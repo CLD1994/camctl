@@ -7,6 +7,7 @@ from typing import Any, Callable
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.operations.models import ErrorValue
 from camctl.contracts.workflow_errors import registered_error
 from camctl.motor.models import (
@@ -179,8 +180,13 @@ async def _finish(runtime: MotorRuntime, request: FinishSendRequest, *, notifica
         record_error(ErrorValue(code, stage, details), stage=stage,
                      context={"action_id": request.action_id},
                      details={"send_result": request, "notification": notification})
-    await _save(runtime, "finish_send", request, "结果事务",
-                apply=lambda _value: runtime.permits.pop(request.action_id, None))
+    def applied(_value):
+        runtime.permits.pop(request.action_id, None)
+        record_event("motor.finish", event="committed",
+                     database_id=runtime.database.metadata.instance_id,
+                     action_id=request.action_id, final_kind=request.kind.value)
+
+    await _save(runtime, "finish_send", request, "结果事务", apply=applied)
 
 
 async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
@@ -241,7 +247,13 @@ async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
     elif decision is MotorDecision.SEND:
         # 从这里起不能再证明“未开始发送”，即使写入或结果保存抛异常。
         runtime.permits.pop(action_id)
-        result = runtime.writer.send(message)
+        with measure_stage("motor.send", database_id=runtime.database.metadata.instance_id,
+                           action_id=action_id):
+            result = runtime.writer.send(message)
+        record_event("motor.notification_result", action_id=action_id,
+                     database_id=runtime.database.metadata.instance_id,
+                     write_kind=result.kind.value, written_bytes=result.written_bytes,
+                     reason=result.reason, errno=result.errno)
         if result.kind is WriteKind.UNAVAILABLE:
             kind = MotorFinalKind.CHANNEL_UNAVAILABLE
             request = FinishSendRequest(action_id, now, kind, permit=permit,

@@ -6,7 +6,7 @@ import re
 import unicodedata
 from pathlib import PurePosixPath
 
-from .files import CameraFileLocator, CameraLocatorStatus
+from .files import CameraFileLocator, CameraLocatorStatus, resolve_camera_path
 from .parameters import CAPTURE_FORMATS, CaptureFormat, CaptureFormatDescription
 
 
@@ -48,6 +48,18 @@ class CaptureResponse:
     camera_locator: CameraFileLocator
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceCaptureResponse:
+    """可靠相机定位与独立解释的同步文件记录。"""
+
+    camera_locator: CameraFileLocator
+    original: CapturedFile | None
+    preview: CapturedFile | None
+    host_records_error: str | None
+    original_error: str | None = None
+    preview_error: str | None = None
+
+
 _DEVICE_LINE = re.compile(
     r"vid=0x([0-9a-fA-F]{4}) pid=0x([0-9a-fA-F]{4})[ \t]+"
     r"bus=[ \t]*([0-9]+) addr=[ \t]*([0-9]+)"
@@ -59,6 +71,7 @@ _SAVED_LINE = re.compile(r"saved (.+) \(([0-9]+) bytes\)")
 _CAMERA_FILE_LINE = re.compile(r"camera file: (.+)")
 _UNREPORTED_CAMERA_FILE_LINE = "capture: camera filename was not reported"
 _NON_LF_LINE_SEPARATORS = frozenset("\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+_DOCTOR_CHECK_LINE = re.compile(r"\[(OK|FAIL)\] [^:\s][^:\r\n]*: \S[^\r\n]*")
 
 
 def _decode(output: bytes, command: str) -> str:
@@ -123,6 +136,27 @@ def parse_serial(output: bytes) -> str:
     if len(values) != 1 or not values[0].strip():
         raise CliParseError("info 输出必须包含唯一且非空的 serial 值")
     return values[0]
+
+
+def doctor_passed(output: bytes, stderr: bytes) -> bool:
+    """按已观察的结构化检查行及明确结果分类；未知内容不能确认。"""
+    lines = _lines(_decode(output, "doctor"))
+    _lines(_decode(stderr, "doctor stderr"))
+    if stderr:
+        raise CliParseError("doctor stderr 包含未知输出")
+    results = []
+    failed = False
+    for line in lines:
+        if line in ("doctor: PASS", "doctor: FAIL"):
+            results.append(line)
+            continue
+        check = _DOCTOR_CHECK_LINE.fullmatch(line)
+        if check is None or any(unicodedata.category(character) == "Cc" for character in line):
+            raise CliParseError("doctor 输出包含无法识别的检查行")
+        failed |= check.group(1) == "FAIL"
+    if results == ["doctor: PASS"] and lines[-1] != "doctor: PASS":
+        raise CliParseError("doctor PASS 之后包含未知输出")
+    return not failed and results == ["doctor: PASS"]
 
 
 def _canonical_absolute_directory(value: str) -> PurePosixPath:
@@ -302,3 +336,134 @@ def parse_capture(
             "capture 输出包含无法解释的额外记录", code=CaptureParseErrorCode.INVALID_RESPONSE
         )
     return CaptureResponse(original=original, preview=preview, camera_locator=locator)
+
+
+def parse_device_capture(
+    output: bytes, stderr: bytes, *, output_complete: bool,
+    capture_format: CaptureFormat, output_directory: str,
+) -> DeviceCaptureResponse:
+    """独立确认相机控制与定位；本地文件记录只决定同步候选。"""
+    if output_complete is not True or type(output) is not bytes or type(stderr) is not bytes:
+        raise CliParseError("capture 必须取得完整且独立的 stdout/stderr")
+    if not isinstance(capture_format, CaptureFormat):
+        raise CliParseError("capture_format 必须是已登记的格式")
+    _canonical_absolute_directory(output_directory)
+    lines = output.split(b"\n")
+    if lines and lines[-1] == b"":
+        lines.pop()
+    if not lines or lines[0] != b"capture: OK" or sum(line == b"capture: OK" for line in lines) != 1:
+        raise CliParseError("capture 输出必须以唯一的 capture: OK 开始")
+    if any(line.startswith(b"capture:") and line not in
+           (b"capture: OK", _UNREPORTED_CAMERA_FILE_LINE.encode()) for line in lines):
+        raise CliParseError("capture 输出包含冲突的控制结果")
+    if any(line.startswith(b"capture:") and line != _UNREPORTED_CAMERA_FILE_LINE.encode()
+           for line in stderr.split(b"\n")):
+        raise CliParseError("capture 双流包含冲突的控制结果")
+    locator_records = [line for line in (*lines, *stderr.split(b"\n"))
+                       if line.startswith(b"camera file") or
+                       line == _UNREPORTED_CAMERA_FILE_LINE.encode()]
+    if len(locator_records) != 1:
+        raise CliParseError("capture 机内定位缺失、重复或冲突")
+    locator_line = _decode(locator_records[0], "capture camera locator")
+    if locator_line == _UNREPORTED_CAMERA_FILE_LINE:
+        raise CliParseError("相机正式源缺少机内定位")
+    locator = _camera_locator(locator_line, CAPTURE_FORMATS[capture_format])
+
+    local_lines = [line for line in lines[1:] if line not in locator_records]
+    # 完整配对优先按原响应规则判定，避免 JPEG 原图名称本身以
+    # thumbnail.jpg 结尾时被误认为预览。
+    if len(local_lines) == 2:
+        try:
+            local = b"capture: OK\n" + b"\n".join(local_lines) + b"\n" + locator_records[0] + b"\n"
+            paired = parse_capture(local, b"", output_complete=True, capture_format=capture_format,
+                                   output_directory=output_directory)
+        except CliParseError:
+            pass
+        else:
+            return DeviceCaptureResponse(locator, paired.original, paired.preview, None)
+    # 各角色分别判断；一个可安全定位的文件不能因另一角色缺失被丢弃。
+    candidates: dict[str, list[_SavedFile]] = {"original": [], "preview": []}
+    invalid: dict[str, str] = {}
+    description = CAPTURE_FORMATS[capture_format]
+    suffix = ".thumbnail" + description.preview_extension
+    def role_for(name):
+        if name.endswith(suffix):
+            if description.original_extension.casefold() == description.preview_extension.casefold():
+                return None
+            original_name = name[:-len(suffix)]
+            return "preview" if original_name.casefold().endswith(
+                description.original_extension.casefold()) else None
+        if name.casefold().endswith(description.original_extension.casefold()):
+            return "original"
+        return None
+    try:
+        for raw in local_lines:
+            line = _decode(raw, "capture host record")
+            if _NON_LF_LINE_SEPARATORS.intersection(line):
+                raise CliParseError("capture 主机文件记录包含非法换行")
+            # 名称只用于归类错误；无效路径绝不成为后续文件操作凭据。
+            match = re.fullmatch(r"saved (.+) \([^\n]*\)", line)
+            role = None if match is None else role_for(PurePosixPath(match.group(1)).name)
+            if role is None:
+                raise CliParseError("capture 主机文件名称不符合请求格式")
+            try:
+                saved = _captured_file(line, _canonical_absolute_directory(output_directory))
+            except CliParseError as error:
+                invalid[role] = str(error)
+            else:
+                candidates[role].append(saved)
+    except CliParseError as error:
+        return DeviceCaptureResponse(locator, None, None, str(error), str(error), str(error))
+    for role, values in candidates.items():
+        if len(values) > 1 or values and role in invalid:
+            invalid[role] = "capture 主机文件角色存在冲突"
+            values.clear()
+    original = candidates["original"][0] if candidates["original"] else None
+    preview = candidates["preview"][0] if candidates["preview"] else None
+    if original is not None and preview is not None and preview.host_name != (
+            original.host_name + ".thumbnail" + description.preview_extension):
+        error = "capture 主机文件配对存在冲突"
+        return DeviceCaptureResponse(locator, None, None, error, error, error)
+    def convert(saved, media):
+        return None if saved is None else CapturedFile(saved.host_path, saved.host_name, saved.size, media)
+    original_error = invalid.get("original") or (None if original is not None else "主机原图记录缺失")
+    preview_error = invalid.get("preview") or (None if preview is not None else "主机预览记录缺失")
+    return DeviceCaptureResponse(locator, convert(original, description.original_media_type),
+        convert(preview, description.preview_media_type), original_error or preview_error,
+        original_error, preview_error)
+
+
+def parse_deleted(output: bytes, stderr: bytes, *, camera_path: str) -> None:
+    """只接受完整且唯一指向原机内路径的删除确认。"""
+    CameraFileLocator(CameraLocatorStatus.PATH, camera_path, PurePosixPath(camera_path).name)
+    if type(output) is not bytes or type(stderr) is not bytes or stderr:
+        raise CliParseError("delete 双流不完整或 stderr 包含未知输出")
+    if _lines(_decode(output, "delete")) != [f"deleted {camera_path}"]:
+        raise CliParseError("delete 输出不是原路径的唯一删除确认")
+
+
+def parse_images_presence(output: bytes, stderr: bytes, *, camera_path: str) -> bool | None:
+    """仅已核验的列表条目能确认在场；列表缺项不能确认缺席。"""
+    CameraFileLocator(CameraLocatorStatus.PATH, camera_path, PurePosixPath(camera_path).name)
+    target = resolve_camera_path(camera_path)
+    if type(output) is not bytes or type(stderr) is not bytes or stderr:
+        raise CliParseError("images 双流不完整或 stderr 包含未知输出")
+    text = _decode(output, "images")
+    if not text:
+        return None
+    lines = _lines(text)
+    seen = set()
+    for line in lines:
+        match = re.fullmatch(r"(?:3FR|JPEG) +([0-9]+) +(/.+)", line)
+        if match is None:
+            raise CliParseError("images 输出包含未经核验的条目")
+        path = match.group(2)
+        try:
+            CameraFileLocator(CameraLocatorStatus.PATH, path, PurePosixPath(path).name)
+        except (TypeError, ValueError) as error:
+            raise CliParseError("images 条目的机内路径无效") from error
+        key = resolve_camera_path(path).comparison_key
+        if key in seen:
+            raise CliParseError("images 条目经固件路径规则归一后重复或存在歧义")
+        seen.add(key)
+    return True if target.comparison_key in seen else None

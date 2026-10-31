@@ -111,6 +111,61 @@ def test_unexpected_admission_error_falls_back_without_recursive_logging():
         manager.getLogger("vendor").error("later")
         assert len(attempts) == 1
         assert "original" in attempts[0]
+        payload = json.loads(attempts[0])
+        assert payload["level"] == "ERROR" and payload["stage"] == "runtime"
+        assert "logged_at_utc" in payload and isinstance(payload["pid"], int)
+        assert "queue unavailable" in payload["message"]
+    finally:
+        route.close()
+
+
+def test_invalid_message_format_preserves_original_exception_and_stack():
+    root, manager = logger_graph()
+    channel, attempts = channel_stub(), []
+    route = install_standard_logging(channel, attempts.append, manager=manager)
+    error = ValueError("original exception")
+    error.add_note("original note")
+    try:
+        try:
+            raise error
+        except ValueError:
+            manager.getLogger("vendor").error("invalid %d", "text", exc_info=True, stack_info=True)
+        assert len(attempts) == 1
+        message = json.loads(attempts[0])["message"]
+        assert "invalid %d" in message and "text" in message
+        assert "original exception" in message and "original note" in message
+        assert "Stack (most recent call last)" in message
+        assert "traceback" in message
+        channel.slog.assert_not_called()
+    finally:
+        route.close()
+
+
+@pytest.mark.parametrize("recursive_format_error", [False, True])
+def test_exception_message_format_failure_does_not_escape_logging(recursive_format_error):
+    class UnprintableError(Exception):
+        def __str__(self):
+            if recursive_format_error:
+                raise UnprintableError("exception formatting failed")
+            raise RuntimeError("exception formatting failed")
+    root, manager = logger_graph()
+    channel, attempts = channel_stub(), []
+    route = install_standard_logging(channel, attempts.append, manager=manager)
+    error = UnprintableError("original argument")
+    error.add_note("original note")
+    error.__cause__ = ValueError("original cause")
+    try:
+        try:
+            raise error
+        except UnprintableError:
+            manager.getLogger("vendor").error("normal message", exc_info=True, stack_info=True)
+        assert len(attempts) == 1
+        message = json.loads(attempts[0])["message"]
+        assert "original argument" in message and "original note" in message
+        assert "original cause" in message and "UnprintableError" in message
+        assert "traceback" in message and "Stack (most recent call last)" in message
+        assert "exception formatting failed" in message
+        channel.slog.assert_not_called()
     finally:
         route.close()
 

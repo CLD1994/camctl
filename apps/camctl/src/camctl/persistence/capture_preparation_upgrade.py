@@ -49,9 +49,9 @@ def _columns(connection: sqlite3.Connection, table: str) -> tuple[tuple, ...]:
 
 def _integrity(connection: sqlite3.Connection) -> None:
     if _one(connection, "PRAGMA quick_check") != ("ok",):
-        raise StateDatabaseError("拍摄准备升级的 SQLite 完整性核验失败")
+        raise StateDatabaseError("状态库升级的 SQLite 完整性核验失败")
     if _one(connection, "PRAGMA foreign_key_check") is not None:
-        raise StateDatabaseError("拍摄准备升级的外键核验失败")
+        raise StateDatabaseError("状态库升级的外键核验失败")
 
 
 def _checked_columns(source, target, table: str) -> tuple[tuple, ...]:
@@ -81,10 +81,25 @@ def _with_format(rows, table: str, names: tuple[str, ...], target_format: int):
     return [(*row[:index], target_format, *row[index + 1:]) for row in rows]
 
 
-def _copy_tables(source: sqlite3.Connection, target: sqlite3.Connection) -> None:
+def _upgrade_tables(source, target, target_format):
+    from camctl.history.events import business_tables_for_format
+    original = _one(source, "SELECT format_version FROM database_metadata WHERE id=1")[0]
     tables = _tables(source)
-    if tables != _tables(target):
-        raise StateDatabaseError("原状态库的全部表与权威目标结构不一致，停止升级")
+    added = set(business_tables_for_format(target_format)) - set(business_tables_for_format(original))
+    target_tables = _tables(target)
+    nonempty = {table for table in added & set(target_tables)
+        if _one(target, f"SELECT COUNT(*) FROM {_quote(table)}") != (0,)}
+    from camctl.persistence.upgrade_tables import validate_upgrade_tables
+    try:
+        validate_upgrade_tables(original=tables, target=target_tables,
+            declared_added=added, nonempty_added=nonempty)
+    except ValueError as error:
+        raise StateDatabaseError(str(error)) from error
+    return tables
+
+
+def _copy_tables(source: sqlite3.Connection, target: sqlite3.Connection) -> None:
+    tables = _upgrade_tables(source, target, CURRENT_FORMAT_VERSION)
     for table in tables:
         columns = _checked_columns(source, target, table)
         names = tuple(column[1] for column in columns if column[6] == 0)
@@ -100,9 +115,7 @@ def _copy_tables(source: sqlite3.Connection, target: sqlite3.Connection) -> None
 
 
 def _verify_contents(source, target, *, target_format: int) -> None:
-    tables = _tables(source)
-    if tables != _tables(target):
-        raise StateDatabaseError("升级副本没有保留原状态库的全部表")
+    tables = _upgrade_tables(source, target, target_format)
     for table in tables:
         columns = _checked_columns(source, target, table)
         names = tuple(column[1] for column in columns)
@@ -161,9 +174,11 @@ def _verify_copy(path, original, source, *, target_format: int) -> None:
     _require_closed_wal(path)
 
 
-def _backup(source, state_db: Path, original: DatabaseMetadata) -> Path:
+def _backup(
+    source, state_db: Path, original: DatabaseMetadata, *, upgrade_name="capture-preparation",
+) -> Path:
     backup = state_db.parent / (
-        f"{state_db.name}.before-capture-preparation-v{CURRENT_FORMAT_VERSION}"
+        f"{state_db.name}.before-{upgrade_name}-v{CURRENT_FORMAT_VERSION}"
         f"-{uuid.uuid4().hex}.sqlite"
     )
     try:
@@ -231,18 +246,30 @@ def _verify_published(state_db: Path, backup: Path, original: DatabaseMetadata) 
 
 
 def upgrade_capture_preparation(owned: OwnedConnection, state_db: Path) -> Path | None:
-    """在初始化持有稳定会话锁时，将 V3/V4 的完整事实升级到当前格式。"""
+    """在初始化持有稳定会话锁时，将 V3/V4/V5 的完整事实升级到当前格式。"""
+    return _upgrade_full_copy(
+        owned, state_db,
+        source_versions=(int(_FORMAT_VERSIONS.V3), int(_FORMAT_VERSIONS.V4), int(_FORMAT_VERSIONS.V5)),
+        upgrade_name="capture-preparation", description="拍摄准备", minimum="V3",
+    )
+
+
+def _upgrade_full_copy(
+    owned: OwnedConnection, state_db: Path, *, source_versions: tuple[int, ...],
+    upgrade_name: str, description: str, minimum: str,
+) -> Path | None:
+    """由显式升级入口复用完整复制、内容核验和一次发布的规则。"""
     source = owned.connection
     original = owned.metadata
     target_format = CURRENT_FORMAT_VERSION
     if original.format_version == target_format:
         _integrity(source)
         return None
-    if original.format_version not in (int(_FORMAT_VERSIONS.V3), int(_FORMAT_VERSIONS.V4)):
-        raise StateDatabaseError("拍摄准备升级要求先完成格式 V3 的已有升级路径")
+    if original.format_version not in source_versions:
+        raise StateDatabaseError(f"{description}升级要求先完成格式 {minimum} 的已有升级路径")
     _integrity(source)
-    backup = _backup(source, state_db, original)
-    prepared = state_db.parent / f".{state_db.name}.capture-preparation-{uuid.uuid4().hex}"
+    backup = _backup(source, state_db, original, upgrade_name=upgrade_name)
+    prepared = state_db.parent / f".{state_db.name}.{upgrade_name}-{uuid.uuid4().hex}"
     try:
         _prepare(source, prepared, original)
         _checkpoint(source)
@@ -262,5 +289,5 @@ def upgrade_capture_preparation(owned: OwnedConnection, state_db: Path) -> Path 
         if not verified:
             _verify_published(state_db, backup, original)
     except (OSError, sqlite3.Error, StateDatabaseError) as error:
-        raise StateDatabaseError(f"拍摄准备升级未完成核验；保留原库及一致备份 {backup}: {error}") from error
+        raise StateDatabaseError(f"{description}升级未完成核验；保留原库及一致备份 {backup}: {error}") from error
     return backup

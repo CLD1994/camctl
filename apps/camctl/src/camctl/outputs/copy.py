@@ -16,7 +16,7 @@ import asyncio
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
@@ -26,6 +26,8 @@ from camctl.contracts.values import (
 from camctl.devices.read_session import ReadChunk, ReadEnd
 from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.events import log_context
+from camctl.logging_runtime.models import LogLevel
 from camctl.operations.models import ErrorValue
 from camctl.host_files.io import (
     LocalSourceReader as LocalCopySource, PositionedWriter, hash_target, prepare_target,
@@ -426,6 +428,7 @@ class CopyContext:
     occurred_at: int
     reset_key: OperationKey | None = None
     executor: FileTaskExecutor | None = None
+    save_reset: Callable | None = None
 
 
 class SegmentSaveDisposition(Enum):
@@ -536,15 +539,18 @@ async def copy_next_segment(copy_id: int, context: SegmentContext) -> SegmentSte
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_segment",
-        lambda control: _copy_next_segment(copy_id, context, facts, control))
+        lambda control: _copy_next_segment(copy_id, context, facts, control), copy_id=copy_id)
 
 
-async def _owned_copy_operation(context, file_id: int, stage: str, body):
+async def _owned_copy_operation(context, file_id: int, stage: str, body, *, copy_id: int,
+                                level: LogLevel | None = LogLevel.INFO):
     """拷贝实际操作与原保存在同一文件资格内完成。"""
     executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
-    return await executor.run_owned_async_file_task(AsyncFileTask(
-        FileTaskId(f"{stage}/{file_id}/{new_operation_key()}"), (file_id,),
-        stage, "副本实际操作及原结果保存", body, resources=("state_db",)))
+    with log_context(copy_id=copy_id):
+        return await executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"{stage}/{file_id}/{new_operation_key()}"), (file_id,),
+            stage, "副本实际操作及原结果保存", body, resources=("state_db",),
+            log_level=LogLevel.DEBUG if stage == "copy_segment" else level))
 
 
 async def _copy_next_segment(copy_id, context, facts, control) -> SegmentStep:
@@ -628,7 +634,7 @@ async def prepare_copy(copy_id: int, context: CopyContext) -> CopyStep:
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_prepare",
-        lambda _control: _prepare_copy(copy_id, context, facts))
+        lambda _control: _prepare_copy(copy_id, context, facts), copy_id=copy_id)
 
 
 async def _prepare_copy(copy_id, context, facts) -> CopyStep:
@@ -648,11 +654,14 @@ async def _prepare_copy(copy_id, context, facts) -> CopyStep:
         await asyncio.to_thread(_prepare_target, ref, context.roots, decision)
     reset: TargetResetOutcome | None = None
     if decision.outcome is ResumeOutcome.RESET_TARGET:
-        key = context.reset_key if context.reset_key is not None else new_operation_key()
         request = TargetResetRequest(copy_id=copy_id, occurred_at=context.occurred_at)
-        outcome = await context.database.write(
-            lambda owned: context.repository.reset_copy_target(request, key, owned),
-            key=key, description="拷贝目标重置保存")
+        if context.save_reset is None:
+            key = context.reset_key if context.reset_key is not None else new_operation_key()
+            outcome = await context.database.write(
+                lambda owned: context.repository.reset_copy_target(request, key, owned),
+                key=key, description="拷贝目标重置保存")
+        else:
+            outcome = await context.save_reset(request)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise CopyPreparationError(
                 "reset_save_failed", str(outcome.error),
@@ -959,10 +968,12 @@ class CompletionContext:
     roots: BoundDirectories
     occurred_at: int
     digest: SourceDigestReader | None = None
-    max_recopies: int = 1
+    max_recopies: int | None = 1
     key: OperationKey | None = None
     executor: FileTaskExecutor | None = None
+    save_business: Callable | None = None
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    allow_recopy: bool = True
 
 
 class CompletionPhase(Enum):
@@ -1030,7 +1041,9 @@ async def complete_copy(copy_id: int, context: CompletionContext) -> CompletionS
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_complete",
-        lambda _control: _complete_copy(copy_id, context, facts))
+        lambda _control: _complete_copy(copy_id, context, facts), copy_id=copy_id,
+        level=None if facts.verification_state in (
+            int(_VERIFICATION.MATCHED), int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE)) else LogLevel.INFO)
 
 
 async def _complete_copy(copy_id, context, facts) -> CompletionStep:
@@ -1044,6 +1057,10 @@ async def _complete_copy(copy_id, context, facts) -> CompletionStep:
     if state == int(_VERIFICATION.MISMATCHED):
         if facts.target_sha256 is None or facts.source_sha256 is None:
             raise ConsistencyError("已保存的不一致结果缺少判定所依据的摘要")
+        if context.max_recopies is None:
+            raise CopyCompletionError("source_binding_unavailable", "设备配置缺失，不能取得本次重拷上限")
+        if not context.allow_recopy and facts.recopies_used < context.max_recopies:
+            raise CopyCompletionError("read_attempts_exhausted", "原读取次数已耗尽，不能登记新的照片重拷")
         return await _register_recopy(copy_id, context, facts, facts.target_sha256)
     if state in (int(_VERIFICATION.MATCHED),
                  int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE)):
@@ -1081,6 +1098,22 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
             source_error = fetched.error
         else:
             source_sha256 = fetched.digest
+    read_exhausted = (not context.allow_recopy and context.max_recopies is not None
+                      and facts.recopies_used < context.max_recopies)
+    if ((context.max_recopies is None or read_exhausted) and source_sha256 is not None
+            and source_sha256 != hashed.digest):
+        request = VerificationSave(copy_id=copy_id, state=int(_VERIFICATION.MISMATCHED),
+            source_sha256=source_sha256, target_sha256=hashed.digest, error_json=None,
+            occurred_at=context.occurred_at)
+        outcome = await _save_completion_business(context, copy_id, "verification", request,
+            context.repository.save_verification, "拷贝校验结果保存")
+        if (outcome.kind is DbOutcomeKind.COMPLETED
+                and outcome.value.disposition is VerificationDisposition.SKIPPED):
+            raise CopyCompletionError(_owner_stage(outcome.value.reason), "发起责任不再执行")
+        _require_completed(outcome, "verification_save_failed", "verification_save_unknown")
+        if read_exhausted:
+            raise CopyCompletionError("read_attempts_exhausted", "原读取次数已耗尽，不能登记新的照片重拷")
+        raise CopyCompletionError("source_binding_unavailable", "设备配置缺失，不能取得本次重拷上限")
     decision = decide_integrity(IntegrityFacts(
         source_size=facts.source_size,
         committed_bytes=facts.committed_bytes,
@@ -1090,7 +1123,7 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
         target_sha256=hashed.digest,
         owner_running=True,
         recopies_used=facts.recopies_used,
-        max_recopies=context.max_recopies,
+        max_recopies=0 if context.max_recopies is None else context.max_recopies,
     ))
     if decision.outcome is IntegrityOutcome.CAPABILITY_UNDETERMINED:
         raise CopyCompletionError(
@@ -1109,15 +1142,13 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
     else:
         save_state = int(_VERIFICATION.MATCHED)
         source_value, error_json = source_sha256, None
-    key = context.key if context.key is not None else new_operation_key()
     request = VerificationSave(
         copy_id=copy_id, state=save_state, source_sha256=source_value,
         target_sha256=hashed.digest, error_json=error_json,
         occurred_at=context.occurred_at,
     )
-    outcome = await context.database.write(
-        lambda owned: context.repository.save_verification(request, key, owned),
-        key=key, description="拷贝校验结果保存")
+    outcome = await _save_completion_business(context, copy_id, "verification", request,
+        context.repository.save_verification, "拷贝校验结果保存")
     if outcome.kind is DbOutcomeKind.COMPLETED \
             and outcome.value.disposition is VerificationDisposition.SKIPPED:
         raise CopyCompletionError(
@@ -1138,7 +1169,6 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
         source_sha256 = facts.source_sha256
     if source_sha256 is None or not target_sha256:
         raise ConsistencyError("重拷登记缺少判定所依据的摘要")
-    key = context.key if context.key is not None else new_operation_key()
     request = RecopyRegistration(
         copy_id=copy_id, source_sha256=source_sha256,
         target_sha256=target_sha256, max_recopies=context.max_recopies,
@@ -1153,9 +1183,8 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
         context={"copy_id": copy_id, "copy_round": facts.round,
                  "max_recopies": context.max_recopies, "recopies_used": facts.recopies_used},
         state=context.diagnostic)
-    outcome = await context.database.write(
-        lambda owned: context.repository.register_recopy(request, key, owned),
-        key=key, description="拷贝重拷登记")
+    outcome = await _save_completion_business(context, copy_id, "recopy", request,
+        context.repository.register_recopy, "拷贝重拷登记")
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         _require_completed(outcome, "recopy_register_failed", "recopy_register_unknown")
     result = outcome.value
@@ -1174,14 +1203,12 @@ async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep
     facts = await context.database.read(
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
-    key = context.key if context.key is not None else new_operation_key()
     request = PreparedRequest(
         copy_id=copy_id, target_sha256=target_sha256,
         size_bytes=facts.source_size, occurred_at=context.occurred_at,
     )
-    outcome = await context.database.write(
-        lambda owned: context.repository.save_prepared(request, key, owned),
-        key=key, description="拷贝准备完成保存")
+    outcome = await _save_completion_business(context, copy_id, "prepared", request,
+        context.repository.save_prepared, "拷贝准备完成保存")
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         _require_completed(outcome, "prepared_save_failed", "prepared_save_unknown")
     result = outcome.value
@@ -1189,3 +1216,11 @@ async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep
         raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
     assert result.prepared is not None
     return CompletionStep(phase=CompletionPhase.PREPARED, prepared=result.prepared)
+
+
+async def _save_completion_business(context, copy_id, stage, request, save, description):
+    if context.save_business is not None:
+        return await context.save_business(copy_id, stage, request, save)
+    key = context.key if context.key is not None else new_operation_key()
+    return await context.database.write(lambda owned: save(request, key, owned),
+                                        key=key, description=description)

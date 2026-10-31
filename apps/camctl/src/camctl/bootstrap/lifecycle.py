@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from camctl.devices.start_entry import StartEntryCoordinator
 
+import asyncio
 import os
 import stat
 import json
+import time
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
 from functools import partial
@@ -46,10 +48,12 @@ from camctl.session.clock import ClockCheckInput, register_clock_guard
 from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
 from camctl.session.outcome import SessionOutcome
 from camctl.session.service import (
-    SessionContext, SessionPaths, _trigger_failure_log, run_session,
+    SessionContext, SessionPaths, _PendingCleanupDiagnostic, _deliver_cleanup_diagnostics,
+    _trigger_failure_log, run_session,
 )
 from camctl.session.work import WorkFacts
 from camctl.operations.error_diagnostics import exception_diagnostic
+from camctl.logging_runtime.events import event_logging, log_context, measure_stage, record_event
 
 __all__ = ["RuntimeDeps", "build_runtime", "close_runtime", "execute_command"]
 
@@ -123,6 +127,7 @@ class RuntimeDeps:
     capture_read_business: dict = field(default_factory=dict)
     capture_read_ends: dict = field(default_factory=dict)
     capture_continuing_reads: dict = field(default_factory=dict)
+    capture_canceled_read_after: int = 0
     cleanup_intents: dict = field(default_factory=dict)
     cleanup_deletes: dict = field(default_factory=dict)
     cleanup_queries: dict = field(default_factory=dict)
@@ -141,7 +146,8 @@ async def _resume_read_requests(deps: RuntimeDeps, database) -> None:
         pending_read_business=deps.capture_read_business,
         pending_read_ends=deps.capture_read_ends,
         continuing_read_tickets=deps.capture_continuing_reads,
-        pending_segment_inspection_results=deps.capture_segment_inspection_results)
+        pending_segment_inspection_results=deps.capture_segment_inspection_results,
+        file_executor=deps.work_files.executor, occurred_at=SystemClock().utc_micros)
     await _resume_capture_requests(deps, database)
 
 
@@ -202,8 +208,35 @@ async def _resume_normal_read_requests(deps: RuntimeDeps, database) -> None:
         pending_read_ends=deps.capture_read_ends,
         continuing_read_tickets=deps.capture_continuing_reads,
         pending_segment_inspection_results=deps.capture_segment_inspection_results,
+        file_executor=deps.work_files.executor,
         binding_check=lambda saved: check_binding(saved, deps.config),
         occurred_at=SystemClock().utc_micros)
+
+
+async def _resume_canceled_internal_reads(deps: RuntimeDeps, context) -> None:
+    """分页发现取消终态后仍持有的原内部读取机会。"""
+    from camctl.capture.canceled_internal_reads import settle_canceled_processing_read
+    from camctl.capture.media_flow import internal_read_scope
+    from camctl.persistence.repositories.operations import OperationRepository
+
+    rows = await context.database.read(lambda owned: owned.connection.execute(
+        "SELECT a.id FROM actions a JOIN recording_processing p ON p.action_id=a.id"
+        " JOIN file_copies c ON c.processing_id=p.id JOIN operation_runs r ON r.copy_id=c.id"
+        " WHERE a.status=6 AND a.cancel_requested=1 AND c.slot_device_id IS NOT NULL"
+        " AND r.kind=3 AND r.status=4 AND json_extract(r.error_json,'$.code')='device_binding_unavailable'"
+        " AND a.id>? ORDER BY a.id LIMIT 128", (deps.capture_canceled_read_after,),
+    ).fetchall())
+    deps.capture_canceled_read_after = rows[-1][0] if len(rows) == 128 else 0
+    if deps.capture_canceled_read_after and context.wake is not None:
+        from camctl.scheduling.notifications import WakeReason
+        context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
+    scope = internal_read_scope(context.database, OperationRepository(),
+        pending_read_results=deps.capture_read_results, pending_read_business=deps.capture_read_business,
+        pending_read_ends=deps.capture_read_ends, continuing_read_tickets=deps.capture_continuing_reads,
+        pending_segment_inspection_results=deps.capture_segment_inspection_results,
+        occurred_at=context.clock.utc_micros, file_executor=deps.work_files.executor)
+    for (action_id,) in rows:
+        await settle_canceled_processing_read(scope, action_id)
 
 
 def _default_catalog(config: ConfigSnapshot):
@@ -244,6 +277,8 @@ def build_runtime(
     register_capture_guards()
     register_timelapse_guards()
     register_outputs_guards()
+    from camctl.persistence.repositories.file_batches import register_file_batch_guards
+    register_file_batch_guards()
     register_cancellation_guards()
     register_report_guards()
     register_window_guard()
@@ -258,7 +293,8 @@ def build_runtime(
             configured_directory_binding(getattr(config.paths, name), name)
     except DirectoryBindingError as error:
         startup_error = SessionOutcome(succeeded=False, reason="configuration_error",
-                                       details={"error": str(error)})
+                                       details={"error": str(error)},
+                                       _diagnostic_sources=((None, error),))
     state_db = Path(config.paths.state_db).expanduser().resolve()
     state_db_present: bool | None = None
     state_db_regular: bool | None = None
@@ -271,6 +307,7 @@ def build_runtime(
             startup_error = SessionOutcome(
                 succeeded=False, reason="state_db_error",
                 details={"error": f"状态库不存在: {state_db}: {error}"},
+                _diagnostic_sources=((None, error),),
             )
         except OSError as error:
             # 不能把 stat 权限错误推断成缺失；没有可靠存在事实时，
@@ -280,6 +317,7 @@ def build_runtime(
             startup_error = SessionOutcome(
                 succeeded=False, reason="state_db_error",
                 details={"error": f"状态库存在性无法确认: {state_db}: {error}"},
+                _diagnostic_sources=((None, error),),
             )
         else:
             state_db_present = True
@@ -306,6 +344,7 @@ def build_runtime(
                     startup_error = SessionOutcome(
                         succeeded=False, reason="configuration_error",
                         details={"error": str(error)},
+                        _diagnostic_sources=((None, error),),
                     )
                 except (StateDatabaseError, OSError) as error:
                     # stat 已确认是普通文件；后续损坏、权限或打开错误
@@ -313,6 +352,7 @@ def build_runtime(
                     startup_error = SessionOutcome(
                         succeeded=False, reason="state_db_error",
                         details={"error": str(error)},
+                        _diagnostic_sources=((None, error),),
                     )
     session_lock, admission_lock = lock_file_paths(state_db)
     deps = RuntimeDeps(
@@ -347,16 +387,16 @@ def _log_wiring(
 ):
     """业务日志链装配：文件通道、接纳通道与关闭运行时。
 
-    追加失败经 ChannelWriteError 交给接纳通道按通道故障禁用；轮换
+    追加或持久化失败按通道故障禁用；轮换
     失败但仍追加成功时通道继续。监听线程在此启动，收场由
     execute_command 的 close_logging 完成。
     """
     from camctl.logging_runtime.clh_adapter import (
-        ChannelWriteError, FileChannel, WriteFailureStage,
+        FileChannel, WriteFailureStage,
     )
     from camctl.logging_runtime.lifecycle import LogRuntime
     from camctl.logging_runtime.models import LogLevel
-    from camctl.logging_runtime.service import LogChannel
+    from camctl.logging_runtime.service import ChannelError, LogChannel
 
     log_config = config.log
     # 配置层以大写名称校验级别；日志运行时枚举以小写值为键。
@@ -371,40 +411,52 @@ def _log_wiring(
     def writer(record):
         nonlocal rotation_warning_reported
         result = file_channel.write_record(record)
-        failure_stage = result.failure_stage
-        details = tuple(
-            f"{label}={detail}" for label, detail in (
-                ("append_error", result.append_error),
-                ("coordination_error", result.coordination_error),
-                ("close_error", result.close_error),
-                ("rotation_error", result.rotation_error),
-            ) if detail is not None
-        )
-        if failure_stage is WriteFailureStage.FORMAT:
-            report_writer_failure(
-                f"普通日志写入诊断：stage=format; appended=false; "
-                + "; ".join(details))
-            return False
-        if result.disables_file_logging:
-            stage = failure_stage.value if failure_stage is not None else "unknown"
-            report_writer_failure(
-                f"普通日志写入诊断：stage={stage}; "
-                f"appended={str(result.appended).lower()}; "
-                + "; ".join(details))
-            if on_file_failure is None:
-                raise ChannelWriteError(
-                    result.append_error or result.coordination_error
-                    or "共享文件日志通道失效")
-            on_file_failure()
-            return result.appended
-        if result.rotation_error is not None:
-            if not rotation_warning_reported:
-                rotation_warning_reported = True
+        try:
+            failure_stage = result.failure_stage
+            details = tuple(
+                f"{label}={detail}" for label, detail in (
+                    ("append_error", result.append_error),
+                    ("sync_error", result.sync_error),
+                    ("coordination_error", result.coordination_error),
+                    ("close_error", result.close_error),
+                    ("rotation_error", result.rotation_error),
+                ) if detail is not None
+            )
+            if failure_stage is WriteFailureStage.FORMAT:
                 report_writer_failure(
-                    "普通日志写入诊断：stage=rotation; "
+                    "普通日志写入诊断：stage=format; appended=false; durable=false; "
+                    + "; ".join(details))
+                return result.completion
+            if result.disables_file_logging:
+                stage = failure_stage.value if failure_stage is not None else "unknown"
+                report_writer_failure(
+                    f"普通日志写入诊断：stage={stage}; "
                     f"appended={str(result.appended).lower()}; "
-                    f"rotation_error={result.rotation_error}")
-        return result.appended
+                    f"durable={str(result.durable).lower()}; "
+                    + "; ".join(details))
+                if on_file_failure is None:
+                    channel.disable_channel(ChannelError(
+                        result.append_error or result.sync_error or result.coordination_error
+                        or "共享文件日志通道失效"))
+                else:
+                    on_file_failure()
+                return result.completion
+            if result.rotation_error is not None:
+                if not rotation_warning_reported:
+                    rotation_warning_reported = True
+                    report_writer_failure(
+                        "普通日志写入诊断：stage=rotation; "
+                        f"appended={str(result.appended).lower()}; "
+                        f"durable={str(result.durable).lower()}; "
+                        f"rotation_error={result.rotation_error}")
+            return result.completion
+        except BaseException as error:
+            try:
+                error.write_result = result
+            except BaseException:
+                # 附加写入事实失败不能替换原控制异常。
+                pass
+            raise
 
     stderr_failed = False
 
@@ -442,9 +494,9 @@ def _log_wiring(
     )
 
 
-async def _emit_session_error(deps: RuntimeDeps, message: str) -> None:
+async def _emit_session_error(deps: RuntimeDeps, message: str, *, structured: bool = False) -> None:
     """会话诊断等待实际写入凭据，不可用时沿原入口转交 stderr。"""
-    await _emit_log_diagnostic(deps, message)
+    await _emit_log_diagnostic(deps, message, structured=structured)
 
 
 def _format_session_exception(error: BaseException) -> str:
@@ -463,12 +515,53 @@ def _attach_session_diagnostic_error(target: BaseException, label: str, error: B
 
 
 def _failed_outcome_message(deps: RuntimeDeps, outcome: SessionOutcome) -> str:
-    details = json.dumps(dict(outcome.details), ensure_ascii=False, separators=(",", ":"))
-    return f"{deps.mode.value} 会话失败: {outcome.reason}\n诊断详情: {details}"
+    """单独投影日志，机器结果及异常快照保持原样。"""
+    from camctl.logging_runtime.diagnostics import diagnostic_reference_for, diagnostic_snapshot
+    from camctl.logging_runtime.formatting import encode_record
+    from camctl.logging_runtime.models import LogLevel
+
+    def project(value):
+        for snapshot, source in outcome._diagnostic_sources:
+            if snapshot is value and snapshot is not None:
+                reference = diagnostic_reference_for(source)
+                if reference is not None:
+                    return reference
+                if isinstance(source, BaseException):
+                    return source
+        if isinstance(value, Mapping):
+            return {key: project(item) for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [project(item) for item in value]
+        return value
+
+    details = project(outcome.details)
+    unplaced = [error for snapshot, error in outcome._diagnostic_sources if snapshot is None]
+    document = {"event": "session_failed", "command": deps.mode.value,
+                "reason": outcome.reason, "details": details}
+    if unplaced:
+        document["exceptions"] = unplaced
+    return encode_record(LogLevel.ERROR, diagnostic_snapshot(document))
+
+
+def _direct_exception_message(deps: RuntimeDeps, error: BaseException) -> str | None:
+    """未准备过的异常由最终会话边界完整交付。"""
+    from camctl.logging_runtime.diagnostics import diagnostic_reference_for, diagnostic_snapshot
+    from camctl.logging_runtime.formatting import encode_record
+    from camctl.logging_runtime.models import LogLevel
+
+    reference = diagnostic_reference_for(error)
+    failures = getattr(error, "_camctl_cleanup_diagnostic_failures", ())
+    if reference is not None and not failures:
+        return None
+    document = {"event": "session_exception", "command": deps.mode.value,
+                "exception": reference if reference is not None else error}
+    if failures:
+        document["cleanup_diagnostic_failures"] = failures
+    return encode_record(LogLevel.ERROR, diagnostic_snapshot(document))
 
 
 async def _emit_log_diagnostic(
-    deps: RuntimeDeps, message: str, *, stderr_only: bool = False,
+    deps: RuntimeDeps, message: str, *, stderr_only: bool = False, structured: bool = False,
 ) -> None:
     """等待普通日志实际写入；不可用时写一次 stderr，不触发副本。"""
     if (not stderr_only and not deps.log_path_unsafe
@@ -478,7 +571,7 @@ async def _emit_log_diagnostic(
 
         try:
             result = await deps.log_runtime.channel.deliver_important(
-                LogRecord(level=LogLevel.ERROR, message=message))
+                LogRecord(level=LogLevel.ERROR, message=message, structured=structured))
             if result.delivered is True or result.fallback_written is True:
                 return
         except Exception as error:
@@ -801,13 +894,30 @@ def _report_assembly(
     ready = Path(deps.config.paths.ready)
     processing = Path(deps.config.paths.processing)
     drivers = current_registry()
+    from camctl.bootstrap.availability_assembly import AvailabilityAssembly
+    from camctl.operations.availability import AvailabilityCoordinator
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
+    availability_owner = AvailabilityCoordinator(
+        monotonic_ns=time.monotonic_ns, occurred_at=lambda: int(time.time() * 1_000_000),
+        recovery_boundary=deps.recovery_boundary, recovery_max_event_id=lambda: deps.recovery_max_event_id)
+    preparation_leads = {}
+    for device_id, declaration in deps.config.devices.items():
+        if declaration.get("driver") == HASSELBLAD_DRIVER_ID:
+            entry = drivers.entry(HASSELBLAD_DRIVER_ID)
+            preparation_leads[device_id] = declaration.get("connection", {}).get(
+                "prepare_lead_s", entry.driver.default_prepare_lead_s)
+    availability = AvailabilityAssembly(availability_owner, deps.config.devices, drivers, preparation_leads)
     from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.bootstrap.download_cleanup import ReadDownloadCleanup
+    from camctl.bootstrap.photo_work_cleanup import DownloadCleanupChain, HostCaptureWorkCleanup, PhotoWorkCleanup
     from camctl.outputs.work_files import WorkFileLimits
     deps.work_files = WorkFileRuntime(
         staging=staging, pending_media_results=deps.capture_media_results,
-        download_cleanup=ReadDownloadCleanup(staging,
+        download_cleanup=DownloadCleanupChain(ReadDownloadCleanup(staging,
             limit=deps.config.cleanup.work_file_limit_per_run, boundary=deps.recovery_boundary),
+            PhotoWorkCleanup(staging, boundary=deps.recovery_boundary,
+                pending_scans=deps.capture_result_scans, pending_results=deps.capture_call_results),
+            HostCaptureWorkCleanup(staging)),
         limits=WorkFileLimits(
             batch_size=deps.config.cleanup.work_file_batch_size,
             limit_per_run=deps.config.cleanup.work_file_limit_per_run))
@@ -844,6 +954,7 @@ def _report_assembly(
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
         "cancel": cancel_flow(
+            staging=staging,
             ready=ready,
             processing=processing,
             start_entries=deps.start_entries,
@@ -854,10 +965,14 @@ def _report_assembly(
             resume_capture_completions=partial(_resume_capture_requests, deps),
             cleanup_pending=partial(_cleanup_pending_for_action, deps),
             preparation_pending=deps.capture_preparations.pending,
+            availability_owner=availability_owner,
+            read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
         ),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
+        "availability_recovery": availability.resume,
+        "canceled_internal_reads": partial(_resume_canceled_internal_reads, deps),
         "scheduling": capture_flow(
             session_capture_assembly(
                 start_entries=deps.start_entries,
@@ -893,6 +1008,7 @@ def _report_assembly(
             resume_media_results=deps.work_files.resume_media_results,
             resume_file_observations=resume_files,
             resume_read_results=resume_reads,
+            availability=availability,
         ),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
@@ -949,6 +1065,7 @@ def _report_assembly(
                 recovery_max_event_id=lambda: deps.recovery_max_event_id,
                 on_recovery_diagnostic=recovery_logger,
                 file_executor=deps.work_files.executor,
+                availability=availability,
             )
         ),
         # 清理推进：删除与查询端口按设备声明解析，尝试上限取自
@@ -981,7 +1098,7 @@ def _report_assembly(
     capture_owner = flows["scheduling"]
     flows["report"] = ReportBackgroundFlow(flows["report"])
     flows["obtain"] = BackgroundFlow(flows["obtain"])
-    deps.background_flows = (flows["report"], capture_owner, flows["obtain"])
+    deps.background_flows = (flows["report"], capture_owner, flows["obtain"], availability_owner)
     return flows, supervisor
 
 
@@ -997,18 +1114,33 @@ async def execute_command(
     """为本命令及原业务子任务装配共同诊断目标和第三方路由。"""
     from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
     from camctl.logging_runtime.standard_logging import install_standard_logging
+    from camctl.logging_runtime.startup import record_startup
 
     channel = None if deps.log_runtime is None else deps.log_runtime.channel
     fallback = lambda message: _write_stderr_diagnostic(deps, message)
     installation = None
-    with error_diagnostics_context(channel, fallback, background=True):
+    command_settled = False
+
+    def finish_command(*, event="result", **fields):
+        nonlocal command_settled
+        if not command_settled:
+            command_settled = True
+            record_event("command", event=event, **fields)
+
+    with error_diagnostics_context(channel, fallback, background=True), event_logging(channel, fallback=fallback), log_context(
+            command_name=deps.mode.value, session_key=deps.session_key):
         try:
             if channel is not None:
                 installation = install_standard_logging(channel, fallback)
+            record_startup()
             return await _execute_command(
                 deps, source, flows=flows, restricted_flows=restricted_flows,
-                wake=wake, poll_interval_s=poll_interval_s,
+                wake=wake, poll_interval_s=poll_interval_s, finish_command=finish_command,
             )
+        except BaseException as error:
+            finish_command(event="cancelled" if isinstance(error, asyncio.CancelledError) else "raised",
+                           exception_type=type(error).__name__)
+            raise
         finally:
             try:
                 # 无文件日志或装配尚未进入正常收场的路径也交付原诊断。
@@ -1026,6 +1158,7 @@ async def _execute_command(
     restricted_flows: Mapping[str, Any] | None = None,
     wake: Any = None,
     poll_interval_s: float | None = None,
+    finish_command: Callable[..., None],
 ) -> SessionOutcome:
     """执行一次 run/submit 会话；调用方负责运行事件循环。
 
@@ -1045,10 +1178,11 @@ async def _execute_command(
         and deps.state_db_regular is True
     )
     if deps.startup_error is not None and not minimal_bad_database_run:
-        if deps.log_runtime is not None:
-            try:
-                await _emit_session_error(deps, _failed_outcome_message(deps, deps.startup_error))
-            finally:
+        finish_command(business_succeeded=False, business_reason=deps.startup_error.reason)
+        try:
+            await _emit_session_error(deps, _failed_outcome_message(deps, deps.startup_error), structured=True)
+        finally:
+            if deps.log_runtime is not None:
                 await _close_log_runtime(deps)
         return deps.startup_error
 
@@ -1122,6 +1256,7 @@ async def _execute_command(
             restricted_flows={
                 "cancel": cancel_flow(
                     start_entries=deps.start_entries,
+                    staging=staging,
                     ready=ready,
                     processing=processing,
                     unscheduled_only=True,
@@ -1131,6 +1266,7 @@ async def _execute_command(
                     resume_file_observations=resume_files,
                     resume_capture_completions=partial(_resume_capture_requests, deps),
                     preparation_pending=deps.capture_preparations.pending,
+                    read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
                 ),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
@@ -1259,17 +1395,21 @@ async def _execute_command(
     outcome: SessionOutcome | None = None
     primary_error: BaseException | None = None
     try:
-        outcome = await run_session(context, source)
+        with measure_stage("session"):
+            outcome = await run_session(context, source)
     except BaseException as error:
         primary_error = error
         raise
     finally:
+        record_event("session.cleanup", event="started")
         selected_control = (
             primary_error
             if primary_error is not None and not isinstance(primary_error, Exception)
             else None
         )
+        ordinary_diagnostic_error: Exception | None = None
         cleanup_errors: list[tuple[str, BaseException]] = []
+        pending_cleanup_diagnostics: list[_PendingCleanupDiagnostic] = []
         seen_cleanup_errors: set[int] = set()
         noted_cleanup_errors: set[int] = (
             set() if selected_control is None else {id(selected_control)}
@@ -1277,33 +1417,28 @@ async def _execute_command(
 
         def attach_cleanup_error(
                 target: BaseException, label: str, error: BaseException) -> None:
-            if target is error or id(error) in noted_cleanup_errors:
+            if target is error:
+                return
+            failures = getattr(error, "_camctl_cleanup_diagnostic_failures", ())
+            if failures:
+                existing = getattr(target, "_camctl_cleanup_diagnostic_failures", ())
+                seen = {id(failure) for failure in existing}
+                target._camctl_cleanup_diagnostic_failures = (
+                    *existing, *(failure for failure in failures if id(failure) not in seen))
+            if id(error) in noted_cleanup_errors:
                 return
             _attach_runtime_close_note(target, label, error)
             noted_cleanup_errors.add(id(error))
 
-        def remember_cleanup_error(
-                label: str, error: BaseException) -> None:
-            """保存首个收场 control，并在全部资源结束后选择传播对象。"""
+        def adopt_control(label: str, error: BaseException) -> None:
             nonlocal selected_control
-            if id(error) not in seen_cleanup_errors:
-                seen_cleanup_errors.add(id(error))
-                cleanup_errors.append((label, error))
-                if isinstance(error, Exception):
-                    from camctl.logging_runtime.diagnostics import record_error
-
-                    record_error(error, stage="shutdown", context={"resource": label})
-            if isinstance(error, Exception):
-                if selected_control is not None:
-                    attach_cleanup_error(selected_control, label, error)
-                return
             if selected_control is None:
                 selected_control = error
                 noted_cleanup_errors.add(id(error))
                 if primary_error is not None and primary_error is not error:
-                    attach_cleanup_error(
-                        selected_control, "此前会话异常", primary_error,
-                    )
+                    attach_cleanup_error(selected_control, "此前会话异常", primary_error)
+                if ordinary_diagnostic_error is not None and ordinary_diagnostic_error is not error:
+                    attach_cleanup_error(selected_control, "此前诊断异常", ordinary_diagnostic_error)
                 if outcome is not None and not outcome.succeeded:
                     note = (
                         "此前会话结果："
@@ -1313,27 +1448,58 @@ async def _execute_command(
                         selected_control.add_note(note)
                 for earlier_label, earlier_error in cleanup_errors:
                     if earlier_error is not error:
-                        attach_cleanup_error(
-                            selected_control, earlier_label, earlier_error,
-                        )
+                        attach_cleanup_error(selected_control, earlier_label, earlier_error)
             else:
                 attach_cleanup_error(selected_control, label, error)
+
+        def remember_cleanup_error(
+                label: str, error: BaseException) -> None:
+            """保存首个收场 control，并在全部资源结束后选择传播对象。"""
+            if id(error) not in seen_cleanup_errors:
+                seen_cleanup_errors.add(id(error))
+                cleanup_errors.append((label, error))
+                if isinstance(error, Exception):
+                    pending_cleanup_diagnostics.append(_PendingCleanupDiagnostic(
+                        error, "shutdown", attach_error_on_failure=True,
+                        context={"resource": label}))
+            if isinstance(error, Exception):
+                if selected_control is not None:
+                    attach_cleanup_error(selected_control, label, error)
+                return
+            adopt_control(label, error)
+
+        def remember_diagnostic_selection(
+                prior: BaseException | None, selected: BaseException | None) -> None:
+            nonlocal ordinary_diagnostic_error
+            if selected is None or selected is prior:
+                return
+            if isinstance(selected, Exception):
+                if ordinary_diagnostic_error is None:
+                    ordinary_diagnostic_error = selected
+                else:
+                    attach_cleanup_error(ordinary_diagnostic_error, "后续诊断异常", selected)
+            else:
+                adopt_control("收场诊断控制异常", selected)
 
         async def stop_worker(worker):
             nonlocal outcome
             if worker is None:
                 return
             stopped = await worker.stop()
-            if stopped.state_failure is not None:
+            failure = (stopped.state_failure if stopped.state_failure is not None
+                       else stopped.configuration_failure)
+            if failure is not None:
+                worker_details = _worker_failure_details(failure)
                 if outcome is not None:
-                    outcome = _shutdown_state_outcome(outcome, stopped.state_failure)
-                from camctl.logging_runtime.diagnostics import record_error
-                record_error(_worker_failure_details(stopped.state_failure), stage="report_shutdown")
-            elif stopped.configuration_failure is not None:
-                if outcome is not None:
-                    outcome = _shutdown_configuration_outcome(outcome, stopped.configuration_failure)
-                from camctl.logging_runtime.diagnostics import record_error
-                record_error(_worker_failure_details(stopped.configuration_failure), stage="report_shutdown")
+                    build_outcome = (_shutdown_state_outcome if stopped.state_failure is not None
+                                     else _shutdown_configuration_outcome)
+                    outcome = build_outcome(outcome, failure, worker_details=worker_details)
+                def attach_worker_state(state):
+                    nonlocal outcome
+                    if outcome is not None:
+                        outcome = _attach_worker_diagnostic(outcome, worker_details, state)
+                pending_cleanup_diagnostics.append(_PendingCleanupDiagnostic(
+                    worker_details, "report_shutdown", on_record=attach_worker_state))
 
         for worker in (supervisor, restricted_supervisor):
             try:
@@ -1368,16 +1534,40 @@ async def _execute_command(
                         scan.close()
                     except BaseException as error:
                         remember_cleanup_error("结果读取缓存关闭异常", error)
+        # 先结束实际资源责任，再登记诊断并保持最早的业务控制对象。
+        prior_error = selected_control or primary_error or (
+            cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
+        diagnostic_selection = _deliver_cleanup_diagnostics(prior_error, pending_cleanup_diagnostics)
+        pending_cleanup_diagnostics.clear()
+        remember_diagnostic_selection(prior_error, diagnostic_selection)
         # 所有必要业务与资源收场先结束，文件接纳不能成为它们的前置。
         try:
             if primary_error is not None:
-                from camctl.logging_runtime.diagnostics import diagnostic_state_for
-                if diagnostic_state_for(primary_error) is None:
-                    await _emit_session_error(deps, _format_session_exception(primary_error))
+                message = _direct_exception_message(deps, primary_error)
+                if message is not None:
+                    await _emit_session_error(deps, message, structured=True)
+            if selected_control is not None and selected_control is not primary_error:
+                message = _direct_exception_message(deps, selected_control)
+                if message is not None:
+                    await _emit_session_error(deps, message, structured=True)
+            if (diagnostic_selection is not None and diagnostic_selection is not primary_error
+                    and diagnostic_selection is not selected_control
+                    and getattr(diagnostic_selection, "_camctl_cleanup_diagnostic_failures", ())):
+                message = _direct_exception_message(deps, diagnostic_selection)
+                if message is not None:
+                    await _emit_session_error(deps, message, structured=True)
             if outcome is not None and not outcome.succeeded:
-                await _emit_session_error(deps, _failed_outcome_message(deps, outcome))
+                await _emit_session_error(deps, _failed_outcome_message(deps, outcome), structured=True)
         except BaseException as error:
             remember_cleanup_error("会话失败诊断异常", error)
+        record_event("session.cleanup", cleanup_error_count=len(cleanup_errors))
+        command_error = selected_control or primary_error or (
+            cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
+        if command_error is not None:
+            finish_command(event=("cancelled" if isinstance(command_error, asyncio.CancelledError)
+                         else "raised"), exception_type=type(command_error).__name__)
+        elif outcome is not None:
+            finish_command(business_succeeded=outcome.succeeded, business_reason=outcome.reason)
         if deps.log_runtime is not None:
             try:
                 await _close_log_runtime(
@@ -1386,11 +1576,30 @@ async def _execute_command(
                 )
             except BaseException as error:
                 remember_cleanup_error("共享日志收场异常", error)
+        if pending_cleanup_diagnostics:
+            prior_error = selected_control or primary_error or (
+                cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
+            previous_failures = len(getattr(prior_error, "_camctl_cleanup_diagnostic_failures", ()))
+            diagnostic_selection = _deliver_cleanup_diagnostics(prior_error, pending_cleanup_diagnostics)
+            remember_diagnostic_selection(prior_error, diagnostic_selection)
+            if (diagnostic_selection is not None and len(getattr(
+                    diagnostic_selection, "_camctl_cleanup_diagnostic_failures", ())) > previous_failures):
+                message = _direct_exception_message(deps, diagnostic_selection)
+                if message is not None:
+                    try:
+                        _write_stderr_diagnostic(deps, message)
+                    except BaseException as error:
+                        if not isinstance(error, Exception):
+                            adopt_control("stderr 诊断异常", error)
+                        else:
+                            _attach_runtime_close_note(
+                                selected_control or diagnostic_selection, "stderr 诊断异常", error)
         if selected_control is not None and selected_control is not primary_error:
             raise selected_control.with_traceback(
                 selected_control.__traceback__)
-        if selected_control is None and cleanup_errors:
-            selected_error = primary_error or cleanup_errors[0][1]
+        if selected_control is None and (cleanup_errors or ordinary_diagnostic_error is not None):
+            selected_error = primary_error or (
+                cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
             for label, error in cleanup_errors:
                 attach_cleanup_error(selected_error, label, error)
             if selected_error is not primary_error:
@@ -1480,39 +1689,50 @@ def _worker_failure_details(failure: ResultFailureMessage) -> dict:
     return {**vars(failure), "error_kind": failure.error_kind.value}
 
 
+def _attach_worker_diagnostic(outcome: SessionOutcome, snapshot: dict, state: Any) -> SessionOutcome:
+    return replace(outcome, _diagnostic_sources=(
+        *outcome._diagnostic_sources, (snapshot, state)))
+
+
 def _shutdown_state_outcome(
-    outcome: SessionOutcome, failure: ResultFailureMessage,
+    outcome: SessionOutcome, failure: ResultFailureMessage, *, worker_details: dict,
 ) -> SessionOutcome:
     """收场的状态库错误主导普通报告错误，其他已有致命错误保持并附加诊断。"""
     details = {"stage": "shutdown",
                "message": f"{failure.error_code}: {failure.error_message}",
-               "worker_failure": _worker_failure_details(failure)}
+               "worker_failure": worker_details}
     if outcome.succeeded:
-        return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
+        return SessionOutcome(succeeded=False, reason="state_db_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous = dict(outcome.details)
     secondary = list(previous.pop("secondary_errors", ()))
     if outcome.reason == "report_error":
         details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
-        return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
+        return SessionOutcome(succeeded=False, reason="state_db_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous["secondary_errors"] = [*secondary, {"reason": "state_db_error", "details": details}]
-    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous)
+    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous,
+                          _diagnostic_sources=outcome._diagnostic_sources)
 
 
 def _shutdown_configuration_outcome(
-    outcome: SessionOutcome, failure: ResultFailureMessage,
+    outcome: SessionOutcome, failure: ResultFailureMessage, *, worker_details: dict,
 ) -> SessionOutcome:
     """配置前提错误主导普通报告错误，保留已有致命主错误及诊断。"""
     details = {"stage": "shutdown", "message": failure.error_message,
-               "worker_failure": _worker_failure_details(failure)}
+               "worker_failure": worker_details}
     if outcome.succeeded:
-        return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
+        return SessionOutcome(succeeded=False, reason="configuration_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous = dict(outcome.details)
     secondary = list(previous.pop("secondary_errors", ()))
     if outcome.reason == "report_error":
         details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
-        return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
+        return SessionOutcome(succeeded=False, reason="configuration_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous["secondary_errors"] = [*secondary, {"reason": "configuration_error", "details": details}]
-    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous)
+    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous,
+                          _diagnostic_sources=outcome._diagnostic_sources)
 
 
 def close_runtime(

@@ -37,6 +37,9 @@ CURRENT_FORMAT_VERSION = max(SUPPORTED_FORMAT_VERSIONS)
 HOST_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V2)
 CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
 PHOTO_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V5)
+OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V6)
+DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V7)
+PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V8)
 _ACTION_TYPES = enum_for("actions.type")
 
 _PRAGMA_LIMIT = 2_147_483_647
@@ -251,6 +254,16 @@ def require_host_photo_format(format_version: int | None) -> None:
         )
 
 
+def require_deferred_photo_format(format_version: int | None) -> None:
+    """按需取得照片大小的责任只写入支持未知长度的整体格式。"""
+    if (isinstance(format_version, bool) or not isinstance(format_version, int)
+            or format_version not in SUPPORTED_FORMAT_VERSIONS
+            or format_version < DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持按需照片来源；"
+            "请先执行 init --upgrade-photo-source")
+
+
 def require_capture_preparation_format(
     format_version: int | None, *, action_type: int | None = None,
 ) -> None:
@@ -269,6 +282,31 @@ def require_capture_preparation_format(
         raise DatabaseUnsupportedFormatError(
             f"数据库整体格式 {format_version!r} 不支持拍摄提前准备；"
             f"至少需要格式 {minimum}"
+        )
+
+
+def require_output_scope_format(format_version: int | None) -> None:
+    """独立范围责任只在支持该操作流程约束的整体格式中保存。"""
+    if (
+        isinstance(format_version, bool)
+        or not isinstance(format_version, int)
+        or format_version not in SUPPORTED_FORMAT_VERSIONS
+        or format_version < OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION
+    ):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持独立输出范围责任；"
+            "请先执行 init --upgrade-output-scope"
+        )
+
+
+def require_preview_selection_format(format_version: int | None) -> None:
+    """新预览选择须能分别保存可靠缺席与依据尚未确认。"""
+    if (isinstance(format_version, bool) or not isinstance(format_version, int)
+            or format_version not in SUPPORTED_FORMAT_VERSIONS
+            or format_version < PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持预览未确认分类；"
+            "请先执行 init --upgrade-preview-selection"
         )
 
 
@@ -365,6 +403,15 @@ def _verify_format_constraints(
     )
 
 
+def _verify_read_end_structure(connection) -> None:
+    columns = {row[1]: row for row in connection.execute("PRAGMA table_info(file_copies)")}
+    column = columns.get("read_end_event_id")
+    foreign_keys = tuple(connection.execute("PRAGMA foreign_key_list(file_copies)"))
+    if (column is None or column[2].upper() != "INTEGER" or column[3] != 0
+            or not any(row[2:5] == ("history_events", "read_end_event_id", "id") for row in foreign_keys)):
+        raise DatabaseInvalidError("文件拷贝缺少读取结束事件引用结构")
+
+
 def _verify_structure(connection: sqlite3.Connection, format_version: int) -> None:
     try:
         present = {
@@ -381,6 +428,41 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
+        _verify_read_end_structure(connection)
+        if format_version >= int(_FORMAT_VERSIONS.V9):
+            from camctl.persistence.file_batch_structure import verify_file_batch_structure
+            try:
+                verify_file_batch_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"同机文件批次结构无效: {error}") from error
+        if format_version >= PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION:
+            from camctl.persistence.preview_selection_structure import verify_preview_selection_structure
+
+            try:
+                verify_preview_selection_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"预览选择格式结构无效: {error}") from error
+        if format_version >= DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION:
+            from camctl.persistence.photo_source_structure import verify_photo_source_structure
+
+            try:
+                verify_photo_source_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"照片来源格式结构无效: {error}") from error
+        from camctl.persistence.retry_wait_structure import verify_retry_wait_structure
+        try:
+            verify_retry_wait_structure(connection)
+        except (ValueError, sqlite3.Error) as error:
+            raise DatabaseInvalidError(f"读取重试索引结构无效: {error}") from error
+        from camctl.persistence.output_scope_structure import (
+            verify_device_activity_structure, verify_output_scope_structure,
+        )
+        try:
+            verify_device_activity_structure(connection)
+            if format_version >= OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION:
+                verify_output_scope_structure(connection)
+        except (ValueError, sqlite3.Error) as error:
+            raise DatabaseInvalidError(f"设备活动或输出范围格式结构无效: {error}") from error
         if format_version >= int(_FORMAT_VERSIONS.V3):
             from camctl.persistence.recovery_structure import verify_recovery_structure
             try:

@@ -70,22 +70,31 @@ class DriverDeclaration:
     directory_supported: bool = False
     #: 仅声明 READ 的本地主机收场恢复，不推断设备效果或独立活动结束。
     local_read_recovery_supported: bool = False
+    #: 只结束可靠旧本地边界内的结果调用，不推断设备文件或结果。
+    local_result_recovery_supported: bool = False
     #: 仅结束旧本地 control 责任，不证明独立设备效果。
     local_control_recovery_supported: bool = False
+    #: 仅结束旧本地可用性检查责任，不推断相机状态。
+    local_availability_recovery_supported: bool = False
     #: 按文件身份查询存在性；独立于拍摄活动状态查询。
     file_query_supported: bool = False
     #: 提供按固件验证门槛使能的操作系统重启及准备端口。
     os_reboot_recovery_supported: bool = False
     #: 在独立控制尝试中只设置参数，不发送实际 START。
     capture_preparation_supported: bool = False
+    #: 本地受管文件调用的旧进程收场恢复；只适用于删除与独立文件查询。
+    local_file_recovery_operations: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():
-            if name != "adb_foreground_recovery_operations" and type(value) is not bool:
+            if name not in ("adb_foreground_recovery_operations", "local_file_recovery_operations") and type(value) is not bool:
                 raise ValueError(f"驱动声明字段 {name} 必须是布尔值")
         operations = self.adb_foreground_recovery_operations
         if not isinstance(operations, frozenset) or not operations <= OPERATIONS:
             raise ValueError("前台命令恢复适用范围必须是已登记操作的 frozenset")
+        local_files = self.local_file_recovery_operations
+        if not isinstance(local_files, frozenset) or not local_files <= {"delete", "query"}:
+            raise ValueError("本地文件恢复适用范围只能包含 delete 与 query")
         if self.delete_supported and not self.file_query_supported:
             raise ValueError("删除能力声明必须同时支持独立文件查询")
 
@@ -117,6 +126,10 @@ class ControlRequest:
     result_directory_reader: ResultDirectoryReader | None = None
     #: 当前会话同一活动已完成设置的原准备尝试；仅用于实际 START。
     prepared_by: AttemptTicket | None = None
+    #: 整体 timeout_s 中独立授予首次设备配置的部分，普通设置使用剩余部分。
+    session_setup_timeout_s: Decimal = Decimal("0")
+    #: 首次受理时冻结的来源模式；未声明来源模式的其他调用留空。
+    output_storage: str | None = None
 
 
 @dataclass(frozen=True)

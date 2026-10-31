@@ -16,6 +16,8 @@ from decimal import Decimal
 import pytest
 
 from camctl.devices.read_session import (
+    DeferredSourceFile,
+    ReadSession,
     ReadSessionError,
     SourceFile,
     SourceStream,
@@ -75,6 +77,18 @@ def _source(size: int = 100) -> SourceFile:
     return SourceFile(
         file_id="9", locator={"driver": "camctl-adb"}, size_bytes=size
     )
+
+
+async def test_unknown_source_length_cannot_start_a_read_session():
+    source = DeferredSourceFile(file_id="9", locator={})
+    with pytest.raises(ReadSessionError, match="本次完整来源长度"):
+        ReadSession(source, 0, SilentStream(), Decimal("30"))
+
+
+async def test_read_session_exposes_the_current_snapshot_length():
+    session = ReadSession(_source(12), 0, ScriptedStream([b"hello world!"]), Decimal("30"))
+    assert session.source_size == 12
+    assert session.read_chunk(12).eof
 
 
 async def test_read_control_allows_stop_and_keeps_resources() -> None:

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from camctl.logging_runtime.diagnostics import record_error
+from camctl.logging_runtime.events import measure_stage
 
 __all__ = [
     "MaintenanceLimits",
@@ -92,11 +93,13 @@ async def maintain_reports(
     if not context.ports.has_new_changes():
         return ReportMaintenanceResult(ReportMaintenanceOutcome.NO_PENDING_REPORT)
     try:
-        payload = await context.ports.generate(job=None)
+        with measure_stage("report.generate"):
+            payload = await context.ports.generate(job=None)
     except Exception as error:
         record_error(error, stage="report_generate")
         return ReportMaintenanceResult(ReportMaintenanceOutcome.GENERATION_FAILED)
-    published = await context.ports.publish(report_id=0, payload=payload)
+    with measure_stage("report.publish"):
+        published = await context.ports.publish(report_id=0, payload=payload)
     if not published:
         record_error(RuntimeError("报告发布返回失败"), stage="report_publish")
         return ReportMaintenanceResult(ReportMaintenanceOutcome.GENERATION_FAILED)

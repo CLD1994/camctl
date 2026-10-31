@@ -369,6 +369,60 @@ async def test_prepare_failure_stops_before_session(error) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("save_fails", [False, True])
+async def test_deferred_photo_records_download_size_before_preparing_target(monkeypatch, save_fails):
+    from types import SimpleNamespace
+    from camctl.operations.models import AttemptTicket
+    from camctl.outputs import obtain_flow, read_attempts
+    from camctl.persistence import transaction
+    from camctl.persistence.repositories import outputs
+
+    calls = []
+    session = _Session()
+    session.source_size = 10
+    class Sessions(_Sessions):
+        _ticket = AttemptTicket(1, "read", "9", "read/9", 4)
+        async def open_session(self, source_id, offset, *, on_start=None):
+            calls.append(("open", source_id, offset))
+            return await super().open_session(source_id, offset, on_start=on_start)
+    class Copies(_Copies):
+        async def copy_state(self, copy_id):
+            calls.append(("state", copy_id))
+            return await super().copy_state(copy_id)
+        async def prepare(self, copy_id):
+            calls.append(("prepare", copy_id))
+            return await super().prepare(copy_id)
+    class Database:
+        async def read(self, function, **kwargs):
+            return function(SimpleNamespace(connection=object()))
+    copies = Copies(segments=[_committed_step()])
+    async def save(runtime, copy_id, operation, request, save):
+        calls.append(("save", copy_id, operation, request.size_bytes))
+        if save_fails:
+            raise RuntimeError("length save failed")
+    monkeypatch.setattr(obtain_flow, "RecordingInputCopies", lambda *args, **kwargs: copies)
+    monkeypatch.setattr(obtain_flow, "DriverReadSessions", Sessions)
+    monkeypatch.setattr(outputs, "_deferred_photo_source", lambda *args: True)
+    monkeypatch.setattr(transaction, "row_facts", lambda *args: {})
+    monkeypatch.setattr(read_attempts, "save_read_business", save)
+    runtime = SimpleNamespace(database=Database(), directories=SimpleNamespace(staging=_STAGING),
+        occurred_at=lambda: _NOW, file_executor=None, segment_size=4, continuing_read_tickets={},
+        outputs=SimpleNamespace(save_photo_read_start=object()))
+    facts = {"id": 9, "source_device_file_id": 11, "source_intermediate_file_id": None,
+             "verification_state": int(_VERIFICATION.NOT_PERFORMED)}
+    if save_fails:
+        with pytest.raises(RuntimeError, match="length save failed"):
+            await obtain_flow._copy_delivery(runtime, Sessions(session), facts, None)
+        assert calls == [("open", 11, 0), ("save", 9, "photo_read_start", 10)]
+    else:
+        step = await obtain_flow._copy_delivery(runtime, Sessions(session), facts, None)
+        assert step.phase is InputPhase.INPUT_READY
+        assert calls == [("open", 11, 0), ("save", 9, "photo_read_start", 10),
+                         ("state", 9), ("prepare", 9)]
+    assert session.stop_requested and session.awaited
+
+
+@pytest.mark.asyncio
 async def test_segment_failure_stops_and_closes_session() -> None:
     copies = _Copies(segments=[CopySegmentError("transfer_failed", "io")])
     sessions = _Sessions()

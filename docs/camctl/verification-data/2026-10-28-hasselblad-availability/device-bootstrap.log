@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-hb-spec-gsHiLJ9d/env/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-hb-spec-gsHiLJ9d/repo/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw] PASSED [ 50%]
+apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg] PASSED [100%]
+
+============================== 2 passed in 39.85s ==============================

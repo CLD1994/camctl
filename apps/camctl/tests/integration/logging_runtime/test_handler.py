@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import subprocess
+import json
 import sys
 from pathlib import Path
 
@@ -43,17 +44,10 @@ class TestFileChannel:
             tmp_path / "camctl.log", max_bytes=32, file_count=2
         )
         channel.write_record(_record("w" * 40))  # 先超过阈值，使下一条触发轮换
-        # 注入轮换失败：追加结果不被掩盖。
-        def broken_rollover():
-            raise OSError("轮换失败")
-
         import unittest.mock as mock
-        from concurrent_log_handler import ConcurrentRotatingFileHandler
-
-        # 在追踪层之下注入轮换失败：追加结果不被掩盖。
-        with mock.patch.object(
-            ConcurrentRotatingFileHandler,
-            "doRollover",
+        # 正式归档名建立失败时，当前文件仍可以独立追加。
+        with mock.patch(
+            "os.link",
             side_effect=OSError("轮换失败"),
         ):
             result = channel.write_record(_record("x" * 40))
@@ -110,7 +104,7 @@ class TestTwoProcesses:
             "from camctl.logging_runtime.models import LogLevel\n"
             "from camctl.logging_runtime.service import LogRecord\n"
             "import sys\n"
-            "channel = FileChannel(sys.argv[1], max_bytes=256, file_count=3)\n"
+            "channel = FileChannel(sys.argv[1], max_bytes=2048, file_count=3)\n"
             "for index in range(30):\n"
             "    result = channel.write_record(LogRecord(level=LogLevel.INFO,"
             " message=f'proc-{sys.argv[2]}-line-{index:03d}'))\n"
@@ -132,6 +126,9 @@ class TestTwoProcesses:
             for path in sorted(tmp_path.iterdir())
             if path.name.startswith("camctl.log")
         )
-        # 轮换保留有限：两进程的近期行都可靠落盘。
-        assert "proc-1-line-02" in combined
-        assert "proc-2-line-02" in combined
+        # 结构化元数据增加行长；保留窗口仍包含两进程的近期记录并跨过轮换。
+        assert (tmp_path / "camctl.log.1").exists()
+        records = [json.loads(line) for line in combined.splitlines() if line]
+        assert all(record["level"] == "INFO" for record in records)
+        assert any(record["message"].startswith("proc-1-line-02") for record in records)
+        assert any(record["message"].startswith("proc-2-line-02") for record in records)

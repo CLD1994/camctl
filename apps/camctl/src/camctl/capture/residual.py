@@ -211,13 +211,71 @@ def _observed_activity(response: Any) -> int | None:
     return None
 
 
+async def _saved_binding_failure(runtime: Any, action: Mapping[str, Any]):
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    if (action.get("driver_id") != DRIVER_ID or action.get("type") != 1
+            or action.get("status") != 1 or action.get("execution_started") != 0):
+        return None
+    from camctl.persistence.repositories.availability_wait_finish import saved_binding_check_failure
+    return await runtime.database.read(lambda owned: saved_binding_check_failure(owned.connection, action["id"]),
+                                       description="读取原检查绑定失败")
+
+
 async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
     """核对保存的设备及驱动；没有绑定端口的调用方提供匹配前提。"""
     from camctl.capture.handlers import _binding
 
+    saved = await _saved_binding_failure(runtime, action)
+    if saved is not None:
+        return saved[0]
     if runtime.binding_check is None:
         return None
-    return binding_failure_details(runtime.binding_check(_binding(action)))
+    failure = binding_failure_details(runtime.binding_check(_binding(action)))
+    if failure is not None:
+        return failure
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    if action.get("driver_id") != DRIVER_ID or action.get("type") != 1:
+        return None
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.physical_alias import physical_alias_conflict
+    from camctl.persistence.repositories.availability_target import (logical_held_identity_mismatch,
+        photo_check_identity_mismatch)
+    current = runtime.fixed_camera_identity
+    if not isinstance(current, CameraIdentity):
+        raise ConsistencyError("当前 Hasselblad 配置缺少固定机身身份")
+    def read(owned):
+        found = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action["id"],)).fetchone()
+        activity = None if found is None else row_facts(owned.connection, "device_activities", found[0])
+        eligible = action["status"] == 1 and action["execution_started"] == 0
+        mismatch = False
+        if activity is None and eligible:
+            old_mismatch = logical_held_identity_mismatch(owned.connection, action["device_id"], current)
+            check_mismatch = photo_check_identity_mismatch(owned.connection, action, current)
+            mismatch = old_mismatch or check_mismatch
+        conflict = eligible and physical_alias_conflict(owned.connection, action["device_id"], current)
+        return activity, mismatch, conflict
+    activity, mismatch, conflict = await runtime.database.read(read, description="读取固定机身身份")
+    if mismatch:
+        return {"device_id": action["device_id"], "expected_driver_id": DRIVER_ID,
+                "reason": "physical_identity_mismatch"}
+    if activity is None:
+        original = None
+    else:
+        try:
+            original = CameraIdentity(**activity["expected_identity_json"])
+        except (TypeError, ValueError, KeyError) as error:
+            raise ConsistencyError("原活动缺少可靠固定机身身份") from error
+        if activity["resource_key"] != original.resource_key:
+            raise ConsistencyError("原活动资源键与固定机身身份不符")
+        if current != original:
+            return {"device_id": action["device_id"], "expected_driver_id": DRIVER_ID,
+                    "reason": "physical_identity_mismatch"}
+    if conflict:
+        return {"device_id": action["device_id"], "expected_driver_id": DRIVER_ID,
+                "reason": "physical_identity_conflict"}
+    return None
 
 
 async def _finish_original_binding_failure(
@@ -537,10 +595,16 @@ async def _stop_residual(
             await runtime.finish(ticket, prevented,
                 end_run=RunOutcome.EXPIRED if reason == "window_ended" else RunOutcome.CANCELED)
             return
-    response = await runtime.stopper.stop(ControlRequest(
-        operation="stop_recording", binding=_binding(owner),
-        params=owner["effective_params_json"], ticket=ticket,
-        timeout_s=runtime.residual_config.timeout_s))
+    from camctl.logging_runtime.events import measure_stage
+
+    with measure_stage("capture.residual_stop", action_id=candidate.action_id,
+            trigger_action_id=trigger_id, device_id=owner["device_id"],
+            activity_id=candidate.activity_id, run_id=ticket.run_id,
+            attempt_id=ticket.attempt_id):
+        response = await runtime.stopper.stop(ControlRequest(
+            operation="stop_recording", binding=_binding(owner),
+            params=owner["effective_params_json"], ticket=ticket,
+            timeout_s=runtime.residual_config.timeout_s))
     outcome, confirmed = _operation_outcome(
         response, "stop_confirmed", evidence_type="stop_returned")
     if confirmed:
@@ -719,7 +783,10 @@ def residual_flow(
 async def _recover_old_attempts(database: Any, capture_factory: Any, *, owns_device=None,
                                 discovery=None, now=0) -> None:
     """每轮结束一批具有可靠旧边界的原调用，沿用原身份及预算。"""
-    from camctl.capture.handlers import _RECOVERABLE_OPERATIONS
+    from camctl.capture.handlers import (
+        _ACTION_TERMINAL, _RECOVERABLE_OPERATIONS, _RUN_KIND, _held_listing,
+        _settle_discontinued_listing,
+    )
     from camctl.operations.models import AttemptTicket
 
     discovery = discovery if discovery is not None else ReadDiscoveryOwner()
@@ -748,8 +815,20 @@ async def _recover_old_attempts(database: Any, capture_factory: Any, *, owns_dev
             None if activity_id is None else str(activity_id), responsibility, run_id)
         # 查询责任的后续尝试沿重试间隔继续；恢复结果不带等待会
         # 使下一次查询被"先建立重试等待"守卫拒绝。
-        (await runtime.recover_attempt(
-            ticket, retry_wait=ticket.operation == "query"))
+        recovered = await runtime.recover_attempt(
+            ticket, retry_wait=ticket.operation == "query")
+        if recovered and ticket.operation == "result":
+            action_id = await runtime.action_id_of_ticket(ticket)
+            if kind == int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE):
+                from camctl.capture.scope_closure import settle_scope_listing
+
+                listing = await _held_listing(runtime, ticket)
+                if listing is not None:
+                    await settle_scope_listing(runtime, action_id, listing)
+                continue
+            action = await runtime.action(action_id)
+            if action["status"] in _ACTION_TERMINAL:
+                await _settle_discontinued_listing(runtime, action_id, ticket, cancel_run=True)
 
 
 async def _settle_orphan_queries(context: Any, database: Any, operations: Any, *, discovery=None, now=0) -> None:

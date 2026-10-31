@@ -129,16 +129,29 @@ class ResultsDouble:
         self.set_finalized = set_finalized
 
     async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
-                        completion_context=None, video_result_mode=None, reading_context=None):
+                        completion_context=None, video_result_mode=None, reading_context=None,
+                        scope_only=False):
+        if type(scope_only) is not bool:
+            raise ValueError("范围读取标记必须是布尔值")
+        prefix = "scope" if scope_only else "results"
+        if (ticket.operation != "result" or ticket.target_id is None
+                or ticket.responsibility_key != f"{prefix}/{ticket.target_id}"):
+            raise ValueError("结果列举要求原活动票据")
         if cursor is not None:
             raise ValueError("替身单批完整集合没有后续游标")
         listed = await self.list_round(ticket, timeout_s=timeout_s)
         observations = []
         for observation in listed.outcome.observations:
             if observation.type == "result_files_listed":
+                data = dict(observation.data)
+                if scope_only:
+                    # 范围页只确认路径，不能据此推断文件大小、完成或配对。
+                    data["entries"] = [{**entry, "complete": False, "size_bytes": None,
+                                        "paired_identity": None} for entry in data["entries"]]
                 observations.append(DeviceObservation(observation.type, 2, {
-                    **observation.data, "cursor": None, "next_cursor": None,
-                    "set_finalized": self.set_finalized, "completion_evidence": None}))
+                    **data, "cursor": None, "next_cursor": None,
+                    "set_finalized": self.set_finalized and (not scope_only or completion_context is not None),
+                    "completion_evidence": None}))
             else:
                 observations.append(observation)
         actual = replace(listed.outcome, observations=tuple(observations))
@@ -781,6 +794,82 @@ class TestInterruptionRecovery:
                 (original_result[0],)).fetchone() == (original_wall,)
             _assert_actual_saved(owned, action_id, actual, attempts_used=2)
             results_driver.list_results.assert_awaited_once()
+            result_case.driver.control.assert_awaited_once()
+            assert _value(owned, "SELECT source_action_id,presence_state,completion_state,size_bytes"
+                          " FROM device_files") == (action_id, 2, 3, 41)
+            assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+        finally:
+            owned.connection.close()
+
+    async def test_result_page_registration_rolls_back_and_resumes_original_request(
+            self, tmp_path: Path, result_case, monkeypatch):
+        from camctl.contracts.values import ConsistencyError
+        from camctl.devices.evidence import EvidenceContract
+        from camctl.persistence.transaction import saved_transaction_events
+        from ..support.result_cases import ResultPageFault
+        from .test_result_consumer_saves import _actual, _assert_actual_saved
+
+        evidence = EvidenceContract(
+            "adb_foreground_assumption", 1, "result", frozenset({"terminate_grace_s"}))
+        owned, runtime, action_id, handler = await result_case.world(
+            tmp_path, "photo", start=False, evidence_contracts=(evidence,))
+        actual = _actual(action_id, with_files=True, complete=True)
+        actual.observations[0].data["entries"][0]["kind"] = "photo"
+
+        class ResultPort(ResultsDouble):
+            async def list_page(self, ticket, **kwargs):
+                if not self.calls:
+                    self.calls.append(int(ticket.target_id))
+                    return page_from_outcome(ticket, actual, cursor=kwargs["cursor"])
+                return await super().list_page(ticket, **kwargs)
+
+        results = ResultPort({action_id: (replace(
+            _entry("original", kind=ResultFileKind.PHOTO, size=41),
+            locator={"path": "/DCIM/original.mp4"}),)})
+        result_case.results.delegate = results
+        requests = []
+        original_save = CaptureRepository.save_result_page
+
+        def fault(repository, command, key, current):
+            requests.append((command, key))
+            if len(requests) == 1:
+                current = replace(current, connection=ResultPageFault(current.connection, "projection"))
+            return original_save(repository, command, key, current)
+
+        monkeypatch.setattr(CaptureRepository, "save_result_page", fault)
+        try:
+            with pytest.raises(ConsistencyError):
+                await capture_handler(handler)(action_id, runtime)
+            assert len(requests) == 1
+            request, key = requests[0]
+            assert request.occurred_at == _NOW and request.outcome.outcome == actual
+            assert saved_transaction_events(owned.connection, key) is None
+            assert _value(owned, "SELECT COUNT(*) FROM device_files") == (0,)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
+            before_attempts = owned.connection.execute(
+                "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
+            assert len(before_attempts) == 2
+            metadata = owned.metadata
+            recovery = await result_case.reopen(owned)
+            assert owned.metadata == metadata
+            result_case.clock.wall = _NOW + 5_000_000
+            await capture_handler(handler)(action_id, recovery)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
+            _assert_actual_saved(owned, action_id, actual)
+            assert owned.connection.execute(
+                "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall() == before_attempts
+            assert requests == [(request, key), (request, key)]
+            result_case.clock.monotonic = 10_000_000_000
+            await capture_handler(handler)(action_id, recovery)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
+            attempts = owned.connection.execute(
+                "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
+            assert attempts[:-1] == before_attempts
+            assert attempts[-1][1:] == (before_attempts[-1][1], 2)
+            events = saved_transaction_events(owned.connection, key)
+            assert events is not None and events[0]["occurred_at"] == _NOW
+            _assert_actual_saved(owned, action_id, actual, attempts_used=2)
+            assert results.calls == [action_id, action_id]
             result_case.driver.control.assert_awaited_once()
             assert _value(owned, "SELECT source_action_id,presence_state,completion_state,size_bytes"
                           " FROM device_files") == (action_id, 2, 3, 41)

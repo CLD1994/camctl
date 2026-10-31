@@ -103,6 +103,7 @@ def _request(*, device_id="camera-1", params=None, timeout=Decimal("180"),
         ticket=AttemptTicket(1, "control", ACTIVITY_ID, "capture/1", 9) if ticket is None else ticket,
         timeout_s=timeout,
         dispatch_check=AsyncMock(side_effect=dispatch_check),
+        output_storage="host",
     )
 
 
@@ -137,7 +138,7 @@ def host_files(monkeypatch):
         prepared.append((actual_roots, activity_id))
         return WORKSPACE
 
-    async def verify(actual_roots, activity_id, specs):
+    async def verify(actual_roots, activity_id, specs, *, trusted_preview_name):
         verified.append((actual_roots, activity_id, specs))
         return _artifacts(specs)
 
@@ -586,7 +587,7 @@ async def test_file_verification_failure_keeps_unknown_photo_workspace(host_file
 
     roots, prepared, _verified = host_files
 
-    async def missing_original(_roots, _activity_id, _specs):
+    async def missing_original(_roots, _activity_id, _specs, *, trusted_preview_name):
         raise CaptureFileError("source_open", WORKSPACE / ORIGINAL_NAME, detail="文件不存在")
 
     monkeypatch.setattr(driver_module, "verify_capture_files", missing_original)
@@ -628,13 +629,15 @@ async def test_configuration_updates_are_visible_to_the_same_registered_driver(h
         control_supported=True,
         stop_supported=False,
         query_supported=False,
-        result_supported=False,
+        result_supported=True,
         read_supported=True,
         digest_supported=False,
         delete_supported=False,
         directory_supported=False,
         local_read_recovery_supported=True,
+        local_result_recovery_supported=True,
         local_control_recovery_supported=True,
+        local_availability_recovery_supported=True,
         capture_preparation_supported=True,
     )
 
@@ -677,7 +680,7 @@ async def test_saved_capture_preserves_named_pair_and_locator(host_files, captur
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shutter", [Decimal("0.000667"),Decimal("0.000333"),Decimal("0.00025")])
+@pytest.mark.parametrize("shutter", ["1/1500", "1/3000", "1/4000"])
 async def test_photo_driver_uses_saved_values_in_structured_argv(host_files, shutter):
     roots, _, _ = host_files
     params = _photo_params()
@@ -685,7 +688,7 @@ async def test_photo_driver_uses_saved_values_in_structured_argv(host_files, shu
     transport = FakeTransport()
     result = await _driver(transport, roots).control(_request(params=params))
     assert result.outcome.status is AttemptStatus.SUCCEEDED
-    assert ("set","shutter",format(shutter,"f")) in _subcommands(transport)
+    assert ("set","shutter",shutter) in _subcommands(transport)
     assert transport.calls[-1].argv[3:] == ("capture","--output",str(WORKSPACE))
     assert all(isinstance(call.argv, tuple) and call.argv[:3]==(EXECUTABLE,"--pid","0x000a") for call in transport.calls)
 

@@ -70,12 +70,16 @@ def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
     """
     if entry is None:
         return None
-    if operation == "control" and getattr(entry.declaration, "local_control_recovery_supported", False):
+    if operation == "availability" and getattr(entry.declaration, "local_availability_recovery_supported", False):
+        evidence_type = "local_availability_recovery"
+    elif operation == "control" and getattr(entry.declaration, "local_control_recovery_supported", False):
         evidence_type = "local_control_recovery"
     elif operation in getattr(entry.declaration, "local_file_recovery_operations", ()):
         evidence_type = "local_file_recovery"
     elif operation == "read" and getattr(entry.declaration, "local_read_recovery_supported", False):
         evidence_type = "local_read_recovery"
+    elif operation == "result" and getattr(entry.declaration, "local_result_recovery_supported", False):
+        evidence_type = "local_result_recovery"
     elif operation in getattr(entry.declaration, "adb_foreground_recovery_operations", ()):
         evidence_type = "adb_foreground_recovery"
     else:

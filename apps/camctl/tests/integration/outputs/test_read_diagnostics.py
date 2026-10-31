@@ -14,10 +14,8 @@ from camctl.devices.read_session import ReadSession, ReadEnd
 from camctl.host_files.io import LocalSourceReader, PositionedWriter
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.session.supervision import Supervisor
-from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context, flush_diagnostics
-from camctl.logging_runtime.models import LogLevel
-from camctl.logging_runtime.service import AdmissionResult
+from support.logging import recording_log_channel
 from camctl.outputs import obtain_flow
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
@@ -28,15 +26,6 @@ from ..bootstrap.test_output_binding_changes import Catalog
 from .test_grant_reuse import local_read, read_targets
 from .test_read_associations import _command
 from .test_source_digest_failure_settlement import _ReadDriver, _CONTENT
-
-
-class Channel:
-    def __init__(self):
-        self.records = []
-
-    async def alog(self, record):
-        self.records.append(json.loads(record.message))
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
 
 
 @pytest.fixture
@@ -67,11 +56,9 @@ def prepare_diagnostic_read_case(request, consumer, *, known_digest=False):
     assert grant.kind is DbOutcomeKind.COMPLETED, grant.error
     return owned, command, grant.value
 
-
 @pytest.fixture
 def diagnostic_read_case(request, consumer):
     return prepare_diagnostic_read_case(request, consumer)
-
 
 @pytest.fixture
 def diagnostic_checksum_case(request, consumer):
@@ -116,7 +103,8 @@ async def test_actual_read_error_is_held_before_result_save(monkeypatch, consume
             raise error
         monkeypatch.setattr(LocalSourceReader, "__init__", open_source)
     port = SaveReadPort(failed=save_failed)
-    channel, fallback = Channel(), []
+    records, fallback = [], []
+    channel = recording_log_channel(records)
     with repository_port(OperationRepository, port, ("finish_attempt",),
             matches=lambda _name, args, _kwargs: (
                 args[0].ticket.operation == "read" and
@@ -131,7 +119,7 @@ async def test_actual_read_error_is_held_before_result_save(monkeypatch, consume
                         assert caught.value.__cause__ is port.error
                     else:
                         await execute_read(runtime, command)
-                    assert not channel.records
+                    assert not records
                 await flush_diagnostics()
                 await flush_diagnostics()
     request, key = port.calls[0]
@@ -144,8 +132,8 @@ async def test_actual_read_error_is_held_before_result_save(monkeypatch, consume
         (ticket.run_id, ticket.attempt_id)).fetchone()
     assert state == (1 if save_failed else 3)
     assert (stored is None) == save_failed
-    assert len(channel.records) == 1 and not fallback
-    recorded = channel.records[0]
+    assert len(records) == 1 and not fallback
+    recorded = json.loads(records[0].message)
     text = json.dumps(recorded)
     assert "actual source read failed" in text and "/source/original.mov" in text
     assert "original source permission" in text
@@ -161,7 +149,8 @@ async def test_checksum_exhaustion_records_verification_error(monkeypatch, consu
     staging = tmp_path / "staging"
     (staging / "derived").mkdir(parents=True)
     (staging / "derived/801.mp4").write_bytes(_CONTENT)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     async with read_test_runtime(owned, _ReadDriver(), EVIDENCE, staging=staging,
             internal=consumer == "internal", segment_size=len(_CONTENT),
             occurred_at=lambda: command.occurred_at + 20) as runtime:
@@ -170,9 +159,9 @@ async def test_checksum_exhaustion_records_verification_error(monkeypatch, consu
         with error_diagnostics_context(channel, lambda _: None):
             async with diagnostic_scope():
                 await execute_read(runtime, command)
-    assert len(channel.records) == 1
-    assert channel.records[0]["stage"] == "checksum_exhausted"
-    assert "RecopyExhausted" in json.dumps(channel.records[0])
+    assert len(records) == 1
+    assert json.loads(records[0].message)["stage"] == "checksum_exhausted"
+    assert "RecopyExhausted" in records[0].message
     assert owned.connection.execute("SELECT verification_state,recopies_used FROM file_copies WHERE id=?", (prepared.copy_id,)).fetchone() == (4, 1)
 
 
@@ -190,7 +179,8 @@ async def test_normal_cancellation_before_dispatch_has_no_error_record(diagnosti
                                       action_id=command.action_id)
             return result
     port = CancelAtIntent()
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with repository_port(OperationRepository, port, ("begin_attempt",),
             matches=lambda _name, args, _kwargs: (
                 args[0].operation == "read" and
@@ -201,7 +191,7 @@ async def test_normal_cancellation_before_dispatch_has_no_error_record(diagnosti
                 async with diagnostic_scope():
                     await execute_read(runtime, command)
     assert len(port.tickets) == 1 and driver.offsets == []
-    assert channel.records == []
+    assert records == []
     assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE copy_id=?", (prepared.copy_id,)).fetchone() == (1,)
 
 
@@ -216,14 +206,15 @@ async def test_download_read_error_keeps_complete_readable_and_raw_stderr(diagno
         async def open_read(self, source, offset, ticket, *, idle_timeout_s):
             self.tickets.append(ticket)
             raise error
-    driver, channel = Driver(), Channel()
+    driver, records = Driver(), []
+    channel = recording_log_channel(records)
     async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
             occurred_at=lambda: command.occurred_at + 20) as runtime:
         with error_diagnostics_context(channel, lambda _: None):
             async with diagnostic_scope():
                 await execute_read(runtime, command)
-    assert len(driver.tickets) == len(channel.records) == 1
-    details = channel.records[0]["error"]["details"]["exception"]["diagnostic_details"]["steps"][0]
+    assert len(driver.tickets) == len(records) == 1
+    details = json.loads(records[0].message)["error"]["details"]["exception"]["diagnostic_details"]["steps"][0]
     assert details["stderr_hex"] == raw.hex()
     assert details["stderr_text"] == raw.decode("utf-8", "backslashreplace")
 
@@ -266,7 +257,8 @@ async def test_stopped_source_preserves_real_write_error_without_logging_control
         raise original
     if actual_write_error:
         monkeypatch.setattr(PositionedWriter, "write", fail_write)
-    driver, channel = Driver(), Channel()
+    driver, records = Driver(), []
+    channel = recording_log_channel(records)
     async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
             file_executor=executor, occurred_at=lambda: command.occurred_at + 20) as runtime:
         with error_diagnostics_context(channel, lambda _: None):
@@ -276,11 +268,11 @@ async def test_stopped_source_preserves_real_write_error_without_logging_control
     assert not settled.failed
     assert len(driver.sessions) == 1
     assert (await driver.sessions[0].wait_stopped()).error == "stopped"
-    assert len(channel.records) == int(actual_write_error)
+    assert len(records) == int(actual_write_error)
     assert owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=?", (prepared.run_id,)).fetchone() == (1, None)
     if actual_write_error:
-        record = json.dumps(channel.records[0])
-        assert '"errno": 28' in record and "disk full" in record
+        record = json.loads(records[0].message)
+        assert '"errno": 28' in json.dumps(record) and "disk full" in json.dumps(record)
 
 
 @pytest.mark.asyncio
@@ -298,12 +290,13 @@ async def test_local_read_normal_stopped_result_is_not_error(monkeypatch, diagno
         executor.control.request_stop()
         return result
     monkeypatch.setattr(LocalSourceReader, "read_chunk", stop_after_read)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     async with read_test_runtime(owned, _ReadDriver(), EVIDENCE, staging=staging,
             file_executor=executor, occurred_at=lambda: command.occurred_at + 20) as runtime:
         with error_diagnostics_context(channel, lambda _: None):
             async with diagnostic_scope():
                 await execute_read(runtime, command)
     assert not (await supervisor.drain_required()).failed
-    assert not channel.records, json.dumps({"records": channel.records, "attempt": owned.connection.execute("SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=?", (prepared.run_id,)).fetchone()}, ensure_ascii=False)
+    assert not records, json.dumps({"records": [r.message for r in records], "attempt": owned.connection.execute("SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=?", (prepared.run_id,)).fetchone()}, ensure_ascii=False)
     assert owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=?", (prepared.run_id,)).fetchone() == (1, None)

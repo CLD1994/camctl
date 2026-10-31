@@ -15,6 +15,7 @@ from typing import Any, Callable, Iterator, Mapping, TypeVar
 
 from camctl.contracts.values import parse_object_id
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+from camctl.host_files.jpeg_boundary import JpegBoundary
 from camctl.host_files.paths import relative_file_path, resolve_file
 from camctl.host_files.photo_formats import (
     CAPTURE_FORMATS, CaptureFormat, photo_file_extension, photo_media_type,
@@ -150,6 +151,15 @@ class CapturedArtifact:
 
 
 @dataclass(frozen=True)
+class PhotoSyncObservation:
+    """一次同步候选观察；错误保留原异常供所属结果诊断。"""
+
+    status: str
+    artifact: CapturedArtifact | None = None
+    error: CaptureFileError | None = None
+
+
+@dataclass(frozen=True)
 class _FileFacts:
     size_bytes: int
     sha256: str
@@ -181,8 +191,10 @@ async def verify_capture_files(
     roots: BoundDirectories,
     activity_id: str,
     specs: tuple[CaptureFileSpec, ...],
+    *,
+    trusted_preview_name: str | None = None,
 ) -> tuple[CapturedArtifact, ...]:
-    """核对工作目录中的普通文件、完整长度及媒体签名，并同步后返回摘要。"""
+    """核对文件事实并同步；可信预览由工具保证媒体内容。"""
     path = workspace_path(roots, activity_id)
     if type(specs) is not tuple or not specs:
         raise CaptureFileError("spec_validation", path, detail="文件规格必须是非空 tuple")
@@ -198,7 +210,35 @@ async def verify_capture_files(
                 detail=f"同一工作目录中的文件名重复: {spec.original_name!r}",
             )
         names.add(spec.original_name)
-    return await _run_file_io(_verify_capture_files, roots, path, specs)
+    if trusted_preview_name is not None and trusted_preview_name not in names:
+        raise CaptureFileError("spec_validation", path, detail="可信预览不在文件规格中")
+    return await _run_file_io(_verify_capture_files, roots, path, specs, trusted_preview_name)
+
+
+async def inspect_capture_candidate(roots: BoundDirectories, activity_id: str,
+                                    spec: CaptureFileSpec, *, owner=None) -> PhotoSyncObservation:
+    """只观察 START 可信记录指定的直接文件，不枚举或猜测名称。"""
+    if not isinstance(spec, CaptureFileSpec):
+        raise CaptureFileError("spec_validation", detail="同步候选必须使用原文件规格")
+    workspace = workspace_path(roots, activity_id)
+    try:
+        artifact = await _run_file_io(_inspect_capture_candidate, roots, workspace, spec, owner)
+    except CaptureFileError as error:
+        status = "invalid" if error.stage in ("source_type", "source_size", "source_media") else "unconfirmed"
+        return PhotoSyncObservation(status, error=error)
+    return PhotoSyncObservation("missing" if artifact is None else "complete", artifact=artifact)
+
+
+def _inspect_capture_candidate(roots: BoundDirectories, workspace: Path,
+                               spec: CaptureFileSpec, owner=None) -> CapturedArtifact | None:
+    with _workspace_directory(roots, workspace, owner=owner) as workspace_fd:
+        path = workspace / spec.original_name
+        if _stat_entry(workspace_fd, spec.original_name, path, "source_observe") is None:
+            return None
+        facts = _read_file_facts_at(workspace_fd, spec.original_name, path, spec.media_type,
+            expected_size=spec.size_bytes, expected_sha256=None, file_kind="source", owner=owner)
+        _sync_directory_fd(workspace_fd, workspace, "workspace_sync")
+        return CapturedArtifact(spec.original_name, facts.size_bytes, facts.sha256, spec.media_type)
 
 
 async def archive_capture_file(
@@ -240,7 +280,77 @@ async def archive_capture_file(
         workspace,
         artifact,
         target_path,
+        False,
+        None,
+        purpose is not FilePurpose.CAPTURE_PREVIEW,
     )
+
+
+async def archive_photo_cache(roots: BoundDirectories, activity_id: str, ticket, role: str,
+                              selected: str, artifact: CapturedArtifact, target: FileRef,
+                              *, purpose: FilePurpose, capture_format: CaptureFormat, owner) -> None:
+    """归档本角色原决定选中的直接副本；调用者持有文件任务和原工作区。"""
+    from camctl.host_files.downloads import result_download_path
+
+    if selected not in ("sync", "camera") or role not in ("original", "thumbnail"):
+        raise CaptureFileError("target_role", detail="照片缓存来源或角色无效")
+    expected_purpose = FilePurpose.CAPTURE_ORIGINAL if role == "original" else FilePurpose.CAPTURE_PREVIEW
+    if purpose is not expected_purpose or target.purpose is not purpose:
+        raise CaptureFileError("target_role", detail="照片缓存用途与原角色不符")
+    if not isinstance(artifact, CapturedArtifact):
+        raise CaptureFileError("artifact_validation", detail="照片缓存缺少原完整文件事实")
+    if (artifact.media_type != photo_media_type(purpose, capture_format)
+            or target.relative_path != relative_file_path(purpose, target.file_id,
+                photo_file_extension(purpose, capture_format))):
+        raise CaptureFileError("target_path", detail="照片缓存目标与原角色格式不符")
+    if ticket.target_id != activity_id:
+        raise CaptureFileError("activity_id", detail="照片缓存活动与原结果票据不同")
+    workspace = (workspace_path(roots, activity_id) if selected == "sync"
+                 else result_download_path(roots.staging, ticket, role))
+    target_path = resolve_file(target, roots).path
+    await _run_file_io(_archive_capture_file, roots, workspace, artifact, target_path,
+                       selected == "camera", owner)
+
+
+async def archive_photo_sync_cache(roots: BoundDirectories, activity_id: str, name: str,
+                                   target: FileRef, *, purpose: FilePurpose,
+                                   capture_format: CaptureFormat, owner) -> None:
+    """归档 CLI 同步文件；只操作原目录项，不读取或比较文件内容。"""
+    _validate_name(name)
+    if target.purpose is not purpose or purpose not in (FilePurpose.CAPTURE_ORIGINAL, FilePurpose.CAPTURE_PREVIEW):
+        raise CaptureFileError("target_role", detail="照片同步缓存用途无效")
+    if target.relative_path != relative_file_path(purpose, target.file_id,
+            photo_file_extension(purpose, capture_format)):
+        raise CaptureFileError("target_path", detail="照片同步缓存路径与原角色不同")
+    workspace = workspace_path(roots, activity_id)
+    target_path = resolve_file(target, roots).path
+    await _run_file_io(_archive_photo_sync_cache, roots, workspace, name, target_path, owner)
+
+
+def _archive_photo_sync_cache(roots, workspace, name, target_path, owner):
+    with _workspace_directory(roots, workspace, owner=owner) as workspace_fd:
+        with _open_directory(target_path.parent, "target_directory_open", owner=owner) as target_fd:
+            source = _stat_entry(workspace_fd, name, workspace / name, "source_observe")
+            target = _stat_entry(target_fd, target_path.name, target_path, "target_observe")
+            if source is None and target is None:
+                raise CaptureFileError("source_and_target_missing", workspace / name)
+            for observed, path in ((source, workspace / name), (target, target_path)):
+                if observed is not None and not stat.S_ISREG(observed.st_mode):
+                    raise CaptureFileError("source_type", path, detail="同步缓存不是普通文件")
+            if source is not None and target is not None and (
+                    source.st_dev != target.st_dev or source.st_ino != target.st_ino):
+                raise CaptureFileError("target_conflict", target_path, detail="目标不是原同步文件")
+            if source is not None and target is None:
+                try:
+                    os.link(name, target_path.name, src_dir_fd=workspace_fd,
+                            dst_dir_fd=target_fd, follow_symlinks=False)
+                except OSError as error:
+                    raise CaptureFileError("archive_link", target_path, cause=error) from error
+            _sync_directory_fd(target_fd, target_path.parent, "target_directory_sync")
+            if source is not None:
+                _unlink_source(workspace_fd, name, workspace / name,
+                               _FileFacts(0, "", source.st_dev, source.st_ino))
+                _sync_directory_fd(workspace_fd, workspace, "workspace_sync")
 
 
 async def _run_file_io(
@@ -310,6 +420,7 @@ def _verify_capture_files(
     roots: BoundDirectories,
     path: Path,
     specs: tuple[CaptureFileSpec, ...],
+    trusted_preview_name: str | None,
 ) -> tuple[CapturedArtifact, ...]:
     artifacts: list[CapturedArtifact] = []
     identities: set[tuple[int, int]] = set()
@@ -323,6 +434,7 @@ def _verify_capture_files(
                 expected_size=spec.size_bytes,
                 expected_sha256=None,
                 file_kind="source",
+                validate_media=spec.original_name != trusted_preview_name,
             )
             identity = (facts.device, facts.inode)
             if identity in identities:
@@ -346,10 +458,14 @@ def _archive_capture_file(
     workspace: Path,
     artifact: CapturedArtifact,
     target_path: Path,
+    result_workspace: bool = False,
+    owner=None,
+    validate_media: bool = True,
 ) -> None:
-    with _workspace_directory(roots, workspace) as workspace_fd:
+    directory = (_result_workspace_directory if result_workspace else _workspace_directory)
+    with directory(roots, workspace, owner=owner) as workspace_fd:
         with _open_directory(
-            target_path.parent, "target_directory_open"
+            target_path.parent, "target_directory_open", owner=owner
         ) as target_directory_fd:
             source_stat = _stat_entry(
                 workspace_fd,
@@ -379,7 +495,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="source",
+                    file_kind="source", owner=owner, validate_media=validate_media,
                 )
 
             if target_stat is not None:
@@ -390,7 +506,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="target",
+                    file_kind="target", owner=owner, validate_media=validate_media,
                 )
                 if source_facts is not None:
                     _unlink_source(
@@ -424,7 +540,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="target",
+                    file_kind="target", owner=owner, validate_media=validate_media,
                 )
             except OSError as failure:
                 raise CaptureFileError(
@@ -475,9 +591,11 @@ def _read_file_facts_at(
     expected_size: int,
     expected_sha256: str | None,
     file_kind: str,
+    owner=None,
+    validate_media: bool = True,
 ) -> _FileFacts:
     fd, opened_stat = _open_regular_file_at(
-        directory_fd, name, path, f"{file_kind}_open", f"{file_kind}_type"
+        directory_fd, name, path, f"{file_kind}_open", f"{file_kind}_type", owner=owner
     )
     primary: BaseException | None = None
     try:
@@ -492,7 +610,7 @@ def _read_file_facts_at(
         digest = hashlib.sha256()
         bytes_read = 0
         header = bytearray()
-        trailer = b""
+        jpeg_boundary = JpegBoundary() if validate_media and media_type == "image/jpeg" else None
         while True:
             try:
                 block = os.read(fd, DEFAULT_CHUNK_SIZE_BYTES)
@@ -504,9 +622,10 @@ def _read_file_facts_at(
                 break
             digest.update(block)
             bytes_read += len(block)
-            if len(header) < 4:
+            if validate_media and len(header) < 4:
                 header.extend(block[: 4 - len(header)])
-            trailer = (trailer + block)[-2:]
+            if jpeg_boundary is not None:
+                jpeg_boundary.feed(block)
 
         if bytes_read != expected_size:
             raise _file_error(
@@ -515,7 +634,8 @@ def _read_file_facts_at(
                 path,
                 f"读取长度 {bytes_read}，期望 {expected_size}",
             )
-        _validate_media_signature(media_type, bytes(header), trailer, bytes_read, path, file_kind)
+        if validate_media:
+            _validate_media_signature(media_type, bytes(header), jpeg_boundary, path, file_kind)
         sha256 = digest.hexdigest()
         if expected_sha256 is not None and sha256 != expected_sha256:
             raise _file_error(
@@ -556,7 +676,7 @@ def _read_file_facts_at(
         primary = failure
         raise
     finally:
-        _close_fd(fd, f"{file_kind}_close", path, primary)
+        _close_fd(fd, f"{file_kind}_close", path, primary, owner=owner)
 
 
 def _open_regular_file_at(
@@ -565,6 +685,7 @@ def _open_regular_file_at(
     path: Path,
     open_stage: str,
     type_stage: str,
+    *, owner=None,
 ) -> tuple[int, os.stat_result]:
     before = _stat_entry(directory_fd, name, path, open_stage)
     if before is None:
@@ -579,17 +700,19 @@ def _open_regular_file_at(
     except OSError as failure:
         stage = type_stage if failure.errno == errno.ELOOP else open_stage
         raise CaptureFileError(stage, path, cause=failure) from failure
+    if owner is not None:
+        owner.opened_file(fd)
     try:
         opened = os.fstat(fd)
     except OSError as failure:
         error = CaptureFileError(open_stage, path, cause=failure)
-        _close_fd(fd, f"{open_stage}_close", path, error)
+        _close_fd(fd, f"{open_stage}_close", path, error, owner=owner)
         raise error from failure
     if not stat.S_ISREG(opened.st_mode):
         error = CaptureFileError(
             type_stage, path, detail="打开后的对象不是普通文件，拒绝读取"
         )
-        _close_fd(fd, f"{open_stage}_close", path, error)
+        _close_fd(fd, f"{open_stage}_close", path, error, owner=owner)
         raise error
     if not _same_identity(before, opened):
         error = CaptureFileError(
@@ -597,7 +720,7 @@ def _open_regular_file_at(
             path,
             detail="文件在检查与打开之间被替换",
         )
-        _close_fd(fd, f"{open_stage}_close", path, error)
+        _close_fd(fd, f"{open_stage}_close", path, error, owner=owner)
         raise error
     return fd, opened
 
@@ -605,8 +728,7 @@ def _open_regular_file_at(
 def _validate_media_signature(
     media_type: str,
     header: bytes,
-    trailer: bytes,
-    size: int,
+    jpeg_boundary: JpegBoundary | None,
     path: Path,
     file_kind: str,
 ) -> None:
@@ -614,8 +736,8 @@ def _validate_media_signature(
         valid = header in (b"II*\x00", b"MM\x00*")
         description = "文件头不是已观察的 TIFF 字节序与 magic"
     else:
-        valid = size >= 4 and header.startswith(b"\xff\xd8") and trailer.endswith(b"\xff\xd9")
-        description = "JPEG 文件缺少 SOI 文件头或 EOI 文件尾"
+        valid = jpeg_boundary is not None and jpeg_boundary.complete
+        description = "JPEG 文件头或外层标记边界无效，或缺少外层 EOI"
     if not valid:
         raise _file_error(file_kind, "media", path, description)
 
@@ -650,46 +772,50 @@ def _stat_entry(
         raise CaptureFileError(stage, path, cause=failure) from failure
 
 
-def _open_directory(path: Path, stage: str):
+def _open_directory(path: Path, stage: str, *, owner=None):
     flags = os.O_RDONLY | _BINARY | _DIRECTORY | _NOFOLLOW
     try:
         fd = os.open(path, flags)
     except OSError as failure:
         raise CaptureFileError(stage, path, cause=failure) from failure
+    if owner is not None:
+        owner.opened_file(fd)
     try:
         observed = os.fstat(fd)
     except OSError as failure:
         error = CaptureFileError(stage, path, cause=failure)
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error from failure
     if not stat.S_ISDIR(observed.st_mode):
         error = CaptureFileError(stage, path, detail="对象不是普通目录")
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error
-    return _fd_context(fd, path, stage)
+    return _fd_context(fd, path, stage, owner=owner)
 
 
-def _open_directory_at(parent_fd: int, name: str, path: Path, stage: str):
+def _open_directory_at(parent_fd: int, name: str, path: Path, stage: str, *, owner=None):
     flags = os.O_RDONLY | _BINARY | _DIRECTORY | _NOFOLLOW
     try:
         fd = os.open(name, flags, dir_fd=parent_fd)
     except OSError as failure:
         raise CaptureFileError(stage, path, cause=failure) from failure
+    if owner is not None:
+        owner.opened_file(fd)
     try:
         observed = os.fstat(fd)
     except OSError as failure:
         error = CaptureFileError(stage, path, cause=failure)
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error from failure
     if not stat.S_ISDIR(observed.st_mode):
         error = CaptureFileError(stage, path, detail="对象不是普通目录")
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error
-    return _fd_context(fd, path, stage)
+    return _fd_context(fd, path, stage, owner=owner)
 
 
 @contextmanager
-def _fd_context(fd: int, path: Path, stage: str) -> Iterator[int]:
+def _fd_context(fd: int, path: Path, stage: str, *, owner=None) -> Iterator[int]:
     primary: BaseException | None = None
     try:
         yield fd
@@ -697,26 +823,36 @@ def _fd_context(fd: int, path: Path, stage: str) -> Iterator[int]:
         primary = failure
         raise
     finally:
-        _close_fd(fd, f"{stage}_close", path, primary)
+        _close_fd(fd, f"{stage}_close", path, primary, owner=owner)
 
 
 @contextmanager
 def _workspace_directory(
-    roots: BoundDirectories, path: Path
+    roots: BoundDirectories, path: Path, *, owner=None
 ) -> Iterator[int]:
-    with _open_directory(roots.staging, "staging_open") as staging_fd:
+    with _open_directory(roots.staging, "staging_open", owner=owner) as staging_fd:
         with _open_directory_at(
             staging_fd,
             "capture-work",
             path.parent,
-            "workspace_parent_open",
+            "workspace_parent_open", owner=owner,
         ) as parent_fd:
             with _open_directory_at(
                 parent_fd,
                 path.name,
                 path,
-                "workspace_open",
+                "workspace_open", owner=owner,
             ) as workspace_fd:
+                yield workspace_fd
+
+
+@contextmanager
+def _result_workspace_directory(roots: BoundDirectories, path: Path, *, owner=None) -> Iterator[int]:
+    with _open_directory(roots.staging, "staging_open", owner=owner) as staging_fd:
+        with _open_directory_at(staging_fd, "result-downloads", path.parent,
+                                "result_workspace_parent_open", owner=owner) as parent_fd:
+            with _open_directory_at(parent_fd, path.name, path,
+                                    "result_workspace_open", owner=owner) as workspace_fd:
                 yield workspace_fd
 
 
@@ -732,10 +868,13 @@ def _close_fd(
     stage: str,
     path: Path,
     primary: BaseException | None = None,
+    *, owner=None,
 ) -> None:
     try:
         os.close(fd)
     except OSError as failure:
+        if owner is not None:
+            owner.closed_file(fd, failure)
         if isinstance(primary, CaptureFileError):
             primary.additional_errors += (failure,)
             primary.add_note(f"{stage} also failed: {failure!r}")
@@ -744,3 +883,6 @@ def _close_fd(
             primary.add_note(f"{stage} also failed: {failure!r}")
             return
         raise CaptureFileError(stage, path, cause=failure) from failure
+    else:
+        if owner is not None:
+            owner.closed_file(fd, None)

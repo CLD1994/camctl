@@ -107,16 +107,28 @@ OSMO_BITRATE = {
     "standard": BitrateSetting(120, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "1")),
     "high": BitrateSetting(170, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2")),
 }
+_SKIP_TIME_SETUP = ("simulate_device", "-n", "DualGuiCmd", "12")
+_DISABLE_AUTO_SHUTDOWN = ("simulate_device", "-s", "DevicePowerUserIdleControlAutoShutdownTime", "0")
+_DISABLE_LAPSE_LOCK = ("simulate_device", "-s", "DevicePowerUserIdleControlLapseLockTime", "0")
+_USB_CHARGING_ONLY = ("simulate_device", "-s", "0xa13cdabe", "3")
+_DISABLE_MAIN_LIVEVIEW = ("simulate_device", "-s", "DeviceSystemLiveviewStream", "0", "0")
+_DISABLE_FRONT_LIVEVIEW = ("simulate_device", "-s", "DeviceSystemLiveviewStream", "1", "0")
 COMMON_SESSION_SETUP = (
-    ("simulate_device", "-n", "DualGuiCmd", "12"),
-    ("simulate_device", "-s", "DevicePowerUserIdleControlAutoShutdownTime", "0"),
-    ("simulate_device", "-s", "DevicePowerUserIdleControlLapseLockTime", "0"),
-    ("simulate_device", "-s", "0xa13cdabe", "3"),
+    _SKIP_TIME_SETUP,
+    _DISABLE_AUTO_SHUTDOWN,
+    _DISABLE_LAPSE_LOCK,
+    _USB_CHARGING_ONLY,
 )
+# Action6 临时仅核实本地调用完成；指令有效性与返回格式待官方确认。
+# 规则见 docs/architecture/camera-parameters.md 的“相机会话准备”。
+ACTION6_OUTPUT_UNCHECKED_SETTINGS = frozenset({
+    _SKIP_TIME_SETUP, _DISABLE_AUTO_SHUTDOWN, _DISABLE_LAPSE_LOCK, _USB_CHARGING_ONLY,
+    _DISABLE_MAIN_LIVEVIEW, _DISABLE_FRONT_LIVEVIEW,
+})
 ACTION6_SESSION_SETUP = (
     *COMMON_SESSION_SETUP,
-    ("simulate_device", "-s", "DeviceSystemLiveviewStream", "0", "0"),
-    ("simulate_device", "-s", "DeviceSystemLiveviewStream", "1", "0"),
+    _DISABLE_MAIN_LIVEVIEW,
+    _DISABLE_FRONT_LIVEVIEW,
 )
 OSMO_SESSION_SETUP = COMMON_SESSION_SETUP
 OSMO_RECORD_FORMAT = ("simulate_device", "-s", "BaseFormat", "6", "69", "0")

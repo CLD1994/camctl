@@ -186,13 +186,23 @@ class _ActivityDriver(DriverDouble):
         )
 
 
+class _ResultFiles(ResultsDouble):
+    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
+                        completion_context=None, video_result_mode=None,
+                        reading_context=None, scope_only=False):
+        return await super().list_page(
+            ticket, cursor=cursor, timeout_s=timeout_s, output_scope=output_scope,
+            completion_context=completion_context, video_result_mode=video_result_mode,
+            reading_context=reading_context)
+
+
 @asynccontextmanager
 async def _runtime(owned):
     from ..support.capture import capture_runtime
 
     yield await capture_runtime(
         owned, driver=_ActivityDriver(activity_target="1"), evidence=_PAGE_EVIDENCE,
-        results=ResultsDouble({1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}),
+        results=_ResultFiles({1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}),
         wall_us=lambda: int(time.time() * 1_000_000), monotonic_ns=time.monotonic_ns,
         wait_config=lambda params: CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0))
 
@@ -207,7 +217,8 @@ async def _finish_action(owned) -> None:
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     descriptors = ready_capture_actions(owned.connection, now)
     async with _runtime(owned) as runtime:
-        await dispatch_ready(runtime, descriptors)
+        results = await dispatch_ready(runtime, descriptors)
+        assert results and not isinstance(results[0][1], BaseException), results
 
 
 def _boundary(connection) -> HistoryBoundary:

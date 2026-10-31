@@ -1,6 +1,7 @@
 """STOP 的固定启动锚点先读取，真实返回随后立即进入原结果责任。"""
 
 import asyncio
+import json
 import sqlite3
 from unittest.mock import create_autospec
 
@@ -21,6 +22,8 @@ from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from support.capture_database import capture_database
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 
 pytestmark = pytest.mark.asyncio
 
@@ -102,8 +105,19 @@ async def test_actual_stop_is_held_with_original_time_before_saving_or_further_r
         assert pending.capture_stop and pending.host_timer_stop.control_elapsed_ns == 64_000_000_000
     saving = mocker.patch.object(runtime, "_save_call_result", autospec=True, side_effect=save)
 
-    result = await _stop_call(runtime, action)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    def consume(record):
+        payload = json.loads(record.message)
+        if payload["event"] == "returned":
+            runtime.monotonic_ns = lambda: 999_000_000_000
+    channel.slog.side_effect = consume
+    with event_logging(channel):
+        result = await _stop_call(runtime, action)
 
     assert result.phase == "confirmed"
     saving.assert_awaited_once()
     assert (ticket.run_id, ticket.attempt_id) in runtime.pending_start_results
+    payloads = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    assert [payload["event"] for payload in payloads] == ["started", "returned"]
+    assert all((payload["stage"], payload["action_id"], payload["activity_id"], payload["run_id"])
+        == ("capture.stop", 21, "71", 9) for payload in payloads)

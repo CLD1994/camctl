@@ -6,15 +6,29 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, replace
 import inspect
 import sqlite3
+from time import monotonic_ns
 from typing import TypeVar
 
 from camctl.contracts.values import OperationKey, new_operation_key
+from camctl.logging_runtime.events import monitor_slow_stage
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.models import (DbExecutorError, DbJob, DbJobKind, DbOutcome,
     DbPriority, DbReadError, ReadReceipt, _attach_db_outcome)
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 
 T = TypeVar('T')
+
+
+def _database_timing(submitted, timing):
+    started = timing.get('started')
+    finished = timing.get('finished')
+    now = monotonic_ns()
+    return {
+        'phase': 'queued' if started is None else 'executing' if finished is None else 'delivering',
+        'queue_ms': round(((started if started is not None else now) - submitted) / 1_000_000, 3),
+        **({} if started is None else {
+            'execution_ms': round(((finished if finished is not None else now) - started) / 1_000_000, 3)}),
+    }
 
 
 async def _settle(future):
@@ -101,10 +115,14 @@ class SharedSave:
 
     def retry_failed(self) -> None:
         """明确恢复原申请；成功与尚在进行的保存继续保留原任务。"""
-        task = self._task
-        if task is not None and task.done() and (task.cancelled()
-                or task.exception() is not None or task.result().error is not None):
+        if self.failed():
             self._task = None
+
+    def failed(self) -> bool:
+        """只观察原保存是否已经结束且失败，不转移任务所有权。"""
+        task = self._task
+        return bool(task is not None and task.done() and (task.cancelled()
+                    or task.exception() is not None or task.result().error is not None))
 
 
 def _check_value(value):
@@ -166,13 +184,21 @@ class BusinessDatabase:
             return result, cancelled
 
     async def read(self, callback: Callable[[OwnedConnection], T], *, description='业务读取') -> T:
+        submitted = monotonic_ns()
+        timing = {}
         def execute(owned):
-            value = callback(owned)
-            _check_value(value)
-            return value
+            timing['started'] = monotonic_ns()
+            try:
+                value = callback(owned)
+                _check_value(value)
+                return value
+            finally:
+                timing['finished'] = monotonic_ns()
         key = new_operation_key()
         job = DbJob(key, description, DbJobKind.READ, DbPriority.BUSINESS, execute)
-        payload, cancelled = await self._wait(self._executor.submit_read(job), key)
+        with monitor_slow_stage('database.operation', operation='read', description=description,
+                                progress=lambda: _database_timing(submitted, timing)):
+            payload, cancelled = await self._wait(self._executor.submit_read(job), key)
         if isinstance(payload, ReadReceipt):
             if payload.error is not None:
                 error = (payload.error.__cause__ if isinstance(payload.error, DbReadError)
@@ -193,17 +219,25 @@ class BusinessDatabase:
     async def write(self, callback: Callable[[OwnedConnection], DbOutcome[T]], *,
                     key: OperationKey, description='业务写入') -> DbOutcome[T]:
         key = OperationKey(key)
+        submitted = monotonic_ns()
+        timing = {}
         def execute(owned):
-            value = callback(owned)
-            if not isinstance(value, DbOutcome):
-                raise DbExecutorError('业务写callback必须返回DbOutcome')
+            timing['started'] = monotonic_ns()
             try:
-                _check_value(value.value)
-            except BaseException as error:
-                return replace(value, value=None, handoff_error=error)
-            return value
+                value = callback(owned)
+                if not isinstance(value, DbOutcome):
+                    raise DbExecutorError('业务写callback必须返回DbOutcome')
+                try:
+                    _check_value(value.value)
+                except BaseException as error:
+                    return replace(value, value=None, handoff_error=error)
+                return value
+            finally:
+                timing['finished'] = monotonic_ns()
         job = DbJob(key, description, DbJobKind.WRITE, DbPriority.BUSINESS, execute)
-        outcome, cancelled = await self._wait(self._executor.submit_write(job), key)
+        with monitor_slow_stage('database.operation', operation='write', description=description,
+                                progress=lambda: _database_timing(submitted, timing)):
+            outcome, cancelled = await self._wait(self._executor.submit_write(job), key)
         if not isinstance(outcome, DbOutcome):
             raise DbExecutorError('业务写入没有实际分类结果')
         error = outcome.control or outcome.handoff_error or outcome.observer_error

@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.10.2)
-project(camctl_host VERSION 1.0.0 LANGUAGES C)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/host_version.h" host_version_line
+  REGEX "^#define CAMCTL_HOST_VERSION \"[0-9]+\\.[0-9]+\\.[0-9]+\"$")
+list(LENGTH host_version_line host_version_count)
+if(NOT host_version_count EQUAL 1)
+  message(FATAL_ERROR "host 版本头文件必须包含唯一的三段版本号")
+endif()
+string(REGEX REPLACE "^#define CAMCTL_HOST_VERSION \"([^\"]+)\"$" "\\1"
+  host_version "${host_version_line}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/host_version.h")
+project(camctl_host VERSION ${host_version} LANGUAGES C)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   if(NOT IS_ABSOLUTE "$ENV{HOME}")
     message(FATAL_ERROR "默认安装需要绝对 HOME；也可显式设置 CMAKE_INSTALL_PREFIX")

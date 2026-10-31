@@ -31,7 +31,7 @@ _CANONICAL_IDENTITY = re.compile(r"\A[1-9][0-9]*\Z")
 
 #: 第一版登记的操作类别；观察与所属操作的契约必须一致。
 OPERATIONS = frozenset(
-    {"control", "stop", "query", "result", "read", "digest", "delete"}
+    {"control", "stop", "query", "result", "read", "digest", "delete", "availability"}
 )
 
 
@@ -89,6 +89,16 @@ RESULT_PAGE_CONTRACT = EvidenceContract(
     RESULT_LISTED_TYPE, 2, "result",
     frozenset({"activity_id", "entries", "cursor", "next_cursor", "set_finalized", "completion_evidence"}),
     identity_field="activity_id")
+RESULT_PHOTO_PAGE_CONTRACT = EvidenceContract(
+    RESULT_LISTED_TYPE, 3, "result",
+    frozenset({"activity_id", "binding", "role", "entries", "cursor", "next_cursor"}),
+    identity_field="activity_id")
+
+# 本地文件驱动与历史消费者共用未派发依据，不借用拍摄控制的同名契约。
+FILE_DELETE_NOT_DISPATCHED = EvidenceContract(
+    "file_delete_not_dispatched", 1, "delete", frozenset(), max_diagnostic_calls=3)
+FILE_QUERY_NOT_DISPATCHED = EvidenceContract(
+    "file_query_not_dispatched", 1, "query", frozenset(), max_diagnostic_calls=3)
 
 
 @dataclass(frozen=True)

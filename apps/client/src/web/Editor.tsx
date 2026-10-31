@@ -98,6 +98,7 @@ export function Editor(props: Props) {
   const { session, capabilities, busy } = props;
   const [json, setJson] = useState(false);
   const [copyError, setCopyError] = useState("");
+  const [validationRequested, setValidationRequested] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const editor = useRef<HTMLElement>(null);
   const [focusTarget, setFocusTarget] = useState<{
@@ -108,6 +109,12 @@ export function Editor(props: Props) {
   const content = session.content;
   const saveVerification = session.saveVerification;
   const wholeAcceptance = session.wholeAcceptanceSnapshot;
+  const showSaveDetails =
+    !["saved", "dirty", "saving"].includes(session.saveStatus) ||
+    !!session.error ||
+    !!session.saveDiagnostic ||
+    session.deletionState !== "idle" ||
+    (session.saveStatus === "dirty" && !session.autoSaveScheduled);
   const [actionIdentity] = useState(() => identityForSession(session));
   useLayoutEffect(() => {
     const releaseAppend = session.bindAppendView((transition) =>
@@ -392,107 +399,103 @@ export function Editor(props: Props) {
         </div>
         <ErrorBox error={copyError} />
         <ErrorBox error={identityProblem} />
-        {Object.keys(content.pending ?? {}).length > 0 && (
-          <p className="notice pending-validation-note">
-            未完成原文尚未应用到草稿正文。下方其余诊断针对草稿正文；修正原文后将重新校验。
-          </p>
-        )}
-        <Issues
-          issues={presentations.map((item) => item.issue)}
-          rawIssues={issues}
-          presentations={presentations}
-          onLocate={locate}
-        />
         <div className="save-line">
-          <div className="save-feedback">
-            <div className="save-summary">
-              <span data-testid="save-status" role="status">
-                {session.deletionState === "deleting"
-                  ? "正在删除草稿…"
-                  : session.deletionState === "unknown"
-                    ? "删除结果尚未确认"
-                    : saveStatusLabels[session.saveStatus]}
-              </span>
-              <span role="status" data-testid="input-save-fact">
-                {session.selectionDecision?.written &&
-                sameContent(content, session.selectionDecision.written.content)
-                  ? "本页完整输入已可靠写入；本地显示接纳尚未完成。"
-                  : sameContent(content, session.confirmedDraft.content)
-                    ? "本页完整输入已有可靠保存版本。"
-                    : "本页完整输入尚未可靠保存。"}
-              </span>
-              <span>
-                最后完整接纳的保存时间：{session.confirmedDraft.updatedAt}
-              </span>
-              {session.error && <span role="status">{session.error}</span>}
-              {session.saveDiagnostic && (
-                <span role="status">{session.saveDiagnostic}</span>
-              )}
-            </div>
-            <div className="save-actions">
-              {saveVerification && !session.selectionPendingDecision && (
-                <button
-                  disabled={busy || session.saving}
-                  onClick={() => {
-                    void session
-                      .verifySaveResult(saveVerification)
-                      .catch(() => {});
-                  }}
-                >
-                  核实保存结果
-                </button>
-              )}
-              {session.canSave &&
-                !session.saved &&
-                !session.saving &&
-                !saveVerification &&
-                !session.selectionPendingDecision && (
+          {!showSaveDetails && (
+            <span className="sr-only" data-testid="save-status" role="status">
+              {saveStatusLabels[session.saveStatus]}
+            </span>
+          )}
+          {showSaveDetails && (
+            <div className="save-feedback">
+              <div className="save-summary">
+                <span data-testid="save-status" role="status">
+                  {session.deletionState === "deleting"
+                    ? "正在删除草稿…"
+                    : session.deletionState === "unknown"
+                      ? "删除结果尚未确认"
+                      : saveStatusLabels[session.saveStatus]}
+                </span>
+                <span role="status" data-testid="input-save-fact">
+                  {session.selectionDecision?.written &&
+                  sameContent(
+                    content,
+                    session.selectionDecision.written.content,
+                  )
+                    ? "本页完整输入已可靠写入；本地显示接纳尚未完成。"
+                    : sameContent(content, session.confirmedDraft.content)
+                      ? "本页完整输入已有可靠保存版本。"
+                      : "本页完整输入尚未可靠保存。"}
+                </span>
+                {session.error && <span role="status">{session.error}</span>}
+                {session.saveDiagnostic && (
+                  <span role="status">{session.saveDiagnostic}</span>
+                )}
+              </div>
+              <div className="save-actions">
+                {saveVerification && !session.selectionPendingDecision && (
+                  <button
+                    disabled={busy || session.saving}
+                    onClick={() => {
+                      void session
+                        .verifySaveResult(saveVerification)
+                        .catch(() => {});
+                    }}
+                  >
+                    核实保存结果
+                  </button>
+                )}
+                {session.canSave &&
+                  !session.saved &&
+                  !session.saving &&
+                  !saveVerification &&
+                  !session.selectionPendingDecision && (
+                    <button
+                      disabled={busy}
+                      onClick={() => void session.flush().catch(() => {})}
+                    >
+                      {session.error || session.saveDiagnostic
+                        ? "重试保存"
+                        : "保存当前输入"}
+                    </button>
+                  )}
+                {wholeAcceptance && (
                   <button
                     disabled={busy}
-                    onClick={() => void session.flush().catch(() => {})}
+                    onClick={() => {
+                      try {
+                        session.retryWholeAcceptance(wholeAcceptance);
+                      } catch {
+                        /* 领域诊断持续保留。 */
+                      }
+                    }}
                   >
-                    {session.error || session.saveDiagnostic
-                      ? "重试保存"
-                      : "保存当前输入"}
+                    重试完整接纳
                   </button>
                 )}
-              {wholeAcceptance && (
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    try {
-                      session.retryWholeAcceptance(wholeAcceptance);
-                    } catch {
-                      /* 领域诊断持续保留。 */
+                {session.conflict && props.onConflict && (
+                  <button
+                    onClick={props.onConflict}
+                    disabled={
+                      busy ||
+                      session.selectionPendingDecision ||
+                      session.copyPendingDecision
                     }
-                  }}
-                >
-                  重试完整接纳
-                </button>
-              )}
-              {session.conflict && props.onConflict && (
-                <button
-                  onClick={props.onConflict}
-                  disabled={
-                    busy ||
-                    session.selectionPendingDecision ||
-                    session.copyPendingDecision
-                  }
-                >
-                  查看完整差异
-                </button>
-              )}
-              {(session.saveStatus === "deleted" ||
-                session.saveStatus === "exported") &&
-                props.onSaveAs &&
-                !session.selectionPendingDecision &&
-                !session.copyPendingDecision && (
-                  <button disabled={busy} onClick={props.onSaveAs}>
-                    将本页另存为新草稿
+                  >
+                    查看完整差异
                   </button>
                 )}
+                {(session.saveStatus === "deleted" ||
+                  session.saveStatus === "exported") &&
+                  props.onSaveAs &&
+                  !session.selectionPendingDecision &&
+                  !session.copyPendingDecision && (
+                    <button disabled={busy} onClick={props.onSaveAs}>
+                      将本页另存为新草稿
+                    </button>
+                  )}
+              </div>
             </div>
-          </div>
+          )}
           <PreviewControl
             intent={intent}
             disabled={busy || !session.editable || !!identityProblem}
@@ -696,13 +699,31 @@ export function Editor(props: Props) {
             </div>
           )}
         </SelectFieldset>
+        {validationRequested && presentations.length > 0 && (
+          <div className="export-validation">
+            {Object.keys(content.pending ?? {}).length > 0 && (
+              <p className="notice pending-validation-note">
+                未完成原文尚未应用到草稿正文。下方其余诊断针对草稿正文；修正原文后将重新校验。
+              </p>
+            )}
+            <Issues
+              issues={presentations.map((item) => item.issue)}
+              rawIssues={issues}
+              presentations={presentations}
+              onLocate={locate}
+            />
+          </div>
+        )}
         <div className="editor-footer">
           <p>导出生成固定请求。下载后，请手工交给负责传输的部门。</p>
           <button
             className="primary"
             data-testid="export-button"
             disabled={busy || !session.editable}
-            onClick={props.onExport}
+            onClick={() => {
+              setValidationRequested(true);
+              if (!issues.length) props.onExport();
+            }}
           >
             {busy ? "正在处理…" : "校验并导出 JSON"}
           </button>

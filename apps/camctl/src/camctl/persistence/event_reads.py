@@ -624,18 +624,18 @@ class SqlEventReads:
 
     def result_pages(self, ticket, cursor, batch):
         """只读取原单次扫描的已保存页及本批文件，不扩大历史上界。"""
-        from camctl.persistence.repositories.result_pages import read_pages
+        from camctl.persistence.repositories.result_pages import read_pages, result_responsibility
         from camctl.persistence.transaction import row_facts
 
         scope = self.scope
         if (not isinstance(scope, CaptureResultReadScope) or not self.connection.in_transaction
                 or type(batch) is not int or not 1 <= batch <= scope.batch_size
                 or ticket.operation != "result" or ticket.run_id != scope.run_id
-                or ticket.attempt_id != scope.attempt_no or ticket.target_id != str(scope.activity_id)
-                or ticket.responsibility_key != f"results/{scope.activity_id}"):
+                or ticket.attempt_id != scope.attempt_no or ticket.target_id != str(scope.activity_id)):
             raise ConsistencyError("结果页读取不属于原有限活动、尝试或批次")
         run = row_facts(self.connection, "operation_runs", scope.run_id)
-        if run is None or run["action_id"] != scope.action_id or run["activity_id"] != scope.activity_id:
+        if (run is None or run["action_id"] != scope.action_id or run["activity_id"] != scope.activity_id
+                or ticket.responsibility_key != result_responsibility(run)):
             raise ConsistencyError("结果读取范围改变原活动归属")
         result = read_pages(ticket, cursor, batch, self)
         if any(page.ref.event_id > scope.last_page_event_id for page in result.items):

@@ -42,6 +42,30 @@ class _Fallback:
             self.local.active = False
 
 
+def _with_exception_and_stack(record: logging.LogRecord, message: str, *, fallback=False) -> str:
+    if record.exc_info is not None and record.exc_info[1] is not None:
+        try:
+            encoded = json.dumps(exception_diagnostic(record.exc_info[1]),
+                                 ensure_ascii=False, separators=(",", ":"))
+        except Exception as format_error:
+            if not fallback:
+                raise
+            # 消息无法格式化时仍沿共同编码器保存整个原异常图。
+            facts = exception_diagnostic(record.exc_info[1], include_message=False)
+            try:
+                encoded = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                encoded = repr(facts)
+            encoded += (f"\n异常格式化错误: {type(format_error).__name__} "
+                        f"args={format_error.args!r}")
+        message += "\n异常诊断: " + encoded
+    elif record.exc_text:
+        message += "\n" + record.exc_text
+    if record.stack_info:
+        message += "\n" + record.stack_info
+    return message
+
+
 def _prepare(record: logging.LogRecord, fallback) -> LogRecord:
     """从原记录取得完整异常图，不修改 msg、args 或 exc_info。"""
     level = (LogLevel.ERROR if record.levelno >= logging.ERROR else
@@ -49,13 +73,7 @@ def _prepare(record: logging.LogRecord, fallback) -> LogRecord:
              LogLevel.INFO if record.levelno >= logging.INFO else LogLevel.DEBUG)
     message = (f"[{record.levelname}/{record.levelno}] {record.name} "
                f"{record.pathname}:{record.lineno} {record.getMessage()}")
-    if record.exc_info is not None and record.exc_info[1] is not None:
-        message += "\n异常诊断: " + json.dumps(
-            exception_diagnostic(record.exc_info[1]), ensure_ascii=False, separators=(",", ":"))
-    elif record.exc_text:
-        message += "\n" + record.exc_text
-    if record.stack_info:
-        message += "\n" + record.stack_info
+    message = _with_exception_and_stack(record, message)
     return LogRecord(level, message, LogSource.SYNC, fallback=fallback)
 
 
@@ -76,10 +94,16 @@ class _StandardHandler(logging.Handler):
             self.channel.slog(prepared)
         except Exception as error:
             if record.levelno >= logging.ERROR:
-                message = (prepared.message if prepared is not None else
-                           f"[{record.levelname}/{record.levelno}] {record.name} "
-                           f"{record.pathname}:{record.lineno} msg={record.msg!r} args={record.args!r}")
-                self.fallback(message + f"\n日志接纳错误: {type(error).__name__}: {error}")
+                if prepared is not None:
+                    message = prepared.message
+                else:
+                    message = _with_exception_and_stack(
+                        record, f"[{record.levelname}/{record.levelno}] {record.name} "
+                        f"{record.pathname}:{record.lineno} msg={record.msg!r} args={record.args!r}",
+                        fallback=True)
+                diagnostic = LogRecord(
+                    LogLevel.ERROR, message + f"\n日志接纳错误: {type(error).__name__} args={error.args!r}")
+                self.fallback(diagnostic.rendered_message())
         finally:
             self.local.active = False
 

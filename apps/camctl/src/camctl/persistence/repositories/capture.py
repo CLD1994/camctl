@@ -372,9 +372,16 @@ class FinishBindingFailure:
     check_config: AttemptConfig | None = None
     drafts: tuple[OutputDraft, ...] = ()
     catalog_facts: OutputCatalogFacts | None = None
+    read_result_key: OperationKey | None = None
+    read_copy_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
+        if (self.read_result_key is None) != (self.read_copy_id is None):
+            raise ValueError("读取结果键与原拷贝身份必须共同提供")
+        if self.read_result_key is not None:
+            OperationKey(self.read_result_key)
+            ObjectId(self.read_copy_id)
         if self.failure.code != "device_binding_unavailable":
             raise ValueError("绑定失败事务只保存设备绑定异常")
         validate_error_details(self.failure.code, self.failure.details)
@@ -519,17 +526,18 @@ def _host_photo_execution_spec(action: Mapping[str, Any]) -> bool:
 
 
 def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action, terminal=False):
-    """设备单张的两源必须沿原动作及双文件捕获事实完整配对。"""
-    temporary = _host_photo_source_pair(temporary_rows, action_id, host_spec=True,
-                                        terminal=terminal, device_temporary=True, action=action)
+    """设备单张按冻结的来源语义核对原图与预览配对。"""
     files = [row for row in device_rows.values() if row.get("source_action_id") == action_id]
-    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+    from camctl.devices.drivers.hasselblad.files import (
+        CameraFileIdentity, DeferredCameraFileIdentity, DownloadVariant,
+    )
     from camctl.devices.bindings import DeviceBinding
 
+    deferred = read_action_spec(action).get("photo_source_policy") == "deferred"
     capture_format = saved_photo_format(action)
     by_kind = {}
     identities = []
-    for kind, captured in temporary.items():
+    for kind in (_KIND_CODES[OutputKind.ORIGINAL], _KIND_CODES[OutputKind.PREVIEW]):
         matches = [row for row in files if row.get("role") == _FILE_ROLE_FOR_KIND[kind]]
         if len(matches) != 1:
             raise _HostPhotoPairError("相机单张必须恰有原图和预览两份设备源")
@@ -540,36 +548,45 @@ def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action,
         completion = parse_exact_json(completion) if isinstance(completion, str) else completion
         if (source.get("observer_action_id") != action_id
                 or source.get("completion_state") != int(_FILE_COMPLETION.COMPLETE)
-                or source.get("checksum_support") != int(_FILE_CHECKSUM.SUPPORTED)
-                or source.get("size_bytes") != captured["size_bytes"]
-                or source.get("sha256") != captured["sha256"]
+                or (not deferred and source.get("checksum_support") != int(_FILE_CHECKSUM.SUPPORTED))
                 or not isinstance(ownership, Mapping)
                 or ownership.get("method") != int(_OWNERSHIP_METHOD.DRIVER_TASK_ASSOCIATION)
                 or not isinstance(completion, Mapping)
                 or completion.get("basis") != int(_COMPLETION_BASIS.DEVICE_GUARANTEE)):
-            raise _HostPhotoPairError("相机源的归属、完成或固定摘要与捕获事实不一致")
+            raise _HostPhotoPairError("相机源缺少可靠归属、完成或固定摘要")
         purpose = FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name]
         locator = source.get("locator_json")
         try:
             locator = parse_exact_json(locator) if isinstance(locator, str) else locator
-            identity = CameraFileIdentity.from_source(source["identity_key"], locator)
+            identity_type = DeferredCameraFileIdentity if deferred else CameraFileIdentity
+            identity = identity_type.from_source(source["identity_key"], locator)
             expected_variant = (DownloadVariant.ORIGINAL if purpose is FilePurpose.CAPTURE_ORIGINAL
                                 else DownloadVariant.THUMBNAIL)
             if (identity.binding != DeviceBinding(action["device_id"], action["driver_id"])
                     or identity.variant is not expected_variant
-                    or identity.sha256 != captured["sha256"]
                     or not identity.camera_name.casefold().endswith(
-                        "." + photo_file_extension(FilePurpose.CAPTURE_ORIGINAL, capture_format))
-                    or source.get("media_type") != photo_media_type(purpose, capture_format)):
+                        "." + photo_file_extension(FilePurpose.CAPTURE_ORIGINAL, capture_format))):
                 raise ValueError("设备源身份或媒体类型与原照片责任不一致")
+            if deferred:
+                if (source.get("size_bytes") is not None or source.get("sha256") is not None
+                        or source.get("media_type") is not None
+                        or source.get("checksum_support") not in (
+                            int(_FILE_CHECKSUM.UNDETERMINED), int(_FILE_CHECKSUM.UNSUPPORTED))):
+                    raise ValueError("按需照片来源不能冒充已读取的大小、摘要或媒体类型")
+            elif (identity.sha256 != source["sha256"] or identity.size_bytes != source["size_bytes"]
+                    or source.get("media_type") != photo_media_type(purpose, capture_format)):
+                raise ValueError("设备源固定内容与原照片责任不一致")
         except (KeyError, TypeError, ValueError) as error:
             raise _HostPhotoPairError("相机源定位与原绑定、用途及固定内容不一致") from error
         identities.append(identity)
         by_kind[kind] = source
-    if len({(identity.camera_path, identity.camera_name) for identity in identities}) != 1:
+    if len({(identity.serial, identity.product_id, identity.camera_path, identity.camera_name)
+            for identity in identities}) != 1:
         raise _HostPhotoPairError("相机原图与预览必须指向同一机内照片")
-    if len(files) != len(temporary):
-        raise _HostPhotoPairError("相机单张设备源集合与捕获双文件不一致")
+    if deferred and len({identity.activity_id for identity in identities}) != 1:
+        raise _HostPhotoPairError("相机原图与预览必须属于同一拍摄活动")
+    if len(files) != 2:
+        raise _HostPhotoPairError("相机单张必须恰有两个设备来源角色")
     original = by_kind[_KIND_CODES[OutputKind.ORIGINAL]]
     preview = by_kind[_KIND_CODES[OutputKind.PREVIEW]]
     if (original.get("original_device_file_id") is not None
@@ -654,12 +671,14 @@ def _host_photo_registered_pair(
         source = sources[kind]
         source_column = "device_file_id" if device else "intermediate_file_id"
         other_column = "intermediate_file_id" if device else "device_file_id"
+        media_type = (None if device and read_action_spec(action).get("photo_source_policy") == "deferred"
+                      else photo_media_type(FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name],
+                                            saved_photo_format(action)))
         if (values.get(source_column) != source["id"]
                 or values.get(other_column) is not None
                 or not isinstance(values.get("original_name"), str)
                 or not values["original_name"]
-                or values.get("media_type") != photo_media_type(
-                    FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name], saved_photo_format(action))):
+                or values.get("media_type") != media_type):
             raise _HostPhotoPairError("正式产物角色、文件身份或可读元信息与主机责任不一致")
     original_links = [values for values in origins.values()
                       if values.get("output_id") == original_id]
@@ -678,6 +697,10 @@ def _guard_host_photo_completion(
         device_rows = context.complete_rows("device_files", "source_action_id", action_id)
         sources = _device_photo_source_pair(device_rows, source_rows, action_id, terminal=terminal,
             action=context.state_rows["actions"][action_id])
+        if context.photo_result_reads is None:
+            raise EventValidationError("设备源登记缺少原拍摄结果读取端口")
+        context.photo_result_reads.verify(context.state_rows["actions"][action_id], sources,
+                                         before_event_id=context.transaction.first_event_id)
     else:
         sources = _host_photo_source_pair(
             source_rows, action_id, host_spec=host_spec, terminal=terminal,
@@ -714,6 +737,43 @@ def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
 
 def _action_finish_guard(event, context) -> None:
     """动作终态组合与产物同事务校验。"""
+    if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 7:
+        from .preparation import PreparationReads
+        from .availability_failure import verify_photo_failure
+        if type(context.preparation_reads) is not PreparationReads:
+            raise EventValidationError("可用性失败缺少原连接事实")
+        verify_photo_failure(context.preparation_reads.connection, event, context)
+    if event.event_type == _ACTION_FINISHED_EVENT and event.reason != 6:
+        for row in event.rows:
+            details = row.after.values.get("error_details_json") if row.table == "actions" else None
+            if isinstance(details, Mapping) and details.get("reason") == "physical_identity_conflict":
+                from .preparation import PreparationReads
+                from .physical_alias import action_physical_identity, physical_alias_conflict
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("机身冲突失败缺少原连接事实")
+                action = _guard_facts(context, "actions", row.row_id)
+                connection = context.preparation_reads.connection
+                if not physical_alias_conflict(connection, action["device_id"],
+                                               action_physical_identity(connection, row.row_id)):
+                    raise EventValidationError("机身冲突失败缺少未完成原责任")
+    if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 6:
+        from .preparation import PreparationReads, verify_binding_preparation_failure
+        from camctl.contracts.workflow_errors import action_error_id
+        if type(context.preparation_reads) is not PreparationReads:
+            raise EventValidationError("准备绑定失败缺少原连接事实")
+        request = event.evidence.get("preparation_binding_request")
+        for row in event.rows:
+            if row.table != "actions":
+                continue
+            action = _guard_facts(context, "actions", row.row_id)
+            if (request["action_id"] != row.row_id or request["occurred_at"] != event.occurred_at
+                    or row.after.values.get("error_code") != action_error_id("device_binding_unavailable")
+                    or not json_equal(row.after.values.get("error_details_json"), request["details"])):
+                raise EventValidationError("准备绑定失败与原申请不符")
+            try:
+                verify_binding_preparation_failure(context.preparation_reads.connection, action, request)
+            except (ValueError, TypeError, KeyError) as error:
+                raise EventValidationError(str(error)) from error
     if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 5:
         from .preparation import PreparationReads
         from camctl.contracts.workflow_errors import validate_error_details, action_error_id
@@ -788,12 +848,25 @@ def _action_finish_guard(event, context) -> None:
 
 def _output_guard(event, context) -> None:
     """从事件当前事实核对来源、原设备绑定、文件角色与提升配对。"""
+    from camctl.devices.start_entry import is_hasselblad_photo
+
     if event.event_type == _INTERMEDIATE_FILE_EVENT:
         _promotion_pairing(event, context)
         return
     for row in event.rows:
         if row.table == "outputs" and not row.before.exists:
             _output_file(row.after.values, context)
+            values = row.after.values
+            file_id = values.get("device_file_id")
+            action = _registration_facts(context, "actions", values.get("source_action_id"))
+            if (file_id is not None and is_hasselblad_photo(action)
+                    and action["execution_spec_json"]["output_storage"] == "device"):
+                source = _registration_facts(context, "device_files", file_id)
+                evidence = source.get("completion_evidence_json")
+                _photo_source_file_guard(context, event, file_id,
+                    evidence.get("observation") if isinstance(evidence, Mapping) else None,
+                    role=source.get("role"), sha256=source.get("sha256"), check_sha=True,
+                    size_bytes=source.get("size_bytes"), check_size=True)
     _output_relationships(event, context)
     source_actions = {
         row.after.values.get("source_action_id")
@@ -1410,7 +1483,7 @@ class FinishCaptureCommand:
                 for draft in self._command.drafts]
 
     def _verify_host_photo_terminal_pair(
-        self, action_id: int, action: Mapping[str, Any],
+        self, connection, action_id: int, action: Mapping[str, Any],
     ) -> None:
         host_spec = _host_photo_execution_spec(action)
         device = read_action_spec(action).get("output_storage") == "device"
@@ -1419,6 +1492,15 @@ class FinishCaptureCommand:
                 sources = _device_photo_source_pair(
                     self._state.get("device_files", {}), self._state.get("intermediate_files", {}),
                     action_id, terminal=True, action=action)
+                from .capture_facts import PhotoResultReads
+                from camctl.persistence.fact_reads import read_event
+                outputs = self._state.get("outputs", {})
+                output_events = [read_event(connection, row["created_event_id"])
+                                 for row in outputs.values() if row["source_action_id"] == action_id]
+                if not output_events:
+                    raise ConsistencyError("设备照片缺少原产物创建事务")
+                PhotoResultReads(connection).verify(action, sources,
+                    before_event_id=min(record.transaction.first_event_id for record in output_events))
                 _device_photo_drafts(self._command.drafts, sources)
             else:
                 sources = _host_photo_source_pair(
@@ -1506,7 +1588,7 @@ class FinishCaptureCommand:
         if (not self._canceled and self._failure is None
                 and current_action is not None
                 and current_action["type"] == _ACTION_TYPE.CAMERA_TAKE_PHOTO):
-            self._verify_host_photo_terminal_pair(command.action_id, current_action)
+            self._verify_host_photo_terminal_pair(connection, command.action_id, current_action)
         output_ids = tuple(registered[item] for item in expected)
         for draft, identity in zip(command.drafts, expected):
             if (draft.kind is not OutputKind.ORIGINAL
@@ -1569,7 +1651,7 @@ class FinishCaptureCommand:
         self._verify_recovered_outputs(connection, registered)
         if (not self._canceled and self._failure is None
                 and action["type"] == _ACTION_TYPE.CAMERA_TAKE_PHOTO):
-            self._verify_host_photo_terminal_pair(command.action_id, action)
+            self._verify_host_photo_terminal_pair(connection, command.action_id, action)
         plan = row_facts(connection, "plans", action["plan_id"])
         assert plan is not None
         self._state["actions"] = {action["id"]: action}
@@ -4053,7 +4135,10 @@ class _CaptureStopCommand:
                 or activity["control_elapsed_ns"] is not None):
             raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
         sub = _CompositeScope(scope, scope.max_event_id + 1)
-        result = FinishAttemptCommand(finish, self._key).plan(sub)
+        result = FinishAttemptCommand(
+            finish, self._key,
+            normal_recording_stop=None if self._stop is None else self._stop.normal_recording_stop,
+        ).plan(sub)
         if result.read_only:
             raise ConsistencyError("已保存的普通 STOP 结果不能补写为共同停止事实")
         before, after = {"activity_state": activity["activity_state"]}, {"activity_state": 3}
@@ -4075,7 +4160,10 @@ class _CaptureStopCommand:
 
     def _reuse(self, scope, saved):
         cut = 1 + int(len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
-        result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        result = FinishAttemptCommand(
+            self._finish, self._key,
+            normal_recording_stop=None if self._stop is None else self._stop.normal_recording_stop,
+        )._reuse(scope, saved[:cut])
         if self._stop is None and len(saved) == cut:
             return result
         if len(saved) != cut + 1:
@@ -4542,6 +4630,11 @@ class _FinishBindingFailureCommand:
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
+        if self._request.read_result_key is not None:
+            from .binding_read_cancel import saved_binding_read_failure
+            saved_binding_read_failure(connection, self._request.read_result_key, self._request.action_id,
+                self._request.read_copy_id, {"code": "device_binding_unavailable", "stage": "execution",
+                                             "details": self._request.failure.details})
         if saved is not None:
             return self._reuse(scope, saved)
         request = self._request
@@ -4549,10 +4642,41 @@ class _FinishBindingFailureCommand:
         if action is None:
             raise TransactionError("绑定失败动作不存在")
         self._verify_binding(action)
+        if request.read_result_key is not None:
+            copy = row_facts(connection, "file_copies", request.read_copy_id)
+            if copy is None:
+                raise ConsistencyError("原绑定读取缺少拷贝")
+            if copy.get("inspection_id") is not None:
+                inspection = row_facts(connection, "segment_inspections", copy["inspection_id"])
+                if inspection is None or inspection["action_id"] != action["id"]:
+                    raise ConsistencyError("原绑定读取的分段检查归属不符")
+                plan = row_facts(connection, "plans", action["plan_id"])
+                if plan is None:
+                    raise ConsistencyError("原动作缺少所属计划")
+                return CommandPlan(events=(), owners={}, read_only=True,
+                    state_rows={"actions": {action["id"]: action}, "plans": {plan["id"]: plan}},
+                    result=CaptureResult(action["status"], plan["status"], (), FinishDisposition.RETIRED))
+        if request.read_result_key is not None and action["cancel_requested"] and action["status"] in (2, 6):
+            plan = row_facts(connection, "plans", action["plan_id"])
+            if plan is None:
+                raise ConsistencyError("原动作缺少所属计划")
+            return CommandPlan(events=(), owners={}, read_only=True,
+                state_rows={"actions": {action["id"]: action}, "plans": {plan["id"]: plan}},
+                result=CaptureResult(action["status"], plan["status"], (), FinishDisposition.RETIRED))
         if action["status"] in _ACTION_TERMINAL:
             return self._capture_command()._recover(connection, action)
         if bool(action["cancel_requested"]) != request.canceled:
             raise TransactionError("绑定失败的取消分支与原动作事实不符")
+        if not request.canceled and request.failure.details.get("reason") == "physical_identity_conflict":
+            from .physical_alias import action_physical_identity, physical_alias_conflict
+            fixed = action_physical_identity(connection, action["id"])
+            if not physical_alias_conflict(connection, action["device_id"], fixed):
+                plan = row_facts(connection, "plans", action["plan_id"])
+                if plan is None:
+                    raise ConsistencyError("原动作缺少所属计划")
+                return CommandPlan(events=(), owners={}, read_only=True,
+                    state_rows={"actions": {action["id"]: action}, "plans": {plan["id"]: plan}},
+                    result=CaptureResult(action["status"], plan["status"], (), FinishDisposition.RETIRED))
         with closing(connection.execute(
             "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
             " WHERE r.action_id = ? AND t.status = 1 LIMIT 1", (request.action_id,),
@@ -4767,7 +4891,7 @@ class _FinishBindingFailureCommand:
             "kind": kind, "query_purpose": None,
             "responsibility_key": responsibility,
             "activity_id": activity["id"], "copy_id": None,
-            "cleanup_item_id": None, "obtain_item_id": None, "session_key": None,
+            "cleanup_item_id": None, "obtain_item_id": None, "availability_check_id": None, "session_key": None,
             "status": 1, "attempts_used": 0,
             "max_attempts_used": config.max_attempts,
             "timeout_s_json": config.timeout_s,
@@ -5214,8 +5338,12 @@ class _FinishResultCheckCommand:
         if saved is not None:
             return self._reuse(scope, saved)
         run = row_facts(connection, "operation_runs", self._finish.ticket.run_id)
-        if run is None or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+        if run is None or run["kind"] not in (
+                int(_RUN_KIND.CHECK_CAPTURE_RESULTS), int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE)):
             raise ConsistencyError("结果复合保存必须属于原结果核实流程")
+        if run["kind"] == int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE) and (
+                self._confirm is not None or self._completion_page is not None):
+            raise ConsistencyError("范围收尾只保存范围事实，不改变原采集判定")
         if self._confirm is not None and self._confirm.action_id != run["action_id"]:
             raise ConsistencyError("集合结论与原结果尝试所属动作不同")
         count = 1 + int(run["status"] in (1, 2)
@@ -6544,6 +6672,22 @@ def _device_file_guard(event, context) -> None:
         _device_file_row_guard(event, row, context)
 
 
+def _photo_source_file_guard(context, event, file_id, observation, *, role=None, sha256=None,
+                             check_sha=False, size_bytes=None, check_size=False):
+    """照片设备文件从原连接核实 START 和实际角色页。"""
+    reads = context.photo_result_reads
+    if reads is None:
+        if isinstance(observation, Mapping) and ("photo_source" in observation or "photo_start" in observation):
+            raise EventValidationError("照片来源事实缺少原写连接")
+        return
+    try:
+        reads.verify_device_file(file_id, observation, before_event_id=event.event_id,
+                                 role=role, sha256=sha256, check_sha=check_sha,
+                                 size_bytes=size_bytes, check_size=check_size)
+    except (ConsistencyError, ValueError, KeyError, TypeError) as error:
+        raise EventValidationError("照片设备文件缺少一致的原角色来源") from error
+
+
 def _device_file_row_guard(event, row, context) -> None:
     reason = event.reason
     if reason == _FILE_CREATE_REASON:
@@ -6620,6 +6764,7 @@ def _device_file_row_guard(event, row, context) -> None:
                 raise EventValidationError("配对两端必须属于同一来源任务且原片用途为原片")
         elif paired is not None or pairing is not None:
             raise EventValidationError("原片不携带配对")
+        _photo_source_file_guard(context, event, row.row_id, evidence.get("observation"), role=role)
         return
 
     facts = _current_file_facts(context, row)
@@ -6634,16 +6779,23 @@ def _device_file_row_guard(event, row, context) -> None:
         observed = {**facts, **after}
         if state == int(_FILE_COMPLETION.COMPLETE):
             size = observed.get("size_bytes")
-            if not is_json_integer(size) or size < 0:
-                raise EventValidationError(f"完成状态必须携带非负完整大小: {size!r}")
             evidence = observed.get("completion_evidence_json")
+            observation = evidence.get("observation") if isinstance(evidence, dict) else None
+            deferred_photo = (size is None and isinstance(observation, Mapping)
+                              and "photo_start" in observation)
+            if not deferred_photo and (not is_json_integer(size) or size < 0):
+                raise EventValidationError(f"完成状态必须携带非负完整大小: {size!r}")
             if (not isinstance(evidence, dict)
                     or not is_json_integer(evidence.get("basis"))
                     or evidence.get("basis") not in (
                         int(member) for member in _COMPLETION_BASIS)):
                 raise EventValidationError("完成状态缺少登记依据")
+            if deferred_photo and evidence.get("basis") != int(_COMPLETION_BASIS.DEVICE_GUARANTEE):
+                raise EventValidationError("未知大小的照片必须依据原设备完成保证")
             if not isinstance(evidence.get("observation"), dict):
                 raise EventValidationError("完成状态缺少驱动观察依据")
+            _photo_source_file_guard(context, event, row.row_id, evidence.get("observation"),
+                                     role=facts.get("role"), size_bytes=size, check_size=True)
             if (evidence.get("basis") == int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
                     and (not is_json_integer(evidence.get("activity_id"))
                          or not is_json_integer(evidence.get("wait_completed_event_id")))):
@@ -6673,6 +6825,10 @@ def _device_file_row_guard(event, row, context) -> None:
                                    int(_FILE_CHECKSUM.UNSUPPORTED))):
             raise EventValidationError("摘要能力只能从未判定一次决定")
         sha256 = after.get("sha256")
+        completion = facts.get("completion_evidence_json")
+        _photo_source_file_guard(context, event, row.row_id,
+            completion.get("observation") if isinstance(completion, Mapping) else None,
+            role=facts.get("role"), sha256=sha256, check_sha=True)
         if sha256 is not None:
             if (support != int(_FILE_CHECKSUM.SUPPORTED)
                     or facts.get("completion_state") != int(_FILE_COMPLETION.COMPLETE)):
@@ -6828,7 +6984,7 @@ class SaveEmergencyCommand:
             "responsibility_key": responsibility_key,
             "activity_id": self._activity_id,
             "copy_id": None,
-            "cleanup_item_id": None, "obtain_item_id": None,
+            "cleanup_item_id": None, "obtain_item_id": None, "availability_check_id": None,
             "session_key": self._session_key,
             "status": run_status,
             "attempts_used": record.attempts_used,
@@ -7085,6 +7241,30 @@ def _activity_guard(event, context) -> None:
         _validate_activity_result(row, context)
         if not row.before.exists:
             action = context.state_rows.get("actions", {}).get(row.after.values.get("action_id"), {})
+            from .file_batch_reads import FileBatchReads
+            if (type(context.file_batch_reads) is not FileBatchReads
+                    or not context.file_batch_reads.permits(action["id"], action["device_id"])):
+                raise EventValidationError("新拍摄活动不能越过同机文件批次")
+            from .scheduling import _fixed_identity
+            from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+            raw_identity = row.after.values.get("expected_identity_json")
+            try:
+                identity = None if raw_identity is None else CameraIdentity(**raw_identity)
+                expected, resource_key = _fixed_identity(action, identity)
+                if (not json_equal(raw_identity, expected)
+                        or row.after.values.get("resource_key") != resource_key):
+                    raise ValueError("活动固定机身身份与资源键不一致")
+            except (TypeError, ValueError, KeyError) as error:
+                raise EventValidationError("活动固定机身身份无效") from error
+            from .preparation import PreparationReads
+            if type(context.preparation_reads) is not PreparationReads:
+                raise EventValidationError("活动创建缺少内核绑定的设备检查核对")
+            if context.preparation_reads.availability_in_flight(action["device_id"], identity):
+                raise EventValidationError("活动创建越过了尚未收场的设备检查")
+            if identity is not None:
+                from .physical_alias import physical_alias_conflict
+                if physical_alias_conflict(context.preparation_reads.connection, action["device_id"], identity):
+                    raise EventValidationError("活动越过了其他逻辑设备的机身限制")
             if action.get("execution_started") == 0:
                 from .preparation import PreparationReads
                 if type(context.preparation_reads) is not PreparationReads:
@@ -7299,7 +7479,8 @@ def _result_check_guard(event, context) -> None:
         if (attempt.get("status") != int(_ATTEMPT_STATUS.SUCCEEDED)
                 or attempt.get("error_json") is not None
                 or attempt.get("result_last_page_event_id") != page_id
-                or run.get("kind") != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+                or run.get("kind") not in (int(_RUN_KIND.CHECK_CAPTURE_RESULTS),
+                                            int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE))
                 or run.get("activity_id") != row.row_id or run.get("action_id") != activity.get("action_id")):
             raise EventValidationError("独立集合事实不属于原活动的可靠成功扫描末页")
         try:

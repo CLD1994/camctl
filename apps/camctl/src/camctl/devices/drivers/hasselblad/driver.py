@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sys
 from collections.abc import Mapping
+from contextlib import nullcontext
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
+from time import monotonic_ns as diagnostic_monotonic_ns
 from typing import Callable
+
+from .tool_gate import CameraToolGate
+from .identity import CameraIdentity
 
 from camctl.contracts.values import parse_object_id
 from camctl.devices.bindings import BindingStatus, DeviceConfigurationError, check_binding
@@ -19,18 +25,25 @@ from camctl.devices.evidence import (
     DeviceObservation,
     EvidenceContract,
     EvidenceRegistry,
+    RESULT_PHOTO_PAGE_CONTRACT,
+    FILE_DELETE_NOT_DISPATCHED,
+    FILE_QUERY_NOT_DISPATCHED,
 )
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.devices.start_entry import ENTERED, PREVENTED, entered_observation
-from camctl.devices.read_session import ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
-from camctl.host_files.downloads import DownloadWorkspace
+from camctl.devices.read_session import DeferredSourceFile, ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
+from camctl.host_files.downloads import DownloadWorkspace, ResultDownloadWorkspace
 from camctl.host_files.capture_sources import (
     CaptureFileError,
     CaptureFileSpec,
     CapturedArtifact,
     prepare_capture_workspace,
     verify_capture_files,
+    inspect_capture_candidate,
+    workspace_path,
 )
+from camctl.logging_runtime.diagnostics import record_error
+from camctl.logging_runtime.events import log_context, measure_stage
 from camctl.operations.models import (
     AttemptStatus,
     CallInfo,
@@ -42,7 +55,7 @@ from camctl.operations.models import (
     SettlementBasis,
 )
 from camctl.operations.owned_calls import current_call_scope
-from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic, attach_diagnostic_facts
 from camctl.operations.process import (
     RawToolOutcome,
     StopSignal,
@@ -53,22 +66,28 @@ from camctl.operations.process import (
 )
 
 from camctl.operations.tool_diagnostics import (
-    ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState,
+    ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState, encode_diagnostics,
 )
 from .commands import PhotoPhase, PhotoStep, PHOTO_START_CALL_LIMIT, photo_start_commands
 from .configuration import CameraConfig, read_camera_config
 from .definitions import DRIVER_DECLARATION, DRIVER_ID
-from .parameters import PhotoSettings, parse_photo_settings
+from .parameters import CAPTURE_FORMATS, CaptureFormat, PhotoSettings, parse_photo_settings
 from .responses import (
     CaptureResponse,
     CliParseError,
     parse_capture,
+    parse_device_capture,
     parse_devices,
     parse_serial,
+    doctor_passed,
+    parse_deleted,
+    parse_images_presence,
 )
-from .files import CameraFileIdentity
+from .files import (CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DeferredCameraFileIdentity,
+                    DownloadVariant, PhotoResultCursor, camera_file_identity_from_source, decide_photo_cache,
+                    resolve_camera_path)
 
-__all__ = ["EVIDENCE", "HasselbladDriver"]
+__all__ = ["AvailabilityCall", "AvailabilityCancelled", "AvailabilityResult", "EVIDENCE", "HasselbladDriver"]
 
 
 _PHOTO_TAKEN = EvidenceContract(
@@ -77,6 +96,11 @@ _PHOTO_TAKEN = EvidenceContract(
     "control",
     frozenset({"activity_id", "original", "preview", "steps"}),
     identity_field="activity_id",
+)
+_DEVICE_PHOTO_TAKEN = EvidenceContract(
+    "photo_taken", 2, "control",
+    frozenset({"activity_id", "camera_locator", "camera_identity", "original", "preview",
+               "original_error", "preview_error", "prepared_by", "steps"}), identity_field="activity_id",
 )
 _PHOTO_PREPARATION_STEPS = EvidenceContract(
     "photo_preparation_steps", 1, "control", frozenset({"activity_id", "steps"}),
@@ -90,12 +114,53 @@ _DISPATCH_PREVENTED = EvidenceContract(
     "dispatch_prevented", 1, "control", frozenset(),
     max_diagnostic_calls=PHOTO_START_CALL_LIMIT
 )
+_AVAILABILITY = EvidenceContract(
+    "device_availability", 1, "availability",
+    frozenset({"check_id", "expected_serial", "expected_product_id", "observed_serial", "steps",
+               "started_monotonic_ns", "finished_monotonic_ns"}),
+    identity_field="check_id",
+)
+_AVAILABILITY_RETURNED = EvidenceContract(
+    "availability_returned", 1, "availability", frozenset(), max_diagnostic_calls=3,
+)
+_AVAILABILITY_NOT_DISPATCHED = EvidenceContract(
+    "availability_not_dispatched", 1, "availability", frozenset(), max_diagnostic_calls=3,
+)
+_PHOTO_RESULT_RETURNED = EvidenceContract(
+    "photo_result_returned", 1, "result", frozenset(), max_diagnostic_calls=3,
+)
+_PHOTO_RESULT_NOT_DISPATCHED = EvidenceContract(
+    "photo_result_not_dispatched", 1, "result", frozenset(), max_diagnostic_calls=3,
+)
+_PHOTO_RESULT_ATTEMPT = EvidenceContract(
+    "photo_result_attempt", 1, "result", frozenset({"activity_id", "role", "steps"}),
+    identity_field="activity_id",
+)
+_PHOTO_RESULT_COMPARISON = EvidenceContract(
+    "photo_result_attempt", 2, "result", frozenset({"activity_id", "role", "steps", "comparison"}),
+    identity_field="activity_id",
+)
 EVIDENCE = EvidenceRegistry((
-    _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
+    _PHOTO_TAKEN, _DEVICE_PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
     CAPTURE_PREPARATION_COMPLETED, _PHOTO_PREPARATION_STEPS,
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("local_read_recovery", 1, "read", frozenset()),
+    EvidenceContract("local_result_recovery", 1, "result", frozenset()),
     EvidenceContract("local_control_recovery", 1, "control", frozenset()),
+    EvidenceContract("local_availability_recovery", 1, "availability", frozenset()),
+    _AVAILABILITY, _AVAILABILITY_RETURNED, _AVAILABILITY_NOT_DISPATCHED,
+    RESULT_PHOTO_PAGE_CONTRACT, _PHOTO_RESULT_RETURNED, _PHOTO_RESULT_NOT_DISPATCHED,
+    _PHOTO_RESULT_ATTEMPT, _PHOTO_RESULT_COMPARISON,
+    EvidenceContract("delete_returned", 1, "delete", frozenset(), max_diagnostic_calls=3),
+    EvidenceContract("query_returned", 1, "query", frozenset(), max_diagnostic_calls=3),
+    FILE_DELETE_NOT_DISPATCHED, FILE_QUERY_NOT_DISPATCHED,
+    EvidenceContract("local_file_recovery", 1, "delete", frozenset()),
+    EvidenceContract("file_absent", 1, "delete", frozenset({"cleanup_item_id"}),
+                     identity_field="cleanup_item_id"),
+    EvidenceContract("file_presence", 1, "query", frozenset({"cleanup_item_id", "present"}),
+                     identity_field="cleanup_item_id"),
+    EvidenceContract("file_presence", 2, "query", frozenset({"obtain_item_id", "present"}),
+                     identity_field="obtain_item_id"),
 ))
 
 _VENDOR_ID = 0x2756
@@ -103,10 +168,110 @@ _NANOSECONDS_PER_SECOND = Decimal(1_000_000_000)
 READ_PREPARATION_TIMEOUT_S = Decimal("180")
 
 
+def _steps_without_timing(steps):
+    """成功观察只保存业务事实；计时留给失败诊断。"""
+    return [{key: value for key, value in step.items() if key != "elapsed_ms"} for step in steps]
+
+
+@dataclass(frozen=True)
+class AvailabilityCall:
+    name: str
+    returned_monotonic_ns: int
+    outcome: RawToolOutcome | None = None
+    error: BaseException | None = None
+    elapsed_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class AvailabilityResult:
+    expected_serial: str
+    expected_product_id: int
+    observed_serial: str | None
+    available: bool
+    reason: str | None
+    calls: tuple[AvailabilityCall, ...]
+    settled: bool
+    started_monotonic_ns: int
+    finished_monotonic_ns: int
+
+    def tool_diagnostics(self) -> ToolDiagnostics:
+        """按实际取得的字节保留各步骤输出，不声明调用已经收场。"""
+        diagnostics = []
+        for index, call in enumerate(self.calls, 1):
+            raw = call.outcome
+            complete = (raw is not None and raw.output is not None and raw.stderr is not None
+                        and raw.output_failure is None)
+
+            def stream(data):
+                state = ToolStreamState.UNAVAILABLE if data is None else (
+                    ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED)
+                return ToolStream(state, data)
+
+            diagnostics.append(ToolCallOutput(index, call.name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
+        return ToolDiagnostics(3, tuple(diagnostics))
+
+    def to_device_result(self, check_id: str) -> DeviceCallResult:
+        """将已收场事实交给原结果拥有者；未知收场不能伪造成票据。"""
+        parse_object_id(check_id)
+        if not self.settled:
+            raise ValueError("检查实际收场尚未确认")
+        steps = []
+        for call in self.calls:
+            raw = call.outcome
+            error = None if raw is None else raw.error
+            if error is not None or call.error is not None:
+                error = {"tool_error": error, "exception": exception_diagnostic(call.error)}
+            steps.append({
+                "name": call.name,
+                "returned_monotonic_ns": call.returned_monotonic_ns,
+                "exit": None if raw is None or raw.exit is None else {
+                    "exit_code": raw.exit.exit_code, "signal": raw.exit.signal},
+                "error": error,
+                "used_grace_s": None if raw is None or raw.used_grace_s is None else str(raw.used_grace_s),
+                "signal_failures": [] if raw is None else [
+                    {"stage": failure.stage.value, "message": failure.message}
+                    for failure in raw.signal_failures],
+                "output_failure": None if raw is None else raw.output_failure,
+            })
+        observation = DeviceObservation(_AVAILABILITY.type, _AVAILABILITY.version, {
+            "check_id": check_id, "expected_serial": self.expected_serial,
+            "expected_product_id": self.expected_product_id,
+            "observed_serial": self.observed_serial, "steps": steps,
+            "started_monotonic_ns": self.started_monotonic_ns,
+            "finished_monotonic_ns": self.finished_monotonic_ns,
+        })
+        error = None if self.available else ErrorValue("device_error", "availability", {
+            "reason": self.reason, "step": None if not self.calls else self.calls[-1].name,
+            "steps": [{"name": call.name, "elapsed_ms": call.elapsed_ms} for call in self.calls],
+        })
+        dispatched = any(call.outcome is not None for call in self.calls)
+        settlement_contract = _AVAILABILITY_RETURNED if dispatched else _AVAILABILITY_NOT_DISPATCHED
+        outcome = CallOutcome(
+            status=AttemptStatus.SUCCEEDED if self.available else AttemptStatus.FAILED,
+            error=error, effect=EffectState.NO_EFFECT,
+            settlement=Settlement(SettlementBasis.OBSERVED if dispatched else SettlementBasis.NOT_DISPATCHED,
+                                  EvidenceValue.of(settlement_contract)),
+            observations=(observation,), diagnostics=self.tool_diagnostics(),
+        )
+        diagnostic_error = next((call.error for call in self.calls if call.error is not None), None)
+        return DeviceCallResult(outcome.observations, DeviceCallResult._error_view(outcome), outcome,
+                                diagnostic_error=diagnostic_error)
+
+
+class AvailabilityCancelled(asyncio.CancelledError):
+    """取消仍向调用者传播，同时交付本次检查已经取得的事实。"""
+
+    def __init__(self, result: AvailabilityResult):
+        super().__init__("设备可用性检查被取消")
+        self.result = result
+
+
 class CameraReadError(ReadPreparationError, DiagnosticError):
     """下载或身份核对失败；保留各次受管调用与实际收场细节。"""
 
-    def __init__(self, reason, steps, *, causes=(), settlement=ReadPreparationSettlement.SETTLED):
+    def __init__(self, reason, steps, *, causes=(), settlement=ReadPreparationSettlement.SETTLED,
+                 expected_identity=None, tool_calls=None):
         self.reason, self.steps = reason, tuple(dict(step) for step in steps)
         self.causes = tuple(causes)
         # OSError 的 repr 不包含 filename；异常组的 str 则不包含各子错误。
@@ -120,6 +285,25 @@ class CameraReadError(ReadPreparationError, DiagnosticError):
             "causes": [exception_diagnostic(cause) for cause in self.causes],
             "settlement": settlement.value,
         }
+        if expected_identity is not None:
+            self.diagnostic_details["expected_identity"] = dict(expected_identity)
+        if tool_calls is not None:
+            diagnostics = encode_diagnostics(ToolDiagnostics(3, tuple(tool_calls)))
+            for call in diagnostics["calls"]:
+                stderr = call["stderr"]
+                stderr["text"] = (None if stderr["hex"] is None else
+                                  bytes.fromhex(stderr["hex"]).decode("utf-8", "backslashreplace"))
+            self.diagnostic_details["tool_diagnostics"] = diagnostics
+
+
+class PhysicalIdentityMismatch(ValueError):
+    """原文件的固定机身与本次合法配置不一致。"""
+
+    reason = "physical_identity_mismatch"
+
+    def __init__(self, binding):
+        self.binding = binding
+        super().__init__("相机源的原机身与本次配置不一致")
 
 
 class _NeverStop:
@@ -172,10 +356,12 @@ class HasselbladDriver:
             raise TypeError("transport 必须提供 run(ToolSpec, StopSignal)")
         self.declaration = DRIVER_DECLARATION
         self._prepared_captures = PreparedCaptureCache()
+        self._tool_gate = CameraToolGate(monotonic_ns=monotonic_ns, start_error=ToolStartError)
 
     def begin_session(self) -> None:
         """新执行会话清空准备凭据，不向相机派发命令。"""
         self._prepared_captures.clear()
+        self._tool_gate = CameraToolGate(monotonic_ns=self.monotonic_ns, start_error=ToolStartError)
 
     def prepared_capture_matches(self, request: ControlRequest) -> bool:
         """只检查本会话凭据及本地绑定，不读取或设置机身。"""
@@ -193,38 +379,173 @@ class HasselbladDriver:
             raise DeviceConfigurationError(f"原设备绑定在本次配置中不可用: {result.status.value}")
         return read_camera_config(self.devices[binding.device_id])
 
+    async def check_availability(
+        self, binding, *, expected_serial: str, expected_product_id: int, timeout_s: Decimal,
+    ) -> AvailabilityResult:
+        """一次独立检查只交付身份与受管工具事实，不释放活动。"""
+        if not isinstance(expected_serial, str) or not expected_serial.strip():
+            raise ValueError("检查必须携带固定的机身 serial")
+        if type(expected_product_id) is not int or not 1 <= expected_product_id <= 0xffff:
+            raise ValueError("检查必须携带固定的产品标识")
+        if not isinstance(timeout_s, Decimal) or not timeout_s.is_finite() or timeout_s <= 0:
+            raise ValueError("检查期限必须是有限正 Decimal 秒数")
+        config = self._binding_config(binding)
+        if (config.serial, config.product_id) != (expected_serial, expected_product_id):
+            raise DeviceConfigurationError("当前设备绑定与固定机身身份不一致")
+
+        def now():
+            value = self.monotonic_ns()
+            if type(value) is not int:
+                raise TypeError("monotonic_ns 必须返回整数纳秒")
+            return value
+
+        began = now()
+        calls: list[AvailabilityCall] = []
+        serial = None
+
+        def result(reason=None, *, settled=True):
+            return AvailabilityResult(expected_serial, expected_product_id, serial,
+                                      reason is None, reason, tuple(calls), settled, began, now())
+
+        for name in ("list", "info", "doctor"):
+            scope = current_call_scope()
+            if scope is not None and scope.interrupted is not None:
+                return result("cancelled")
+            remaining = timeout_s - Decimal(now() - began) / _NANOSECONDS_PER_SECOND
+            if remaining <= 0:
+                return result("deadline_elapsed")
+            spec = ToolSpec((config.executable, "--pid", f"0x{expected_product_id:04x}", name),
+                            remaining, self.terminate_grace_s)
+            interrupted = None
+            call_began = diagnostic_monotonic_ns()
+            try:
+                try:
+                    with log_context(device_id=binding.device_id, driver_id=binding.driver_id,
+                                     command=(name,), step_name=name):
+                        raw = await self._tool_gate.run(
+                            CameraIdentity(config.serial, config.product_id).resource_key,
+                            self.transport, spec, _NeverStop(),
+                            interrupted=lambda: getattr(current_call_scope(), "interrupted", None))
+                finally:
+                    elapsed_ms = (diagnostic_monotonic_ns() - call_began) // 1_000_000
+            except ToolCallCancelled as error:
+                raw = error.outcome
+                interrupted = error
+            except asyncio.CancelledError as error:
+                if isinstance(error.__cause__, ToolStartError):
+                    calls.append(AvailabilityCall(name, now(), error=error.__cause__, elapsed_ms=elapsed_ms))
+                    raise AvailabilityCancelled(result("tool_start_failed")) from error
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
+                raise AvailabilityCancelled(result("cancelled", settled=False)) from error
+            except ToolStartError as error:
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
+                return result("tool_start_failed")
+            except Exception as error:
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
+                return result("transport_failed", settled=False)
+            if not isinstance(raw, RawToolOutcome):
+                error = TypeError("transport.run 必须返回 RawToolOutcome")
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
+                return result("transport_failed", settled=False)
+            returned = now()
+            calls.append(AvailabilityCall(name, returned, raw, elapsed_ms=elapsed_ms))
+
+            def finish(value):
+                if interrupted is not None:
+                    raise AvailabilityCancelled(value) from interrupted
+                return value
+
+            failure = self._local_return_failure(raw, needs_stdout=True)
+            if failure is not None:
+                return finish(result(failure, settled=raw.exit is not None))
+            if raw.stderr is None:
+                return finish(result("stderr_unavailable"))
+            if Decimal(returned - began) / _NANOSECONDS_PER_SECOND >= timeout_s:
+                return finish(result("deadline_elapsed"))
+            try:
+                if name == "list":
+                    matching = tuple(camera for camera in parse_devices(raw.output)
+                                     if camera.vendor_id == _VENDOR_ID
+                                     and camera.product_id == expected_product_id)
+                    if len(matching) != 1:
+                        return finish(result("no_matching_device" if not matching else "multiple_matching_devices"))
+                elif name == "info":
+                    serial = parse_serial(raw.output)
+                    if serial != expected_serial:
+                        return finish(result("serial_mismatch"))
+                elif not doctor_passed(raw.output, raw.stderr):
+                    return finish(result("doctor_not_passed"))
+            except CliParseError as error:
+                calls[-1] = replace(calls[-1], error=error)
+                return finish(result("invalid_response"))
+            if interrupted is not None:
+                raise AvailabilityCancelled(result() if name == "doctor" else result("cancelled")) from interrupted
+        return result()
+
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
         """下载指定固定源，核验后从偏移读取；工具 stdout 不承载文件定位。"""
-        if not isinstance(source, SourceFile):
+        if not isinstance(source, (SourceFile, DeferredSourceFile)):
             raise ValueError("读取必须携带固定源文件")
-        identity = CameraFileIdentity.from_source(source.file_id, source.locator)
+        identity = camera_file_identity_from_source(source.file_id, source.locator)
+        deferred = isinstance(identity, DeferredCameraFileIdentity)
+        if deferred != isinstance(source, DeferredSourceFile):
+            raise ValueError("相机读取源类型与已保存身份不一致")
+        if not deferred and source.size_bytes != identity.size_bytes:
+            raise ValueError("相机源长度与固定文件身份不一致")
+        if deferred and source.size_bytes is not None:
+            raise ValueError("按需照片来源不能预设单次下载长度")
         config = self._binding_config(identity.binding)
+        if (config.serial, config.product_id) != (identity.serial, identity.product_id):
+            error = PhysicalIdentityMismatch(identity.binding)
+            attach_diagnostic_facts(error, {
+                "expected_identity": {"serial": identity.serial, "product_id": identity.product_id},
+                "configured_identity": {"serial": config.serial, "product_id": config.product_id},
+            })
+            raise error
         workspace = DownloadWorkspace(self.roots.staging, ticket)
-        if type(offset) is not int or not 0 <= offset <= source.size_bytes:
+        if (type(offset) is not int or offset < 0
+                or (deferred and offset != 0)
+                or (not deferred and offset > source.size_bytes)):
             raise ValueError("读取偏移不在固定长度范围内")
         if (not isinstance(idle_timeout_s, Decimal) or not idle_timeout_s.is_finite()
                 or idle_timeout_s <= 0):
             raise ValueError("无数据超时必须是有限正 Decimal 秒数")
-        steps = []
+        steps, calls = [], []
         settled = True
         began = self.monotonic_ns()
+
+        def read_error(reason, *, causes=(), settlement=ReadPreparationSettlement.SETTLED,
+                       include_tool_calls=True):
+            return CameraReadError(reason, steps, causes=causes, settlement=settlement,
+                expected_identity={"serial": identity.serial, "product_id": identity.product_id},
+                tool_calls=calls if include_tool_calls else None)
 
         async def run(name, args, *, stdout):
             nonlocal settled
             remaining = READ_PREPARATION_TIMEOUT_S - Decimal(self.monotonic_ns() - began) / _NANOSECONDS_PER_SECOND
             if remaining <= 0:
-                raise CameraReadError("preparation_timeout", steps)
+                raise read_error("preparation_timeout")
             settled = False
-            raw = await self._run_step(config=config, name=name, args=args,
-                                       timeout_s=remaining, steps=steps)
+            with log_context(device_id=identity.binding.device_id,
+                             driver_id=identity.binding.driver_id,
+                             file_id=source.file_id, run_id=ticket.run_id,
+                             attempt_id=ticket.attempt_id):
+                raw = await self._run_step(config=config, name=name, args=args,
+                                           timeout_s=remaining, steps=steps)
             settled = True
+            complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
+            def stream(data):
+                return ToolStream(ToolStreamState.UNAVAILABLE if data is None else
+                                  ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED, data)
+            calls.append(ToolCallOutput(len(calls) + 1, name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
             if raw is None:
-                raise CameraReadError("tool_start_failed", steps)
+                raise read_error("tool_start_failed")
             failure = self._local_return_failure(raw, needs_stdout=stdout)
             if raw.error == "cancelled":
-                raise asyncio.CancelledError("相机读取已取消，受管工具已退出") from CameraReadError(failure, steps)
+                raise asyncio.CancelledError("相机读取已取消，受管工具已退出") from read_error(failure)
             if failure:
-                raise CameraReadError(failure, steps)
+                raise read_error(failure)
             return raw
 
         try:
@@ -232,38 +553,242 @@ class HasselbladDriver:
                 try:
                     await workspace.prepare()
                 except (OSError, ValueError) as error:
-                    raise CameraReadError("download_maintenance_waiting", steps, causes=(error,),
-                        settlement=ReadPreparationSettlement.WAITING) from error
+                    raise read_error("download_maintenance_waiting", causes=(error,),
+                                     settlement=ReadPreparationSettlement.WAITING) from error
                 raw = await run("list", ("list",), stdout=True)
                 cameras = parse_devices(raw.output)
                 matching = tuple(camera for camera in cameras if camera.vendor_id == _VENDOR_ID
                                  and camera.product_id == config.product_id)
+                steps[-1]["devices"] = [{"vendor_id": camera.vendor_id, "product_id": camera.product_id,
+                                         "bus": camera.bus, "address": camera.address} for camera in cameras]
+                steps[-1]["matching_count"] = len(matching)
                 if len(matching) != 1:
-                    raise CameraReadError("no_matching_device" if not matching else "multiple_matching_devices", steps)
+                    raise read_error("no_matching_device" if not matching else "multiple_matching_devices")
                 raw = await run("info", ("info",), stdout=True)
-                if parse_serial(raw.output) != config.serial:
-                    raise CameraReadError("serial_mismatch", steps)
+                observed_serial = parse_serial(raw.output)
+                steps[-1]["observed_serial"] = observed_serial
+                if observed_serial != identity.serial:
+                    raise read_error("serial_mismatch")
+                steps[-1]["serial_verified"] = True
                 await run("download", ("download", identity.variant.value, identity.camera_name,
                                        "--output", str(workspace.path)), stdout=False)
+                if deferred:
+                    stream, size = await workspace.open_current()
+                    return ReadSession(SourceFile(source.file_id, source.locator, size), 0, stream, idle_timeout_s)
                 stream = await workspace.open_verified(source.size_bytes, identity.sha256, offset)
                 return ReadSession(source, offset, stream, idle_timeout_s)
         except BaseException as error:
             # transport 未交回实际退出事实时，不能删除可能仍被工具使用的目录。
             if not settled or not workspace.files_closed:
-                causes = (error,) if error.__cause__ is None else (error, error.__cause__)
-                raise CameraReadError("preparation_unconfirmed", steps, causes=causes,
-                    settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+                has_calls = isinstance(error, CameraReadError) or isinstance(error.__cause__, CameraReadError)
+                raise read_error("preparation_unconfirmed", settlement=ReadPreparationSettlement.UNCONFIRMED,
+                                 include_tool_calls=not has_calls) from error
             if settled:
                 try:
                     await workspace.cleanup()
                 except BaseException as cleanup_error:
                     if isinstance(error, Exception) and isinstance(cleanup_error, Exception):
-                        raise CameraReadError("preparation_and_cleanup_failed", steps,
-                                              causes=(error, cleanup_error)) from error
+                        failures = ExceptionGroup("相机读取准备与临时下载回收均失败", [error, cleanup_error])
+                        raise read_error("preparation_and_cleanup_failed",
+                                         include_tool_calls=not isinstance(error, CameraReadError)) from failures
                     raise BaseExceptionGroup("相机读取准备与临时下载回收均失败", [error, cleanup_error]) from None
             if isinstance(error, Exception) and not isinstance(error, CameraReadError):
-                raise CameraReadError("preparation_failed", steps, causes=(error,)) from error
+                raise read_error("preparation_failed", causes=(error,)) from error
             raise
+
+    async def observe_photo_source(self, request: ControlRequest) -> DeviceCallResult:
+        """沿原 RESULTS 尝试取得一个角色的实际相机内容。"""
+        ticket = request.ticket
+        if (request.operation != "result" or ticket is None or ticket.operation != "result"
+                or ticket.target_id is None or ticket.responsibility_key != f"results/{ticket.target_id}"):
+            raise ValueError("照片来源观察必须携带原 RESULTS 活动票据")
+        parse_object_id(ticket.target_id)
+        if not isinstance(request.timeout_s, Decimal) or not request.timeout_s.is_finite() or request.timeout_s <= 0:
+            raise ValueError("照片来源观察必须携带有限正期限")
+        params = request.params
+        if not isinstance(params, Mapping) or set(params) != {
+                "activity_id", "camera_identity", "camera_locator", "capture_format", "role", "cursor",
+                "original_identity", "sync_candidate", "sync_error"}:
+            raise ValueError("照片来源观察申请成员不完整")
+        if params["activity_id"] != ticket.target_id:
+            raise ValueError("照片来源观察改变原活动")
+        locator = CameraFileLocator.from_json(params["camera_locator"])
+        if locator.status is not CameraLocatorStatus.PATH:
+            raise ValueError("照片来源观察缺少可靠机内定位")
+        camera = params["camera_identity"]
+        if not isinstance(camera, Mapping) or set(camera) != {"serial", "product_id"}:
+            raise ValueError("照片来源观察缺少原机身")
+        from .identity import CameraIdentity
+        fixed_camera = CameraIdentity(camera["serial"], camera["product_id"])
+        role = DownloadVariant(params["role"])
+        original_identity = params["original_identity"]
+        if (original_identity is not None and (role is not DownloadVariant.THUMBNAIL
+                or not isinstance(original_identity, str) or not original_identity)):
+            raise ValueError("照片来源配对身份只能属于预览角色")
+        capture_format = CaptureFormat(params["capture_format"])
+        candidate, sync_error = params["sync_candidate"], params["sync_error"]
+        if candidate is None:
+            if not isinstance(sync_error, str) or not sync_error:
+                raise ValueError("同步副本缺少可信记录时须保留原诊断")
+        elif (not isinstance(candidate, Mapping) or set(candidate) != {"host_path", "host_name", "size", "media_type"}
+              or sync_error is not None):
+            raise ValueError("同步副本记录无效")
+        cursor = None if params["cursor"] is None else PhotoResultCursor.from_json(params["cursor"])
+        if cursor is not None and (cursor.binding != request.binding or cursor.activity_id != ticket.target_id
+                                   or role is not cursor.role):
+            raise ValueError("照片来源观察改变原角色游标")
+        config = self._binding_config(request.binding)
+        workspace = ResultDownloadWorkspace(self.roots.staging, ticket, role.value)
+        began = self.monotonic_ns()
+        steps, calls = [], []
+        last_raw = None
+        in_call = False
+        comparison = None
+        pending_error = None
+
+        def result(*, error=None, entries=()):
+            observed = [DeviceObservation("photo_result_attempt", 2, {
+                "activity_id": ticket.target_id, "role": role.value,
+                "steps": list(steps) if error is not None else _steps_without_timing(steps),
+                "comparison": comparison})]
+            if entries:
+                following = (PhotoResultCursor(request.binding, ticket.target_id, DownloadVariant.THUMBNAIL)
+                             if role is DownloadVariant.ORIGINAL else None)
+                observed.append(DeviceObservation("result_files_listed", 3, {
+                    "activity_id": ticket.target_id,
+                    "binding": {"device_id": request.binding.device_id, "driver_id": request.binding.driver_id},
+                    "role": role.value, "entries": list(entries),
+                    "cursor": None if cursor is None else cursor.as_json(),
+                    "next_cursor": None if following is None else following.as_json(),
+                }))
+            basis = SettlementBasis.OBSERVED if last_raw is not None else SettlementBasis.NOT_DISPATCHED
+            contract = _PHOTO_RESULT_RETURNED if last_raw is not None else _PHOTO_RESULT_NOT_DISPATCHED
+            outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if error is None else AttemptStatus.FAILED,
+                effect=EffectState.CONFIRMED if entries else EffectState.NO_EFFECT,
+                error=error, settlement=Settlement(basis, EvidenceValue.of(contract)),
+                observations=tuple(observed), call_info=self._call_info(last_raw),
+                diagnostics=ToolDiagnostics(3, tuple(calls)) if calls else None)
+            return DeviceCallResult.from_outcome(outcome)
+
+        async def run(name, args):
+            nonlocal in_call, last_raw
+            remaining = request.timeout_s - Decimal(self.monotonic_ns() - began) / _NANOSECONDS_PER_SECOND
+            if remaining <= 0:
+                raise ValueError("source_call_timeout")
+            in_call = True
+            with log_context(device_id=request.binding.device_id, driver_id=request.binding.driver_id,
+                             activity_id=ticket.target_id, run_id=ticket.run_id,
+                             attempt_id=ticket.attempt_id):
+                raw = await self._run_step(config=config, name=name, args=args, timeout_s=remaining, steps=steps)
+            in_call = False
+            steps[-1]["argv"] = list(args)
+            complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
+            def stream(data):
+                return ToolStream(ToolStreamState.UNAVAILABLE if data is None else
+                                  ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED, data)
+            calls.append(ToolCallOutput(len(calls) + 1, name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
+            if raw is None:
+                raise ValueError("tool_start_failed")
+            last_raw = raw
+            failure = self._local_return_failure(raw, needs_stdout=True)
+            if failure is not None or raw.stderr is None:
+                raise ValueError(failure or "stderr_unavailable")
+            return raw
+
+        try:
+            if (config.serial, config.product_id) != (fixed_camera.serial, fixed_camera.product_id):
+                raise PhysicalIdentityMismatch(request.binding)
+            await workspace.prepare()
+            listed = await run("list", ("list",))
+            cameras = parse_devices(listed.output)
+            matching = tuple(item for item in cameras if item.vendor_id == _VENDOR_ID
+                             and item.product_id == fixed_camera.product_id)
+            steps[-1]["matching_count"] = len(matching)
+            if len(matching) != 1:
+                raise ValueError("no_matching_device" if not matching else "multiple_matching_devices")
+            info = await run("info", ("info",))
+            observed_serial = parse_serial(info.output)
+            steps[-1]["observed_serial"] = observed_serial
+            if observed_serial != fixed_camera.serial:
+                raise PhysicalIdentityMismatch(request.binding)
+            await run("download", ("download", role.value, locator.camera_name, "--output", str(workspace.path)))
+            description = CAPTURE_FORMATS[capture_format]
+            media = description.original_media_type if role is DownloadVariant.ORIGINAL else description.preview_media_type
+            artifact = await workspace.observe(media)
+            steps[-1]["artifact"] = artifact.as_json()
+            identity = CameraFileIdentity(request.binding, locator.camera_path, locator.camera_name, role,
+                artifact.sha256, fixed_camera.serial, fixed_camera.product_id, artifact.size_bytes)
+            if candidate is None:
+                sync_status, sync_artifact, sync_failure = "unconfirmed", None, sync_error
+                record_error(sync_error, stage="capture.photo_sync_candidate",
+                             context={"ticket": ticket, "role": role.value})
+            else:
+                spec = CaptureFileSpec(candidate["host_name"], candidate["size"], candidate["media_type"])
+                if (candidate["host_path"] != str(workspace_path(self.roots, ticket.target_id) / spec.original_name)
+                        or spec.media_type != media):
+                    raise ValueError("同步副本记录改变原角色工作目录或媒体类型")
+                sync = await inspect_capture_candidate(self.roots, ticket.target_id, spec, owner=workspace)
+                sync_status, sync_artifact = sync.status, sync.artifact
+                sync_failure = None if sync.error is None else exception_diagnostic(sync.error)
+                if sync.error is not None:
+                    record_error(sync.error, stage="capture.photo_sync_candidate",
+                                 context={"ticket": ticket, "role": role.value})
+            selected = decide_photo_cache(identity, status=sync_status,
+                size_bytes=None if sync_artifact is None else sync_artifact.size_bytes,
+                sha256=None if sync_artifact is None else sync_artifact.sha256)
+            comparison = {"status": selected.comparison, "selected": selected.selected,
+                "sync_artifact": None if sync_artifact is None else sync_artifact.as_json(),
+                "sync_error": sync_failure}
+            original_name = (locator.camera_name if role is DownloadVariant.ORIGINAL
+                             else locator.camera_name + ".thumbnail" + description.preview_extension)
+            entry = {"identity": identity.file_identity, "locator": identity.locator(),
+                "complete": True, "size_bytes": artifact.size_bytes, "kind": "photo",
+                "original_name": original_name, "media_type": artifact.media_type,
+                "paired_identity": original_identity}
+            return result(entries=(entry,))
+        except PhysicalIdentityMismatch as error:
+            pending_error = error
+            return result(error=ErrorValue("device_binding_unavailable", "execution", {
+                "device_id": request.binding.device_id,
+                "expected_driver_id": request.binding.driver_id,
+                "actual_driver_id": request.binding.driver_id,
+                "reason": "physical_identity_mismatch", "steps": list(steps)}))
+        except CaptureFileError as error:
+            pending_error = error
+            classification = ("invalid" if error.stage in {
+                "source_file_count", "source_type", "source_size", "source_media"} else "unconfirmed")
+            return result(error=ErrorValue("device_error", "result", {
+                "role": role.value, "reason": error.stage, "classification": classification,
+                "diagnostic": exception_diagnostic(error), "steps": list(steps)}))
+        except (ValueError, OSError) as error:
+            pending_error = error
+            return result(error=ErrorValue("device_error", "result", {
+                "role": role.value, "reason": str(error), "classification": "unconfirmed",
+                "diagnostic": exception_diagnostic(error), "steps": list(steps)}))
+        finally:
+            # 裸取消或 transport 未交回收场事实时，实际拥有者不得释放。
+            if not workspace.files_closed:
+                actual = sys.exception() or pending_error
+                close_errors = workspace.close_errors
+                if actual is not None:
+                    attach_diagnostic_facts(actual, {"photo_source_close_errors": close_errors})
+                if isinstance(actual, asyncio.CancelledError):
+                    actual.add_note("照片来源文件关闭未确认，原关闭错误保留在诊断事实中")
+                    raise actual
+                if actual is not None:
+                    raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有",
+                                             [actual, *close_errors])
+                raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有", list(close_errors))
+            if in_call:
+                raise RuntimeError("照片来源工具调用尚未实际收场，原 RESULTS 拥有者继续持有") from pending_error
+            if not in_call:
+                workspace.release()
+
+    async def list_results(self, request: ControlRequest, batch: int) -> DeviceCallResult:
+        if type(batch) is not int or batch < 1:
+            raise ValueError("照片来源页批次必须为正整数")
+        return await self.observe_photo_source(request)
 
     def _request_config(self, request: ControlRequest) -> tuple[str, CameraConfig, PhotoSettings]:
         if request.operation != "take_photo":
@@ -275,6 +800,8 @@ class HasselbladDriver:
             raise ValueError("拍摄调用必须以活动身份为目标")
         parse_object_id(ticket.target_id)
         config = self._binding_config(request.binding)
+        if request.output_storage not in ("host", "device"):
+            raise ValueError("拍摄调用必须携带已冻结的来源模式")
         try:
             settings = parse_photo_settings(request.params)
         except ValueError as error:
@@ -343,23 +870,44 @@ class HasselbladDriver:
         args: tuple[str, ...],
         timeout_s: Decimal,
         steps: list[dict[str, object]],
+        start_errors: list[BaseException] | None = None,
     ) -> RawToolOutcome | None:
         spec = ToolSpec(
             (config.executable, "--pid", f"0x{config.product_id:04x}", *args),
             timeout_s,
             self.terminate_grace_s,
         )
+        call_began = diagnostic_monotonic_ns()
         try:
-            raw = await self.transport.run(spec, _NeverStop())
+            try:
+                with log_context(command=args, step_name=name):
+                    raw = await self._tool_gate.run(
+                        CameraIdentity(config.serial, config.product_id).resource_key,
+                        self.transport, spec, _NeverStop(),
+                        interrupted=lambda: getattr(current_call_scope(), "interrupted", None))
+            finally:
+                elapsed_ms = (diagnostic_monotonic_ns() - call_began) // 1_000_000
         except ToolStartError as failure:
+            if start_errors is not None:
+                start_errors.append(failure)
             steps.append({
                 "name": name,
                 "start_error": f"{type(failure).__name__}: {failure}",
+                "elapsed_ms": elapsed_ms,
             })
             return None
         except ToolCallCancelled as failure:
             raw = failure.outcome
         except asyncio.CancelledError as failure:
+            if isinstance(failure.__cause__, ToolStartError):
+                if start_errors is not None:
+                    start_errors.append(failure.__cause__)
+                steps.append({"name": name, "start_error": str(failure.__cause__), "elapsed_ms": elapsed_ms})
+                scope = current_call_scope()
+                if scope is None:
+                    raise
+                scope.interrupted = failure
+                return None
             # 真实 execute_tool 在拥有范围内交回收场后的 RawToolOutcome；
             # 裸取消没有该事实，保留未收场责任并由外层拥有者恢复。
             scope = current_call_scope()
@@ -370,10 +918,142 @@ class HasselbladDriver:
         # 端口契约；不把它伪装成结束结果，保留原 RUNNING 尝试供恢复接手。
         if not isinstance(raw, RawToolOutcome):
             raise TypeError("transport.run 必须返回 RawToolOutcome")
-        steps.append(self._step_fact(name, raw))
+        steps.append({**self._step_fact(name, raw), "elapsed_ms": elapsed_ms})
         if raw.exit is None:
             raise RuntimeError(f"{name} transport 未提供本地退出/收场结果")
         return raw
+
+    async def delete(self, request: ControlRequest) -> DeviceCallResult:
+        """按固定原机身和完整路径删除一张相机照片。"""
+        return await self._file_call(request, "delete")
+
+    async def query_file(self, request: ControlRequest) -> DeviceCallResult:
+        """独立核对原照片是否明确出现在相机列表。"""
+        return await self._file_call(request, "query")
+
+    async def _file_call(self, request: ControlRequest, operation: str) -> DeviceCallResult:
+        ticket = request.ticket
+        if (request.operation != operation or ticket is None or ticket.operation != operation
+                or ticket.target_id is None):
+            raise ValueError("文件调用必须携带匹配的原尝试票据")
+        parse_object_id(ticket.target_id)
+        obtain = operation == "query" and ticket.responsibility_key == f"obtain-exists/{ticket.target_id}"
+        owner = "obtain_item_id" if obtain else "cleanup_item_id"
+        responsibility = (f"obtain-exists/{ticket.target_id}" if obtain else
+                          f"{'delete' if operation == 'delete' else 'exists'}/{ticket.target_id}")
+        if (ticket.responsibility_key != responsibility or not isinstance(request.params, Mapping)
+                or request.params.get(owner) != ticket.target_id):
+            raise ValueError("文件调用改变原成员或操作责任")
+        parse_object_id(request.params.get("file_id"))
+        if (not isinstance(request.timeout_s, Decimal) or not request.timeout_s.is_finite()
+                or request.timeout_s <= 0):
+            raise ValueError("文件调用必须携带有限正期限")
+        identity = camera_file_identity_from_source(request.params["identity_key"], request.params["locator"])
+        path = resolve_camera_path(identity.camera_path)
+        path_details = {"original_path": path.original_path, "comparison_key": path.comparison_key,
+                        "delete_path": path.delete_path, "firmware_rule": path.firmware_rule}
+        if identity.binding != request.binding:
+            raise ValueError("文件调用改变原设备绑定")
+        config = self._binding_config(request.binding)
+        began = self.monotonic_ns()
+        if type(began) is not int:
+            raise TypeError("monotonic_ns 必须返回整数纳秒")
+        steps, calls, start_errors = [], [], []
+        last_raw = None
+        target_dispatched = False
+        planned = ("list", "info", "delete" if operation == "delete" else "images")
+
+        def finish(*, reason=None, observations=(), diagnostic=None):
+            returned = target_dispatched
+            basis = SettlementBasis.OBSERVED if returned else SettlementBasis.NOT_DISPATCHED
+            evidence = (operation + "_returned" if returned else
+                        (FILE_DELETE_NOT_DISPATCHED if operation == "delete"
+                         else FILE_QUERY_NOT_DISPATCHED).type)
+            effect = (EffectState.CONFIRMED if observations else
+                      EffectState.UNKNOWN if returned else EffectState.NO_EFFECT)
+            details = {"reason": reason, "steps": deepcopy(steps), "file_path": path_details}
+            if diagnostic is not None:
+                details["response_error"] = str(diagnostic)
+            if start_errors:
+                details["start_error"] = exception_diagnostic(start_errors[-1])
+            outcome = CallOutcome(
+                status=AttemptStatus.SUCCEEDED if reason is None else AttemptStatus.FAILED,
+                error=None if reason is None else ErrorValue("device_error", operation, details),
+                effect=effect, settlement=Settlement(basis, EvidenceValue(evidence, 1, {})),
+                observations=observations, call_info=self._call_info(last_raw),
+                diagnostics=ToolDiagnostics(3, tuple(calls)))
+            actual_names = tuple(step["name"] for step in steps)
+
+            def check_prefix(original):
+                if (tuple(call.step_name for call in original.diagnostics.calls) != actual_names
+                        or actual_names != planned[:len(actual_names)]):
+                    raise ValueError("原工具诊断与实际文件命令前缀不符")
+            return DeviceCallResult(outcome.observations, DeviceCallResult._error_view(outcome), outcome,
+                                    diagnostics_check=check_prefix,
+                                    diagnostic_error=start_errors[-1] if start_errors else None)
+
+        if (config.serial, config.product_id) != (identity.serial, identity.product_id):
+            return finish(reason="physical_identity_mismatch")
+        for name in planned:
+            scope = current_call_scope()
+            if scope is not None and scope.interrupted is not None:
+                return finish(reason="transport_cancelled")
+            now = self.monotonic_ns()
+            if type(now) is not int:
+                raise TypeError("monotonic_ns 必须返回整数纳秒")
+            budget = request.timeout_s - Decimal(now - began) / _NANOSECONDS_PER_SECOND
+            if budget <= 0:
+                return finish(reason="deadline_elapsed")
+            args = ("delete", path.delete_path) if name == "delete" else (name,)
+            with log_context(device_id=request.binding.device_id, driver_id=request.binding.driver_id,
+                             run_id=ticket.run_id, attempt_id=ticket.attempt_id,
+                             operation=operation, file_path=path_details, **{owner: ticket.target_id}):
+                raw = await self._run_step(config=config, name=name, args=args,
+                                           timeout_s=budget, steps=steps, start_errors=start_errors)
+            complete = (raw is not None and raw.output is not None and raw.stderr is not None
+                        and raw.output_failure is None)
+            def stream(data):
+                state = (ToolStreamState.UNAVAILABLE if data is None else
+                         ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED)
+                return ToolStream(state, data)
+            calls.append(ToolCallOutput(len(calls) + 1, name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
+            if raw is None:
+                return finish(reason="tool_start_failed")
+            last_raw = raw
+            if name == planned[-1]:
+                target_dispatched = True
+            failure = self._local_return_failure(raw, needs_stdout=True)
+            if failure is not None or raw.stderr is None:
+                return finish(reason=failure or "stderr_unavailable")
+            if name in ("list", "info") and raw.stderr:
+                return finish(reason="identity_stderr_unconfirmed")
+            try:
+                if name == "list":
+                    cameras = parse_devices(raw.output)
+                    matching = tuple(camera for camera in cameras if camera.vendor_id == _VENDOR_ID
+                                     and camera.product_id == identity.product_id)
+                    steps[-1]["matching_count"] = len(matching)
+                    if len(matching) != 1:
+                        return finish(reason="no_matching_device" if not matching else "multiple_matching_devices")
+                elif name == "info":
+                    serial = parse_serial(raw.output)
+                    steps[-1]["observed_serial"] = serial
+                    if serial != identity.serial:
+                        return finish(reason="serial_mismatch")
+                elif operation == "delete":
+                    parse_deleted(raw.output, raw.stderr, camera_path=path.delete_path)
+                    return finish(observations=(DeviceObservation("file_absent", 1,
+                                          {"cleanup_item_id": ticket.target_id}),))
+                else:
+                    present = parse_images_presence(raw.output, raw.stderr, camera_path=identity.camera_path)
+                    if present is None:
+                        return finish(reason="file_presence_unconfirmed")
+                    return finish(observations=(DeviceObservation("file_presence", 2 if obtain else 1,
+                                          {owner: ticket.target_id, "present": True}),))
+            except CliParseError as error:
+                return finish(reason="response_unconfirmed", diagnostic=error)
+        raise AssertionError("文件调用没有目标步骤")
 
     async def control(self, request: ControlRequest) -> DeviceCallResult:
         if request.start_entry is not None:
@@ -473,7 +1153,14 @@ class HasselbladDriver:
                 if isinstance(budget, DeviceCallResult):
                     return budget
                 args = (*args, "--output", str(workspace))
-            raw = await self._run_step(config=config, name=name, args=args, timeout_s=budget, steps=steps)
+            stage = ("camera_start_command" if command.name is PhotoStep.CAPTURE else
+                     "camera_setting" if command.name not in (PhotoStep.LIST, PhotoStep.INFO) else None)
+            with log_context(device_id=request.binding.device_id,
+                             driver_id=request.binding.driver_id, activity_id=activity_id,
+                             run_id=request.ticket.run_id, attempt_id=request.ticket.attempt_id):
+                with measure_stage(stage, command=args, timeout_s=str(budget)) if stage is not None else nullcontext():
+                    raw = await self._run_step(config=config, name=name, args=args,
+                                               timeout_s=budget, steps=steps)
             complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
             def stream(data):
                 state = ToolStreamState.UNAVAILABLE if data is None else (
@@ -523,11 +1210,32 @@ class HasselbladDriver:
                 {"activity_id": activity_id})
             preparation_steps = DeviceObservation(
                 _PHOTO_PREPARATION_STEPS.type, _PHOTO_PREPARATION_STEPS.version,
-                {"activity_id": activity_id, "steps": deepcopy(steps)})
+                {"activity_id": activity_id, "steps": deepcopy(_steps_without_timing(steps))})
             result = finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED,
                             observations=(observation, preparation_steps))
             self._prepared_captures.remember(request, (serial, config.product_id))
             return result
+
+        if request.output_storage == "device":
+            try:
+                response = parse_device_capture(raw.output, raw.stderr, output_complete=complete,
+                    capture_format=settings.capture_format, output_directory=str(workspace))
+            except CliParseError as error:
+                return failed("capture", "capture_response_unconfirmed", effect=EffectState.UNKNOWN,
+                    extra={"response_error": str(error), "response_code": error.code})
+            observation = DeviceObservation("photo_taken", 2, {
+                "activity_id": activity_id,
+                "camera_locator": response.camera_locator.as_json(),
+                "camera_identity": {"serial": config.serial, "product_id": config.product_id},
+                "original": None if response.original is None else asdict(response.original),
+                "preview": None if response.preview is None else asdict(response.preview),
+                "original_error": response.original_error,
+                "preview_error": response.preview_error,
+                "prepared_by": None if request.prepared_by is None else {
+                    "run_id": request.prepared_by.run_id, "attempt_no": request.prepared_by.attempt_id},
+                "steps": _steps_without_timing(steps),
+            })
+            return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observations=(observation,))
 
         try:
             response: CaptureResponse = parse_capture(raw.output, raw.stderr, output_complete=complete,
@@ -538,9 +1246,11 @@ class HasselbladDriver:
         steps[-1]["files"] = [{"host_name": item.host_name, "size_bytes": item.size, "media_type": item.media_type}
                               for item in (response.original, response.preview)]
         steps[-1]["camera_locator"] = response.camera_locator.as_json()
+        steps[-1]["camera_identity"] = {"serial": config.serial, "product_id": config.product_id}
         specs = tuple(CaptureFileSpec(item.host_name, item.size, item.media_type) for item in (response.original, response.preview))
         try:
-            artifacts = await verify_capture_files(roots, activity_id, specs)
+            artifacts = await verify_capture_files(roots, activity_id, specs,
+                trusted_preview_name=response.preview.host_name)
         except CaptureFileError as error:
             return failed("verify_files", error.stage, effect=EffectState.UNKNOWN, extra={"file_error": str(error)})
         if (not isinstance(artifacts, tuple) or len(artifacts) != 2
@@ -550,5 +1260,5 @@ class HasselbladDriver:
             return failed("verify_files", "verified_file_pair_mismatch", effect=EffectState.UNKNOWN)
         observation = DeviceObservation("photo_taken", 1, {
             "activity_id": activity_id, "original": artifacts[0].as_json(), "preview": artifacts[1].as_json(),
-            "steps": [dict(fact) for fact in steps]})
+            "steps": _steps_without_timing(steps)})
         return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observations=(observation,))

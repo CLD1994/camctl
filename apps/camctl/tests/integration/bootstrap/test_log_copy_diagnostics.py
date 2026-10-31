@@ -18,6 +18,7 @@ from camctl.bootstrap.lifecycle import (
 from camctl.logging_runtime import copies
 from camctl.logging_runtime.clh_adapter import FileChannel, WriteResult
 from camctl.logging_runtime.copies import MarkerStage, SaveOutcome
+from integration.logging_runtime.sync_support import FileSyncProbe
 from camctl.reporting.messages import ErrorKind, ResultFailureMessage
 from camctl.reporting.supervisor import (
     GenerationOutcomeKind, WorkerGeneration, WorkerSupervisor,
@@ -31,6 +32,75 @@ from ..support.bootstrap_log_cases import (
     run_with_report_failure as _run_with_report_failure, generate_valid_report,
     observe_failure_service,
 )
+
+
+async def test_report_copy_sync_failure_keeps_original_receipt_and_consumes_failure(
+        tmp_path: Path, monkeypatch) -> None:
+    from camctl.logging_runtime import diagnostics
+
+    deps = await _runtime(tmp_path)
+    path = Path(deps.config.paths.log_file)
+    before = ([json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+              if path.exists() else [])
+    probe = FileSyncProbe(monkeypatch, path, fail="file")
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    states, requests, receipts = [], [], []
+    original_record_error = diagnostics.record_error
+    original_deliver = copies.FailureLogService.on_report_failure_with_factory
+
+    def observe_error(error, **kwargs):
+        state = original_record_error(error, **kwargs)
+        if all(state is not captured for captured in states):
+            states.append(state)
+        return state
+
+    async def observe_delivery(service, factory, *, diagnose=None):
+        def request():
+            value = factory()
+            requests.append(value)
+            return value
+
+        receipt = await original_deliver(service, request, diagnose=diagnose)
+        receipts.append(receipt)
+        return receipt
+
+    monkeypatch.setattr(diagnostics, "record_error", observe_error)
+    monkeypatch.setattr(copies.FailureLogService, "on_report_failure_with_factory", observe_delivery)
+    try:
+        outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
+    finally:
+        close_runtime(deps)
+    assert outcome.reason == "report_error" and report_called["count"] == 1
+    assert len(requests) == len(receipts) == 1
+    copied = receipts[0]
+    assert copied.outcome is copies.CopyOutcome.COPY_FAILED
+    assert copied.write_result.appended is True and copied.write_result.durable is False
+    assert "controlled original file sync failure" in copied.write_result.sync_error
+    state, = [state for state in states
+              if diagnostics.diagnostic_record_for(state) is requests[0].trigger]
+    shared = diagnostics.submit_diagnostic(state)
+    assert diagnostics.submit_diagnostic(state) is shared
+    assert shared.write_result.delivered is False and shared.write_result.appended is True
+    assert shared.write_result.durable is False and shared.write_result.fallback_written is False
+    assert probe.events.count(("file", "started")) == 1
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert records[:len(before)] == before
+    assert records[len(before):] == [json.loads(requests[0].trigger.rendered_message())]
+    assert "controlled report generation failure" in json.dumps(records[-1])
+    assert deps.log_path_unsafe is True and deps.log_runtime.path_unsafe is True
+    assert deps.log_runtime.channel.disabled is True
+    assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
+    diagnostic = stderr.getvalue()
+    assert "报告失败的日志副本诊断" in diagnostic
+    assert "controlled_report_failure" in diagnostic
+    assert "controlled report generation failure" in diagnostic
+    assert "controlled original file sync failure" in diagnostic
+    assert "appended=True" in diagnostic and "durable=False" in diagnostic
+    assert "run 会话失败: report_error" in diagnostic
+    assert stdout.getvalue() == ""
 
 
 async def test_default_run_records_marker_progress_failure(
@@ -738,7 +808,11 @@ async def test_default_format_failure_keeps_listener_for_later_record(
     original_format = style.format
 
     def fail_one_record(record):
-        if record.getMessage() == "controlled ordinary format failure":
+        try:
+            document = json.loads(record.getMessage())
+        except json.JSONDecodeError:
+            return original_format(record)
+        if isinstance(document, dict) and document.get("message") == "controlled ordinary format failure":
             raise ValueError("permission denied while formatting ordinary log")
         return original_format(record)
 
@@ -933,15 +1007,12 @@ async def test_default_rotation_failure_is_reported_once_and_keeps_writes(
     monkeypatch.setattr(sys, "stderr", stderr)
     monkeypatch.setattr(sys, "stdout", stdout)
 
-    def fail_rollover(self):
+    def fail_rollover_check(self, record):
         raise OSError("controlled rotation failure")
 
     monkeypatch.setattr(
         concurrent_log_handler.ConcurrentRotatingFileHandler,
-        "shouldRollover", lambda self, record: True)
-    monkeypatch.setattr(
-        concurrent_log_handler.ConcurrentRotatingFileHandler,
-        "doRollover", fail_rollover)
+        "shouldRollover", fail_rollover_check)
     try:
         first = await deps.log_runtime.channel.deliver_important(
             LogRecord(level=LogLevel.ERROR, message="first rotation record"))
@@ -979,6 +1050,7 @@ async def test_default_run_records_copy_and_cleanup_failures(
             appended=True, rotated=True,
             rotation_error="rotation denied",
             copy_handles_closed=True,
+            durable=True,
         ), "snapshot read failed")
 
     original_unlink = copies._unlink
@@ -1147,6 +1219,7 @@ async def test_unconfirmed_copy_unlock_uses_stderr_directly(
             coordination_error="coordination_unlock_failed: unlock lost",
             close_error="coordination_close_failed: close unknown",
             copy_handles_closed=True,
+            durable=True,
         ), None)
 
     monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_unlock)
@@ -1185,6 +1258,7 @@ async def test_unknown_copy_close_disables_later_file_logging(
             coordination_error="coordination_unlock_failed: unlock unknown",
             close_error="coordination_close_failed: close unknown",
             copy_handles_closed=True,
+            durable=True,
         ), None)
 
     monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_close)

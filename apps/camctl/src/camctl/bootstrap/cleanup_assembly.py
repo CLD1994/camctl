@@ -513,11 +513,17 @@ def session_cleanup_assembly(
     intents = pending_intents if pending_intents is not None else {}
     deletes = pending_deletes if pending_deletes is not None else {}
     saves = pending_saves if pending_saves is not None else {}
+    pending_file_batches = {}
     monotonic = monotonic_ns if monotonic_ns is not None else time.monotonic_ns
     wall = occurred_at if occurred_at is not None \
         else (lambda: int(time.time() * 1_000_000))
 
+    async def settle_file_batches(database):
+        from camctl.outputs.batches import retry_file_batches
+        await retry_file_batches(database, pending_file_batches)
+
     async def factory(database) -> CleanupRuntime:
+        await settle_file_batches(database)
         device_ports = None
 
         def load_ports():
@@ -574,6 +580,7 @@ def session_cleanup_assembly(
             monotonic_ns=monotonic, retry_gate=retry_gate,
             pending_queries=queries, pending_companions=companions,
             pending_intents=intents, pending_deletes=deletes, pending_saves=saves,
+            pending_file_batches=pending_file_batches,
             consumed_queries=consumed_queries,
             recovery_boundary=recovery_boundary,
             recovery_max_event_id=(recovery_max_event_id() if callable(recovery_max_event_id)
@@ -628,7 +635,8 @@ def session_cleanup_assembly(
         base.for_item = for_item
         return base
 
-    factory.pending_collections = (intents, deletes, queries, companions, saves, active)
+    factory.pending_collections = (intents, deletes, queries, companions, saves, active, pending_file_batches)
+    factory.settle_file_batches = settle_file_batches
     return factory
 
 
@@ -656,6 +664,7 @@ class _CleanupRound:
         self._active = False
         self._settled = None
         self._stopping = False
+        self._database = None
 
     def required_settlements(self):
         return int(self._active) + sum(len(collection) for collection in self._pending)
@@ -666,6 +675,9 @@ class _CleanupRound:
     async def settle(self):
         if self._active:
             await self._settled.wait()
+        settle_batches = getattr(self._factory, "settle_file_batches", None)
+        if settle_batches is not None and self._database is not None:
+            await settle_batches(self._database)
         if self.required_settlements():
             from camctl.session.service import StateDbFailure
             raise StateDbFailure("原清理保存责任尚未可靠交接")
@@ -676,6 +688,7 @@ class _CleanupRound:
         self._active = True
         self._settled = asyncio.Event()
         try:
+            self._database = context.database
             runtime = await self._factory(context.database)
             if runtime is not None:
                 required = await advance_cleanup(runtime)

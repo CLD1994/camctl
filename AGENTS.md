@@ -4,6 +4,7 @@
 
 ## 全局约束
 
+- 每次会话开始或上下文压缩后，检索 [Agents 规则](.agents/rules/agents) 目录，读取对应身份的文档。
 - 将自己放在与人类平等的位置上，不迎合他人。保持独立判断，技术讨论中可以明确表达不同意见。
 - 优先使用自然、完整的中文交流，保留准确名称、标识符和通行英文术语。必须使用上下文中未出现的英文术语时，紧跟括号说明其中文含义。用具体行为与证据说明结论，不猜测或编造来源未说明的机制。
 - 从保密材料中研究技术时，本项目文档只记录抽象后的技术方案，不记录来源名称、路径、源码、提交标识或可追溯到来源的验证数据。
@@ -12,10 +13,14 @@
 - 错误结果、异常与第三方 ERROR 的诊断遵守[全局错误诊断责任](docs/architecture/logging.md#全局错误诊断责任)。修改错误处理入口时，同时核对原事实交付、诊断所有权、重送去重及必要停止，不以可靠入库或后续重试代替日志。
 - 系统级和开发者级指令、skill、参考文件、`AGENTS.md` 或用户要求之间出现冲突时，停止相关动作，列出冲突和优先级，不得静默选择。
 - 项目变化影响工作规则时，更新根目录、作用域内的 `AGENTS.md` 及相关共享规则。
+- 组件构建、部署配置或设备能力说明发生变化时，核对[真机验证环境 skill](.agents/skills/camctl-real-device-deploy/SKILL.md)及其部署脚本；受影响时同步更新，保持新环境能够随项目部署。
+- 软件发版、版本输出及已有环境更新遵守[组件版本与软件更新](docs/architecture/versioning-and-updates.md)，组件版本从各自唯一来源读取或生成。
+- 用户要求项目部署包时，使用该 skill 的[完整部署包入口与契约](.agents/skills/camctl-real-device-deploy/references/packaging.md)构建和验证，交付内容及说明由脚本与模板维护。
 - 实现中发现可能的设计缺陷或新增防御需求时，遵守[设计缺口处理规则](.agents/rules/design-and-planning.md#实现中发现设计缺口)。
 - 本仓库的工作区只由用户、当前 Agent 与其明确指派的子代理共同修改。执行期间出现新改动时，视为已知协作者的工作并结合当前状态继续，不将未知第三方并发写入作为防御前提。
 - 实施计划的步骤推进、前置依赖判断和进度更新遵守[计划执行与进度控制](.agents/rules/implementation.md#计划执行与进度控制)。
 - 并行开发、工作目录核对、阶段提交和分支集成遵守[Git 协作与工作区隔离](.agents/rules/implementation.md#git-协作与工作区隔离)。
+- 把 superpowers skills 当作可选的工作方法参考，不是必须机械执行的流程
 
 ## 语言与表达
 
@@ -45,13 +50,14 @@
 
 先读上下文，再行动。开始相关工作前，实际读取下表中所有适用规则的正文及其必需参考文件。未完成实际读取前，不得把摘要、历史记录或“已加载”声明视为有效加载。
 
-当前任务|必须读取的规则
--|-
-编写或修改项目文档、规格、计划，或提供详细技术解释与评审报告|[写作规则](.agents/rules/writing.md)
-设计或修改程序行为，编写、修改、运行或评审测试，汇报验证结论|[测试规则](.agents/rules/testing.md)
-定义或核对行为契约，设计架构，编写或审查规格、实施计划|[设计与计划规则](.agents/rules/design-and-planning.md)
-实现功能、修复缺陷、重构代码或修改开发脚本|[实施规则](.agents/rules/implementation.md)
-进行评审、处理评审意见或交接评审缺陷|[评审规则](.agents/rules/review.md)
+| 当前任务                                                     | 必须读取的规则                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------ |
+| 编写或修改项目文档、规格、计划，或提供详细技术解释与评审报告 | [写作规则](.agents/rules/writing.md)                   |
+| 设计或修改程序行为，编写、修改、运行或评审测试，汇报验证结论 | [测试规则](.agents/rules/testing.md)                   |
+| 定义或核对行为契约，设计架构，编写或审查规格、实施计划       | [设计与计划规则](.agents/rules/design-and-planning.md) |
+| 实现功能、修复缺陷、重构代码或修改开发脚本                   | [实施规则](.agents/rules/implementation.md)            |
+| 进行评审、处理评审意见或交接评审缺陷                         | [评审规则](.agents/rules/review.md)                    |
+| 协调多个 Agent 的任务、验证与交付                            | [Agent 调度规则](.agents/rules/agent-coordination.md) |
 
 一项任务符合多个条件时，读取全部适用规则；任务范围扩大时，在继续相关工作前补读新增规则。必需规则或参考文件无法读取时，停止依赖它的工作并说明缺失内容。
 
@@ -72,14 +78,14 @@
 
 仓库按独立运行组件组织。公共机器协议只在根 `protocol` 维护；组件内部共享代码不作为跨组件协议来源。组件测试放在各自目录，跨组件集成测试放在根 `tests/integration`。目录、数据边界及文档职责见[仓库结构](docs/architecture/repository-layout.md)。
 
-工作范围|资料入口
--|-
-客户端 `apps/client`|[源码与运行说明](apps/client/README.md)、[客户端设计](docs/client/README.md)
-Python CLI（命令行接口）`apps/camctl`|[源码与运行说明](apps/camctl/README.md)、[实现设计](docs/camctl/README.md)
-C 接入模块与终端演示 `apps/host-demo`|[源码与构建说明](apps/host-demo/README.md)、[接入设计](docs/host-demo/README.md)
-公共机器协议 `protocol`|[协议入口](protocol/README.md)及相关行为专题
-camctl 组件测试 `apps/camctl/tests`|[测试运行指南](apps/camctl/tests/AGENTS.md)
-跨组件集成测试 `tests/integration`|[集成测试说明](tests/integration/README.md)
+| 工作范围                              | 资料入口                                                                         |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| 客户端 `apps/client`                  | [源码与运行说明](apps/client/README.md)、[客户端设计](docs/client/README.md)     |
+| Python CLI（命令行接口）`apps/camctl` | [源码与运行说明](apps/camctl/README.md)、[实现设计](docs/camctl/README.md)       |
+| C 接入模块与终端演示 `apps/host-demo` | [源码与构建说明](apps/host-demo/README.md)、[接入设计](docs/host-demo/README.md) |
+| 公共机器协议 `protocol`               | [协议入口](protocol/README.md)及相关行为专题                                     |
+| camctl 组件测试 `apps/camctl/tests`   | [测试运行指南](apps/camctl/tests/AGENTS.md)                                      |
+| 跨组件集成测试 `tests/integration`    | [集成测试说明](tests/integration/README.md)                                      |
 
 ## 环境
 

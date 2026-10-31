@@ -113,13 +113,16 @@ def saved_cleanup_attempt(owned, ticket: AttemptTicket, *, database_id: str,
 def saved_cleanup_not_dispatched(connection, ticket: AttemptTicket, item_id: int) -> bool:
     """只用精确票据的完整原保存事实判断未派发，不信任投影片段。"""
     from camctl.operations.models import AttemptStatus, EffectState, SettlementBasis
+    from camctl.devices.evidence import FILE_DELETE_NOT_DISPATCHED, FILE_QUERY_NOT_DISPATCHED
     saved = _read_exact_cleanup_attempt(connection, ticket, item_id)
     outcome = saved.actual.outcome
     if outcome.settlement.basis is not SettlementBasis.NOT_DISPATCHED:
         return False
     evidence = outcome.settlement.evidence
+    file_contract = (FILE_DELETE_NOT_DISPATCHED if ticket.operation == "delete"
+                     else FILE_QUERY_NOT_DISPATCHED)
     if (outcome.status is not AttemptStatus.FAILED or outcome.effect is not EffectState.NO_EFFECT
-            or evidence.type != "dispatch_prevented" or type(evidence.version) is not int
+            or evidence.type not in ("dispatch_prevented", file_contract.type) or type(evidence.version) is not int
             or evidence.version != 1 or evidence.data != {}):
         raise ConsistencyError("原清理未派发结果不符合固定证据契约")
     return True
@@ -297,13 +300,16 @@ def running_cleanup_attempt(connection, item_id):
     return _read_exact_cleanup_attempt(connection, ticket, item_id, allow_running=True)
 
 
-def latest_possible_cleanup_delete(connection, output_id, *, unresolved_only=False):
+def latest_possible_cleanup_delete(connection, output_id, *, unresolved_only=False, exclude_ticket=None):
     """逐票据核对原完整事实；可靠未派发不形成新的文件阶段。"""
     from camctl.operations.models import SettlementBasis
     before = None
     while True:
         filters = "" if before is None else " AND a.id<?"
         parameters = [output_id] if before is None else [output_id, before]
+        if exclude_ticket is not None:
+            filters += " AND NOT (r.id=? AND a.attempt_no=?)"
+            parameters.extend((exclude_ticket.run_id, exclude_ticket.attempt_id))
         row = connection.execute(
             "SELECT a.id,a.status,a.effect_state,a.result_json,a.error_json,c.id,"
             "a.intent_event_id,a.attempt_no,r.responsibility_key,r.id"

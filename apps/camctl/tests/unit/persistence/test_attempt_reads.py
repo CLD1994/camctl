@@ -9,6 +9,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts import enums
+from camctl.capture import software_recovery  # 导入期枚举属于稳定协作者，不参与独立仓储实例。
 from camctl.contracts.values import OperationKey
 from camctl.history import events
 from camctl.operations.attempts import (
@@ -24,7 +25,8 @@ def repository(monkeypatch):
     readers = (transaction.load_enum_registry, row_history.load_enum_registry)
     definitions = {
         "operation_runs.kind": {"START": 1, "STOP": 2, "READ_FILE": 3, "QUERY_ACTIVITY": 6,
-                                "STOP_RESIDUAL": 8, "EMERGENCY_STOP": 9},
+                                "STOP_RESIDUAL": 8, "EMERGENCY_STOP": 9,
+                                "RESOLVE_OUTPUT_SCOPE": 11},
         "operation_runs.status": {"PENDING": 1, "ACTIVE": 2, "SUCCEEDED": 3},
         "operation_runs.query_purpose": {"BEFORE_EXECUTION": 1},
         "operation_attempts.status": {"RUNNING": 1},
@@ -132,6 +134,46 @@ def test_intent_plan_releases_count_query_cursor_on_inconsistent_count(repositor
         _plan(module, connection)
     for cursor in data["cursors"]:
         cursor.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("action_status", [1, 3, 4, 5, 6])
+def test_scope_intent_uses_original_action_even_after_its_end(repository, database, action_status):
+    module, _ = repository
+    connection, data = database
+    data["found"] = None
+    action = {"id": 1, "device_id": "cam-1", "status": action_status}
+    activity = {"id": 4, "action_id": 1, "activity_state": 3, "occupancy_state": 1,
+        "baseline_state": 3, "output_set_finalized_event_id": None}
+    module.row_facts.side_effect = lambda connection, table, identity: (
+        action if table == "actions" else activity)
+    intent = AttemptIntent("result", 1, OperationKind.RESOLVE_OUTPUT_SCOPE,
+        AttemptTarget(activity_id=4), None, AttemptConfig(2, "5", "1"), occurred_at=1)
+    plan = _plan(module, connection, intent)
+    assert plan.result.disposition is BeginDisposition.GRANTED
+    assert plan.result.ticket.responsibility_key == "scope/4"
+    assert {row.table for row in plan.events[0].rows} == {"operation_runs", "operation_attempts"}
+    assert all(owner == ("action", 1) for owner in plan.owners.values())
+
+
+@pytest.mark.parametrize("changes,reason", [
+    ({"activity_state": 2}, "scope_not_held"),
+    ({"occupancy_state": 2}, "scope_not_held"),
+    ({"baseline_state": 2}, "scope_not_held"),
+    ({"output_set_finalized_event_id": 9}, "scope_resolved"),
+])
+def test_scope_intent_requires_ended_held_fixed_unresolved_activity(repository, database, changes, reason):
+    module, _ = repository
+    connection, _ = database
+    action = {"id": 1, "device_id": "cam-1", "status": 4}
+    activity = {"id": 4, "action_id": 1, "activity_state": 3, "occupancy_state": 1,
+        "baseline_state": 3, "output_set_finalized_event_id": None, **changes}
+    module.row_facts.side_effect = lambda connection, table, identity: (
+        action if table == "actions" else activity)
+    intent = AttemptIntent("result", 1, OperationKind.RESOLVE_OUTPUT_SCOPE,
+        AttemptTarget(activity_id=4), None, AttemptConfig(2, "5", "1"), occurred_at=1)
+    plan = _plan(module, connection, intent)
+    assert plan.result.reason == reason
+    assert plan.events == ()
 
 
 @pytest.mark.parametrize("query", ["found", "maximum"])

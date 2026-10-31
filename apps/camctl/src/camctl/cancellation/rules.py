@@ -208,7 +208,7 @@ def current_eligibility_facts(loaded: LoadedEligibility, entry_phase) -> Eligibi
     from camctl.devices.start_entry import EntryPhase
     if not isinstance(entry_phase, EntryPhase):
         raise ConsistencyError("START 入口阶段类型不可解释")
-    if entry_phase in (EntryPhase.UNKNOWN, EntryPhase.RESERVED):
+    if entry_phase in (EntryPhase.GRANTING, EntryPhase.UNKNOWN, EntryPhase.RESERVED):
         raise ConsistencyError("START 授予或取消事务尚未核实")
     if entry_phase is EntryPhase.ENTERED:
         dispatch = loaded.entered_dispatch

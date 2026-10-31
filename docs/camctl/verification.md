@@ -1,5 +1,250 @@
 # 软件验证与实施顺序
 
+## 组件独立版本与停机离线更新（2026-10-31）
+
+[版本与更新验证记录](component-versioning-verification-2026-10-31.md)说明版本权威、启动 INFO 的过滤例外、原环境离线更新及只读检查。六个隔离单元文件为 57 项及 5 个子测试通过；host 和客户端完成配置、语法及类型检查。独立评审修正了缓存校验冲突、外置配置接线及完整错误诊断交付问题。两次测试隔离越界及合规重跑单独记录；真实发行物、依赖下载、安装、数据库组合和设备范围均未验证，尚未生成新部署包。
+
+## 取消读取结果与可靠进度收场（2026-10-31）
+
+[取消修复验证记录](canceled-read-settlement-verification-2026-10-31.md)说明源 EOF 与副本可靠进度的区分、三个读取结果消费者、已取消旧票据的冷恢复，以及原流程终态后的迟到结果保存。定向隔离范围为 66 项及 4 个子测试通过；真实 SQL、历史回放和真机取消仍待验证。首次旧测试实际启动线程的范围越界及后续隔离修正单独保留，未将其计入符合约束的验证。取消修复前交付的 `70316ef3` 部署包包含路径修复，尚未包含取消修复。
+
+## Hasselblad 固件路径修复的真机复验（2026-10-31）
+
+[真机复验记录](hasselblad-path-real-device-verification-2026-10-31.md)确认 `9a1be85d` 在独立安装环境完成两张 JPEG 拍摄、两批后到取回和清理，五个动作均成功。原定位保留 `106HASBL`，两次实际 DELETE 使用 `100HASBL` 并取得成功确认；四个原图、预览角色清理完成，四份交付长度与摘要一致。列表为 73→75→73，只有本次两个新增条目移除；三个批次有序释放，40 次受管调用没有重叠或错误。真实列表响应的安装版解析器复核另行说明其边界；取消与 RAW 不在本轮通过范围内。全部业务进程已停止，旧环境和原始证据保留。
+
+## Hasselblad 固件路径例外（2026-10-31）
+
+[固件路径例外](hasselblad-driver.md#固件路径例外)将约定的 SSD 根和首目录别名用于查询比较及本次 DELETE 定位。拍摄返回、文件身份和历史保持原值；删除确认按实际派发路径核验。调用日志及失败结果保存原路径、比较键、命令路径和稳定固件规则标识，便于后续排查路径不一致。
+
+Linux 开发容器、Python 3.11.17，基线 `ea98026e` 加本次修改，`test_hasselblad_device_response_isolated.py`、`test_h2_availability_port_isolated.py`、`test_hasselblad_tool_gate.py` 共 **121 项通过**，2.58 秒，退出 0。命令禁用 pytest 插件自动加载，仅显式启用 asyncio 插件；包资源、设备配置和工具传输按受测边界隔离。公开删除、查询端口的源码抽取用例覆盖实际参数选择、响应确认及错误事实，不能作为真实装配或日志通道交付的证据。边界用例保留其他目录、文件名大小写、缺项、非法条目及归一化后的歧义拒绝。完整输出为 `tmp/hasselblad-path-alias-unit-final.log`。
+
+独立只读复核未发现明确阻断项。语法、变更文档本地链接及差异空白检查通过；未新增或运行集成测试，没有再次操作相机、修改既有状态库、安装部署或重打部署包。既有的下载取消收场缺陷仍按下节真机记录保留。没有新增构建依赖、配置或能力字段；部署 skill 的身份发现仍只消费原设备与序列号解析入口，无需修改。
+
+## 同机文件批次的真机验证（2026-10-31）
+
+[Hasselblad 真机记录](file-batches-real-device-verification-2026-10-31.md)确认 `530a00ac` 的来源等待不占机、两次批量取回连续执行、清理等待及第一场景三个批次可靠释放；六份实际交付长度与摘要相符。删除仍返回 `camErrDbusCallFailure`，九次真实列表查询通过格式解析但不能确认缺席。下载取消另暴露既有的读取结束与可靠进度不一致缺陷，取消收场未通过，原批次仍保留。原始状态和日志已保留，全部业务进程已停止；本次没有修改生产代码或运行集成测试套件。
+
+## 同机文件批次与 Hasselblad 查询（2026-10-30）
+
+[同机文件批次](../architecture/file-batches.md)由数据库 V9 保存设备归属。取回等待本机全部来源和选择完成后整批连续读取，等待期间不占相机；清理等待旧读取依赖，整批取得设备后保持到实际调用和保存责任结束。Hasselblad 所有实际 USB 调用共享机身互斥，等待时间计入原调用期限；图片列表接受多空格对齐的 `3FR` 与 `JPEG` 行。真实删除返回的相机错误保持原判定。
+
+Linux 开发容器、Python 3.11.17，基线 `a3fc8c24` 加本次变更，最终十个文件的隔离单元范围共 **202 项、12 个子测试通过**，4.75 秒，退出 0。范围包括 Hasselblad 响应和互斥、可用性取消、批次决策与分页事实、公开仓储、原键重送与等待取消、升级表集合，以及既有读取票据和取消收场。数据库、文件、工具、时钟及资源读取按受测边界提供替身，未使用真实 SQLite 执行这些测试。公开驱动源码抽取用例只证明相应局部行为，不作为真实装配证据。命令禁用 pytest 插件自动加载，显式启用 asyncio 和 mock 插件；解释器、完整范围、输出和检查记录保存在 `tmp/device-file-batches-20261030/`。
+
+权威资源同步检查、变更 Python 的 AST、JSON 解析及差异空白检查通过。事件登记静态检查只解析 SQL 文本，核对 40 类事件、145 个分支、443 列、47 个状态模型和 52 个业务引用，并核对生成区段；未执行建立真实数据库的完整结构检查。变更 Markdown 的本地文件链接检查通过。全仓库链接检查仍报告部署包 README 模板中的三条交付时生成的文档链接缺失，这些模板没有在本次变更中修改。独立只读评审修正来源等待、旧读取续接、纯本地成员、期限、原键重送与停机交接问题后，未发现剩余的明确阻断项。
+
+本项没有新增或运行集成测试，没有执行 V8 到 V9 的实际复制升级、真实批次事务、历史回放、安装构建、目标部署、相机操作或断电验证。软件装配及 SQL 组合行为保持未验证。既有 V8 环境停止运行会话后，使用原配置执行 `camctl init --upgrade-device-file-batches --config <config.toml>`；完整升级边界见[数据库执行](persistence-runtime.md#同机文件批次的显式升级)。部署 skill 继续通过当前初始化入口创建新库，构建依赖与能力说明未变化，脚本无需调整。
+
+## 部署入口的自定义路径（2026-10-30）
+
+[真机部署 skill](../../.agents/skills/camctl-real-device-deploy/SKILL.md#首次部署的路径参数)的本地部署及交付安装入口共同支持五个 `paths` 参数。默认路径、参数注册和覆盖共用一个映射；显式参数在写出配置前生效，能力导出、初始化及 host 启动入口消费同一组路径，收据保留最终路径。状态库仍要求使用新文件。
+
+Linux 开发容器、Python 3.11.17 中，执行 `apps/camctl/.venv311/bin/python -m unittest discover -s .agents/skills/camctl-real-device-deploy/tests/unit -v`，7 项通过，退出 0。覆盖默认隔离、部分与全部覆盖、含空格与中文的路径、非法路径拒绝、已有状态库保护，以及 Python 3.6 入口保留路径参数。安装入口用例通过内存文件和命令替身，核对 `describe` 与 `init` 读取的最终 TOML 路径相同，启动脚本使用相同 `ready`、`processing`，没有实际安装组件、调用相机或修改状态库。
+
+按 skill 要求，使用现有安装版 camctl 的 `tmp/manual-validation-20261029/venv/bin/python`，设置 `PYTHONPATH=.agents/skills/camctl-real-device-deploy/scripts`，运行既有 `tests/integration` 目录的 unittest，15 项通过，退出 0。该范围使用真实临时 TOML、已安装的机身响应解析器及最小 CMake 工程，设备调用使用替身。没有新增或修改集成测试。两入口帮助、Python 3.6 入口与共用模块的语法检查、差异空白检查通过。
+
+日志为 `tmp/deploy-paths-unit.log`、`tmp/deploy-paths-existing-integration.log`，来源与检查收据为 `tmp/deploy-paths-receipt.json`。本项没有重建交付包、执行完整安装、在真实状态库执行初始化或连接真实相机；没有改写已有部署。
+
+## ADB 结果扫描与预览失败分类（2026-10-29）
+
+[修复计划](../superpowers/plans/2026-10-29-adb-result-reading-and-preview-diagnostics.md)接通单文件模式的同尝试目录清单与基准筛选、同目录同主干的当前配对查询，以及预览未确认的选择、持久化与客户端消费。元数据失败保留路径、命令、期限、耗时、退出和原始 stdout／stderr。新预览选择使用 V8 约束，V7 的显式升级复用已有完整副本流程；原选择和历史保持原判定。
+
+在 `/workspaces/camctl` 的 `3143113a` 基线加当前修复工作树，使用 Linux 开发容器、Python 3.11.17 执行以下单元范围，均退出 0：
+
+| 范围 | 结果 |
+| --- | --- |
+| 两个驱动的结果读取、文件适配、候选过滤，预览事实、选择及读取，初始化选项、格式门槛与已有升级流程，共 14 个文件 | 378 项通过，3.09 秒。 |
+| 拍摄准备、独立输出范围及准备写入的格式回归，共 3 个文件 | 66 项通过，0.39 秒。 |
+
+前者使用 `python -m pytest -p pytest_asyncio.plugin -p no:cacheprovider <范围> -q --tb=short`，后者另启用 `-p pytest_mock`；均禁用插件自动加载和字节码写入，显式设置 `PYTHONPATH=apps/camctl/src:apps/camctl/tests`。用例保留跨页、原片消失、身份歧义、完整帧、严格大小、部分成功和源绑定分区，新增 136 条路径中只读取 10 份新增大小、既有 LRF 不重复查询，以及观察到 LRF 后超时与可靠缺席的区分。格式回归保留旧最低版本，并补充 V7、V8 的合法分区及未支持格式拒绝。扩展范围首次因缺少显式 pytest-mock 插件、旧用例仍将已支持的 V7／V8 当未知格式而失败；完成上述调整后复核，原失败日志单独保留。
+
+最终调整结果读取游标的关闭责任后，该端口 7 项单元重新通过，0.20 秒，退出 0，不另计入上述 444 项。29 个变更 Python 文件的 AST、3 个 JSON、802 个本地文件链接及 Git 差异空白检查通过；链接检查只确认本地目标文件存在。
+
+用户提供的原日志重新按工具开始／返回记录汇总：OSMO 首轮扫描 74.686 秒，其中 63 次目录调用累计 62.490 秒、7 次超时；第二轮 74.712 秒，其中同样 63 次目录调用累计 62.243 秒、7 次超时。旧单文件逻辑为每份 LRF 重复递归列举完整 DCIM，并查询基准内旧文件大小；多次重复调用消耗每页期限。Action6 首轮也执行了 321 次目录调用、294 次元数据调用。以上是原环境的测量，不能作为修复后的速度。
+
+对复制状态库只用 `mode=ro&immutable=1` 消费既有结果页及当前产物：六组 OSMO 的 12 份原片保留默认选择，预览均归类为 `preview_unconfirmed`；已有正式预览的 Action6 选择保持有效。读取前后状态库 SHA-256 相同。旧 Action6 非法长度响应没有保存 stdout，无法据此确认相机端返回了什么；新增诊断和候选隔离不把非法响应解释为合法大小。
+
+原始命令输出、日志汇总、报告解析、只读状态库回放与源码收据保存在 `tmp/adb-preview-*`。客户端范围见[客户端验证](../client/verification.md#预览失败身份与原始报告复核2026-10-29)。权威资源同步完成，静态核对新旧选择恢复、普通及分段入口、错误登记、SQL 约束及升级参数转发。
+
+本项没有新增或执行集成测试，没有执行数据库结构检查脚本、实际 V7 到 V8 复制升级、目标部署、客户端数据库导入或真实相机。新浅层查询的固件选项、修复后的目标耗时、真实 SQL 写入和升级中断恢复仍待组合及现场验证。部署 skill 创建新库时使用当前初始化入口，无需改动其配置或脚本；既有 TX2 库未被升级或改写。现有 `single_file` 对原片数量的要求继续适用，来源配置须符合实际固件结果模式。
+
+## CLI 帮助命令的软件验证（2026-10-29）
+
+CLI 解析入口保留帮助的正常退出，并把帮助写入调用方指定的 stdout；真实帮助写入错误继续保留原异常及一次错误诊断。业务命令的错误监督与参数错误退出规则遵守[CLI 契约](../architecture/cli-commands.md#命令与用途)。
+
+Linux 开发容器、Python 3.11.17 下，以下定向单元范围 32 项通过，退出码为 0；覆盖顶层及四个子命令的 `-h`、`--help`、指定输出流、真实写入失败、版本输出，以及既有命令语法和通知描述符校验。
+
+```bash
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/bootstrap/test_command_output.py::TestParseCommand apps/camctl/tests/unit/bootstrap/test_command_output.py::TestMainSyntaxExitCode apps/camctl/tests/unit/bootstrap/test_notification_argument.py -q --tb=short
+```
+
+仓库之外的独立源码副本构建新 wheel，并在全新虚拟环境按锁定清单安装。安装版的 10 种帮助调用及版本调用均退出 0、stderr 为空；缺命令、未知命令、缺少计划路径和非法通知描述符四种调用均退出 1、stdout 为空，各保留一次参数错误诊断。wheel 与上一部署包逐文件比较，仅 `camctl/cli.py` 及 wheel 的 `RECORD` 清单不同；源码、wheel 和安装后的 CLI 字节一致。
+
+独立评审未发现阻塞问题。构建、依赖检查、进程结果矩阵及文件差异收据随修正版部署包保存于 `build-info/cli-help-verification.json`。本项未运行完整单元或组件集成套件，未运行拍摄业务、真实设备或 ARM64 验收，也未修改用户既有安装环境。
+
+[Hasselblad 真机验证与 H6 部署交接（2026-10-28）](hasselblad-real-device-verification-2026-10-28.md)记录安装版 C host 与真实机身的参数、双源取回、取消、未知活动恢复及有限失败，以及现场暴露的绑定和 JPEG 校验问题。真实媒体、供电见证、软件修复与尚未完成的范围分别列明；客户端不在本次范围。
+
+[关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
+
+## 照片缓存绑定失败的冷恢复（2026-10-28）
+
+源码 `7351cee5f318bff00719561c2cfa1d0795ab446f`（包含 `d51eadbe`）修复原读取绑定失败已保存、所属交付失败尚未提交时的恢复。直接设备源沿原路径；照片缓存从原结果事务的首事件固定历史边界，核实原 H、角色页、归档及 READ_END 与摘要不符事实，解析原设备来源后接续既有失败事务。取消或终态已经生效、缓存已清理时，仓储仅在原读取结果已核实且将返回既有只读收场的分区采用历史核验；活跃申请和没有原结果键的申请继续核当前资格，已保存业务键继续核原事务。原错误、结果键、时刻、身份及取消规则保持，恢复不新增读取、重拷或交付。
+
+环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/tmp/camctl-photo-binding-cold-recovery-20261028`。两个反例分别经 `advance_obtain` 和 `OutputsRepository.fail_read_binding` 入口证明旧代码拒绝合法照片缓存及取消后的历史收场，均退出 1。修复后，既有 `test_publication_discovery_isolated.py` 文件 7 项通过，既有直接设备恢复单例 1 项通过；主代理另在最终源码运行受影响的 `test_canceled_publication_isolated.py` 完整文件，48 项、15 个子测试通过，2.60 秒，三组均退出 0。各组在独立进程执行，使用源码及内存协作者；原装配在导入前隔离包资源与生产协作者。绿测命令为：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_publication_discovery_isolated.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_canceled_read_end_recovery_isolated.py::CanceledRecoveryTests::test_binding_failure_recovery_preserves_original_identity_and_key -q
+env -u PYTHONHOME -u PYTEST_ADDOPTS PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_canceled_publication_isolated.py -q
+```
+
+新增用例复用现有装配，从取回调度和仓储入口覆盖配置缺失、驱动不符、只读终态或取消退休、实时资格保留及错误来源拒绝，核对原申请和历史边界；不另建测试文件或框架。原结果加载和照片历史核验器在该单元中使用替身，因此拒绝传播不代表真实守卫对普通 HOST 或错误关联的组合已经验证。GPT-6-Astra 独立复核原事务边界、业务键重送、取消和终态分类后未发现剩余阻断。原始日志、命令及退出码收据归档于 `.local/verification/photo-binding-cold-recovery-20261028/`。上述软件验证不含真实仓储与 SQLite 冷重启、软件集成或设备流程；后续源码 `a9023ec0` 的构建、原环境安装及元信息核对已完成，见[真机记录](hasselblad-real-device-verification-2026-10-28.md)。当前安装版另已取得两类 DEVICE 来源、RESULTS 进程中断恢复和 START 结果丢失后新请求检查恢复的实际证据；这些流程不等于本修复的“读取绑定失败已提交、交付失败尚未提交”事务间隙已经经过真实冷重启验证，该具体范围仍待验。
+
+## implement_camctl 合并的软件验证（2026-10-28）
+
+在 `fix/capture-results-and-delivery-recovery-20261028` 合入 `implement_camctl` 的 `07c13be7a6b7b15564ad4086dee4d9c47f7e0d0c`；合并前本分支为 `2312207b889707f1b128eac01af50b93c17bd4fc`，共同基线为 `61e73c8ac4e32dc5511664e0dd9f6c0a167926d3`。本地来源分支包含已拉取的远端提交。本次保留拍摄结果、发布取消及错误诊断修复，并接入 Hasselblad 原机来源、同步副本与有限缓存恢复。
+
+RESULTS 恢复先持有原实际返回或未知结果，再由消费者决定重试或结束；Hasselblad 使用原 `local_result_recovery` 证据。DEVICE 照片的 `LISTED/CLOSED` 消费者先恢复可靠角色页的文件责任，再保存 RESULTS 结论。取消取回仅核对照片缓存的历史关联，缓存释放或清理不阻断同键及终态新键恢复；首次读取资格仍要求当前可用的缓存。
+
+环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/home/cld/.codex/worktrees/7426/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。各组在独立进程执行；清除 Python 与 pytest 外部选项、禁用插件自动加载和字节码写入。导入前隔离协作者或包资源，并阻止真实数据库连接、线程及子进程；只读取源码及使用内存替身。最终六组均退出 0，禁止器触发次数为 0。
+
+| 范围 | 结果 |
+| --- | --- |
+| `capture/test_hasselblad_device_results_isolated.py`、`capture/test_result_recovery_owner_isolated.py` | 25 项通过。 |
+| `outputs/test_publication_discovery_isolated.py`、`outputs/test_canceled_publication_isolated.py` | 53 项、15 个子测试通过。 |
+| capture 的六个 `test_photo_*_isolated.py`；devices 的 `test_hasselblad_device_response_isolated.py`、`test_hasselblad_frozen_storage_isolated.py`；host_files 的 `test_photo_cache_reader_isolated.py`、`test_photo_result_workspace_isolated.py`、`test_photo_sync_observation_isolated.py` | 113 项通过。 |
+| [拍摄结果与普通交付恢复](#拍摄结果与普通交付恢复的软件验证2026-10-28)第一组中除 `test_result_recovery_owner_isolated.py` 外的十个文件 | 133 项、8 个子测试通过；原结果拥有者另计入第一行。 |
+| [错误日志投影与诊断复用](#错误日志投影与诊断复用的软件验证2026-10-28)第一组四个隔离文件 | 128 项通过。 |
+| `host_files/test_capture_sources_jpeg_boundary.py` | 101 项通过。 |
+
+以上路径均相对于 `apps/camctl/tests/unit/`，共 553 项、23 个子测试；重复运行不重复计数。命令、隔离入口及完整日志收据保存在 `tmp/implement-merge-20261028/`。新增接缝用例分别证实登记故障不结束原 RESULTS、缓存清理后历史关联仍可核验而不授予新读取资格，以及取消恢复拒绝替换缓存身份。取消恢复样例的交付此前已失败，原取消组只含动作终态，返回的首次清理集合为空；该样例不证明 PUBLISHING 的非空清理集合恢复。既有 AST 抽取用例只验证恢复持有逻辑，不作为真实组件组合证据。
+
+独立静态复核覆盖两边的 capture、outputs、装配、诊断及数据库契约接缝，修正问题后未发现剩余阻断项。52 个变更 Python 文件的 AST 解析、事件转换 JSON 解析及差异空白检查通过。最初测试入口过度限制了无 I/O 的源码导入，禁止器在导入发生前中止；补齐必要的纯源码白名单或资源替身后执行上述最终范围，没有读取真实包资源。接缝红测与测试装配失败不计为最终通过。
+
+本次没有新增或运行集成测试；来源分支中一个既有组件集成用例的 HOST 模式参数变更随分支合入，该用例没有运行。部署脚本从源码构建并生成能力说明，未增加部署依赖或配置字段，脚本无需调整。本次没有构建安装包、部署既有环境，也未执行 TX2、真实相机或物理断电验收。
+
+
+## 错误日志投影与诊断复用的软件验证（2026-10-28）
+
+[修复计划](../superpowers/plans/2026-10-28-error-log-projection-and-ownership.md)完成成功设置 stdout 摘要、同记录重复错误引用、会话最终摘要复用原诊断，以及报告内部通信的异常图边界保存。实际调用结果、数据库证据、机器会话 reason/details 保持各自的原编码；新收场错误及诊断登记失败仍交付完整适用事实。
+
+受测源码为 `1345a4291822db9686828bcd04be80c37b4db932`，环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/home/cld/.codex/worktrees/7426/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。使用显式源码路径，禁用插件自动加载及字节码写入；旧异步用例只显式启用 pytest-asyncio。单元替身隔离包资源、业务文件、数据库、网络、线程和子进程，被测源码加载保留。各范围按进程可变模块状态分别执行。
+
+| 范围 | 结果 |
+| --- | --- |
+| 公共投影、会话来源及控制选择、最终格式函数使用实际纯投影、H4 原调用消费者，共 4 个隔离文件 | 128 项通过，6.43 秒，退出 0。 |
+| 7 个既有日志单元文件、异常图编码器、CLI JSON 诊断和本地收场异常图，共 10 个文件 | 217 项通过，1.43 秒，退出 0；资源、线程、数据库及子进程禁止器触发次数为 0。 |
+
+执行命令为：
+
+```bash
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/logging_runtime/test_projection_isolated.py apps/camctl/tests/unit/session/test_outcome_diagnostic_sources_isolated.py apps/camctl/tests/unit/bootstrap/test_error_projection_handoff_isolated.py apps/camctl/tests/unit/operations/test_h4_diagnostic_consumer_isolated.py -q --tb=short
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python tmp/error-log-repair-20261028/run_audited_units.py
+```
+
+第二组入口只包含 `operations/test_error_diagnostics.py`，日志目录的 `test_diagnostics.py`、`test_log_diagnostics.py`、`test_diagnostic_durability.py`、`test_diagnostic_reservations.py`、`test_diagnostic_write_receipts.py`、`test_logger.py`、`test_standard_logging.py`，以及 bootstrap 的 `test_cli_json_diagnostics.py` 和 `test_local_work_error_diagnostics.py`。完整禁止器、命令、源码、进程回执和日志收据保存在 `tmp/error-log-repair-20261028/`。
+
+既有布局断言已迁移到可解析引用、稳定诊断身份和结构化摘要，原错误字节、完整异常组、共享回执、顺序和控制对象断言保留。旧 `test_session_terminal_diagnostics.py` 仍因顶层导入真实登记资源而未运行；其中六种直接异常与两种失败结果分区，已由隔离的实际会话入口承接，保留 23 成员宽异常组、16 层深异常组及取消对象身份。新增最终格式函数单元使用真实纯投影函数，实际文件通道、队列、进程和数据库均使用替身。
+
+独立静态评审覆盖投影、预编码及嵌套异常图、报告编码与解码、stderr 回退、会话来源合并、报告 worker 收场、诊断登记失败和后到控制异常。处理确定问题后复核未发现剩余阻塞。17 个变更 Python 文件的 AST 解析与差异空白检查通过。部署依赖、配置和能力说明不变，部署脚本按原目录复制源码，工作规则及部署脚本不需调整。
+
+受控的 16 次成功设置、1 次失败设置样本，原始展开为 418568 字节，日志投影为 2977 字节；该用例另行输出体积收据并退出 0，已包含在上述通过数内。测试同时证明源对象不变。此数值只表示合成 JSON 输入的投影变化，不代表客户日志重跑、目标吞吐或真实相机验证。
+
+本次没有新增、修改或运行集成测试，也未执行全量单元套件、真实报告进程通信、安装包、TX2、真实设备及物理断电验收。文件日志和 stderr 都不可用时继续保留原控制传播及停止重试边界，不能保证诊断输出。
+
+
+## 拍摄结果与普通交付恢复的软件验证（2026-10-28）
+
+[修复计划](../superpowers/plans/2026-10-28-capture-result-and-publication-recovery.md)完成首次配对的事务内边界固定、原 RESULTS 结果与业务处置共同保存，以及普通 PUBLISHING 的发现和取消收场。公共路径覆盖 Action6、OSMO 360 II 与 Hasselblad；Hasselblad 主机照片继续使用原 START 及文件恢复依据。
+
+最终受测生产源码为 `f1aa91a97d8d2d82842ecb9570bb658d83232a30`。环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/home/cld/.codex/worktrees/7426/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。显式指定源码路径、禁用插件自动加载及字节码写入，隔离真实包资源、数据库、业务文件、网络、线程和子进程；只加载被测源码与内存协作者。
+
+| 独立进程范围 | 结果 |
+| --- | --- |
+| 配对、原结果拥有者与消费者、Hasselblad 恢复边界、取消录像读取、普通停止、分段完成、内部绑定、可用性装配、设备可用性及取消读取收场，共 11 个隔离文件 | 145 项、8 个子测试通过，4.52 秒，退出 0。 |
+| 普通发布发现与取消发布恢复，共 2 个隔离文件 | 52 项、9 个子测试通过，2.28 秒，退出 0。 |
+
+完整命令如下；两组在独立进程中运行，发布测试要求进程没有先前加载的 `camctl` 模块。
+
+```bash
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/persistence/test_result_pairing_atomic_isolated.py apps/camctl/tests/unit/capture/test_result_recovery_owner_isolated.py apps/camctl/tests/unit/capture/test_result_consumers_isolated.py apps/camctl/tests/unit/capture/test_h1_recovery_boundaries_isolated.py apps/camctl/tests/unit/capture/test_canceled_processing_read_isolated.py apps/camctl/tests/unit/capture/test_normal_recording_stop_isolated.py apps/camctl/tests/unit/capture/test_segment_completion_recovery_isolated.py apps/camctl/tests/unit/capture/test_saved_internal_binding_recovery_isolated.py apps/camctl/tests/unit/operations/test_availability_binding_assembly_isolated.py apps/camctl/tests/unit/devices/test_h2_availability_port_isolated.py apps/camctl/tests/unit/outputs/test_canceled_read_end_recovery_isolated.py -q --tb=short
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_publication_discovery_isolated.py apps/camctl/tests/unit/outputs/test_canceled_publication_isolated.py -q --tb=short
+```
+
+配对和 RESULTS 的独立评审核对原申请、事务、守卫、恢复和各设备消费者。发布评审进一步核对持文件资格后的状态重读、观察期间取消、已发生交接、普通未知失败的两个出口、原键重送、目标独立发现、分页、有效父明细及首次清理；处理发现后复核未发现剩余阻塞。24 个变更 Python 文件的 AST 解析、事件转换 JSON 解析和差异空白检查通过。部署脚本按目录复制源码和权威资源，本次没有新增依赖、配置或能力声明，脚本及工作规则不需修改。
+
+验证期间有一轮新增单元用例因延迟导入未隔离，触及真实包资源目录，随后在资源名检查失败；没有读取到资源字节，也没有访问数据库或设备。该轮结果作废，补齐贯穿模块执行的导入阻断器和资源失败替身后重跑；原取消证据守卫覆盖保留。另一次合并运行中，前序 AST 测试留下的合成模块使发布测试的清洁进程检查中止，随后按上述独立进程范围执行。配对与 RESULTS 合并时缺失的协作者替身已补齐，没有放宽断言。
+
+原始命令、日志、源码及退出码收据保存在 `tmp/capture-result-repair-20261028/`。本次没有新增或修改集成测试文件，也未调用集成测试入口；上述资源目录触达属于验证越界，已经作废。三个既有 `test_flow_events.py` 调用点只补齐 staging 参数，该文件未运行。真实 SQLite／文件／执行器组合、安装包、TX2、真实相机及物理断电均未验证，单元与静态评审结果不替代这些验收。
+
+
+## 错误日志的断电持久性软件验证（2026-10-27）
+
+[分级写入完成要求](../architecture/logging.md#分级写入完成与断电持久性)将 ERROR／CRITICAL 的成功回执绑定到文件及必要目录同步；普通调用继续立即提交。原记录的追加、持久性及 stderr 交付分别保存，副本失败不会重写已经追加的原记录。[实施计划](../superpowers/plans/2026-10-27-error-log-durability.md)已完成软件范围，使用方式见[通用日志入口](logging-runtime.md#日志异步投递入口与有界队列)。
+
+最终受测源码为 `b3d0ebf237f173b754c5bd56078c53cf2e37b6b8`。环境为 Linux x86_64 开发容器、CPython 3.11.17、SQLite 3.53.1，工作目录为 `/workspaces/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。显式绑定所属源码及测试路径，清除计时和 Python 环境变量，逐进程串行运行。实际 UTC 为 11:23:41—11:26:26，以下全部进程退出 0；命令统一为 `python -m pytest <范围> -q --tb=short`。
+
+| 检查范围 | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 9696 项通过、1 项跳过、2 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/logging_runtime` | 完整目录 295 项通过、1 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/bootstrap` 的五个日志文件及六个副本节点，精确命令保存在收据中 | 31 项通过；含真实生产装配、文件／目录同步失败、原控制异常及副本拥有者诊断。 |
+| `apps/camctl/tests/integration/session/test_custom_delivery_durability.py` | 6 项通过；公开 `SessionContext`／`run_session` 覆盖三种自定义交付形状及两类写入事实。 |
+| `apps/camctl/tests/integration/outputs/test_read_diagnostics.py` | 14 项通过。 |
+| `apps/camctl/tests/integration/persistence/test_snapshot_error_diagnostics.py` | 2 项通过。 |
+
+348 项相关集成保留取消、禁用、正常排空及原异常去重，新增真实文件同步门闩及失败见证。INFO 先创建或轮换后的 ERROR、新建目录链、日志文件符号链接的实际目标目录及正式名字目录均覆盖；同步失败仍保留实际追加事实，不确认持久成功。轮换使用正式名字间的硬链接，覆盖搬迁、删除及整理期间的中断，恢复先按文件身份去重和压紧，再判断正常淘汰。保留数为 1 的截断及最旧超限归档删除保持原规则。
+
+错误收场分别核对文件操作控制与副本既有有序异常选择，保持原异常对象、因果及完整写入事实。实际副本拥有者在原日志同步失败后交付一次完整错误诊断；原日志已持久而复制、发布或解锁失败时，仍保留原日志成功事实。stderr 入口、不可读／不可附加的异常事实和关闭摘要均通过公共入口验证，不能用附属诊断失败改写原控制或已经完成的写入。
+
+最终独立审查核对相同生产文件摘要，并以 9 个公共分区复核旧副本异常选择、独立解锁控制及两入口的符号链接目录同步，退出 0。分域较早探针各自保留实际快照，不计为最终来源重跑。完整命令、UTC、环境、来源、日志及退出码位于 `.local/verification/error-log-durability/final/`；分域、基线与独立审查原始证据分别在同级 `agents/`、`review/`，首次合并检查保存在 `attempt-df5d911b/`。
+
+文档的 5777 个本地文件链接检查及差异空白检查通过，新增标题锚点另行核对。
+
+首次合并检查为单元通过、日志集成 282 项通过及 2 项副本异常选择回归；保留旧断言修复后，最终完整日志目录通过。额外扩大 bootstrap 检查中的旧报告调度等待超时、低层接纳的 stderr 断言及报告身份文案断言，均在 `08abcafb` 隔离基线复现，未计为本轮最终范围通过。失配的格式化及轮换故障替身已迁移到实际边界，保留原断言；旧 session 三个形状因已废弃的 `open_connection` 装配在进入目标前失败，其覆盖由上述公开会话六分区承接，未将原文件称为通过。
+
+本记录证明软件同步调用、顺序、失败处理及回执接线，不替代目标 ARM Linux 文件系统和存储设备的物理断电验收。本项未部署、未更新真机验证安装，未执行真实相机、目标性能、Windows 或 macOS 验收。
+
+## 调用即提交与写入回执验证（2026-10-27）
+
+[通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)在调用时立即提交，忽略返回回执也会由原日志线程继续处理。`await logger.info(...)` 或稍后 `await receipt` 等待该条文件追加并 flush 的实际结果，不要求每条 fsync。原诊断及日志副本共享同一条写入事实，底层 alog 仍只等待接纳。使用方式见[日志入口](logging-runtime.md#日志异步投递入口与有界队列)，实施进度见[回执计划](../superpowers/plans/2026-10-27-log-write-receipts.md)。
+
+最终受测生产源码为 `64b6625054ad85e40f668f00082dca8a46c2f15a`，环境为 Linux x86_64 开发容器、CPython 3.11.17、SQLite 3.53.1。工作目录为 `/workspaces/camctl`，解释器为 `apps/camctl/.venv311/bin/python`；显式使用本工作区源码路径，清除计时及 Python 环境变量。同一工作区的集成 pytest 逐进程执行。实际 UTC 为 09:51:27—09:54:20，以下各进程均退出 0。
+
+| 命令范围，统一使用 `python -m pytest <范围> -q --tb=short` | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 9685 项通过、1 项跳过、2 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/logging_runtime` | 189 项通过、1 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/bootstrap/` 中的 `test_logging_composition.py`、`test_one_shot_logging.py`、`test_cli_error_diagnostics.py`、`test_foreground_error_scopes.py`、`test_report_diagnostic_ownership.py` | 22 项通过。 |
+| `apps/camctl/tests/integration/outputs/test_read_diagnostics.py` | 14 项通过。 |
+| `apps/camctl/tests/integration/persistence/test_snapshot_error_diagnostics.py` | 2 项通过。 |
+
+227 项定向集成覆盖真实队列、线程、文件及诊断消费者，包含 24 项通用 Logger 组合。验证不等待时业务继续、实际 flush 后回执完成、混合级别与旧入口共同排序、满载重要日志补位、取消一个等待者不撤回记录、重复等待不重投、正常退出排空、过滤及未写入的明确结果，以及禁用途中实际写入成功的事实。日志副本覆盖实际追加后复制失败、抑制、未开始及未写入的责任归还。
+
+满载补位与接纳通知共用原通道，未创建逐条后台任务。失败路径回归覆盖按原顺序降级、writer 与 stderr 降级同时失败时全部回执终结、控制异常在收场后继续传播、回执回调相互完成时不死锁、不可格式化的 writer 异常及禁用时低层接纳等待及时结束。源位置、调用时冻结、上下文和媒体过滤保留原覆盖。
+
+最终独立审查核对上述生产源码，并以 8 个公共接口内存探针复核降级顺序、控制异常收场、回执回调锁序、不可格式化异常及原 alog 的禁用接纳；全部探针退出 0，没有未闭合项。文档的 5767 个本地文件链接检查及差异空白检查通过，新增标题锚点另行核对。
+
+完整命令、UTC、来源、环境、退出码与原始日志位于 `.local/verification/log-write-receipts/final/`，分域原始证据归档于同级 `agents/`。本项未执行全部组件集成套件、安装包或真实相机验收，未更新真机验证安装。
+
+## 通用日志入口验证（2026-10-27）
+
+[通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)提供 `get_logger` 通用调用及 `get_sync_logger` 的低级别同步调用；[使用示例](logging-runtime.md#日志异步投递入口与有界队列)说明入口和原错误责任的关系。生产命令开始记录及快照维护默认警告已使用通用入口，文件拥有者的真实工作线程沿每次调用复制上下文。
+
+最终组合源码为 `c2ac8ea93718508998120117346d8766044ff7ea`，在 Linux 开发容器、Python 3.11.17、SQLite 3.53.1 下验证。工作目录为 `/workspaces/camctl`，解释器为 `apps/camctl/.venv311/bin/python`；显式使用本工作区的源码与测试路径，清除不应传入子进程的计时和 Python 环境变量。同一工作区的集成 pytest 按目录顺序执行。
+
+| 命令范围，统一使用 `python -m pytest <范围> -q --tb=short` | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 9658 项通过、1 项跳过、2 条既有 asyncio 标记警告；退出 0。 |
+| `apps/camctl/tests/integration/logging_runtime` | 157 项通过、1 条既有 asyncio 标记警告；退出 0。 |
+| `apps/camctl/tests/integration/bootstrap/` 中的 `test_logging_composition.py`、`test_one_shot_logging.py`、`test_cli_error_diagnostics.py` | 18 项通过；退出 0。 |
+| `apps/camctl/tests/integration/persistence/test_snapshot_error_diagnostics.py` | 2 项通过；退出 0。 |
+
+177 项定向集成覆盖真实有界队列、文件和 stderr、工作线程、CLI 与数据库入口，包含 9 项新增通用 Logger 组合。观测覆盖同一模块 Logger 的并发隔离、调用时冻结及源位置、满载时低级别立即返回、重要日志重复取消时仍只交接一次、独立必要停止继续推进、原异常向外层传播去重、正在交接及日志副本预留／接管的所有权、通道禁用与有序关闭。消息及异常格式化失败仍沿共同快照过滤媒体 stdout，并保留可取得的 stderr 与错误事实。
+
+文件线程缺失上下文、消息格式失败提前转为 repr 导致媒体进入日志、以及已结束目标的多条诊断在首条控制异常后留下等待者，均先用反例复现，再修复并复验。独立审查另以公共消费者内存探针核对实际 JSON、异常状态和原控制异常；已报告问题均已闭合。
+
+完整命令、UTC、源码身份、环境、退出码和日志保存在 `.local/verification/generic-logger/final/`，分域原始记录及红绿证据归档于同级 `agents/`。上述结果不代表全部组件集成回归或真实设备验收；本次没有更新真机验证安装，也没有执行新的相机拍摄。
+
 [设计入口](README.md) · [实现总览](implementation.md)
 
 本页定义 camctl 实现的测试分工和跨职责验证要求。各业务专题中的决策表及验收场景仍须逐项落实。具体阶段与门禁见[第一版实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)，接口、测试文件、失败用例和执行步骤见其引用的[模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)及[跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md)。进入代码实施前核对所需前置交付和实际代码。
@@ -15,6 +260,74 @@
 [合计内存预算测试结果](memory-budget-test-results.md)记录测试侧统一进程树预算、sudo 委派及批量持久化用例的改造。在该报告标明的基线上，真实限额专项、513 条输入的容量测试及 CLI／host 部署检查均已通过；逐项耗时、实际峰值和有限负载边界由原报告维护。严格无交换运行能力另行验证，目标与运行入口见[内存预算测试说明](memory-budget-testing.md)。
 
 [完整集成回归与测试接口审计（2026-10-26）](integration-regression-2026-10-26.md)保存同步 `272fda66` 后的失败结果及补跑。当前容量测试被共享环境准备阻断，清理目录复用还导致部分最终预算收据丢失；历史通过记录不能替代该基线的完整验收。公开接口、失败归因、合并修复和后续迁移边界集中在该记录中。
+## Action6 会话设置的临时输出处理（2026-10-26）
+
+Action6 将关闭延时摄影熄屏省电和两路屏幕实时画面的设置纳入[相机会话准备](../architecture/camera-parameters.md#相机会话准备)的临时输出处理，普通准备和软件恢复共用同一精确命令规则。调用历史继续保留原始 stdout、stderr 和确认依据；调用错误及其他命令按各自契约处理。
+
+两路实时画面设置的扩展在 Linux 开发容器、Python 3.11.17 下，使用下述相同四个测试文件执行定向单元验证，**130 项通过，1.57 秒，退出 0**。六条会话设置均覆盖返回文字忽略、原输出保留、同会话缓存、新会话重发、真实调用故障和软件恢复；码率及 OSMO 继续核对自己的输出规则。拆分预算中的两条实时画面接受用例在生产修改前失败，省电设置对照用例通过。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-liveview-output-20261026/`。本项未运行集成测试或真实设备验证。
+
+提交 `aac523d8` 已更新到现有真机验证安装。331 个生产 Python 文件及 27 项资源在提交归档、wheel 和安装副本中逐字节一致，主代理另行核对核心命令文件与当前源码一致；安装后的隔离导入检查确认两路实时画面命令均使用临时输出处理。5375 个现有配置、业务数据、日志、host 和客户端文件的部署前后摘要一致，依赖版本与主机 ADB 路由保留。host 和 camctl 保持停止，客户端继续运行；本次安装未执行数据库或设备命令。完整收据和旧 wheel、状态库、配置备份位于 `.local/deployments/20261026-action6-liveview-output/`。
+
+Linux 开发容器、Python 3.11.17 下，执行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_action6_session_settings.py apps/camctl/tests/unit/devices/test_session_setup_budget.py apps/camctl/tests/unit/devices/test_osmo360ii_session_settings.py apps/camctl/tests/unit/devices/test_camera_power_session_settings.py -q --tb=short`，**113 项通过，1.45 秒，退出 0**。覆盖普通录像、原生延时、独立准备、软件恢复、原输出保存、会话缓存、调用失败以及 OSMO 的严格输出检查。使用正式驱动与受接口约束的传输替身；更新后的省电设置接受用例在生产修改前失败。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-lapse-lock-20261026/`。本项未运行集成测试或真实设备验证。
+
+提交 `c4301d4e` 已安装到 `/home/cld/.camctl/manual-validation-20261026`，安装解释器为 Python 3.11.17、SQLite 3.53.1。331 个生产 Python 文件及 27 项权威资源在提交归档、wheel 和实际安装中逐字节一致；包内另一个 Python 文件为资源示例脚本，随资源共同核对。主代理另行核对核心命令文件与当前源码一致，安装后的隔离导入及临时输出处理检查通过，依赖版本保留。5369 个现有配置、业务数据、日志、host 和客户端文件的部署前后摘要一致，主机 ADB 路由保留。安装完成时 host 和 camctl 均已停止；交付记录整理期间观察到 host 启动，保留该运行状态，进程观察另存于部署目录的 `final-processes.json`。旧 wheel、状态库与配置备份及完整收据位于 `.local/deployments/20261026-action6-lapse-lock/`，安装过程未执行数据库或设备命令。
+
+## 会话设备配置的独立预算（2026-10-26）
+
+[实施计划](../superpowers/plans/2026-10-26-session-setup-budget.md)为 ADB 相机的首次会话设备配置单独授予 30 秒，普通设置使用整体预算扣除设备配置部分后的完整控制预算。准备拥有者冻结本次整体与阶段预算；实际阶段分别计时，不能互相借用额度。候选发现、唤醒、准备占用及范围收尾使用同一个实际提前量：默认首次最多提前 40 秒，同会话配置缓存后恢复 10 秒，0 继续关闭提前准备。真正 START、基准读取及软件恢复保持原有各自期限。Action6 的返回文字处理遵守[相机会话准备](../architecture/camera-parameters.md#相机会话准备)。
+
+源码 `d55acfa2` 在 Linux 开发容器、Python 3.11.17 下，拍摄、装配及受影响驱动定向单元 **2599 项通过，44.35 秒，退出 0**。覆盖设备配置满 30 秒后普通设置仍获完整预算、两个阶段各自超限、缓存及新会话、原错误与调用事实、取消、冻结意图和实际请求一致、0 提前量及范围触发。生产装配使用真实驱动与受约束传输替身，验证缓存使提前量由 40 变为 10，重开会话再变为 40；数据库边界使用替身。原日志及收据位于 `.local/verification/session-setup-budget-20261026/`。未运行集成或真实拍摄，未增加操作种类或状态库格式。
+
+提交 `d55acfa2` 已安装到现有真机验证环境，主代理逐字节核对七个生产接缝在源码、wheel 和安装中一致。部署保留主机 ADB、配置及业务数据，host 和 camctl 已停止；收据位于 `.local/deployments/20261026-session-setup-budget/`，实际拍摄由用户继续验证。
+
+## 分段来源的选择等待（2026-10-26）
+
+待选来源批次一次带回来源动作状态、分段策略和录像处理状态。分段来源尚在拍摄或适用处理未结束时，编排直接等待，不逐来源读取完整事实或提交选择事务；来源结束后，下一轮沿原仓储事务复核并固定。已持有的保存与诊断回执继续优先恢复，普通非分段选择沿原路径执行。
+
+Linux 开发容器、Python 3.11.17 下，`test_pending_source_selections.py` **21 项通过，0.99 秒，退出 0**，日志位于隔离工作区 `.local/verification/pending-segment-selection/unit.log`。用例使用数据库和批次发现替身，覆盖两种分段策略的拍摄等待、终态转换、检查／修复／丢弃等待、原保存恢复及错误、普通来源选择和空候选；未运行真实 SQLite 查询组合、集成或设备测试，未重测现场事务数量及耗时。
+
+主分支合并后，取回、装配及拍摄准备相关单元 **1833 项通过，22.50 秒，退出 0**；相机驱动相关定向单元另为 **265 项通过，4.57 秒**，两组存在重叠，不合计为唯一用例数。相机失败结果及逐条计时现在附带实际设备命令和本次剩余调用期限，原错误码、响应和退出事实继续保留。新增两个分区先复现命令缺失，再验证超时和非零退出时的上下文。日志及诊断副本批次查询的只读核对位于 `.local/verification/latest-plan-obtain-wait-20261026/`；未运行集成测试或重新执行拍摄。
+
+提交 `bf145155` 已安装到现有真机验证环境，主代理核对取回编排、分段选择仓储及相机驱动在源码、wheel 和安装中一致。主机 ADB 路由保持，host 和 camctl 已停止；部署收据位于 `.local/deployments/20261026-obtain-source-wait/`。现场新计划的空事务数量和 OSMO 设置超时原因由后续人工验证继续确认。
+
+## 已结束活动的输出范围收尾（2026-10-26）
+
+公共保存入口允许范围末页与原尝试共同保存，仓储继续限制范围责任只能提交范围事实。定向单元 **38 项通过，1.25 秒，退出 0**，Python 3.11.17；新增用例实际经过末页处置、结果持有、可靠保存和仓储分派，覆盖实时结果、已保存末页恢复、无关操作拒绝及保存未知或回滚时原页和原键保留。另覆盖范围已固定但占用未释放时，在后续有效准备期间只继续原释放而不新增读取或尝试。首批五个保存入口分区在修改前有三个失败；最终日志位于 `.local/verification/scope-result-save-20261026/unit.log`。数据库和设备边界使用替身，未运行集成或设备验证。
+
+范围保存及释放接续提交 `d8f83839` 的安装记录核对了两个生产入口及事件登记在源码、wheel 和安装中一致，并确认当时 host 与 camctl 已停止。部署收据位于 `.local/deployments/20261026-scope-result-save/`。该次部署未初始化或迁移状态库，保留已保存的范围末页。
+
+范围责任的事件登记覆盖普通流程的建立、实际配置、结束，首次及后续尝试，以及重试等待的建立、完成和放弃。上述八处种类约束接受 `RESOLVE_OUTPUT_SCOPE=11`，原事件校验继续生效。Linux 开发容器、Python 3.11.17 下，内存登记替身与历史解码定向单元 **179 项通过，0.72 秒，退出 0**；新增单元分别验证创建种类和完整前态种类，不读取真实包资源。日志位于隔离工作区 `.local/verification/scope-event-registration/unit.log`。真实包资源的九项登记回归归入 `tests/integration/history/test_scope_event_registration.py`，本次未运行；这些单元结果不证明构建、安装内容或真机流程。
+
+事件登记修复 `097fce88` 的安装记录逐字节核对权威事件登记、wheel 内资源和实际安装资源一致，并核对上述八处声明均包含种类 11。部署收据见 `.local/deployments/20261026-scope-events/`，单元日志副本及安装核对见 `.local/verification/scope-events-20261026/`。该次部署未运行初始化、迁移或设备命令。
+
+[实施计划](../superpowers/plans/2026-10-26-ended-output-scope.md)将已结束但范围未知的占用接入后续有效拍摄的提前准备。Action6 与 OSMO 的范围读取只保存目录身份与分页结束，不调用文件元数据；保留原结束后等待。原基准差集的全部归属核实后，独立保存范围确定事实并按统一条件释放旧占用。旧拍摄终态、错误、原 RESULTS 次数保持，范围责任独立有限计数。格式 V6 及显式输出范围升级入口保留已有库和历史。
+
+提交 `10492c1a` 验证准备完成后由 `pending` 转为 `running` 的衔接：录像和延时摄影在 START 前再次核对准备时，继续取得原准备凭据；同样允许仍在准备中的 `running` 动作触发旧范围收尾。新增三个分区在修复前失败，修复后 `test_scope_closure.py` 与 `test_preparation.py` 共 **86 项通过，6.13 秒**，Python 3.11.17，退出 0。原日志位于 `.local/verification/report145-start-state-20261026/unit.log`。范围收尾开关在该状态转换用例中真实启用，准备和范围模块共同执行，数据库与设备边界使用替身；未运行集成测试或设备命令。
+
+`10492c1a` 已构建并安装到 `/home/cld/.camctl/manual-validation-20261026`，主代理核对了实际安装源码及当前索引。host 和 camctl 已停止，使用原启动脚本继续人工验证。部署未初始化或迁移状态库，收据位于 `.local/deployments/20261026-start-state/deployment-receipt.json`。
+
+Linux 开发容器、Python 3.11.17 下，持久化、操作及升级定向单元 **617 项通过**；接通后的拍摄、装配及受影响驱动单元 **2299 项通过，35.75 秒**；最后接口与新入口定向 **43 项通过，1.38 秒**。新驱动分区覆盖两台相机的单文件及分段模式、大小未知、停止后等待和目录错误；生产入口分区覆盖独立责任、原失败保持、释放、失败重试及无有效触发时不读取。原始主代理日志位于 `.local/verification/output-scope-20261026/`。本次不运行集成或真实设备验证，由用户在安装后人工验证。
+
+提交 `32743a43` 已安装到现有真机验证环境，停止后原库完整备份并显式升级为 V6，升级命令退出 0，依赖检查通过。主代理另行核对六个生产入口的安装字节及当前索引。配置、能力说明和客户端、host 安装版本保留，未启动实际业务会话或设备命令。收据及原库备份见 `.local/deployments/20261026-output-scope/`。
+
+## 已保存拍摄结果的收尾恢复（2026-10-26）
+
+[修复计划](../superpowers/plans/2026-10-26-results-closed-recovery.md)落实原结果已经保存而后续整理尚未完成的恢复。公共结果入口先恢复原文件子责任，再按原重试要求分派：无需重试时返回经原票据、归属、结果和页时刻校验的 `CLOSED` 输入；需要重试时保留原间隔和累计次数；原在途尝试继续由原拥有者处理。原页发现查询同时取得重试标记，不增加独立查询，有页结果复用原文件恢复已经取得的输入。
+
+Linux 开发容器、Python 3.11.17 下，新增九项定向单元通过，覆盖有无设备端口、有无分页、原文件信息读取错误、正常成功但未全的重试、3 秒间隔边界、在途尝试、原归属及文件登记错误保持。测试使用受接口约束的数据库、仓储和文件登记替身，保留真实结果解码与页校验，不连接真实数据库或设备。最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2222 项通过，35.62 秒，退出 0**；独立审查通过。原始日志保存在 `.local/verification/results-closed-recovery-20261026/`。本次未运行集成测试，真实设备恢复由用户验证。
+
+修复提交 `e32d1996` 已安装到现有真机验证环境。328 个生产 Python 文件、27 项权威资源及 2 个构建辅助文件三方一致，依赖检查通过；主代理另行逐字节核对全部生产 Python 文件和当前索引。状态库、配置、两份能力说明摘要及依赖版本保持，host 与客户端安装版本保留。部署证据见 `.local/deployments/20261026-results-closed/`，部署未启动实际会话或连接原数据库。
+
+## 延时摄影共享结果清单的并发修复（2026-10-26）
+
+[修复计划](../superpowers/plans/2026-10-26-timelapse-scan-concurrency.md)针对共享清单的异步遍历：延时摄影处理器先同步固定扫描条目，再异步查询归属，保持跨设备并发与原页保存责任。相邻原申请恢复循环已经固定条目后再等待；新增回归通过公开 `capture_handler("camera_timelapse")`、受接口约束的替身及明确同步点控制交错。
+
+Linux 开发容器、Python 3.11.17 下，旧代码的四项增删交错均稳定触发 `dictionary changed size during iteration`，两项错误保持用例通过。修复后新增六项通过，覆盖另一设备新增、移除扫描，当前动作有无原页，原申请及操作键只保存一次，异动作原页保持未消费，新增扫描在后续推进可见，以及查询异常、保存错误的原异常链保持。
+
+最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2213 项通过**，耗时 32.79 秒，退出 0。原始失败、通过日志与执行证据保存在 `.local/verification/timelapse-scan-concurrency-20261026/`。本次未运行集成测试或调用设备；OSMO 文件信息读取超时属于独立的现场问题，不计入此项修复结论。
+
+修复提交 `b3d00889` 已安装到 `/home/cld/.camctl/manual-validation-20261026`，Python 3.11.17、SQLite 3.53.1，依赖检查通过。328 个生产 Python 文件、27 项权威资源及 2 个构建辅助文件在源码、发行物和安装副本之间一致；主代理另行核对了全部生产 Python 文件、状态库、配置及两份能力说明。部署记录保存在 `.local/deployments/20261026-capture-scan-snapshot-0639/`。部署保留 host 与客户端的已安装版本，真实拍摄由用户验证。
+
 ## 相机首次准备的省电与 USB 模式设置（2026-10-26）
 
 Action6 与 OSMO 360 II 在本会话首次拍摄准备时共同请求关闭延时摄影熄屏省电及选择仅充电；普通录像、原生延时和软件重启后的恢复准备复用同一命令组合。命令值由[相机会话设置](../hardware/camera-control-handoff.md#相机会话设置)维护，缓存与失败语义沿用[相机会话准备](../architecture/camera-parameters.md#相机会话准备)，进度见[实施计划](../superpowers/plans/2026-10-26-camera-idle-settings.md)。

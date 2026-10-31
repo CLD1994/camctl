@@ -189,8 +189,7 @@ async def _close_logging_owned(
     except BaseException as error:
         record_close_error("listener_stop_failed", error)
     runtime.listener_stopped = stopped
-    runtime.summary_written = (not runtime.path_unsafe
-                               and stopped and channel.summary_written)
+    runtime.summary_written = channel.summary_written
     # 停用分支只在确认监听结束后关闭文件；普通分支保持原关闭机会。
     close_file = stopped if runtime.path_unsafe else True
 

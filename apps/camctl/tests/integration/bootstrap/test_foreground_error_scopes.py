@@ -4,23 +4,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics, record_error
-from camctl.logging_runtime.service import AdmissionResult
+from support.logging import recording_log_channel
 from camctl.session.service import run_session
 from camctl.persistence.initialization import initialize_state, InitOutcome
 from ..support.session import session_config, session_context
 
 
-class ObservingChannel:
-    def __init__(self, ready):
-        self.ready = ready
-        self.records = []
+def observing_channel(ready):
+    records = []
 
-    async def alog(self, record):
-        assert self.ready(), "日志接纳提前阻止了必要业务收场"
-        self.records.append(record)
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+    def before_record(_record):
+        assert ready(), "日志接纳提前阻止了必要业务收场"
+
+    return recording_log_channel(records, before_record=before_record), records
 
 
 def _session(tmp_path, name, flow):
@@ -34,7 +31,7 @@ def _session(tmp_path, name, flow):
 @pytest.mark.asyncio
 async def test_foreground_flow_logs_after_its_business_result(tmp_path):
     saved = False
-    channel = ObservingChannel(lambda: saved)
+    channel, records = observing_channel(lambda: saved)
 
     async def flow(_context):
         nonlocal saved
@@ -44,13 +41,13 @@ async def test_foreground_flow_logs_after_its_business_result(tmp_path):
     context = _session(tmp_path, "motor", flow)
     with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
         assert (await run_session(context, None)).succeeded
-        assert len(channel.records) == 1
+        assert len(records) == 1
 
 
 @pytest.mark.asyncio
 async def test_fatal_foreground_flow_delivers_outcome_before_logs(tmp_path):
     stopped = False
-    channel = ObservingChannel(lambda: stopped)
+    channel, records = observing_channel(lambda: stopped)
 
     async def flow(_context):
         record_error(RuntimeError("实际设备错误"), stage="capture")
@@ -60,7 +57,7 @@ async def test_fatal_foreground_flow_delivers_outcome_before_logs(tmp_path):
     with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
         result = await run_session(context, None)
         assert result.reason == "state_db_error"
-        assert not channel.records
+        assert not records
         stopped = True
         await flush_diagnostics()
-        assert len(channel.records) == 1
+        assert len(records) == 1

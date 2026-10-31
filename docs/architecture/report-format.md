@@ -162,6 +162,8 @@
 | 适用动作已经终态，设备执行记录为 `ACTIVE`，仍有可靠依据表明这次工作在进行 | 提供 `status: still_running`。 |
 | 适用动作已经终态，启动可能已经生效，设备执行情况未知，且没有上述可靠完成依据 | 提供 `status: end_unconfirmed`。 |
 
+Hasselblad 按[可用性检查](../camctl/hasselblad-availability-recovery.md#运行假设与事实边界)解除旧调度限制后，原活动仍为 `UNKNOWN`，报告继续提供 `end_unconfirmed`；`RELEASED` 和 doctor PASS 不属于原采集完成依据。后续拍摄或读取的事实不能写入原动作，原结果和错误保持。
+
 对已终态且适用该字段的动作，字段省略表示没有需要提示的“设备仍在执行或结束尚未确认”的情况。由于设备可能从未开始这次工作，也可能按驱动契约完成，客户端不能仅凭字段省略就宣称执行过停止命令。
 
 后来 camctl 可靠确认设备结束了原动作要求的工作时，原动作取得新的应报告变化。新报告通过完整替换动作自身字段，清除客户端先前保存的 `device_execution` 及对应提示；原动作的失败、取消或过期结果保持。所需设备执行记录始终归属于原动作，后续由其他动作发起停止时也按原归属恢复历史和生成报告。
@@ -210,6 +212,8 @@ OSMO 360 II 的分段完成下界属于内部完成依据，不是实测媒体�
 显式 ID 不存在或归属不匹配时，失败项关联本次已确认的指定来源，通过 `error.details.requested_output_id` 保留请求中的产物 ID；不填写不成立的 `output_id`、`delivery_id` 关联。同一来源下的多个无效 ID 分别报告，不合并为 `no_outputs`，去重不能忽略请求 ID。错误码和详情以[公共登记](../../protocol/errors/workflow-codes.json)为准。
 
 同一失败只列一次，不按尝试次数重复。全部来源和条目处理结束前，空数组不表示取回成功；部分交付成功、其他项失败时，保留全部实际结果。该版本的 Schema 不在单份报告中强制要求所有引用实体出现，否则跨计划或增量报告会被错误拒绝。
+
+`preview_missing` 与 `preview_unconfirmed` 的逐原片失败通过 `error.details.original_output_id` 区分，详情中的来源必须等于失败项来源。预览尚未登记时不填写 `output_id` 或 `delivery_id`。客户端在单份报告及历史比较中使用相同身份规则，允许多份原片分别失败，并兼容旧报告中同时存在的来源级预览汇总；同一原片的重复失败仍须拒绝。错误分类由[预览取回](preview-obtaining.md#产物选择与失败)定义。
 
 ### 清理
 
@@ -262,6 +266,8 @@ OSMO 360 II 的分段完成下界属于内部完成依据，不是实测媒体�
 ## 正式产物
 
 每项必填 `output_id`、`source_action_instance_id`、`kind`、`availability`、`cleanup`、`checksum`、`media`。归属关系必须与所在拍摄动作一致。已知时提供原始文件名 `original_name`、内容类型 `media_type` 和完整大小 `size`；无法可靠取得时省略，而非填写空名称或零长度。
+
+Hasselblad DEVICE 新照片依据可靠拍摄返回登记时，来源大小、媒体类型和源摘要尚未取得，报告省略 `size`、`media_type` 并将 `checksum.status` 表达为 `not_obtained`。每次交付独立报告实际大小和 SHA-256，不用交付摘要改写设备来源摘要。
 
 第一版 `original` 是设备生成的原始产物，包括图片和视频，`media_type` 按实际已知的 MIME 内容类型填写；未知时省略。文件类别不能由动作名称或 `kind` 推断。`original` 不要求必须是视频；`repaired` 仍仅用于录像修复。`repaired` 是正式修复成品；后者必须有 `derived_from_output_id` 指向其来源原片。两者各有独立身份，清理不级联。正常修复成品尚未正式登记时，不分配一个可供客户端取回的虚构 output。
 

@@ -25,6 +25,7 @@ from camctl.host_files.io import (
 from camctl.host_files.models import BoundDirectories, FileObservation, FileObservationKind, FileRef
 from camctl.host_files.paths import observe_file, resolve_file
 from camctl.host_files.tasks import AsyncFileControl, AsyncFileTask, FileTaskExecutor, FileTaskId, FileTaskResult
+from camctl.logging_runtime.events import log_context
 from camctl.session.supervision import ResponsibilityOwner
 from camctl.operations.process import (
     RawToolOutcome,
@@ -409,7 +410,8 @@ async def _probe(
            "stream_disposition=attached_pic",
            "-of", "json", str(host.path))
     )
-    execution = await _run_tool(argv, control)
+    with log_context(file_id=input.file_id):
+        execution = await _run_tool(argv, control)
 
     def probe_result(*, exception=None, **values):
         return MediaProbe(**values, tool_diagnostics=execution if exception is None
@@ -543,7 +545,8 @@ async def _repair(
         + format_args
         + (str(output_host.path),)
     )
-    outcome = await _run_tool(argv, control)
+    with log_context(file_id=output.file_id, input_file_id=input.file_id):
+        outcome = await _run_tool(argv, control)
     # 外层执行任务由文件执行器保留；等待者取消不会取消该线程等待。
     return await asyncio.to_thread(_collect_artifact, outcome, output, roots, control.stop_event)
 

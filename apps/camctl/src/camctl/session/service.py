@@ -18,6 +18,7 @@ from contextlib import closing
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 
+from camctl.logging_runtime.events import measure_stage, monitor_slow_stage, record_event
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.notification import notify_acceptance
 from camctl.acceptance.service import AcceptanceResult, CommandMode, accept_input
@@ -317,11 +318,18 @@ class SessionContext:
                 f"poll_interval_s 必须是有限正秒数: {self.poll_interval_s!r}")
 
 
-def _outcome_error(reason: str, details: Mapping[str, Any] | None = None) -> SessionOutcome:
+def _outcome_error(
+    reason: str, details: Mapping[str, Any] | None = None, *,
+    error: BaseException | None = None,
+    sources: tuple[tuple[Mapping[str, Any], BaseException], ...] = (),
+) -> SessionOutcome:
     from types import MappingProxyType
 
+    if error is not None and details is not None and "exception" in details:
+        sources = (*sources, (details["exception"], error))
     return SessionOutcome(
-        succeeded=False, reason=reason, details=details or MappingProxyType({})
+        succeeded=False, reason=reason, details=details or MappingProxyType({}),
+        _diagnostic_sources=sources,
     )
 
 
@@ -511,6 +519,7 @@ def _ordered_sources_outcome(
     )
     if include_unknown_commit:
         details["unknown_commit"] = True
+    diagnostic_sources = [(details["exception"], primary)]
     secondary: list[dict[str, Any]] = []
     for leaf, facts in sources[1:]:
         secondary_reason, secondary_details = _exception_details(
@@ -520,11 +529,13 @@ def _ordered_sources_outcome(
             facts_override=facts,
         )
         secondary.append({"reason": secondary_reason, "details": secondary_details})
+        diagnostic_sources.append((secondary_details["exception"], leaf))
     if secondary:
         details["secondary_errors"] = secondary
     if diagnostic_error is not None:
         details["exception"] = exception_diagnostic(diagnostic_error)
-    return _outcome_error(reason, details)
+        diagnostic_sources.append((details["exception"], diagnostic_error))
+    return _outcome_error(reason, details, sources=tuple(diagnostic_sources))
 
 
 def _is_typed_sync_control(error: BaseException) -> bool:
@@ -556,12 +567,14 @@ def _merge_failure_outcome(
         secondary = list(details.pop("secondary_errors", ()))
         secondary.extend(_secondary_outcomes(current))
         details["secondary_errors"] = secondary
-        return _outcome_error(added.reason or "state_db_error", details)
+        return _outcome_error(added.reason or "state_db_error", details,
+                              sources=(*added._diagnostic_sources, *current._diagnostic_sources))
     details = dict(current.details)
     secondary = list(details.pop("secondary_errors", ()))
     secondary.extend(_secondary_outcomes(added))
     details["secondary_errors"] = secondary
-    return _outcome_error(current.reason or "state_db_error", details)
+    return _outcome_error(current.reason or "state_db_error", details,
+                          sources=(*current._diagnostic_sources, *added._diagnostic_sources))
 
 
 def _remember_error(errors: list[BaseException], error: BaseException | None) -> None:
@@ -614,11 +627,22 @@ def _attach_ordered_error_notes(
             existing_notes.add(note)
 
 
+@dataclass(frozen=True)
+class _PendingCleanupDiagnostic:
+    error: Any
+    stage: str
+    attach_error_on_failure: bool = False
+    only_if_original_selected: bool = False
+    context: Mapping[str, Any] | None = None
+    on_record: Callable[[Any], None] | None = None
+
+
 def _merge_cleanup_errors(
     outcome: SessionOutcome | None,
     original: BaseException | None,
     failures: list[tuple[BaseException, str, str]],
     observed_errors: list[BaseException] | None = None,
+    *, pending_diagnostics: list[_PendingCleanupDiagnostic] | None = None,
 ) -> tuple[SessionOutcome | None, BaseException | None]:
     """合并同步资源收场结果，控制对象优先且每个原错误只交付一次。"""
     seen: set[int] = set()
@@ -626,6 +650,9 @@ def _merge_cleanup_errors(
         seen.update(id(error) for error in observed_errors)
     if original is not None:
         seen.add(id(original))
+    own_pending = pending_diagnostics is None
+    if pending_diagnostics is None:
+        pending_diagnostics = []
     for error, stage, fallback_reason in failures:
         sources = _ordered_error_sources(error)
         unobserved_sources = [
@@ -638,6 +665,8 @@ def _merge_cleanup_errors(
         seen.update(
             id(source) for source in _error_identity_objects(error)
         )
+        if original is not None:
+            pending_diagnostics.append(_PendingCleanupDiagnostic(error, stage))
         if not isinstance(error, Exception):
             if original is None or isinstance(original, Exception):
                 previous = original
@@ -669,6 +698,10 @@ def _merge_cleanup_errors(
                 diagnostic_error=error,
             )
             continue
+        # 原错误尚未形成异常时，机器结果负责这项事实。若之后又
+        # 选择控制异常，结果不会返回，需独立交付这项原错误。
+        pending_diagnostics.append(_PendingCleanupDiagnostic(
+            error, stage, only_if_original_selected=True))
         if len(unobserved_sources) == len(sources):
             added = _transaction_error_outcome(
                 error,
@@ -684,7 +717,54 @@ def _merge_cleanup_errors(
                 diagnostic_error=error,
             )
         outcome = added if outcome is None else _merge_failure_outcome(outcome, added)
+
+    if own_pending:
+        original = _deliver_cleanup_diagnostics(original, pending_diagnostics)
     return outcome, original
+
+
+def _deliver_cleanup_diagnostics(
+    original: BaseException | None, pending: list[_PendingCleanupDiagnostic],
+) -> BaseException | None:
+    """在实际收场结束并选出业务控制后登记诊断，不等待日志交付。"""
+    if not pending:
+        return original
+    from camctl.logging_runtime.diagnostics import record_error
+    deferred = []
+    failures = list(getattr(original, "_camctl_cleanup_diagnostic_failures", ()))
+    for item in pending:
+        if item.only_if_original_selected and original is None:
+            deferred.append(item)
+            continue
+        try:
+            if item.context is None:
+                state = record_error(item.error, stage=item.stage)
+            else:
+                state = record_error(item.error, stage=item.stage, context=item.context)
+            if item.on_record is not None:
+                item.on_record(state)
+        except BaseException as diagnostic_error:
+            failure = {"stage": item.stage, "error": item.error,
+                       "diagnostic_error": diagnostic_error}
+            failures.append(failure)
+            if original is None:
+                original = diagnostic_error
+            elif not isinstance(diagnostic_error, Exception) and isinstance(original, Exception):
+                failure["previous_error"] = original
+                _RequiredPhaseWaiter.attach_exception_notes(
+                    diagnostic_error, "此前会话异常", original)
+                original = diagnostic_error
+            else:
+                _RequiredPhaseWaiter.attach_exception_notes(
+                    original, "收场诊断异常", diagnostic_error)
+            if item.attach_error_on_failure and isinstance(item.error, BaseException):
+                _RequiredPhaseWaiter.attach_exception_notes(
+                    original, "未交付的收场错误", item.error)
+    if original is not None and failures:
+        original._camctl_cleanup_diagnostic_failures = tuple(failures)
+    if original is not None and deferred:
+        original = _deliver_cleanup_diagnostics(original, deferred)
+    return original
 
 
 async def run_session(
@@ -721,11 +801,13 @@ async def _submit_session(
             outcome = _outcome_error(
                 "configuration_error",
                 {"error": str(error), "exception": exception_diagnostic(error)},
+                error=error,
             )
         except Exception as error:
             outcome = _outcome_error(
                 "state_db_error",
                 {"error": str(error), "exception": exception_diagnostic(error)},
+                error=error,
             )
         if database is not None:
             try:
@@ -786,11 +868,20 @@ async def _run_session(
     # 受理事务在时钟检查前结束。
     session_lease: SessionLease | None = None
     admission_lease: AdmissionLease | None = None
+    admission_release_recorded = False
     database: Any = None
     local_errors: list[Exception] = []
     observed_errors: list[BaseException] = []
     waiter = _RequiredPhaseWaiter(context)
     previous_report_observer = context.report_change_wm
+
+    def release_admission() -> None:
+        nonlocal admission_release_recorded
+        admission_lease.close()
+        if not admission_release_recorded:
+            record_event("session.admission", event="released",
+                         database_id=database.metadata.instance_id)
+            admission_release_recorded = True
 
     async def drive() -> SessionOutcome:
         nonlocal session_lease, admission_lease, database
@@ -808,7 +899,7 @@ async def _run_session(
                 await context.on_session_locked()
             except Exception as error:
                 return _outcome_error(
-                    "state_db_error", {"error": f"日志启动收场未能启动: {error}", "exception": exception_diagnostic(error)})
+                    "state_db_error", {"error": f"日志启动收场未能启动: {error}", "exception": exception_diagnostic(error)}, error=error)
         if context.startup_outcome is not None:
             return context.startup_outcome
         try:
@@ -816,9 +907,9 @@ async def _run_session(
             context.database = database
         except (RuntimeLibraryError, DirectoryBindingError) as error:
             # 同 submit：运行库不满足部署要求归配置错误，先于业务库打开拒绝。
-            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         context.report_change_wm = lambda: database.read(
             lambda owned: _read_report_change_wm(owned.connection),
             description="报告业务水位")
@@ -826,7 +917,7 @@ async def _run_session(
             try:
                 await context.on_session_open(database)
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         if source is not None:
             try:
                 await accept_input(
@@ -850,13 +941,13 @@ async def _run_session(
                         stage="input_handling",
                         include_unknown_commit=True,
                     )
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
 
         try:
             policy = await database.read(
                 lambda owned: context.clock_policy(owned.connection), description="启动时钟依据")
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         check = check_clock(policy, context.clock)
         try:
             mode = await enter_execution(
@@ -864,7 +955,7 @@ async def _run_session(
                 _clock_context(context, database),
             )
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         if mode is ExecutionMode.FATAL:
             return _outcome_error("state_db_error", {"error": "可信时间下界保存失败"})
         if mode is ExecutionMode.RESTRICTED:
@@ -880,16 +971,22 @@ async def _run_session(
 
         def acquire_and_register() -> None:
             acquired.append(context.acquire_admission())
+            record_event("session.admission", event="acquired",
+                         database_id=database.metadata.instance_id)
 
         try:
             key = new_operation_key()
             async def acquire_phase():
                 nonlocal admission_lease
                 try:
-                    return await database.write(
-                        lambda owned: context.session_repository.acquire_admission(
-                            AcquireAdmission(acquire_and_register), key, owned),
-                        key=key, description="取得接纳资格")
+                    with measure_stage("session.acquire_admission",
+                                       database_id=database.metadata.instance_id,
+                                       operation_key=key):
+                        result = await database.write(
+                            lambda owned: context.session_repository.acquire_admission(
+                                AcquireAdmission(acquire_and_register), key, owned),
+                            key=key, description="取得接纳资格")
+                        return result
                 finally:
                     if acquired:
                         admission_lease = acquired[0]
@@ -929,16 +1026,18 @@ async def _run_session(
             try:
                 await context.snapshot_owner.start()
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         while True:
             observed_wake = None if context.wake is None else context.wake.snapshot()
             try:
                 if context.snapshot_owner is not None:
                     try:
-                        await context.snapshot_owner.discover()
+                        with monitor_slow_stage("session.snapshot_discovery"):
+                            await context.snapshot_owner.discover()
                     except Exception as error:
-                        return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
-                fatal = await _drive_normal_flows(context)
+                        return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
+                with monitor_slow_stage("session.flow_round"):
+                    fatal = await _drive_normal_flows(context)
             except ClockBecameUntrusted as clock_error:
                 async def transition_to_restricted() -> SessionOutcome:
                     nonlocal admission_lease
@@ -951,7 +1050,7 @@ async def _run_session(
                         return _outcome_error(
                             "clock_invalid", {"error": str(clock_error)})
                     try:
-                        admission_lease.close()
+                        release_admission()
                     except Exception as error:
                         _remember_error(observed_errors, error)
                         outcome = _transaction_error_outcome(
@@ -962,7 +1061,7 @@ async def _run_session(
                         )
                         details = dict(outcome.details)
                         details["clock_error"] = str(clock_error)
-                        return _outcome_error(outcome.reason, details)
+                        return _outcome_error(outcome.reason, details, sources=outcome._diagnostic_sources)
                     except BaseException as error:
                         if _is_typed_sync_control(error):
                             waiter.record_sync_control(error)
@@ -991,16 +1090,17 @@ async def _run_session(
                 return await waiter.run(
                     "late-clock-restricted-transition", transition_to_restricted)
             except (DirectoryBindingError, DeviceConfigurationError) as error:
-                return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
             if fatal is not None:
                 # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
                 return fatal
             try:
                 # 数据库空闲后先交付已有后台轮次，再由关闭事务复核全部
                 # 责任；本地发现任务不能使等待它结束的收场入口永远跳过。
-                decision = classify_work(await _run_work_facts(context, include_local=False))
+                with monitor_slow_stage("session.work_facts"):
+                    decision = classify_work(await _run_work_facts(context, include_local=False))
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
                 async def settle_before_close() -> Exception | None:
                     try:
@@ -1024,14 +1124,15 @@ async def _run_session(
                             if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR
                             else SessionOutcome(succeeded=True))
                 outcome = await waiter.run("close-admission", lambda: _try_close(
-                    context, database, admission_lease, observed_errors))
+                    context, database, admission_lease, observed_errors,
+                    release_admission=release_admission))
                 if outcome is not None:
                     return outcome
                 # 关闭事务观察到新工作：继续推进，不释放接纳。
             try:
                 await _wait_for_more_work(context, database, observed=observed_wake)
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
 
     outcome: SessionOutcome | None = None
     original: BaseException | None = None
@@ -1164,10 +1265,11 @@ async def _run_session(
                 )
         elif original is None:
             original = waiter.parent_cancel
+    pending_cleanup_diagnostics: list[_PendingCleanupDiagnostic] = []
     outcome, original = _merge_cleanup_errors(
         outcome, original,
         [(error, "shutdown", "state_db_error") for error in local_errors],
-        observed_errors,
+        observed_errors, pending_diagnostics=pending_cleanup_diagnostics,
     )
     # 后面的句柄关闭沿同一原错误身份去重，包括已通过控制附注交付的错误。
     for error in (*local_errors, *waiter._stop_errors):
@@ -1186,13 +1288,13 @@ async def _run_session(
         try:
             await waiter.run("diagnostic-result-handoff", diagnostic_settlement)
         except Exception as error:
-            from camctl.logging_runtime.diagnostics import record_error
-            record_error(error, stage="diagnostic_result_handoff")
+            pending_cleanup_diagnostics.append(_PendingCleanupDiagnostic(
+                error, "diagnostic_result_handoff", attach_error_on_failure=True))
         except BaseException as error:
             cleanup_failures.append((error, "shutdown", "state_db_error"))
     if admission_lease is not None:
         try:
-            admission_lease.close()
+            release_admission()
         except BaseException as error:
             cleanup_failures.append((error, "shutdown", "internal_error"))
     if session_lease is not None:
@@ -1207,7 +1309,9 @@ async def _run_session(
             cleanup_failures.append((error, "shutdown", "state_db_error"))
     outcome, original = _merge_cleanup_errors(
         outcome, original, cleanup_failures, observed_errors,
+        pending_diagnostics=pending_cleanup_diagnostics,
     )
+    original = _deliver_cleanup_diagnostics(original, pending_cleanup_diagnostics)
     if original is not None:
         raise original.with_traceback(original.__traceback__)
     assert outcome is not None
@@ -1232,9 +1336,11 @@ async def _merge_emergency_stops(
     """执行应急停止并把诊断并入原错误；收场失败不掩盖原错误。"""
     from dataclasses import replace as _replace
 
+    emergency_error = None
     try:
         stops = list(await context.emergency_settlement())
     except Exception as error:
+        emergency_error = error
         stops = [{"outcome": "not_attempted", "attempts_used": 0,
                   "record_status": "not_recorded",
                   "error": f"应急收场失败: {error}"}]
@@ -1243,7 +1349,10 @@ async def _merge_emergency_stops(
     details = dict(outcome.details)
     existing = list(details.get("emergency_stops", ()))
     details["emergency_stops"] = existing + stops
-    return _replace(outcome, details=details)
+    sources = outcome._diagnostic_sources
+    if emergency_error is not None:
+        sources = (*sources, (None, emergency_error))
+    return _replace(outcome, details=details, _diagnostic_sources=sources)
 
 
 def _work_facts_query(context: SessionContext):
@@ -1377,12 +1486,12 @@ async def _drive_normal_flows(context: SessionContext) -> SessionOutcome | None:
         except StateDbFailure as error:
             return _outcome_error("state_db_error", {
                 "error": str(error), "exception": exception_diagnostic(error),
-            })
+            }, error=error)
         except Exception as error:
             return _outcome_error("state_db_error", {
                 "error": f"后台流程异常: {error}",
                 "exception": exception_diagnostic(error),
-            })
+            }, error=error)
     return await _drive_flows(context)
 
 
@@ -1405,20 +1514,21 @@ async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
         except StateDbFailure as error:
             return _outcome_error("state_db_error", {
                 "error": str(error), "exception": exception_diagnostic(error),
-            })
+            }, error=error)
         except Exception as error:
             return _outcome_error("state_db_error", {
                 "error": f"后台流程异常: {error}",
                 "exception": exception_diagnostic(error),
-            })
+            }, error=error)
         try:
             from camctl.logging_runtime.diagnostics import diagnostic_scope
 
             async with diagnostic_scope():
-                if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
-                    await _advance_report_flow(context, flow)
-                else:
-                    await flow(context)
+                with monitor_slow_stage("session.flow", flow=name):
+                    if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
+                        await _advance_report_flow(context, flow)
+                    else:
+                        await flow(context)
         except ClockBecameUntrusted:
             raise
         except (DirectoryBindingError, DeviceConfigurationError):
@@ -1426,12 +1536,12 @@ async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
         except StateDbFailure as error:
             return _outcome_error("state_db_error", {
                 "error": str(error), "exception": exception_diagnostic(error),
-            })
+            }, error=error)
         except Exception as error:
             return _outcome_error("state_db_error", {
                 "error": f"流程 {name} 异常: {error}",
                 "exception": exception_diagnostic(error),
-            })
+            }, error=error)
     return None
 
 
@@ -1508,7 +1618,7 @@ async def _trigger_failure_log_owned(
 
             state = diagnostic_state_for(error)
             if state is not None:
-                acknowledge_diagnostic(state)
+                acknowledge_diagnostic(state, write_result.completion)
         if (write_result is None
                 or not write_result.disables_file_logging):
             return False
@@ -1584,6 +1694,7 @@ def _failure_copy_exception(
     if write_result is not None:
         facts = [
             f"appended={write_result.appended}",
+            f"durable={write_result.durable}",
             f"disables_file_logging={write_result.disables_file_logging}",
         ]
         if write_result.failure_stage is not None:
@@ -1591,6 +1702,7 @@ def _failure_copy_exception(
         for label, value in (
                 ("rotation_error", write_result.rotation_error),
                 ("append_error", write_result.append_error),
+                ("sync_error", write_result.sync_error),
                 ("coordination_error", write_result.coordination_error),
                 ("close_error", write_result.close_error)):
             if value is not None:
@@ -1675,6 +1787,7 @@ def _copy_receipt_diagnostic(
         for label, detail in (
                 ("rotation_error", write_result.rotation_error),
                 ("append_error", write_result.append_error),
+                ("sync_error", write_result.sync_error),
                 ("coordination_error", write_result.coordination_error),
                 ("close_error", write_result.close_error)):
             if detail is not None:
@@ -1709,6 +1822,9 @@ def _copy_receipt_diagnostic(
             f"error={legacy_error or 'none'}")
     if not issues:
         return None, False
+    if write_result is not None:
+        issues.insert(0,
+            f"copy_write: appended={write_result.appended}; durable={write_result.durable}")
     if receipt.file_stage is not None:
         issues.append(f"file_stage={receipt.file_stage.value}")
     if receipt.copy_location is not None:
@@ -1756,6 +1872,7 @@ def _legacy_error_is_stage_duplicate(
         expected = "; ".join(part for part in (
             receipt.copy_error,
             write_result.append_error if write_result is not None else None,
+            write_result.sync_error if write_result is not None else None,
             receipt.cleanup_error,
         ) if part)
         return bool(expected) and legacy_error == expected
@@ -1809,6 +1926,7 @@ async def _try_close(
     context: SessionContext, database: Any,
     admission_lease: AdmissionLease,
     observed_errors: list[BaseException] | None = None,
+    *, release_admission: Callable[[], None] | None = None,
 ) -> SessionOutcome | None:
     """在关闭事务内重查工作并按结果释放接纳；仍需驱动时返回 None。"""
     from camctl.persistence.repositories.session import CloseAdmission
@@ -1818,7 +1936,9 @@ async def _try_close(
         query = _work_facts_query(context)
         outcome = await database.write(
             lambda owned: context.session_repository.close_admission(
-                CloseAdmission(facts_query=query, release_admission=admission_lease.close),
+                CloseAdmission(facts_query=query,
+                               release_admission=(admission_lease.close if release_admission is None
+                                                  else release_admission)),
                 key, owned), key=key, description="原子关闭接纳")
     except Exception as error:
         if observed_errors is not None:
@@ -1893,8 +2013,9 @@ async def _wait_for_more_work(
     """
     wait_s = context.poll_interval_s
     now_us = context.clock.utc_micros()
-    deadline = await database.read(
-        lambda owned: _pending_deadline_seconds(now_us, owned), description="下一业务截止")
+    with monitor_slow_stage("session.wait_deadline"):
+        deadline = await database.read(
+            lambda owned: _pending_deadline_seconds(now_us, owned), description="下一业务截止")
     if deadline is not None:
         wait_s = min(wait_s, deadline)
     loop = asyncio.get_running_loop()
@@ -1906,14 +2027,16 @@ async def _wait_for_more_work(
             if at is not None:
                 wait_s = min(wait_s, max(0, at - now))
     wait_s = max(wait_s, _MIN_IDLE_WAIT_S)
-    if context.wake is None:
-        await asyncio.sleep(wait_s)
-        return
-    # 本轮查询前的版本覆盖流程内安排的下一批，以及查询后到等待前的通知。
-    # 通知已到达时仍交回事件循环，避免连续页面挤占其他设备或取消收场。
-    await asyncio.sleep(0)
-    await context.wake.wait_changed(context.wake.snapshot() if observed is None else observed,
-                                    loop.time() + wait_s)
+    with monitor_slow_stage("session.wait", threshold_s=wait_s + 1.0,
+                            planned_wait_ms=round(wait_s * 1000, 3)):
+        if context.wake is None:
+            await asyncio.sleep(wait_s)
+            return
+        # 本轮查询前的版本覆盖流程内安排的下一批，以及查询后到等待前的通知。
+        # 通知已到达时仍交回事件循环，避免连续页面挤占其他设备或取消收场。
+        await asyncio.sleep(0)
+        await context.wake.wait_changed(context.wake.snapshot() if observed is None else observed,
+                                        loop.time() + wait_s)
 
 
 async def _restricted_session(context: SessionContext) -> SessionOutcome:
@@ -1942,12 +2065,12 @@ async def _run_restricted_flows(
         try:
             await flow(context)
         except (DirectoryBindingError, DeviceConfigurationError) as error:
-            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except Exception as error:
             # 期间的状态库等会话错误保留为实际主错误，不再执行
             # 依赖已失效条件的报告工作。
             return _outcome_error("state_db_error",
-                                  {"error": f"受限收场流程 {name} 失败: {error}", "exception": exception_diagnostic(error)})
+                                  {"error": f"受限收场流程 {name} 失败: {error}", "exception": exception_diagnostic(error)}, error=error)
     return None
 
 
@@ -1960,10 +2083,10 @@ async def _restricted_once_report(context: SessionContext) -> SessionOutcome:
             raise
         except (DirectoryBindingError, DeviceConfigurationError) as error:
             await _trigger_failure_log(context, error)
-            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except StateDbFailure as error:
             await _trigger_failure_log(context, error)
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except Exception as error:
             # 一次报告机会失败：保留诊断与责任，本次不循环重试，
             # 仍按时钟异常退出。

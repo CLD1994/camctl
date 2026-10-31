@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from dataclasses import replace
 from unittest.mock import create_autospec
 
@@ -23,6 +25,7 @@ from camctl.reporting.messages import (
     ShutdownMessage,
 )
 from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerSupervisor
+from camctl.logging_runtime.events import event_logging, log_context
 
 _INSTANCE = "f" * 32
 
@@ -169,6 +172,33 @@ def _supervisor(monkeypatch, mode: str, late_message):
         spawn=lambda: (process, object(), _UnusedEnd()),
     )
     return supervisor, channel, process
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("known_pid", [True, False])
+async def test_worker_events_describe_actual_lifecycle_without_reusable_or_stop_duplicates(monkeypatch, known_pid):
+    supervisor, _channel, process = _supervisor(monkeypatch, "immediate", _success())
+    if known_pid:
+        process.pid = 4312
+    records = []
+
+    class LogChannel:
+        def slog(self, record):
+            records.append(json.loads(record.message))
+
+    with event_logging(LogChannel()), log_context(report_id=1, job_id="current-task"):
+        assert (await supervisor.generate(_job())).kind is GenerationOutcomeKind.SUCCESS
+        assert (await supervisor.start()).ready
+        stopped = await supervisor.stop()
+        assert await supervisor.stop() == stopped
+    worker_events = [record for record in records if record["stage"] == "report.worker"]
+    assert [record["event"] for record in worker_events] == ["started", "ready", "exited"]
+    assert [(record["stage"], record["event"]) for record in records if record["stage"] != "report.worker"] == [
+        ("report.worker_stop", "started"), ("report.worker_stop", "returned")]
+    assert all(record["pid"] == os.getpid() and record["report_id"] == 1
+               and record["job_id"] == "current-task" for record in records)
+    assert all(record.get("worker_pid") == (4312 if known_pid else None) for record in records)
+    assert worker_events[-1]["exit_code"] == 0 and not worker_events[-1]["forced"]
 
 
 @pytest.mark.asyncio

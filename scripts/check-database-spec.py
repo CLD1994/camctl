@@ -781,13 +781,14 @@ def main() -> None:
     registry = json.loads((ROOT / 'protocol/errors/workflow-codes.json').read_text())['codes']
     ids = [rule['action_error_id'] for rule in registry.values() if 'action_error_id' in rule]
     verify(len(ids) == len(set(ids)) and all(type(i) is int and i > 0 for i in ids), '动作错误编号为唯一正整数')
-    for rule in registry.values():
+    for code, rule in registry.items():
         if 'action_error_id' not in rule:
             continue
         with case(db):
             admission = rule['stage'] == 'admission'
+            unstarted = admission or code == 'device_availability_unconfirmed'
             db.execute('UPDATE actions SET status=4,error_code=?,error_details_json=\'{}\',execution_started=?,execution_spec_json=?,effective_params_json=?,driver_id=? WHERE id=1',
-                       (rule['action_error_id'], 0 if admission else 1, None if admission else '{}', None if admission else '{}', None if admission else 'driver'))
+                       (rule['action_error_id'], 0 if unstarted else 1, None if admission else '{}', None if admission else '{}', None if admission else 'driver'))
             verify(True, '登记错误码可保存')
     core_sql = db.execute("SELECT sql FROM sqlite_schema WHERE name='actions'").fetchone()[0]
     allowed = re.search(r'error_code IS NULL OR error_code IN \(([^)]+)\)', core_sql)

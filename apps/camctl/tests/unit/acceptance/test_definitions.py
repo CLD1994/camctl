@@ -59,7 +59,7 @@ def test_photo_acceptance_uses_the_parameter_definition_task_factory():
             "capture_format": "raw",
             "exposure": {
                 "mode": "M", "iso": 800, "aperture": Decimal("8"),
-                "shutter_s": Decimal("0.008"),
+                "shutter_s": "1/125",
             },
             "white_balance": {"mode": "manual", "temperature_k": 5500},
             "focus": {"mode": "MF"},

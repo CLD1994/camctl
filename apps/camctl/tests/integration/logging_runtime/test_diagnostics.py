@@ -10,12 +10,14 @@ import pytest
 from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.clh_adapter import FileChannel
 from camctl.logging_runtime.diagnostics import (
-    DiagnosticStatus, diagnostic_scope, error_diagnostics_context,
-    flush_diagnostics, record_error,
+    DiagnosticStatus, admit_diagnostic, diagnostic_scope, error_diagnostics_context,
+    flush_diagnostics, prepare_log_diagnostic, record_call_outcome, record_error,
 )
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord
+from camctl.operations.models import AttemptStatus, AttemptTicket, CallOutcome, ErrorValue
+from camctl.operations.tool_diagnostics import ToolCallOutput, ToolDiagnostics, ToolStream, ToolStreamState
 from camctl.session.service import run_session
 from camctl.session.clock import register_clock_guard
 from camctl.session.work import WorkFacts
@@ -36,7 +38,7 @@ class GatedFileWriter:
             self.entered.set()
             if not self.release.wait(10):
                 raise TimeoutError("测试没有释放日志消费者")
-        return self.file_channel.write_record(record).appended
+        return self.file_channel.write_record(record).completion()
 
 
 async def full_channel(tmp_path):
@@ -52,6 +54,45 @@ async def full_channel(tmp_path):
         assert result.decision.kind is AdmissionKind.ACCEPTED
     runtime = LogRuntime(channel=channel, file_closer=file_channel.close)
     return channel, writer, runtime
+
+
+async def test_availability_result_delivers_both_streams_once_after_full_queue(tmp_path):
+    channel, writer, runtime = await full_channel(tmp_path)
+    stdout, stderr = b"doctor: FAIL\x00\xff", b"tool error\xff"
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(ToolStreamState.COMPLETE, stdout),
+        ToolStream(ToolStreamState.COMPLETE, stderr)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    original = ValueError("original tool failure")
+    fallback = []
+    with error_diagnostics_context(channel, fallback.append, background=True):
+        try:
+            async with diagnostic_scope():
+                state = record_call_outcome(outcome, ticket=ticket, run_error=original,
+                                            include_tool_stdout=True)
+                assert record_call_outcome(outcome, ticket=ticket, state=state,
+                                           include_tool_stdout=True) is state
+            assert state.status is DiagnosticStatus.HELD
+            writer.release.set()
+            await flush_diagnostics()
+            await close_logging(runtime)
+        finally:
+            writer.release.set()
+            await close_logging(runtime)
+    records = [json.loads(line) for line in (tmp_path / "camctl.log").read_text().splitlines()]
+    payloads = [record for record in records if record.get("stage") == "doctor"]
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["ticket"]["operation"] == "availability"
+    assert payload["run_error"]["message"] == "original tool failure"
+    streams = payload["outcome"]["diagnostics"]["calls"][0]
+    assert streams["stdout"] == {"state": "complete", "hex": stdout.hex()}
+    assert streams["stderr"]["hex"] == stderr.hex()
+    assert streams["stderr"]["text"] == stderr.decode("utf-8", "backslashreplace")
+    assert not fallback
+    assert not channel.listener_alive
 
 
 async def test_full_queue_waits_after_cleanup_and_cancel_keeps_single_record(tmp_path):
@@ -95,7 +136,10 @@ async def test_full_queue_waits_after_cleanup_and_cancel_keeps_single_record(tmp
                 await asyncio.gather(task, return_exceptions=True)
             await close_logging(runtime)
     text = (tmp_path / "camctl.log").read_text(encoding="utf-8")
-    payloads = [json.loads(line) for line in text.splitlines() if line.startswith("{")]
+    records = [json.loads(line) for line in text.splitlines()]
+    assert [record["message"] for record in records if record["stage"] == "runtime"] == [
+        "hold-consumer", "backlog-0", "backlog-1", "backlog-2"]
+    payloads = [record for record in records if record["stage"] == "read"]
     assert len(payloads) == 1
     assert payloads[0]["error"]["message"] == "device-read-failed"
     assert payloads[0]["details"] == {"stderr_hex": "6b6e6f776eff", "stderr_text": "known\\xff"}
@@ -253,5 +297,42 @@ async def test_background_admission_allows_later_flow_stop_and_same_device_round
             await close_logging(runtime)
     text = (tmp_path / "camctl.log").read_text(encoding="utf-8")
     assert all(text.count(f"device-round-{number}") == 1 for number in range(2))
+    assert not fallback
+    assert not channel.listener_alive
+
+
+async def test_single_waiter_joins_full_queue_admission_and_preserves_repeated_cancellation(tmp_path):
+    channel, writer, runtime = await full_channel(tmp_path)
+    fallback = []
+    waiter = None
+    with error_diagnostics_context(channel, fallback.append, background=True):
+        error = ValueError("joined-original-error")
+        state = record_error(error, stage="joined")
+        try:
+            await asyncio.sleep(0)
+            assert state.status is DiagnosticStatus.HELD
+            duplicate = prepare_log_diagnostic(LogRecord(LogLevel.ERROR, "replacement"), error=error)
+            assert duplicate is state
+            waiter = asyncio.create_task(admit_diagnostic(duplicate))
+            await asyncio.sleep(0)
+            waiter.cancel("first waiter cancel")
+            await asyncio.sleep(0)
+            waiter.cancel("repeat waiter cancel")
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            writer.release.set()
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await asyncio.wait_for(waiter, 5)
+            assert raised.value.args == ("first waiter cancel",)
+            assert state.status is DiagnosticStatus.ADMITTED
+        finally:
+            writer.release.set()
+            if waiter is not None and not waiter.done():
+                await asyncio.gather(waiter, return_exceptions=True)
+            await flush_diagnostics()
+            await close_logging(runtime)
+    records = [json.loads(line) for line in (tmp_path / "camctl.log").read_text().splitlines()]
+    assert len([record for record in records if record.get("stage") == "joined"]) == 1
+    assert "replacement" not in (tmp_path / "camctl.log").read_text()
     assert not fallback
     assert not channel.listener_alive

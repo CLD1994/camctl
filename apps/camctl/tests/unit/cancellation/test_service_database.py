@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from unittest.mock import create_autospec
 
@@ -16,6 +17,8 @@ from camctl.cancellation.service import (
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 from support.business_database import inline_business_database
 
 
@@ -55,11 +58,12 @@ async def test_unknown_stop_wait_reuses_request_and_key_until_completion():
     )
     command = OriginSettle(origin_action_id=7)
 
-    first = await settle_origin_cancel(command, runtime)
-    identity = metadata.instance_id, command.origin_action_id
-    original_request, original_key = pending[identity]
-
-    second = await settle_origin_cancel(command, runtime)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        first = await settle_origin_cancel(command, runtime)
+        identity = metadata.instance_id, command.origin_action_id
+        original_request, original_key = pending[identity]
+        second = await settle_origin_cancel(command, runtime)
 
     assert first.kind is DbOutcomeKind.UNKNOWN
     assert isinstance(original_request, StopWaitCancelItems)
@@ -69,6 +73,12 @@ async def test_unknown_stop_wait_reuses_request_and_key_until_completion():
     assert isinstance(repository.calls[2][0], FinishCancelAction)
     assert repository.calls[2][1] != original_key
     assert identity not in pending
+    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    stop = [record for record in records if record["stage"] == "cancel.origin_stop_waiting"]
+    assert [record["event"] for record in stop] == ["started", "returned", "committed"]
+    assert stop[-1]["operation_key"] == original_key
+    assert all(record["level"] == "INFO" and record["action_id"] == 7
+               and record["database_id"] == metadata.instance_id for record in records)
 
 
 @pytest.mark.asyncio

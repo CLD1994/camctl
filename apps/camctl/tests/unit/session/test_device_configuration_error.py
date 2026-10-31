@@ -1,5 +1,7 @@
 """设备声明无法可靠使用时保留配置前提错误。"""
 
+import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -28,3 +30,27 @@ async def test_restricted_flow_reports_device_configuration_error_before_report_
     outcome = await _restricted_session(context)
 
     assert outcome.reason == "configuration_error"
+
+
+@pytest.mark.asyncio
+async def test_slow_flow_reports_its_name_without_logging_fast_flows(monkeypatch):
+    from camctl.logging_runtime.events import event_logging, monitor_slow_stage
+    from camctl.session import service
+
+    records = []
+    channel = SimpleNamespace(slog=lambda record: records.append(json.loads(record.rendered_message())))
+    monkeypatch.setattr(service, "monitor_slow_stage",
+                        lambda stage, **fields: monitor_slow_stage(stage, threshold_s=0.01, **fields))
+
+    async def fast(context):
+        return None
+
+    async def slow(context):
+        await asyncio.sleep(0.03)
+
+    context = SimpleNamespace(flows={"fast": fast, "scheduling": slow}, failure_log=None)
+    with event_logging(channel):
+        assert await _drive_flows(context) is None
+    assert [(r["stage"], r["event"], r["flow"]) for r in records] == [
+        ("session.flow", "started", "scheduling"),
+        ("session.flow", "returned", "scheduling")]

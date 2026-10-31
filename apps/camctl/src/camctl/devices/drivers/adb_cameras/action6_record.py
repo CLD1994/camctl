@@ -10,7 +10,8 @@ from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, C
                                   EndControl, StartReturn, VideoResultMode,
                                   video_result_mode_for_declaration)
 from .action6_formats import product_rules_for_output
-from .commands import ACTION_APERTURE, ACTION_BITRATE, ACTION6_SESSION_SETUP, CameraModel
+from .commands import (ACTION_APERTURE, ACTION_BITRATE, ACTION6_OUTPUT_UNCHECKED_SETTINGS,
+                       ACTION6_SESSION_SETUP, CameraModel)
 from .contracts import CAPTURE_PREPARATION_COMPLETED, CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .file_commands import FILE_COMMAND_EVIDENCE, file_command_factory
@@ -145,7 +146,8 @@ def action6_record_contract():
                 raise ValueError("录像控制要求原明确命令")
             script = shlex.split(argv[5])[2]
             command = tuple(shlex.split(script))
-            interpreter = (Action6SimulationSettingInterpreter(request.ticket.target_id)
+            interpreter = (Action6SimulationSettingInterpreter(request.ticket.target_id,
+                    ignore_output_text=command in ACTION6_OUTPUT_UNCHECKED_SETTINGS)
                 if (kind is CameraCall.SETTING
                     and request.operation in {"start_recording", "start_timelapse"}
                     and (command in ACTION6_SESSION_SETUP

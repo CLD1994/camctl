@@ -459,7 +459,7 @@ class FakeChannel:
         self.order = order if order is not None else []
         self.copies: list[tuple] = []
         self.write_result = WriteResult(
-            appended=True, rotated=False, copy_handles_closed=True)
+            appended=True, rotated=False, durable=True, copy_handles_closed=True)
         self.copy_error: str | None = None
 
     def copy_with_write(self, record, destination):
@@ -658,6 +658,26 @@ def test_copy_write_failure_cleans_staging_copy(monkeypatch):
     assert publisher.calls == []
 
 
+def test_original_sync_failure_keeps_append_fact_and_stops_copy_delivery(monkeypatch):
+    from camctl.logging_runtime.clh_adapter import WriteFailureStage
+
+    files = FakeFiles(monkeypatch)
+    channel, publisher = FakeChannel(), FakePublisher()
+    channel.write_result = WriteResult(
+        appended=True, rotated=False, durable=False, sync_error="file fsync failed",
+        failure_stage=WriteFailureStage.FILE_SYNC, copy_handles_closed=True)
+
+    receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
+
+    assert receipt.outcome is CopyOutcome.COPY_FAILED
+    assert receipt.write_result is channel.write_result
+    assert receipt.write_result.appended is True
+    assert receipt.write_result.durable is False
+    assert "file fsync failed" in receipt.error
+    assert not publisher.calls
+    assert MarkerStore(_logs_dir()).check().presence is MarkerPresence.EXISTS
+
+
 def test_write_result_callback_runs_before_cleanup(monkeypatch):
     from camctl.logging_runtime import copies
     from camctl.logging_runtime.clh_adapter import WriteFailureStage
@@ -715,7 +735,7 @@ def test_copy_without_close_fact_is_unknown_and_keeps_staging(monkeypatch):
     channel, publisher = FakeChannel(), FakePublisher()
     # 兼容旧 WriteResult 构造的默认 None 表示生产者没有交付副本
     # 句柄关闭事实；消费者不得把它猜成关闭成功。
-    channel.write_result = WriteResult(appended=True, rotated=False)
+    channel.write_result = WriteResult(appended=True, rotated=False, durable=True)
     publisher.result = _moved()
 
     receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
@@ -856,7 +876,7 @@ def test_rotation_failure_keeps_successful_copy_classification(monkeypatch):
     files = FakeFiles(monkeypatch)
     channel, publisher = FakeChannel(), FakePublisher()
     channel.write_result = WriteResult(
-        appended=True, rotated=False, rotation_error="rotation denied",
+        appended=True, rotated=False, durable=True, rotation_error="rotation denied",
         copy_handles_closed=True)
     publisher.result = _moved()
 

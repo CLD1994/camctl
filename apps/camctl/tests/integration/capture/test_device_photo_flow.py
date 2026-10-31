@@ -349,6 +349,7 @@ async def test_device_success_requires_complete_matching_device_pair(tmp_path,mo
     from camctl.contracts.values import new_operation_key
     from camctl.outputs.catalog import FileReference
     from camctl.persistence.models import DbOutcomeKind
+    from camctl.contracts.values import ConsistencyError
     cfg,owned,driver,runtime,_=await _world(tmp_path,storage="device")
     request=[]
     def interrupt(repository, value, key, current):
@@ -416,9 +417,10 @@ async def test_restart_without_configured_camera_finishes_original_registration(
             raise OSError("归档后会话中断")
         monkeypatch.setattr(host_photo,"archive_capture_file",interrupted)
     try:
-        with pytest.raises(OSError):
+        with pytest.raises(ConsistencyError if after_checksum else OSError) as interrupted_error:
             await capture_handler("camera_take_photo")(1,runtime)
         if after_checksum:
+            assert isinstance(interrupted_error.value.__cause__, OSError)
             monkeypatch.setattr(CaptureRepository,"save_file_checksum",original)
         else:
             monkeypatch.setattr(host_photo,"archive_capture_file",original)

@@ -1,4 +1,4 @@
-"""从原 RESULTS 意图之前的可靠事实重建文件来源，不改变原历史。"""
+"""从原结果或范围意图之前的可靠事实重建文件来源，不改变原历史。"""
 from contextlib import closing
 from dataclasses import dataclass
 from enum import StrEnum
@@ -32,6 +32,7 @@ def result_source_from_state(action, activity, attempt, state):
     """持久读取与独立历史守卫共同核对原意图及其可采用的来源。"""
     from .capture import _CaptureStopCommand, _history_source_event, _source_fact
     from .operations import _ATTEMPT_STARTED_EVENT
+    from .result_pages import result_responsibility
     from .timelapse import _verify_wait_basis
 
     intent_id = ObjectId(attempt['intent_event_id'])
@@ -43,10 +44,9 @@ def result_source_from_state(action, activity, attempt, state):
             or rows[0].after.values.get('attempt_no') != attempt['attempt_no']):
         raise ConsistencyError('结果来源缺少原可靠意图及尝试身份')
     run = _source_fact(state, 'operation_runs', attempt['run_id'])
-    if (run['kind'] != int(enum_for('operation_runs.kind').CHECK_CAPTURE_RESULTS)
-            or run['action_id'] != action['id'] or run['activity_id'] != activity['id']
-            or activity['action_id'] != action['id']
-            or run['responsibility_key'] != f"results/{activity['id']}"):
+    result_responsibility(run)
+    if (run['action_id'] != action['id'] or run['activity_id'] != activity['id']
+            or activity['action_id'] != action['id']):
         raise ConsistencyError('结果来源的原责任、动作与活动不符')
     spec = action['execution_spec_json']
     requires_wait = 'file_completion_wait_ms' in spec

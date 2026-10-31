@@ -8,14 +8,47 @@ from pathlib import PurePosixPath
 import re
 import unicodedata
 
-from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.contracts.values import parse_object_id
 from camctl.devices.bindings import DeviceBinding
 from .definitions import DRIVER_ID
+from .identity import CameraIdentity
 
 
 class DownloadVariant(StrEnum):
     ORIGINAL = "original"
     THUMBNAIL = "thumbnail"
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoResultCursor:
+    """原图结果页可靠保存后，指向同一活动的预览来源观察。"""
+
+    binding: DeviceBinding
+    activity_id: str
+    role: DownloadVariant
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, DeviceBinding) or self.binding.driver_id != DRIVER_ID:
+            raise ValueError("照片结果游标必须属于原 Hasselblad 绑定")
+        parse_object_id(self.activity_id)
+        if self.role is not DownloadVariant.THUMBNAIL:
+            raise ValueError("照片结果后续页只能观察预览角色")
+
+    def as_json(self) -> dict[str, str]:
+        return {"kind": "hasselblad_photo", "device_id": self.binding.device_id,
+                "driver_id": self.binding.driver_id, "activity_id": self.activity_id,
+                "role": self.role.value}
+
+    @classmethod
+    def from_json(cls, value: object) -> "PhotoResultCursor":
+        if not isinstance(value, Mapping) or set(value) != {
+                "kind", "device_id", "driver_id", "activity_id", "role"}:
+            raise ValueError("照片结果游标成员不完整")
+        if value["kind"] != "hasselblad_photo":
+            raise ValueError("照片结果游标类别无效")
+        return cls(DeviceBinding(value["device_id"], value["driver_id"]),
+                   value["activity_id"], DownloadVariant(value["role"]))
 
 
 class CameraLocatorStatus(StrEnum):
@@ -85,6 +118,38 @@ class CameraFileLocator:
 
 
 @dataclass(frozen=True, slots=True)
+class CameraPathResolution:
+    """原始定位的比较键与本次命令路径，不改变已保存文件身份。"""
+
+    original_path: str
+    comparison_key: str
+    delete_path: str
+    firmware_rule: str | None
+
+
+# 当前固件目录报告 bug；后续路径不一致优先复核此例外。
+# 完整边界见 docs/camctl/hasselblad-driver.md 的“固件路径例外”。
+_SSD_DIRECTORY_ALIAS = ("106HASBL", "100HASBL")
+_SSD_PATH_RULE = "cfv100c_ssd_directory_alias_v1"
+_SSD_PREFIXES = ("/mnt/media_rw/ssd/DCIM/", "/mnt/media_rw/ssd/", "/SSD/DCIM/", "/SSD/")
+
+
+def resolve_camera_path(path: str) -> CameraPathResolution:
+    """仅在已知 SSD 根处理目录别名；其他定位保持精确比较。"""
+    _camera_name_from_path(path)
+    for prefix in _SSD_PREFIXES:
+        if not path.startswith(prefix):
+            continue
+        relative = path[len(prefix):]
+        directory, separator, tail = relative.partition("/")
+        if separator and directory == _SSD_DIRECTORY_ALIAS[0]:
+            relative = _SSD_DIRECTORY_ALIAS[1] + separator + tail
+        return CameraPathResolution(path, "/SSD/" + relative,
+                                    prefix + relative, _SSD_PATH_RULE)
+    return CameraPathResolution(path, path, path, None)
+
+
+@dataclass(frozen=True, slots=True)
 class CameraFileIdentity:
     """原设备绑定、完整机内路径、下载文件名及拍摄时核验的内容摘要。"""
 
@@ -93,6 +158,9 @@ class CameraFileIdentity:
     camera_name: str
     variant: DownloadVariant
     sha256: str
+    serial: str
+    product_id: int
+    size_bytes: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.binding, DeviceBinding) or self.binding.driver_id != DRIVER_ID:
@@ -106,17 +174,24 @@ class CameraFileIdentity:
             raise ValueError("相机文件读取种类无效")
         if not isinstance(self.sha256, str) or re.fullmatch(r"[0-9a-f]{64}", self.sha256) is None:
             raise ValueError("相机文件必须携带拍摄时的 SHA-256")
+        CameraIdentity(self.serial, self.product_id)
+        if type(self.size_bytes) is not int or self.size_bytes <= 0:
+            raise ValueError("相机文件必须携带拍摄时的完整长度")
 
     @property
     def file_identity(self) -> str:
         return json.dumps(
-            ["hb-download-v2", self.camera_path, self.camera_name, self.variant.value, self.sha256],
+            ["hb-download-v3", self.serial, self.product_id, self.camera_path,
+             self.camera_name, self.variant.value, self.size_bytes, self.sha256],
             ensure_ascii=False,
             separators=(",", ":"),
         )
 
-    def locator(self) -> dict[str, str]:
+    def locator(self) -> dict[str, str | int]:
         return {
+            "serial": self.serial,
+            "product_id": self.product_id,
+            "size_bytes": self.size_bytes,
             "camera_path": self.camera_path,
             "camera_name": self.camera_name,
             "variant": self.variant.value,
@@ -129,16 +204,163 @@ class CameraFileIdentity:
         if not isinstance(value, list) or len(value) != 3:
             raise ValueError("相机源身份必须包含原设备、驱动和固定文件身份")
         opaque = parse_exact_json(value[2])
-        if not isinstance(opaque, list) or len(opaque) != 5 or opaque[0] != "hb-download-v2":
+        if not isinstance(opaque, list) or len(opaque) != 8 or opaque[0] != "hb-download-v3":
             raise ValueError("相机固定文件身份版本或结构无效")
         identity = cls(
             DeviceBinding(value[0], value[1]),
+            opaque[3],
+            opaque[4],
+            DownloadVariant(opaque[5]),
+            opaque[7],
             opaque[1],
             opaque[2],
-            DownloadVariant(opaque[3]),
-            opaque[4],
+            opaque[6],
         )
         expected = identity.locator()
-        if not isinstance(locator, Mapping) or set(locator) != set(expected) or dict(locator) != expected:
+        if not isinstance(locator, Mapping) or not json_equal(dict(locator), expected):
             raise ValueError("相机源定位与原固定身份不一致")
         return identity
+
+
+@dataclass(frozen=True, slots=True)
+class DeferredCameraFileIdentity:
+    """原单张活动的相机定位和读取角色，不以任一次交付字节定义来源。"""
+
+    binding: DeviceBinding
+    activity_id: str
+    camera_path: str
+    camera_name: str
+    variant: DownloadVariant
+    serial: str
+    product_id: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, DeviceBinding) or self.binding.driver_id != DRIVER_ID:
+            raise ValueError("相机文件必须属于 Hasselblad 原绑定")
+        parse_object_id(self.activity_id)
+        if (not isinstance(self.camera_name, str)
+                or self.camera_name != _camera_name_from_path(self.camera_path)):
+            raise ValueError("相机下载文件名必须与完整机内路径末段一致")
+        if not isinstance(self.variant, DownloadVariant):
+            raise ValueError("相机文件读取种类无效")
+        CameraIdentity(self.serial, self.product_id)
+
+    @property
+    def file_identity(self) -> str:
+        return json.dumps(
+            ["hb-photo-v4", self.serial, self.product_id, self.activity_id,
+             self.camera_path, self.camera_name, self.variant.value],
+            ensure_ascii=False, separators=(",", ":"),
+        )
+
+    def locator(self) -> dict[str, str | int]:
+        return {"serial": self.serial, "product_id": self.product_id,
+                "activity_id": self.activity_id, "camera_path": self.camera_path,
+                "camera_name": self.camera_name, "variant": self.variant.value}
+
+    @classmethod
+    def from_source(cls, identity_key: str, locator: object) -> "DeferredCameraFileIdentity":
+        value = parse_exact_json(identity_key)
+        if not isinstance(value, list) or len(value) != 3:
+            raise ValueError("相机源身份必须包含原设备、驱动和固定文件身份")
+        opaque = parse_exact_json(value[2])
+        if not isinstance(opaque, list) or len(opaque) != 7 or opaque[0] != "hb-photo-v4":
+            raise ValueError("相机固定文件身份版本或结构无效")
+        identity = cls(DeviceBinding(value[0], value[1]), opaque[3], opaque[4],
+                       opaque[5], DownloadVariant(opaque[6]), opaque[1], opaque[2])
+        if not isinstance(locator, Mapping) or not json_equal(dict(locator), identity.locator()):
+            raise ValueError("相机源定位与原固定身份不一致")
+        return identity
+
+
+def deferred_photo_identities(binding: DeviceBinding, observation: Mapping[str, object]) -> tuple[
+        DeferredCameraFileIdentity, DeferredCameraFileIdentity]:
+    """从原可靠单张响应固定设备原图及其配对预览的逻辑身份。"""
+    if not isinstance(observation, Mapping):
+        raise ValueError("照片观察必须是对象")
+    activity_id = observation.get("activity_id")
+    locator = CameraFileLocator.from_json(observation.get("camera_locator"))
+    camera = observation.get("camera_identity")
+    if locator.status is not CameraLocatorStatus.PATH:
+        raise ValueError("照片观察缺少可靠机内定位")
+    if not isinstance(camera, Mapping) or set(camera) != {"serial", "product_id"}:
+        raise ValueError("照片观察缺少原机身身份")
+    assert locator.camera_path is not None and locator.camera_name is not None
+    return tuple(DeferredCameraFileIdentity(
+        binding, activity_id, locator.camera_path, locator.camera_name,
+        variant, camera["serial"], camera["product_id"])
+        for variant in (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL))
+
+
+def camera_file_identity_from_source(identity_key: str, locator: object) -> CameraFileIdentity | DeferredCameraFileIdentity:
+    """按身份版本解释旧固定内容与按需照片来源。"""
+    value = parse_exact_json(identity_key)
+    if not isinstance(value, list) or len(value) != 3 or not isinstance(value[2], str):
+        raise ValueError("相机源身份必须包含原设备、驱动和固定文件身份")
+    opaque = parse_exact_json(value[2])
+    if not isinstance(opaque, list) or not opaque:
+        raise ValueError("相机固定文件身份结构无效")
+    if opaque[0] == "hb-photo-v4":
+        return DeferredCameraFileIdentity.from_source(identity_key, locator)
+    return CameraFileIdentity.from_source(identity_key, locator)
+
+
+def validate_photo_result_page(data: object, *, activity_id: str,
+                               binding: DeviceBinding, cursor: PhotoResultCursor | None):
+    """校验一页真实角色观察与原活动、角色及固定读取身份。"""
+    if not isinstance(data, Mapping) or set(data) != {
+            "activity_id", "binding", "role", "entries", "cursor", "next_cursor"}:
+        raise ValueError("照片来源结果页成员不完整")
+    if data["activity_id"] != activity_id:
+        raise ValueError("照片来源结果页改变原活动")
+    saved_binding = data["binding"]
+    if not isinstance(saved_binding, Mapping) or set(saved_binding) != {"device_id", "driver_id"}:
+        raise ValueError("照片来源结果页缺少原设备绑定")
+    if DeviceBinding(saved_binding["device_id"], saved_binding["driver_id"]) != binding:
+        raise ValueError("照片来源结果页改变原设备绑定")
+    role = DownloadVariant(data["role"])
+    input_cursor = None if data["cursor"] is None else PhotoResultCursor.from_json(data["cursor"])
+    if input_cursor != cursor or (cursor is not None and (
+            cursor.binding != binding or cursor.activity_id != activity_id or role is not cursor.role)):
+        raise ValueError("照片来源结果页改变原角色游标")
+    entries = data["entries"]
+    if not isinstance(entries, (tuple, list)) or len(entries) != 1 or not isinstance(entries[0], Mapping):
+        raise ValueError("照片来源成功页必须包含一个角色观察")
+    entry = entries[0]
+    opaque = entry.get("identity")
+    if not isinstance(opaque, str):
+        raise ValueError("照片来源结果缺少固定身份")
+    key = json.dumps([binding.device_id, binding.driver_id, opaque], ensure_ascii=False, separators=(",", ":"))
+    identity = CameraFileIdentity.from_source(key, entry.get("locator"))
+    if (identity.variant is not role or entry.get("complete") is not True
+            or type(entry.get("size_bytes")) is not int or entry["size_bytes"] != identity.size_bytes
+            or entry.get("kind") != "photo"):
+        raise ValueError("照片来源角色、大小或完成观察不一致")
+    next_cursor = None if data["next_cursor"] is None else PhotoResultCursor.from_json(data["next_cursor"])
+    expected = (PhotoResultCursor(binding, activity_id, DownloadVariant.THUMBNAIL)
+                if role is DownloadVariant.ORIGINAL else None)
+    if next_cursor != expected:
+        raise ValueError("照片来源结果页后续角色不一致")
+    return next_cursor
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoCacheDecision:
+    comparison: str
+    selected: str
+
+
+def decide_photo_cache(source: CameraFileIdentity, *, status: str,
+                       size_bytes: int | None, sha256: str | None) -> PhotoCacheDecision:
+    """一次比较只以可靠相机来源和本次同步副本事实决定缓存。"""
+    if not isinstance(source, CameraFileIdentity):
+        raise ValueError("照片缓存决定缺少可靠相机来源")
+    if status == "complete":
+        if (type(size_bytes) is not int or size_bytes <= 0 or not isinstance(sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", sha256) is None):
+            raise ValueError("完整同步副本缺少实际大小或摘要")
+        matched = size_bytes == source.size_bytes and sha256 == source.sha256
+        return PhotoCacheDecision("matched" if matched else "mismatch", "sync" if matched else "camera")
+    if status not in ("missing", "invalid", "unconfirmed") or size_bytes is not None or sha256 is not None:
+        raise ValueError("同步副本分类或内容事实无效")
+    return PhotoCacheDecision(status, "camera")

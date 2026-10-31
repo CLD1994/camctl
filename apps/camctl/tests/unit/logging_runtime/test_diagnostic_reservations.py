@@ -10,6 +10,7 @@ from camctl.logging_runtime.diagnostics import (
     error_diagnostics_context, flush_diagnostics, record_error,
     release_diagnostic, reserve_diagnostic,
 )
+from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult
 
 pytestmark = pytest.mark.asyncio
@@ -19,9 +20,13 @@ class MemoryChannel:
     def __init__(self):
         self.records = []
 
-    async def alog(self, record):
+    def submit(self, record, *, receipt=None):
+        receipt = receipt if receipt is not None else LogReceipt()
         self.records.append(record)
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+        result = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+        receipt.complete_admission(result)
+        receipt.complete_write(AdmissionResult(result.decision, 0, delivered=True))
+        return receipt
 
 
 async def test_reservation_removes_parent_responsibility_until_child_adopts_original_state():
@@ -87,20 +92,33 @@ async def test_child_cannot_adopt_into_inherited_parent_scope():
 
 async def test_already_admitting_state_cannot_be_reserved():
     entered = asyncio.Event()
-    release = asyncio.Event()
 
     class BlockedChannel(MemoryChannel):
-        async def alog(self, record):
+        def __init__(self):
+            super().__init__()
+            self.pending = []
+
+        def submit(self, record, *, receipt=None):
+            receipt = receipt if receipt is not None else LogReceipt()
+            self.records.append(record)
+            self.pending.append((record, receipt))
             entered.set()
-            await release.wait()
-            return await super().alog(record)
+            return receipt
+
+        def release_admission(self):
+            for record, receipt in self.pending:
+                result = AdmissionResult(
+                    AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+                receipt.complete_admission(result)
+                receipt.complete_write(AdmissionResult(result.decision, 0, delivered=True))
+            self.pending.clear()
 
     channel = BlockedChannel()
     with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
         state = record_error(ValueError("already-admitting"), stage="report")
         await entered.wait()
         assert reserve_diagnostic(state) is None
-        release.set()
+        channel.release_admission()
         await flush_diagnostics()
         assert reserve_diagnostic(state) is None
     assert len(channel.records) == 1

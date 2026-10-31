@@ -1,5 +1,6 @@
 """唯一发送许可、最终时间检查与结果保存的行为边界。"""
 import asyncio
+import json
 import sqlite3
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -14,6 +15,8 @@ from camctl.motor.models import (
 from camctl.motor.notification import NotificationWriter, NotificationWriteResult, WriteKind
 from camctl.motor.rules import MotorDecision
 from camctl.motor.service import MotorRuntime, advance_motor
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from camctl.persistence.repositories.motor import MotorRepository
@@ -66,6 +69,26 @@ async def test_send_once_after_intent_and_save_local_result(monkeypatch):
     assert request.written_bytes == 76
     assert request.permit == PERMIT
     assert runtime.permits == {}
+
+
+async def test_actual_send_and_confirmed_finish_are_logged_without_terminal_poll_noise(monkeypatch):
+    runtime, repo, writer, row = make_runtime(monkeypatch)
+    channel = Mock(spec=LogChannel)
+    with event_logging(channel):
+        assert await advance_motor(1, runtime) is MotorDecision.SEND
+        before_poll = channel.slog.call_count
+        repo.read_facts.side_effect = None
+        repo.read_facts.return_value = MotorActionFacts({**row, "status": 3}, PENDING)
+        assert await advance_motor(1, runtime) is MotorDecision.KEEP_TERMINAL
+    assert channel.slog.call_count == before_poll
+    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    assert [(record["stage"], record["event"]) for record in records] == [
+        ("motor.send", "started"), ("motor.send", "returned"),
+        ("motor.notification_result", "returned"), ("motor.finish", "committed")]
+    assert records[2]["write_kind"] == "written" and records[2]["written_bytes"] == 76
+    assert records[3]["final_kind"] == MotorFinalKind.WRITTEN.value
+    assert all(record["level"] == "INFO" and record["action_id"] == 1 for record in records)
+    writer.send.assert_called_once()
 
 
 async def test_expiration_at_final_check_never_writes(monkeypatch):

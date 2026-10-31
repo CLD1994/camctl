@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import copy_context
 import threading
 import weakref
 from dataclasses import dataclass
@@ -168,7 +169,8 @@ class LoggingOwner:
             except BaseException as error:
                 return _ThreadFact(started=True, error=error)
 
-        fact = await asyncio.get_running_loop().run_in_executor(None, run)
+        context = copy_context()
+        fact = await asyncio.get_running_loop().run_in_executor(None, context.run, run)
         if not fact.started:
             raise _LoggingOperationStopped(stage)
         if fact.error is not None:

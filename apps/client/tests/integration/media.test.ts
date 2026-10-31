@@ -29,6 +29,7 @@ it.each([
     capture.type = "camera_take_photo";
     delete capture.result;
     capture.outputs![0].media_type = mediaType;
+    capture.outputs![0].original_name = "1.png";
     r.plans![0].actions![1].deliveries![0].file_name = "1.png";
     const server = createHttpApp(app, files).listen(0, "127.0.0.1");
     await new Promise<void>((resolve) => server.once("listening", resolve));

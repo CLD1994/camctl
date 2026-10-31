@@ -7,7 +7,7 @@ import pytest
 
 from camctl import cli
 from camctl.bootstrap import application
-from camctl.bootstrap.config import ConfigError
+from camctl.bootstrap.config import ConfigDefaults, ConfigError, load_config
 from camctl.persistence import initialization
 
 
@@ -44,7 +44,7 @@ def test_init_failed_result_preserves_primary_and_secondary_exceptions(monkeypat
     secondary = OSError("初始化锁释放失败")
     result = initialization.InitResult(initialization.InitOutcome.FAILED,
         "数据库初始化失败", error=error, secondary_errors=(secondary,))
-    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: object())
+    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: load_config({}, ConfigDefaults()))
     monkeypatch.setattr(application.ConfigAdapter, "state_db_path", lambda *args: cli.Path("/state.sqlite"))
     monkeypatch.setattr(initialization, "initialize_state", lambda *args, **kwargs: result)
     monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: cls("/unused")))

@@ -29,7 +29,7 @@ def _channel():
 
 def _payload(channel):
     assert channel.slog.call_count == 1
-    return json.loads(channel.slog.call_args.args[0].message.removeprefix("性能计时 "))
+    return json.loads(channel.slog.call_args.args[0].message)
 
 
 def test_phases_are_exclusive_and_details_are_inclusive(clock):

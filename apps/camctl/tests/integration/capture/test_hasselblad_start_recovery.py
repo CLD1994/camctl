@@ -97,6 +97,27 @@ def _grant(owned, clock):
     return receipt.value.ticket
 
 
+async def interrupt_after_focus(transport, runtime):
+    """让真实调焦调用进入后中断，保留原 START 的未确认状态。"""
+    transport.interrupt_focus = True
+    task = asyncio.create_task(capture_handler("camera_take_photo")(1, runtime))
+    entered = asyncio.create_task(transport.focused.wait())
+    try:
+        done, _ = await asyncio.wait((task, entered), return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            await task
+            pytest.fail("实际相对调焦必须先发生")
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await entered
+    finally:
+        if not entered.done():
+            entered.cancel()
+        await asyncio.gather(task, entered, return_exceptions=True)
+    transport.interrupt_focus = False
+
+
 @pytest.mark.parametrize("boundary", [RecoveryBoundary.HOST_LOCAL_SETTLED, RecoveryBoundary.HOST_POWER_CYCLE])
 @pytest.mark.parametrize("stage", ["after_focus", "saved_return", "complete_unknown"])
 async def test_photo_restart_after_relative_focus_never_replays_start(tmp_path, stage, boundary):
@@ -162,12 +183,18 @@ async def test_photo_restart_after_relative_focus_never_replays_start(tmp_path, 
         owned.connection.close()
 
 
+@pytest.mark.parametrize("interruption", ["granted", "after_focus"])
 @pytest.mark.parametrize("condition,reason", [("boundary", "UNCONFIRMED_BOUNDARY"),
     ("horizon", "MISSING_HORIZON"), ("outside", "INTENT_OUTSIDE_HORIZON")])
-async def test_missing_control_result_requires_original_reliable_recovery_boundary(tmp_path, condition, reason):
+async def test_missing_control_result_requires_original_reliable_recovery_boundary(tmp_path, condition, reason, interruption):
     transport, cfg, owned, driver, runtime, clock = await focus_world(tmp_path)
     try:
-        ticket = _grant(owned, clock)
+        if interruption == "after_focus":
+            await interrupt_after_focus(transport, runtime)
+            ticket = _ticket(owned)
+        else:
+            ticket = _grant(owned, clock)
+        original_calls = tuple(transport.calls)
         recovery = await resume(cfg, owned, driver, clock,
             boundary=RecoveryBoundary.UNCONFIRMED if condition == "boundary" else RecoveryBoundary.HOST_LOCAL_SETTLED,
             horizon=None if condition == "horizon" else (0 if condition == "outside" else True))
@@ -175,24 +202,26 @@ async def test_missing_control_result_requires_original_reliable_recovery_bounda
         await capture_handler("camera_take_photo")(1, recovery)
         assert baseline_case_for().diagnostics[-1].reason.name == reason
         assert tuple(owned.connection.iterdump()) == original and _ticket(owned) == ticket
-        assert not transport.calls
+        assert tuple(transport.calls) == original_calls
     finally:
         owned.connection.close()
 
 
-async def test_recovery_does_not_end_control_still_executing_in_same_session(tmp_path):
-    class HeldCapture(_ManagedCaptureTransport):
+@pytest.mark.parametrize("held_step", ["focus", "capture"])
+async def test_recovery_does_not_end_control_still_executing_in_same_session(tmp_path, held_step):
+    class HeldFocus(FocusTransport):
         def __init__(self):
             super().__init__()
             self.entered, self.release = asyncio.Event(), asyncio.Event()
         async def run(self, spec, stop):
-            if spec.argv[3] == "capture":
+            if spec.argv[3] == held_step:
                 self.entered.set()
                 await self.release.wait()
             return await super().run(spec, stop)
-    transport = HeldCapture()
+    transport = HeldFocus()
     cfg, owned, driver, _, clock = await _world(tmp_path, driver_factory=lambda cfg: HasselbladDriver(
-        cfg.devices, BoundDirectories(Path(cfg.paths.staging)), transport=transport, monotonic_ns=lambda: 1))
+        cfg.devices, BoundDirectories(Path(cfg.paths.staging)), transport=transport, monotonic_ns=lambda: 1),
+        photo_focus={"mode": "MF", "relative_move": 5} if held_step == "focus" else None)
     maximum = [None]
     runtime = await resume(cfg, owned, driver, clock, boundary=RecoveryBoundary.HOST_POWER_CYCLE,
         horizon=lambda: maximum[0])
@@ -211,7 +240,8 @@ async def test_recovery_does_not_end_control_still_executing_in_same_session(tmp
         owned.connection.close()
 
 
-async def test_unknown_control_recovery_retains_original_request_key(tmp_path):
+@pytest.mark.parametrize("interruption", ["granted", "after_focus"])
+async def test_unknown_control_recovery_retains_original_request_key(tmp_path, interruption):
     class Unknown(CaptureRepository):
         def __init__(self):
             self.calls = []
@@ -222,7 +252,12 @@ async def test_unknown_control_recovery_retains_original_request_key(tmp_path):
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("原恢复结果提交回执未知"))
     transport, cfg, owned, driver, runtime, clock = await focus_world(tmp_path)
     try:
-        ticket = _grant(owned, clock)
+        if interruption == "after_focus":
+            await interrupt_after_focus(transport, runtime)
+            ticket = _ticket(owned)
+        else:
+            ticket = _grant(owned, clock)
+        original_calls = tuple(transport.calls)
         repository = Unknown()
         recovery = await resume(cfg, owned, driver, clock, repository=repository)
         with pytest.raises(ConsistencyError):
@@ -232,7 +267,7 @@ async def test_unknown_control_recovery_retains_original_request_key(tmp_path):
         baseline_case_for().repositories.clear()
         await capture_handler("camera_take_photo")(1, await baseline_case_for().view())
         assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (key,)).fetchone() == (1,)
-        assert _ticket(owned) == ticket and not transport.calls
+        assert _ticket(owned) == ticket and tuple(transport.calls) == original_calls
         assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (1,)
     finally:
         owned.connection.close()

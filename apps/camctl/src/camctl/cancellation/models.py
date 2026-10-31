@@ -248,6 +248,8 @@ class CancelTargetsDisposition(Enum):
     SAVED = "saved"
     #: 已固定集合或原键重送：只读复用首次结果。
     ALREADY = "already"
+    #: 发起者在目标固定之前取消，不建立目标及源动作效果。
+    ABANDONED = "abandoned"
 
 
 @dataclass(frozen=True)

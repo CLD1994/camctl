@@ -30,6 +30,8 @@ Action6 与 OSMO 360 II 的共同延时时间规则、各自候选参数及命�
 
 Hasselblad CFV 100C 仅接入单张拍照，既有主机原图与预览登记、独立取回、报告及安装交付由[专项接入计划](2026-10-12-hasselblad-integration.md#实施状态)跟踪，双正式源由[相机源计划](2026-10-14-hasselblad-camera-source.md)跟踪。RAW／JPEG、曝光、白平衡、对焦及中文选项的目标契约见[单张参数规格](../specs/2026-10-20-hasselblad-photo-parameters-design.md)，具体实现、安装版联合验收及 ARM 真机验证由[单张参数执行计划](2026-10-21-hasselblad-photo-parameters.md)跟踪；完成范围以实际任务状态和验证记录为准。
 
+Hasselblad 未知活动后的可用性检查、持久化释放、普通拍摄与 HOST／DEVICE 文件获取接线，由[无人值守恢复实施计划](2026-10-28-hasselblad-availability-recovery.md)跟踪。该计划覆盖原责任收场、当前结构、并发与取消、历史和报告、安装版联合验收；现场数据与待执行计划的处理、目标设备验收分别交接。
+
 2026-10-11 客户端分支 `origin/codex/client-spec-sync` 已通过 `106f93e` 合并。[视频大小估算计划](2026-10-10-video-size-estimate.md#linux-实施记录2026-10-11)已完成 Python 同源能力导出、包内公共 Schema 及客户端软件交接验收；更新发行物已交付 ARM 主机，安装、实际配置、初始化和能力导出已有回传结果。用户在客户端生成取回计划并成功完成独立取回，随后确认实际演示一切正常，当前 Action6 普通录像演示按[用户现场确认](../../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)验收通过。交付与后续设备条件由[现场验收状态与部署入口](2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)维护。[清理查询结果保存与恢复计划](2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)的全部任务（Task 0—4）已于 2026-10-11 交付，含成员／伴随仓储原键复验五项修复与冻结边界三路径恢复核验。
 
 公共计划、动作、设备状态和报告模型保持设备无关。第一版 MCU 仅遵守[接口预留与不支持动作的受理规则](../../architecture/mcu-actions.md)，不增加实际通信工作或运行依赖。

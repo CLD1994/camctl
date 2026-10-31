@@ -112,7 +112,7 @@ it.each([1416, 390])(
       await input.fill("输入响应已修改");
       await check(
         page.getByRole("button", { name: "保存当前输入", exact: true }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       const dirtyY = await position();
       await saving;
       const savingY = await position();
@@ -138,7 +138,7 @@ it.each([1416, 390])(
 
 it("轮询消费新的能力版本后重新校验当前输入", async () => {
   const { page, app, capabilitiesFile } = await setup(1416);
-  await check(page.getByTestId("validation-issues")).toHaveClass("valid");
+  await check(page.getByTestId("validation-issues")).toHaveCount(0);
   const capabilities = JSON.parse(readFileSync(capabilitiesFile, "utf8"));
   const fixed = capabilities.devices[0].actions[0].parameter_types.find(
     (p: { type: string }) => p.type === "demo_fixed",
@@ -147,6 +147,10 @@ it("轮询消费新的能力版本后重新校验当前输入", async () => {
   fixed.schema.properties.new_required_field = { type: "string" };
   writeFileSync(capabilitiesFile, JSON.stringify(capabilities));
   app.reloadCapabilities();
+  await check(page.getByLabel("参数类型", { exact: true })).toBeVisible();
+  await check(page.getByTestId("validation-issues")).toHaveCount(0);
+  await check(page.locator('[aria-invalid="true"]')).not.toHaveCount(0);
+  await page.getByTestId("export-button").click();
   await check(page.getByTestId("validation-issues")).toBeVisible();
   await check(page.getByTestId("validation-issues")).toContainText(
     "new_required_field",

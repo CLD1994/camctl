@@ -46,8 +46,6 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
                 members,
                 complete=prepared.source_kind is SegmentSourceKind.COMPLETE_SCAN,
                 activity_id=prepared.activity_id,
-                explicit_error=listing.outcome is not None
-                and listing.outcome.error is not None,
             )
         if (
             used < runtime.check_config.max_attempts

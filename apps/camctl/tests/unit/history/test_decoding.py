@@ -110,7 +110,8 @@ def test_undeclared_evidence_member_is_rejected_on_decode():
 
 
 def _preparation_request():
-    return {"action_id": 8, "trusted_wall_now": 0, "prepare_lead_s": 10, "occurred_at": 1}
+    return {"action_id": 8, "trusted_wall_now": 0, "prepare_lead_s": 10, "occurred_at": 1,
+            "expected_identity": None}
 
 
 def _preparation_failure_request():

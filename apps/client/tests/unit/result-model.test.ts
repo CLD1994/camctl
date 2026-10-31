@@ -123,7 +123,7 @@ it("报告类型未知不从文件名猜测图片", () => {
   )[0];
   expect(row.group).toBe("other");
 });
-it.each(["LRF", "osv"])("%s 原片归入视频并提供预览类型", (extension) => {
+it.each(["MP4", "LRF", "osv"])("%s 原片归入视频并提供预览类型", (extension) => {
   const row = resultProducts(
     {
       ...capture,

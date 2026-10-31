@@ -6,7 +6,7 @@ import pytest
 
 from camctl.capture.models import CaptureDefinition, CaptureInput, build_capture_spec, validate_capture_spec
 from camctl.devices.tasks import (CaptureTask, CompletionMode, EndControl,
-                                  StartReturn, VideoResultMode)
+                                  CaptureStorage, PhotoSourcePolicy, StartReturn, VideoResultMode)
 
 
 def _task(**changes):
@@ -20,6 +20,36 @@ def _task(**changes):
 
 def test_photo_spec_has_no_device_parameter_copy():
     assert build_capture_spec("camera_take_photo", None) == {}
+
+
+def test_device_photo_source_policy_is_fixed_and_legacy_definitions_remain_readable():
+    old = {"output_storage": "device", "start_call_timeout_s": 180}
+    task = CaptureTask("camera_take_photo", output_storage=CaptureStorage.DEVICE,
+                       start_call_timeout_s=180, photo_source_policy=PhotoSourcePolicy.DEFERRED)
+    new = {**old, "photo_source_policy": "deferred"}
+    assert build_capture_spec("camera_take_photo", task) == new
+    assert validate_capture_spec("camera_take_photo", new) == new
+    assert validate_capture_spec("camera_take_photo", old) == old
+
+
+@pytest.mark.parametrize("policy", [None, "other", True, 1])
+def test_device_photo_source_policy_rejects_unknown_or_non_string_values(policy):
+    with pytest.raises(ValueError):
+        validate_capture_spec("camera_take_photo", {
+            "output_storage": "device", "start_call_timeout_s": 180,
+            "photo_source_policy": policy})
+
+
+def test_photo_source_policy_cannot_be_used_for_host_or_non_photo_tasks():
+    with pytest.raises(ValueError):
+        build_capture_spec("camera_take_photo", CaptureTask("camera_take_photo",
+            output_storage=CaptureStorage.HOST, start_call_timeout_s=180,
+            photo_source_policy=PhotoSourcePolicy.DEFERRED))
+    with pytest.raises(ValueError):
+        build_capture_spec("camera_timelapse", _task(photo_source_policy=PhotoSourcePolicy.DEFERRED))
+    with pytest.raises(ValueError):
+        build_capture_spec("camera_take_photo", CaptureTask("camera_take_photo",
+            photo_source_policy=PhotoSourcePolicy.DEFERRED))
 
 
 def _completed_spec():

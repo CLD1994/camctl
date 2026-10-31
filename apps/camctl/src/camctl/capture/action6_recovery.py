@@ -195,13 +195,32 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
                 return False
             raise db_failure(ConsistencyError, f"Action6 未结束检查收场被拒绝: {outcome.error}", outcome)
         after_inspection_id = rows[-1][0]
-    slot_flow = flow if flow is not None else SimpleNamespace(
-        database=runtime.database, pending_read_business=runtime.pending_read_business,
-    )
+    if flow is None:
+        from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
+        slot_flow = SimpleNamespace(
+            database=runtime.database, pending_read_business=runtime.pending_read_business,
+            pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
+            continuing_read_tickets=runtime.continuing_read_tickets, operations=runtime.operations,
+            occurred_at=runtime.wall_us,
+            evidence=EvidenceRegistry((EvidenceContract("read_returned", 1, "read", frozenset()),)),
+            file_executor=getattr(runtime, "file_executor", None),
+        )
+    else:
+        slot_flow = flow
     # READ 仍 ACTIVE 或尚有重试等待时只保留原 slot；这不应阻断既有
     # Action6 取消终态。后续 Action6 恢复会在 READ 自身终结后补做释放。
     await settle_terminal_inspection_slots_for_action(slot_flow, action_id, runtime.wall_us())
     return True
+
+
+def _saved_inspection_without_media(existing):
+    from camctl.capture.segment_inspections import _step_from_ref
+    from camctl.contracts.enums import enum_for
+
+    saved = existing.inspection
+    if saved is None or saved.state == int(enum_for("segment_inspections.state").PENDING):
+        return None
+    return _step_from_ref(saved, None if existing.copy is None else existing.copy.copy_id)
 
 
 async def advance_action6_recovery(runtime, action, decision=None):
@@ -244,9 +263,16 @@ async def advance_action6_recovery(runtime, action, decision=None):
             return
         await advance_action6_segmented_recording(runtime, action, decision)
         return
-    # 受限时钟会话只保存控制和文件进度；媒体检查由正常会话执行。
     if runtime.media is None:
-        return
+        saved_failure = await runtime.database.read(lambda owned: owned.connection.execute(
+            "SELECT 1 FROM segment_inspections s JOIN file_copies c ON c.inspection_id=s.id"
+            " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3"
+            " WHERE s.action_id=? AND s.state=? AND r.status=4"
+            " AND json_extract(r.error_json,'$.code')='device_binding_unavailable' LIMIT 1",
+            (action_id, int(enum_for("segment_inspections.state").FAILED)),
+        ).fetchone())
+        if saved_failure is None:
+            return
     repository = SegmentRepository()
     ref = await prepare_action6_segment_set(runtime, action, None)
     if ref is None:
@@ -264,20 +290,23 @@ async def advance_action6_recovery(runtime, action, decision=None):
         enum_for("actions.type")(action["type"]).name.lower(),
     )
     flow = runtime.media
-    budget = OperationConfig(flow.max_read_attempts, flow.read_idle_timeout_s,
-                             flow.retry_interval_s)
+    budget = (None if flow is None else OperationConfig(
+        flow.max_read_attempts, flow.read_idle_timeout_s, flow.retry_interval_s))
     explicit_media_failure = False
 
     async def inspect(stored):
         nonlocal explicit_media_failure
         existing = await runtime.database.read(lambda owned: read_inspection_for_member(action_id, stored.member_id, owned))
         saved = existing.inspection
-        adopted_budget = budget if saved is None else OperationConfig.from_document(
-            saved.budget_json
-        )
-        step = await inspect_segment(flow, SegmentInspectionRequest(
-            action_id, stored.member_id, target, adopted_budget, runtime.wall_us(),
-        ))
+        if flow is None:
+            step = _saved_inspection_without_media(existing)
+            if step is None:
+                return None
+        else:
+            adopted_budget = budget if saved is None else OperationConfig.from_document(saved.budget_json)
+            step = await inspect_segment(flow, SegmentInspectionRequest(
+                action_id, stored.member_id, target, adopted_budget, runtime.wall_us(),
+            ))
         if step.phase is SegmentInspectionPhase.WAITING:
             return None
         # FAILED 还包括读次数耗尽和媒体工具异常；它们只让覆盖前缀

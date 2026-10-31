@@ -9,6 +9,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.persistence import capture_preparation_upgrade as upgrade
+from camctl.persistence.output_scope_upgrade import upgrade_output_scope
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection, StateDatabaseError
 
 
@@ -100,24 +101,24 @@ def _metadata(version=3):
     return DatabaseMetadata("camctl", "a" * 32, version, "/staging", "/ready", "/processing")
 
 
-@pytest.mark.parametrize("version", [3, 4])
+@pytest.mark.parametrize("version", [3, 4, 5])
 def test_copy_keeps_all_rows_and_identities_and_changes_only_metadata_format(version):
     source, target = _rows(version=version), _rows(target=True)
     upgrade._copy_tables(source.connection, target.connection)
     assert target.tables == {
-        "database_metadata": [(1, 5)],
+        "database_metadata": [(1, upgrade.CURRENT_FORMAT_VERSION)],
         "history_events": source.tables["history_events"],
     }
     assert all(len(rows) <= 128 for _, _, rows in target.inserts)
     assert all("derived" not in names for _, names, _ in target.inserts)
-    upgrade._verify_contents(source.connection, target.connection, target_format=5)
+    upgrade._verify_contents(source.connection, target.connection, target_format=upgrade.CURRENT_FORMAT_VERSION)
     assert all(cursor.close.call_count == 1 for cursor in (*source.cursors, *target.cursors))
 
 
 @pytest.mark.parametrize("changed", ["missing_row", "same_count_changed_history", "generated_value"])
 def test_content_verification_rejects_loss_or_changes(changed):
     source, target = _rows(), _rows()
-    target.tables["database_metadata"] = [(1, 5)]
+    target.tables["database_metadata"] = [(1, upgrade.CURRENT_FORMAT_VERSION)]
     if changed == "missing_row":
         target.tables["history_events"].pop()
     elif changed == "same_count_changed_history":
@@ -125,7 +126,7 @@ def test_content_verification_rejects_loss_or_changes(changed):
     else:
         target.tables["history_events"][0] = (1, "记录-1", 999)
     with pytest.raises(StateDatabaseError):
-        upgrade._verify_contents(source.connection, target.connection, target_format=5)
+        upgrade._verify_contents(source.connection, target.connection, target_format=upgrade.CURRENT_FORMAT_VERSION)
 
 
 def test_original_table_without_authoritative_target_is_not_silently_dropped():
@@ -156,7 +157,7 @@ def publication(monkeypatch):
     return owned, state_db, backup, events, backup_fn, prepare, verify, publish
 
 
-@pytest.mark.parametrize("version", [3, 4])
+@pytest.mark.parametrize("version", [3, 4, 5])
 def test_publish_happens_only_after_complete_preparation_checkpoint_and_actual_close(publication, version):
     owned, state_db, backup, events, _, _, verify, publish = publication
     owned = replace(owned, metadata=_metadata(version))
@@ -211,9 +212,9 @@ def test_unknown_replace_is_observed_without_republishing(publication, published
     verify.assert_called_once()
 
 
-def test_repeated_v5_only_checks_the_existing_database(publication):
+def test_repeated_current_only_checks_the_existing_database(publication):
     owned, state_db, _, _, backup, prepare, _, publish = publication
-    owned = replace(owned, metadata=_metadata(5))
+    owned = replace(owned, metadata=_metadata(upgrade.CURRENT_FORMAT_VERSION))
     assert upgrade.upgrade_capture_preparation(owned, state_db) is None
     backup.assert_not_called()
     prepare.assert_not_called()
@@ -267,14 +268,14 @@ def test_unknown_prepared_commit_is_closed_then_observed_without_recopy(monkeypa
 @pytest.mark.parametrize("changed", ["instance_id", "staging_path", "ready_path", "processing_path", "format_version"])
 def test_copy_verification_rejects_changed_identity_binding_or_format(monkeypatch, changed):
     original = _metadata()
-    metadata = replace(original, format_version=5)
+    metadata = replace(original, format_version=upgrade.CURRENT_FORMAT_VERSION)
     metadata = replace(metadata, **{changed: 3 if changed == "format_version" else "different"})
     connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
     monkeypatch.setattr(upgrade, "open_existing", create_autospec(upgrade.open_existing,
         return_value=OwnedConnection(connection, metadata)))
     with pytest.raises(StateDatabaseError):
         upgrade._verify_copy(Path("/state/prepared"), original,
-            create_autospec(sqlite3.Connection, instance=True, spec_set=True), target_format=5)
+            create_autospec(sqlite3.Connection, instance=True, spec_set=True), target_format=upgrade.CURRENT_FORMAT_VERSION)
     connection.close.assert_called_once()
 
 
@@ -314,7 +315,7 @@ def test_backup_is_consistent_closed_verified_and_durable_before_it_is_returned(
     else:
         path = upgrade._backup(source, Path("/state/state.db"), _metadata())
         assert path.parent == Path("/state")
-        assert path.name.startswith("state.db.before-capture-preparation-v5-")
+        assert path.name.startswith(f"state.db.before-capture-preparation-v{upgrade.CURRENT_FORMAT_VERSION}-")
         assert events == ["backup", "closed", "verified", "file_synced", "directory_synced"]
     source.backup.assert_called_once_with(target, pages=128)
 
@@ -322,15 +323,15 @@ def test_backup_is_consistent_closed_verified_and_durable_before_it_is_returned(
 @pytest.mark.parametrize("broken", ["quick_check", "foreign_key_check"])
 def test_copy_integrity_error_closes_connection_and_rejects_the_copy(monkeypatch, broken):
     target = _rows()
-    target.tables["database_metadata"] = [(1, 5)]
+    target.tables["database_metadata"] = [(1, upgrade.CURRENT_FORMAT_VERSION)]
     original_execute = target.connection.execute.side_effect
     target.connection.execute.side_effect = lambda sql: (
         _cursor([("broken",)]) if sql == f"PRAGMA {broken}" else original_execute(sql)
     )
     monkeypatch.setattr(upgrade, "open_existing", create_autospec(upgrade.open_existing,
-        return_value=OwnedConnection(target.connection, _metadata(5))))
+        return_value=OwnedConnection(target.connection, _metadata(upgrade.CURRENT_FORMAT_VERSION))))
     with pytest.raises(StateDatabaseError):
-        upgrade._verify_copy(Path("/state/prepared"), _metadata(), _rows().connection, target_format=5)
+        upgrade._verify_copy(Path("/state/prepared"), _metadata(), _rows().connection, target_format=upgrade.CURRENT_FORMAT_VERSION)
     target.connection.close.assert_called_once()
 
 
@@ -340,3 +341,32 @@ def test_directory_sync_after_replace_must_succeed_without_republication(publica
     with pytest.raises(StateDatabaseError, match=str(backup)):
         upgrade.upgrade_capture_preparation(owned, state_db)
     publish.assert_called_once()
+
+
+def test_output_scope_upgrades_v5_with_the_same_complete_publication_rules(publication):
+    owned, state_db, backup, events, backup_fn, _, _, _ = publication
+    owned = replace(owned, metadata=_metadata(5))
+    assert upgrade_output_scope(owned, state_db) == backup
+    assert events == ["prepared", "closed", "published", "verified"]
+    backup_fn.assert_called_once_with(owned.connection, state_db, owned.metadata,
+        upgrade_name="output-scope")
+
+
+def test_output_scope_repeated_current_format_only_verifies(publication):
+    owned, state_db, _, _, backup, prepare, _, publish = publication
+    owned = replace(owned, metadata=_metadata(upgrade.CURRENT_FORMAT_VERSION))
+    assert upgrade_output_scope(owned, state_db) is None
+    backup.assert_not_called()
+    prepare.assert_not_called()
+    publish.assert_not_called()
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
+def test_output_scope_requires_the_existing_preparation_upgrade_first(publication, version):
+    owned, state_db, _, _, backup, prepare, _, publish = publication
+    owned = replace(owned, metadata=_metadata(version))
+    with pytest.raises(StateDatabaseError, match="V5"):
+        upgrade_output_scope(owned, state_db)
+    backup.assert_not_called()
+    prepare.assert_not_called()
+    publish.assert_not_called()

@@ -31,6 +31,11 @@ import { DeviceGuide } from "./DeviceGuide";
 import { useFeedback } from "./feedback";
 import { stringifyJson } from "../shared/json";
 import { RecordDetail, type Followup } from "./Records";
+import {
+  PlanRecordList,
+  pageForRecord,
+  recordListPage,
+} from "./PlanRecordList";
 import { Badge, Empty, ErrorBox, Facts } from "./common";
 import { DraftConflictDialog } from "./DraftConflictDialog";
 import { DraftOperationNotice } from "./DraftOperationNotice";
@@ -48,6 +53,7 @@ export function App() {
     [tab, setTab] = useState<"drafts" | "records">("drafts"),
     [selected, setSelected] = useState(""),
     [recordId, setRecordId] = useState(""),
+    [recordPage, setRecordPage] = useState(1),
     [busy, setBusy] = useState(false),
     [follow, setFollow] = useState<Followup>(),
     [activeFollow, setActiveFollow] = useState<PendingFollow>(),
@@ -58,6 +64,7 @@ export function App() {
   const navigationGeneration = useRef(0);
   const exportedNavigation = useRef(new WeakMap<DraftSession, string>());
   const [focusRequest, setFocusRequest] = useState<number>();
+  const appliedFocusRequest = useRef<number | undefined>(undefined);
   const [error, setError] = useFeedback(page);
   const [estimateReloadPhase, setEstimateReloadPhase] =
     useState<EstimateReloadPhase>("idle");
@@ -91,6 +98,10 @@ export function App() {
     refreshing = useRef<Promise<ClientState> | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}),
     [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  const records = recordsFor(state?.requests ?? [], state?.snapshot?.plans ?? []);
+  useLayoutEffect(() => {
+    setRecordPage((current) => recordListPage(records, current).page);
+  }, [records.length]);
   const captureStateContext = (consumerId?: string) => ({ consumerId });
   const [observations] = useState(
     () =>
@@ -273,12 +284,21 @@ export function App() {
   const focusNavigation = (generation: number) => setFocusRequest(generation);
   // 焦点只能在目的地的 React 提交完成后移动，不能提前聚焦即将卸载的来源 Editor。
   useLayoutEffect(() => {
-    if (focusRequest !== undefined) queueMicrotask(() => {
+    if (
+      focusRequest === undefined ||
+      appliedFocusRequest.current === focusRequest
+    ) return;
+    appliedFocusRequest.current = focusRequest;
+    if (page === "plans" && tab === "records") {
+      const destination = pageForRecord(records, recordId);
+      if (destination !== undefined) setRecordPage(destination);
+    }
+    queueMicrotask(() => {
       if (mounted.current && navigationGeneration.current === focusRequest)
-        visibleDestination()?.focus();
+        visibleDestination()?.focus({ preventScroll: true });
     });
   }, [focusRequest, page, tab, selected, recordId]);
-  const openRecord = (id: string) => {
+  const openRecord = (id: string, moveFocus = true) => {
     for (const session of sessions.current.values())
       if (session.exportedRequestId === id && !session.needsLeaveWarning)
         exportedNavigation.current.set(session, id);
@@ -286,7 +306,7 @@ export function App() {
     setRecordId(id);
     setPage("plans");
     setTab("records");
-    focusNavigation(generation);
+    if (moveFocus) focusNavigation(generation);
   };
   const finishExportNavigation = (session: DraftSession, id: string, generation: number) => {
     if (session.exportedRequestId !== id || session.needsLeaveWarning) return;
@@ -725,7 +745,6 @@ export function App() {
       (d) =>
         !d.exportedRequestId && !sessions.current.get(d.id)?.exportedRequestId,
     ),
-    records = recordsFor(state.requests ?? [], state.snapshot?.plans ?? []),
     record = records.find((r) => r.id === recordId);
   let conflictSnapshot: ConflictSelectionSnapshot | undefined,
     conflictSelectable = false;
@@ -779,23 +798,14 @@ export function App() {
           ) : (
             <Empty>从一份新草稿开始。未完成的输入也会自动保存。</Empty>
           )
-        ) : records.length ? (
-          records.map((r) => (
-            <button
-              className={`list-item ${recordId === r.id ? "selected" : ""}`}
-              data-testid="record-open-button"
-              key={r.id}
-              onClick={() => openRecord(r.id)}
-            >
-              <strong>
-                {r.plan?.name ?? String(r.request?.body.name ?? r.id)}
-              </strong>
-              <span>{r.plan ? "主机已提供结果" : "已导出，等待报告"}</span>
-              <small>{r.id}</small>
-            </button>
-          ))
         ) : (
-          <Empty>导出计划或导入报告后，可在这里查看记录。</Empty>
+          <PlanRecordList
+            records={records}
+            selectedId={recordId}
+            page={recordPage}
+            onPageChange={setRecordPage}
+            onOpen={(id) => openRecord(id, false)}
+          />
         )}
       </section>
       {tab === "drafts" ? (

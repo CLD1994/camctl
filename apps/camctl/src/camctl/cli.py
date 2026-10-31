@@ -12,11 +12,13 @@ import json
 import sys
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TextIO
 
 from camctl.contracts.schemas import SchemaRuleError, SchemaValidationError, validate_document
 from camctl.session.outcome import SessionOutcome
+from camctl.version import installed_version
 
 __all__ = [
     "Command",
@@ -28,8 +30,6 @@ __all__ = [
     "main",
     "parse_command",
 ]
-
-VERSION = "0.1.0"
 
 _CAPABILITIES_SCHEMA = "protocol/capabilities.schema.json"
 
@@ -58,10 +58,22 @@ class Command:
     host_notification_fd: int | None = None
     upgrade_software_recovery: bool = False
     upgrade_capture_preparation: bool = False
+    upgrade_output_scope: bool = False
+    upgrade_photo_source: bool = False
+    upgrade_preview_selection: bool = False
+    upgrade_device_file_batches: bool = False
 
 
 class _Parser(argparse.ArgumentParser):
     """参数错误转为 CommandLineError，退出码契约由 CLI 统一处理。"""
+
+    def __init__(self, *args, stdout: TextIO | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._stdout = stdout
+
+    def print_help(self, file: TextIO | None = None) -> None:
+        output = file if file is not None else self._stdout if self._stdout is not None else sys.stdout
+        output.write(self.format_help())
 
     def error(self, message: str) -> None:
         raise CommandLineError(message)
@@ -72,16 +84,22 @@ class _Parser(argparse.ArgumentParser):
         raise SystemExit(status)
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = _Parser(prog="camctl", add_help=True)
+def _build_parser(stdout: TextIO | None = None) -> argparse.ArgumentParser:
+    parser = _Parser(prog="camctl", add_help=True, stdout=stdout)
     parser.add_argument("--version", action="store_true", help="输出版本并退出")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True,
+                                    parser_class=partial(_Parser, stdout=stdout))
 
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("--config", dest="config_path", default=None)
     upgrade = init_parser.add_mutually_exclusive_group()
     upgrade.add_argument("--upgrade-software-recovery", action="store_true", help="备份并显式升级软件恢复格式")
     upgrade.add_argument("--upgrade-capture-preparation", action="store_true", help="备份并显式升级拍摄准备格式")
+    upgrade.add_argument("--upgrade-output-scope", action="store_true", help="备份并显式升级输出范围格式")
+    upgrade.add_argument("--upgrade-photo-source", action="store_true", help="备份并显式升级照片来源格式")
+    upgrade.add_argument("--upgrade-preview-selection", action="store_true", help="备份并显式升级预览选择格式")
+
+    upgrade.add_argument("--upgrade-device-file-batches", action="store_true", help="备份并显式升级同机文件批次格式")
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("plan_path", nargs="?")
@@ -107,14 +125,16 @@ def _notification_fd(raw: str) -> int:
     return value
 
 
-def parse_command(argv: Sequence[str]) -> Command:
-    """解析命令行；语法与参数错误统一为 CommandLineError。"""
+def parse_command(argv: Sequence[str], *, stdout: TextIO | None = None) -> Command:
+    """解析命令行；帮助输出后以 SystemExit(0) 正常结束，参数错误为 CommandLineError。"""
     arguments = list(argv)
     if "--version" in arguments:
         return Command(kind=CommandKind.VERSION, plan_path=None, config_path=None)
     try:
-        parsed = _build_parser().parse_args(arguments)
+        parsed = _build_parser(stdout=stdout).parse_args(arguments)
     except SystemExit as error:  # --help 等不带命令的退出路径。
+        if error.code == 0:
+            raise
         raise CommandLineError(f"命令行未表达可执行命令: {arguments}") from error
     kind = CommandKind(parsed.command)
     plan_path = getattr(parsed, "plan_path", None)
@@ -125,7 +145,11 @@ def parse_command(argv: Sequence[str]) -> Command:
     return Command(kind=kind, plan_path=plan_path, config_path=parsed.config_path,
                    host_notification_fd=getattr(parsed, "host_notification_fd", None),
                    upgrade_software_recovery=getattr(parsed, "upgrade_software_recovery", False),
-                   upgrade_capture_preparation=getattr(parsed, "upgrade_capture_preparation", False))
+                   upgrade_capture_preparation=getattr(parsed, "upgrade_capture_preparation", False),
+                   upgrade_output_scope=getattr(parsed, "upgrade_output_scope", False),
+                   upgrade_photo_source=getattr(parsed, "upgrade_photo_source", False),
+                   upgrade_preview_selection=getattr(parsed, "upgrade_preview_selection", False),
+                   upgrade_device_file_batches=getattr(parsed, "upgrade_device_file_batches", False))
 
 
 def encode_session_result(
@@ -187,16 +211,18 @@ def main(
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
     try:
-        command = parse_command(list(sys.argv[1:] if argv is None else argv))
+        command = parse_command(list(sys.argv[1:] if argv is None else argv), stdout=out)
     except CommandLineError as error:
         _diagnose_error(err, "camctl: 命令解析失败", error)
         return 1
     except BaseException as error:
+        if isinstance(error, SystemExit) and error.code == 0:
+            return 0
         _diagnose_error(err, "camctl: 命令解析异常", error)
         raise
     try:
         if command.kind is CommandKind.VERSION:
-            out.write(VERSION + "\n")
+            out.write(installed_version() + "\n")
             return 0
         if command.kind is CommandKind.DESCRIBE:
             return _run_describe(command, out, err)
@@ -216,15 +242,30 @@ def main(
 def _diagnose_error(err: TextIO, stage: str, error: BaseException) -> None:
     """初始化前及日志关闭后直接保留完整异常图，不污染 stdout。"""
     from camctl.operations.error_diagnostics import exception_diagnostic
+    from camctl.logging_runtime.formatting import encode_record
+    from camctl.logging_runtime.models import LogLevel
 
     if getattr(error, "_camctl_cli_diagnostic_attempted", False):
         return
     error._camctl_cli_diagnostic_attempted = True
+    payload = {"stage": "cli", "message": stage}
     try:
-        encoded = json.dumps(exception_diagnostic(error), ensure_ascii=False, separators=(",", ":"))
-        print(f"{stage}: {type(error).__name__}: {error}\n异常诊断: {encoded}", file=err)
+        payload["exception"] = exception_diagnostic(error)
+        encoded = encode_record(LogLevel.ERROR, payload)
+    except Exception as format_error:
+        payload["exception"] = exception_diagnostic(error, include_message=False)
+        payload["format_error"] = exception_diagnostic(format_error, include_message=False)
+        try:
+            encoded = encode_record(LogLevel.ERROR, payload)
+        except Exception:
+            encoded = repr(payload)
+    try:
+        print(encoded, file=err)
     except Exception as diagnostic_error:
-        encoded = json.dumps(exception_diagnostic(diagnostic_error), ensure_ascii=False, separators=(",", ":"))
+        try:
+            encoded = json.dumps(exception_diagnostic(diagnostic_error), ensure_ascii=False, separators=(",", ":"))
+        except Exception:
+            encoded = repr(exception_diagnostic(diagnostic_error, include_message=False))
         error.add_note(f"stderr 诊断写入失败: {encoded}")
 
 
@@ -364,6 +405,9 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
         describe,
     )
     from camctl.bootstrap.config import ConfigError
+    from camctl.logging_runtime.one_shot import stderr_logging
+    from camctl.logging_runtime.events import measure_stage
+    from camctl.logging_runtime.startup import record_startup
 
     try:
         from camctl.devices.catalog import build_catalog, default_driver_definitions
@@ -371,10 +415,14 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
 
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        register_builtin_drivers(config)
-        catalog = build_catalog(config, default_driver_definitions())
-        document = describe(config, catalog)
-        payload = encode_describe_document(document).decode("utf-8")
+        with stderr_logging(config.log, err, command_name="describe",
+                on_error=lambda stage, error: _diagnose_error(err, stage, error)):
+            record_startup()
+            with measure_stage("describe"):
+                register_builtin_drivers(config)
+                catalog = build_catalog(config, default_driver_definitions())
+                document = describe(config, catalog)
+                payload = encode_describe_document(document).decode("utf-8")
     except (ConfigError, RuleError, SchemaRuleError, SchemaValidationError, OSError) as error:
         _diagnose_error(err, "camctl describe: 能力说明导出失败", error)
         return 1
@@ -385,6 +433,9 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
 def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.application import ConfigAdapter
     from camctl.bootstrap.config import ConfigError
+    from camctl.logging_runtime.one_shot import stderr_logging
+    from camctl.logging_runtime.events import measure_stage, record_event
+    from camctl.logging_runtime.startup import record_startup
     from camctl.persistence.initialization import (
         InitOutcome,
         initialize_state,
@@ -393,9 +444,18 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     try:
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        result = initialize_state(config, adapter.state_db_path(config),
-            upgrade_software_recovery=command.upgrade_software_recovery,
-            upgrade_capture_preparation=command.upgrade_capture_preparation)
+        with stderr_logging(config.log, err, command_name="init",
+                on_error=lambda stage, error: _diagnose_error(err, stage, error)):
+            record_startup()
+            with measure_stage("initialization"):
+                result = initialize_state(config, adapter.state_db_path(config),
+                    upgrade_software_recovery=command.upgrade_software_recovery,
+                    upgrade_capture_preparation=command.upgrade_capture_preparation,
+                    upgrade_output_scope=command.upgrade_output_scope,
+                    upgrade_photo_source=command.upgrade_photo_source,
+                    upgrade_preview_selection=command.upgrade_preview_selection,
+                    upgrade_device_file_batches=command.upgrade_device_file_batches)
+            record_event("initialization", event="result", outcome=result.outcome.value)
     except (ConfigError, OSError) as error:
         _diagnose_error(err, "camctl init: 初始化失败", error)
         return 1

@@ -714,6 +714,7 @@ it("裸曝光方式原文与非法旧值的诊断分开呈现并保留全部责�
   await check(field.locator(".current-input-error")).toContainText("输入");
   await check(field.locator(".current-input-error")).not.toContainText("对象");
   await check(field.locator(".retained-content-errors")).toContainText("对象");
+  await page.getByTestId("export-button").click();
   await check(page.locator(".pending-validation-note")).toBeVisible();
   await page.locator(".raw-validation > summary").click();
   await check(
@@ -923,6 +924,7 @@ it("超限时长的字段、摘要和 HTTP 诊断均保留原上界", async () =
     })
     .locator(".field-error");
   await check(field).toContainText("9223372036854775");
+  await page.getByTestId("export-button").click();
   await check(page.locator(".validation")).toContainText("9223372036854775");
   const response = await page.request.post(
     `${page.url()}api/drafts/${draft.id}/validate`,
@@ -1239,6 +1241,7 @@ it("曝光缺失子成员的校验摘要定位对应选择器并保持草稿", a
   await check(
     page.getByRole("combobox", { name: "mode (mode)", exact: true }),
   ).not.toHaveAttribute("aria-invalid", "true");
+  await page.getByTestId("export-button").click();
   const summary = page
     .getByTestId("validation-issues")
     .locator(".validation-link");
@@ -1312,6 +1315,7 @@ it.each([{ omit: true }, { value: "{}" }])(
   async (exposure) => {
     const { app, page, draft } = await setup("10", false, exposure);
     const before = app.draft(draft.id);
+    await page.getByTestId("export-button").click();
     const summary = page
       .getByTestId("validation-issues")
       .locator(".validation-link");
@@ -1540,12 +1544,12 @@ it("能力源的 Action6 延时参数、预览与三种输出经真实表单和�
 }, 60000);
 
 it.each([
-  ["0", "1/1500 秒", "0.000667"],
-  ["1", "1/3000 秒", "0.000333"],
-  ["2", "1/4000 秒", "0.00025"],
+  ["0", "1/1500 秒", "1/1500"],
+  ["1", "1/3000 秒", "1/3000"],
+  ["2", "1/4000 秒", "1/4000"],
 ])(
   "short shutter choices survive preset reopen and export: %s",
-  async (choice, label, token) => {
+  async (choice, label, shutter) => {
     const capabilities = {
       devices: [
         {
@@ -1633,7 +1637,9 @@ it.each([
       .click();
     await check.poll(() => app.state().presets!.length).toBe(1);
     const preset = app.state().presets![0];
-    expect(stringifyJson(preset.params)).toContain('"shutter_s":' + token);
+    expect(stringifyJson(preset.params)).toContain(
+      '"shutter_s":' + stringifyJson(shutter),
+    );
     await page.reload();
     await page.getByTestId("draft-open-button").click();
     await check(control("快门 (shutter_s)")).toContainText(label);
@@ -1694,7 +1700,7 @@ it.each([
       (await (await downloadEvent).path())!,
       "utf8",
     );
-    expect(downloaded).toContain('"shutter_s": ' + token);
+    expect(downloaded).toContain('"shutter_s": ' + stringifyJson(shutter));
     const exported = parseJson(downloaded) as any;
     expect(exported.actions[0].params).toEqual(preset.params);
     expect(exported).not.toHaveProperty("objectVariants");

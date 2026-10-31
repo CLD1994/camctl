@@ -42,6 +42,40 @@ def _one(db,sql,params=()):
         return cursor.fetchone()
 
 
+def _verify_action6_inspections_finished(db, action, setrow, assessment):
+    """来源成功前核对已建立的检查责任与其实际读取结果。"""
+    from camctl.capture.segment_models import CoverageStatus
+    from camctl.devices.tasks import CaptureResultPolicy
+    from camctl.persistence.repositories.segment_inspections import (
+        _result_requires_read, inspection_input_read_succeeded,
+    )
+
+    if action["execution_spec_json"].get("result_policy") != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
+        return
+    cursor_id = 0
+    while True:
+        with closing(db.execute(
+            "SELECT id FROM segment_inspections WHERE action_id=? AND set_id=? AND id>?"
+            " ORDER BY id LIMIT 128", (action["id"], setrow["id"], cursor_id),
+        )) as cursor:
+            rows = cursor.fetchall()
+        if not rows:
+            return
+        if assessment.coverage_status is CoverageStatus.NOT_PERFORMED:
+            raise ConsistencyError("已建立分段检查责任不能按未检查发布")
+        for (inspection_id,) in rows:
+            inspection = row_facts(db, "segment_inspections", inspection_id)
+            if inspection is None or inspection["state"] == int(enum_for("segment_inspections.state").PENDING):
+                raise ConsistencyError("来源成功前分段检查必须结束")
+            result = inspection["result_json"]
+            if result is None:
+                raise ConsistencyError("已结束分段检查缺少结果")
+            if (_result_requires_read(inspection["state"], result)
+                    and not inspection_input_read_succeeded(db, inspection)):
+                raise ConsistencyError("来源成功前检查副本的原读取必须可靠成功")
+        cursor_id = rows[-1][0]
+
+
 def _publishes_candidates(action, setrow):
     if setrow["publication_kind"] != int(enum_for("segment_sets.publication_kind").CANCELED):
         return True
@@ -697,6 +731,8 @@ def verify_finish_request_event(db,event,context,action_id):
     if (header['original_count'],header['preview_count'],header['scope_count'])!=(originals,previews,scope_count):
         raise ConsistencyError('原有限头没有完整覆盖冻结候选和范围')
     expected_status,error,details=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db,conclusion),before_event_id=event.event_id)
+    if expected_status == 3:
+        _verify_action6_inspections_finished(db, action, setrow, assessment)
     before={'status':2};after={'status':expected_status}
     if expected_status==4:
         before.update(error_code=action['error_code'],error_details_json=action['error_details_json'])
@@ -1071,6 +1107,8 @@ class _FinishCommand:
         allocation=scope.allocate(event_count)
         outcome=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db,conclusion),before_event_id=scope.max_event_id+1)
         status,error,details=outcome
+        if status == 3:
+            _verify_action6_inspections_finished(db, action, setrow, assessment)
         facts=_FinishFacts(action,run,setrow,assessment,outcome)
         result=SegmentFinishResult(request.ref,status,3 if complete_plan else plan['status'],HistoryBoundary(allocation.txn_id,allocation.last_event_id),output_count,originals,previews,scope_count)
         header={'request':request_document(request),'output_count':output_count,'original_count':originals,'preview_count':previews,'scope_count':scope_count,

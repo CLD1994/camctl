@@ -15,12 +15,11 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ObjectId, UtcMicros
+from camctl.contracts.values import ObjectId, UtcMicros, parse_object_id
 from camctl.persistence.transaction import encode_json_value
 
 if TYPE_CHECKING:
     from camctl.capture.result_pages import ResultPageRef
-    from camctl.contracts.history_values import HistoryBoundary
 
 __all__ = [
     "FileChecksumSave",
@@ -152,8 +151,9 @@ class OwnershipFromResultPageSave:
         if (ticket.operation != "result" or not isinstance(ticket.target_id, str)
                 or not ticket.target_id.isascii() or not ticket.target_id.isdecimal()
                 or str(ObjectId(int(ticket.target_id))) != ticket.target_id
-                or ticket.responsibility_key != f"results/{ticket.target_id}"):
-            raise ValueError("原页归属要求原 RESULTS 活动票据")
+                or ticket.responsibility_key not in (
+                    f"results/{ticket.target_id}", f"scope/{ticket.target_id}")):
+            raise ValueError("原页归属要求原结果核实或范围收尾活动票据")
         if (self.page.next_cursor is not None
                 and not isinstance(self.page.next_cursor, DirectoryCursor)):
             raise TypeError("原页归属游标必须保持 DirectoryCursor 或空")
@@ -223,21 +223,17 @@ class OwnershipSave:
 
 @dataclass(frozen=True)
 class PairResultFilesSave:
-    """按原完整扫描和固定文件边界保存一次后配对事实。"""
+    """按原完整扫描保存一次后配对事实。"""
 
     preview_file_id: int
     scan: "ResultPageRef"
-    source_boundary: "HistoryBoundary"
     occurred_at: int
 
     def __post_init__(self):
         from camctl.capture.result_pages import ResultPageRef
-        from camctl.contracts.history_values import HistoryBoundary
         ObjectId(self.preview_file_id)
         if not isinstance(self.scan, ResultPageRef):
             raise TypeError("配对必须引用原扫描末页")
-        if not isinstance(self.source_boundary, HistoryBoundary):
-            raise TypeError("配对必须使用完整历史边界")
         OwnershipFromResultPageSave(self.scan, self.preview_file_id, self.occurred_at)
         UtcMicros(self.occurred_at)
 
@@ -246,9 +242,10 @@ class PairResultFilesSave:
 class FileCompletionSave:
     """一次文件形成状态保存（DEVICE_FILE_OBSERVED.COMPLETE）。
 
-    COMPLETE 携带完整大小与完成依据，TIME_AND_OUTPUTS 依据引用已
-    保存的等待完成事实；WRITING 只携带仍在形成的观察证据；UNCON-
-    FIRMED 携带实际失败证据。文件已经完成后不得倒退。
+    COMPLETE 通常携带完整大小与完成依据。按需照片来源的可靠
+    START 可以确认来源完成而尚不提供任何一次读取的大小。
+    TIME_AND_OUTPUTS 依据引用已保存的等待完成事实；WRITING 只
+    携带仍在形成的观察证据；UNCONFIRMED 携带实际失败证据。
     """
 
     file_id: int
@@ -278,8 +275,17 @@ class FileCompletionSave:
             if basis not in (_DEVICE_GUARANTEE, _TIME_AND_OUTPUTS, _STOP_RETURN_AND_WAIT):
                 raise ValueError(f"完成依据不合法: {self.basis!r}")
             _mapping("完成观察依据", self.observation, required=True)
-            if (isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int)
-                    or self.size_bytes < 0):
+            if self.size_bytes is None:
+                reference = self.observation.get("photo_start")
+                if (basis != _DEVICE_GUARANTEE or set(self.observation) != {"activity_id", "photo_start"}
+                        or not isinstance(reference, Mapping)
+                        or set(reference) != {"start_result_event_id", "role"}
+                        or reference.get("role") not in ("original", "thumbnail")):
+                    raise ValueError("未知大小仅适用于按原 START 登记的照片来源")
+                parse_object_id(self.observation["activity_id"])
+                ObjectId(reference["start_result_event_id"])
+            elif (isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int)
+                  or self.size_bytes < 0):
                 raise ValueError(f"完整大小必须是非负整数: {self.size_bytes!r}")
             if basis == _TIME_AND_OUTPUTS:
                 if self.activity_id is None or self.wait_completed_event_id is None:

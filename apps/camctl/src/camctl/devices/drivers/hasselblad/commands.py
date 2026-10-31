@@ -74,7 +74,9 @@ def photo_start_commands(
                 field = "shutter_s" if slot is PhotoStep.SHUTTER else slot.value
                 if field not in exposure_fields:
                     continue
-                argv = (C.SET, PHOTO_FIELDS[field].command_field, _number(getattr(exposure, field)))
+                value = getattr(exposure, field)
+                argv = (C.SET, PHOTO_FIELDS[field].command_field,
+                        value if slot is PhotoStep.SHUTTER else _number(value))
             case PhotoStep.WB_MODE:
                 argv = (C.SET, C.WHITE_BALANCE_MODE_FIELD, wb.mode.value)
             case PhotoStep.WB:

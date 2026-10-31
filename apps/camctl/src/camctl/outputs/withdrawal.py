@@ -15,6 +15,7 @@ from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
 from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
+from camctl.logging_runtime.models import LogLevel
 
 if TYPE_CHECKING:
     from camctl.persistence.business import BusinessDatabase
@@ -60,8 +61,10 @@ async def _identity(delivery_id: int, context: WithdrawalContext):
         description="交付撤回身份读取")
     if len(rows) != 1 or rows[0][6] != delivery_id:
         raise ConsistencyError("交付撤回缺少原交付的唯一目标文件归属")
-    if rows[0][2] not in (int(_DELIVERY.PUBLISHED), int(_DELIVERY.WITHDRAWN)):
-        raise ConsistencyError("交付撤回要求可靠的原发布事实")
+    if (rows[0][2] not in (int(_DELIVERY.PUBLISHED), int(_DELIVERY.WITHDRAWN))
+            and not (rows[0][2] in (int(_DELIVERY.CANCELED), int(_DELIVERY.PUBLISHING))
+                     and rows[0][3] == int(_WITHDRAWAL.UNKNOWN))):
+        raise ConsistencyError("交付撤回要求可靠的原发布事实或已保存的位置未知结论")
     HandoffIdentity(context.ready, rows[0][1])
     return rows[0]
 
@@ -156,7 +159,9 @@ async def withdraw_delivery(delivery_id: int, context: WithdrawalContext) -> boo
 
     await context.executor.run_owned_async_file_task(AsyncFileTask(
         FileTaskId(f"withdrawal/{delivery_id}/{new_operation_key()}"), (identity[5],),
-        "delivery_withdrawal", "交付撤回实际结果及原事务保存", body, resources=("state_db",)))
+        "delivery_withdrawal", "交付撤回实际结果及原事务保存", body, resources=("state_db",),
+        log_level=None if pending is not None or identity[3] not in (
+            int(_WITHDRAWAL.NOT_REQUESTED), int(_WITHDRAWAL.PENDING)) else LogLevel.INFO))
     return True
 
 

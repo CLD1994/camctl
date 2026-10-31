@@ -24,7 +24,7 @@ export function playbackMediaType(
 ): string | undefined {
   if (
     (type === undefined || type === "application/octet-stream") &&
-    names.some((name) => name !== undefined && /\.(lrf|osv)$/i.test(name))
+    names.some((name) => name !== undefined && /\.(mp4|lrf|osv)$/i.test(name))
   )
     return "video/mp4";
   return type;

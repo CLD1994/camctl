@@ -62,6 +62,7 @@ class SavedPhotoReturn:
     occurred_at: int
     result_json: Any
     error_json: Any
+    result_event_id: int | None = None
 
 
 def is_saved_host_photo(action: Mapping[str, Any]) -> bool:
@@ -168,6 +169,191 @@ async def _save_complete(runtime, action_id: int, request: HostPhotoComplete) ->
     return await settle_required(save_and_apply())
 
 
+async def _save_photo_cache(runtime, action_id, role, request=None):
+    """沿角色原申请与原键完成缓存字节保存。"""
+    from camctl.history.photo_cache_request import PhotoCacheComplete
+    repository, _ = _owned_repository(runtime, action_id)
+    identity = (action_id, role)
+    pending = runtime.pending_host_photo_completions.get(identity)
+    if pending is None:
+        if not isinstance(request, PhotoCacheComplete):
+            raise ConsistencyError("照片缓存缺少原完整申请")
+        pending = PendingHostPhotoRequest(new_operation_key(), request)
+        runtime.pending_host_photo_completions[identity] = pending
+    elif request is not None and pending.request != request:
+        raise ConsistencyError("照片缓存原完整申请不可替换")
+    try:
+        result = await _request_result(runtime, repository, pending, repository.save_photo_cache_complete)
+    except BaseException as error:
+        receipt = db_outcome_for(error)
+        if receipt is not None and receipt.kind is DbOutcomeKind.COMPLETED:
+            runtime.pending_host_photo_completions.pop(identity, None)
+        raise
+    runtime.pending_host_photo_completions.pop(identity, None)
+    return result
+
+
+async def _save_sync_photo_cache(runtime, action_id, role, request=None):
+    """沿原拍摄同步文件的完整申请及操作键保存结果。"""
+    from camctl.history.photo_cache_request import PhotoSyncCacheComplete
+    repository, _ = _owned_repository(runtime, action_id)
+    identity = (action_id, role)
+    pending = runtime.pending_host_photo_completions.get(identity)
+    if pending is None:
+        if not isinstance(request, PhotoSyncCacheComplete):
+            raise ConsistencyError("照片同步缓存缺少原完整申请")
+        pending = PendingHostPhotoRequest(new_operation_key(), request)
+        runtime.pending_host_photo_completions[identity] = pending
+    elif request is not None and pending.request != request:
+        raise ConsistencyError("照片同步缓存原完整申请不可替换")
+    try:
+        result = await _request_result(runtime, repository, pending, repository.save_photo_sync_cache_complete)
+    except BaseException as error:
+        receipt = db_outcome_for(error)
+        if receipt is not None and receipt.kind is DbOutcomeKind.COMPLETED:
+            runtime.pending_host_photo_completions.pop(identity, None)
+        raise
+    runtime.pending_host_photo_completions.pop(identity, None)
+    return result
+
+
+async def archive_device_sync_cache(runtime, action_id, saved, observation, files, drafts):
+    """将原 START 返回的同步文件保存在对应责任下供等待者复用。"""
+    import sys
+    from camctl.history.photo_cache_request import PhotoSyncCacheComplete
+    from camctl.host_files.capture_sources import CaptureFileError, archive_photo_sync_cache
+    from camctl.host_files.downloads import CaptureCleanupWorkspace
+    from camctl.host_files.tasks import AsyncFileTask, FileTaskError, FileTaskId
+    from camctl.logging_runtime.diagnostics import record_error
+    from camctl.operations.error_diagnostics import exception_diagnostic, attach_diagnostic_facts
+
+    _, roots = _owned_repository(runtime, action_id)
+    action = await runtime.action(action_id)
+    for role, key, prepared, draft in (
+            ("original", "original", files.original, drafts[0]),
+            ("thumbnail", "preview", files.preview, drafts[1])):
+        identity = (action_id, role)
+        if identity in runtime.pending_host_photo_completions:
+            await _save_sync_photo_cache(runtime, action_id, role)
+            continue
+        candidate = observation.data.get(key)
+        if candidate is None or runtime.file_executor is None:
+            continue
+        facts = await runtime.database.read(lambda owned: row_facts(owned.connection, "intermediate_files", prepared.file_id),
+                                            description="读取照片同步缓存原责任")
+        if facts["last_error_json"] is not None or facts["size_bytes"] is not None:
+            continue
+        owner = CaptureCleanupWorkspace(roots.staging, saved.ticket)
+        if not owner.claim():
+            raise ConsistencyError("照片同步缓存的原拍摄工作区仍由其他拥有者持有")
+
+        async def work(_control):
+            error_document = None
+            try:
+                await archive_photo_sync_cache(roots, saved.ticket.target_id, candidate["host_name"],
+                    _file_ref(prepared, roots.staging), purpose=prepared.purpose,
+                    capture_format=saved_photo_format(action), owner=owner)
+            except CaptureFileError as error:
+                if not owner.files_closed:
+                    raise
+                record_error(error, stage="capture.photo_cache_archive", context={"action_id": action_id, "role": role})
+                error_document = exception_diagnostic(error)
+            try:
+                request = PhotoSyncCacheComplete(action_id, prepared.file_id, draft.file.device_file_id,
+                    saved.result_event_id, role, candidate["host_name"], candidate["size"], runtime.wall_us(), error_document)
+                await _save_sync_photo_cache(runtime, action_id, role, request)
+            finally:
+                owner.release()
+                if not owner.files_closed:
+                    actual = sys.exception()
+                    if actual is None:
+                        raise BaseExceptionGroup("照片同步缓存文件关闭未确认", list(owner.close_errors))
+                    attach_diagnostic_facts(actual, {"photo_cache_close_errors": owner.close_errors})
+        try:
+            await runtime.file_executor.run_owned_async_file_task(AsyncFileTask(
+                FileTaskId(f"photo_sync_cache/{new_operation_key()}"), (prepared.file_id,),
+                "photo_cache", "照片同步缓存归档", work))
+        except FileTaskError as error:
+            record_error(error, stage="capture.photo_cache_archive", context={"action_id": action_id, "role": role})
+        finally:
+            owner.release()
+
+
+async def archive_device_photo_cache(runtime, action_id, saved, device_file_id):
+    """归档已固定选择；缓存本地失败不改变可靠相机来源。"""
+    from camctl.history.photo_cache_request import PhotoCacheComplete
+    from camctl.host_files.capture_sources import CaptureFileError, archive_photo_cache
+    from camctl.host_files.downloads import ResultDownloadWorkspace
+    from camctl.host_files.tasks import AsyncFileTask, FileTaskError, FileTaskId
+    from camctl.logging_runtime.diagnostics import record_error
+    from camctl.operations.error_diagnostics import exception_diagnostic, attach_diagnostic_facts
+    import sys
+
+    attempts = [item for item in saved.page.outcome.observations
+                if item.type == "photo_result_attempt" and item.version == 2]
+    if len(attempts) != 1 or not isinstance(attempts[0].data.get("comparison"), Mapping):
+        return
+    detail = attempts[0].data
+    role, decision = detail["role"], detail["comparison"]
+    selected = decision["selected"]
+    identity = (action_id, role)
+    if identity in runtime.pending_host_photo_completions:
+        await _save_photo_cache(runtime, action_id, role)
+        return
+    files = await _prepare_files(runtime, action_id)
+    prepared = files.original if role == "original" else files.preview
+    facts = await runtime.database.read(lambda owned: row_facts(owned.connection, "intermediate_files", prepared.file_id),
+                                        description="读取照片缓存原责任")
+    entry = saved.page.entries[0]
+    raw_artifact = decision["sync_artifact"] if selected == "sync" else detail["steps"][-1]["artifact"]
+    artifact = CapturedArtifact.from_json(raw_artifact)
+    if facts["last_error_json"] is not None:
+        return
+    if facts["size_bytes"] is not None or facts["sha256"] is not None:
+        if facts["size_bytes"] != entry.size_bytes or facts["sha256"] != artifact.sha256:
+            raise ConsistencyError("照片缓存原完整大小与来源不同")
+        return
+    if runtime.file_executor is None:
+        return
+    _, roots = _owned_repository(runtime, action_id)
+    action = await runtime.action(action_id)
+    owner = ResultDownloadWorkspace(roots.staging, saved.ref.ticket, role)
+    if not owner.claim():
+        raise ConsistencyError("照片缓存原文件操作仍由其他拥有者持有")
+    async def work(_control):
+        try:
+            await archive_photo_cache(roots, saved.ref.ticket.target_id, saved.ref.ticket, role,
+                selected, artifact, _file_ref(prepared, roots.staging), purpose=prepared.purpose,
+                capture_format=saved_photo_format(action), owner=owner)
+            request = PhotoCacheComplete(action_id, prepared.file_id, device_file_id, saved.ref.event_id,
+                selected, artifact.size_bytes, artifact.sha256, runtime.wall_us(), None)
+            await _save_photo_cache(runtime, action_id, role, request)
+        except CaptureFileError as error:
+            if not owner.files_closed:
+                raise
+            record_error(error, stage="capture.photo_cache_archive",
+                         context={"action_id": action_id, "role": role})
+            request = PhotoCacheComplete(action_id, prepared.file_id, device_file_id, saved.ref.event_id,
+                selected, artifact.size_bytes, artifact.sha256, runtime.wall_us(), exception_diagnostic(error))
+            await _save_photo_cache(runtime, action_id, role, request)
+        finally:
+            owner.release()
+            if not owner.files_closed:
+                actual = sys.exception()
+                if actual is None:
+                    raise BaseExceptionGroup("照片缓存文件关闭未确认", list(owner.close_errors))
+                attach_diagnostic_facts(actual, {"photo_cache_close_errors": owner.close_errors})
+    try:
+        await runtime.file_executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"photo_cache/{new_operation_key()}"), (prepared.file_id,),
+            "photo_cache", "照片来源缓存归档", work))
+    except FileTaskError as error:
+        record_error(error, stage="capture.photo_cache_archive",
+                     context={"action_id": action_id, "role": role})
+    finally:
+        owner.release()
+
+
 async def _saved_start(runtime, action_id: int) -> SavedPhotoReturn | None:
     responsibility = f"start/{action_id}"
     def read(owned, parameters=(responsibility,)):
@@ -191,7 +377,7 @@ async def _saved_start(runtime, action_id: int) -> SavedPhotoReturn | None:
         return SavedPhotoReturn(ticket, status, effect, 0, None, None)
     if occurred_at is None or result_json is None:
         raise ConsistencyError("主机单张 START 的完整返回缺少原结果或时刻")
-    return SavedPhotoReturn(ticket, status, effect, occurred_at, result_json, error_json)
+    return SavedPhotoReturn(ticket, status, effect, occurred_at, result_json, error_json, result_event_id)
 
 
 async def _activity_id(runtime, action_id: int) -> int:
@@ -364,6 +550,15 @@ def _capture_locator(outcome):
         raise ConsistencyError(f"相机正式源的机内定位事实无效: {failure}") from failure
 
 
+def _capture_camera_identity(outcome):
+    observation, = (item for item in outcome.observations if item.type == "photo_taken")
+    steps = [step for step in observation.data["steps"] if step.get("name") == "capture"]
+    identity = steps[0].get("camera_identity") if len(steps) == 1 else None
+    if not isinstance(identity, Mapping) or set(identity) != {"serial", "product_id"}:
+        raise ConsistencyError("相机正式源缺少原拍摄结果中的机身身份")
+    return identity
+
+
 async def _device_drafts(runtime, action_id, artifacts, occurred_at, outcome):
     from camctl.capture.handlers import FileRegistration, ObservedFile, _binding, _register_observed
     from camctl.capture.results import FileKind
@@ -376,13 +571,17 @@ async def _device_drafts(runtime, action_id, artifacts, occurred_at, outcome):
     binding = _binding((await runtime.action(action_id)))
     original, preview = artifacts
     locator = _capture_locator(outcome)
+    camera = _capture_camera_identity(outcome)
     if locator.status is not CameraLocatorStatus.PATH:
         raise ConsistencyError("相机正式源缺少可下载的机内文件名和完整路径")
-    identities = tuple(CameraFileIdentity(
-        binding, locator.camera_path, locator.camera_name, variant, artifact.sha256
-    )
-                       for variant, artifact in zip(
-                           (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL), artifacts))
+    try:
+        identities = tuple(CameraFileIdentity(
+            binding, locator.camera_path, locator.camera_name, variant, artifact.sha256,
+            camera["serial"], camera["product_id"], artifact.size_bytes,
+        ) for variant, artifact in zip(
+            (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL), artifacts))
+    except (TypeError, ValueError) as error:
+        raise ConsistencyError("相机正式源的原拍摄机身或文件事实无效") from error
     activity_id = str(await _activity_id(runtime, action_id))
     entries = tuple(ObservedFile(
         identity=identity.file_identity, locator=identity.locator(),
@@ -405,6 +604,41 @@ async def _device_drafts(runtime, action_id, artifacts, occurred_at, outcome):
     )
 
 
+async def _deferred_device_drafts(runtime, action_id: int, saved: SavedPhotoReturn, observation):
+    """由原可靠 START 固定相机原图及预览身份，不读取相机内容。"""
+    from camctl.capture.handlers import FileRegistration, ObservedFile, _binding, _register_observed
+    from camctl.capture.results import FileKind
+    from camctl.devices.drivers.hasselblad.files import deferred_photo_identities
+
+    if saved.result_event_id is None:
+        raise ConsistencyError("按需照片来源缺少原 START 结果事件")
+    action = await runtime.action(action_id)
+    try:
+        identities = deferred_photo_identities(_binding(action), observation.data)
+    except (TypeError, ValueError, KeyError) as error:
+        raise ConsistencyError("按需照片来源缺少可靠机身或机内定位") from error
+    if identities[0].activity_id != saved.ticket.target_id:
+        raise ConsistencyError("按需照片来源改变原拍摄活动")
+    name = identities[0].camera_name
+    entries = tuple(ObservedFile(
+        identity=identity.file_identity, locator=identity.locator(),
+        evidence={"activity_id": identity.activity_id, "photo_start": {
+            "start_result_event_id": saved.result_event_id, "role": identity.variant.value}},
+        complete=True, size_bytes=None, kind=FileKind.PHOTO,
+        original_name=name if index == 0 else name + ".thumbnail.jpg", media_type=None,
+        paired_identity=None if index == 0 else identities[0].file_identity,
+    ) for index, identity in enumerate(identities))
+    registered = await _register_observed(runtime, action_id, entries, occurred_at=saved.occurred_at,
+        registration=FileRegistration(
+            ownership_method=int(enum_for("device_files.ownership_evidence_json.method").DRIVER_TASK_ASSOCIATION)))
+    original_id, preview_id = (file_id for _, file_id in registered)
+    return (
+        OutputDraft(OutputKind.ORIGINAL, FileReference(device_file_id=original_id), True),
+        OutputDraft(OutputKind.PREVIEW, FileReference(device_file_id=preview_id), True,
+                    original_batch_file_id=original_id),
+    )
+
+
 async def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_at: int, outcome) -> None:
     from camctl.persistence.repositories.capture import FinishCanceledCapture
 
@@ -418,6 +652,98 @@ async def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_a
         occurred_at=occurred_at)))
 
 
+async def _device_source_drafts(runtime, action_id: int, ticket):
+    """按原结果页和完成事实取得两个固定相机来源。"""
+    from camctl.capture.files import file_identity_key
+    from camctl.capture.result_scans import SourceResultEntries
+    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+
+    action = await runtime.action(action_id)
+    sources = {}
+    async for entry, file, file_id in SourceResultEntries(runtime.capture, runtime.database, ticket).records():
+        if not file.complete:
+            continue
+        identity = CameraFileIdentity.from_source(
+            file_identity_key(action["device_id"], action["driver_id"], entry.identity), entry.locator)
+        if identity.variant in sources:
+            raise ConsistencyError("照片同一来源角色出现多个完整文件")
+        sources[identity.variant] = (entry, file_id, identity)
+    original = sources.get(DownloadVariant.ORIGINAL)
+    preview = sources.get(DownloadVariant.THUMBNAIL)
+    if original is None:
+        return ()
+    drafts = [OutputDraft(OutputKind.ORIGINAL, FileReference(device_file_id=original[1]), True, original[2].sha256)]
+    if preview is not None:
+        if preview[0].paired_identity != original[0].identity:
+            raise ConsistencyError("照片预览没有指向原可靠原图")
+        drafts.append(OutputDraft(OutputKind.PREVIEW, FileReference(device_file_id=preview[1]), True,
+                                  preview[2].sha256, original_batch_file_id=original[1]))
+    return tuple(drafts)
+
+
+async def _device_photo_results(runtime, action_id: int):
+    """推进原 RESULTS，可靠关闭后交付已固定来源草稿。"""
+    from camctl.capture.handlers import (
+        ListingPhase, _close_check_unconfirmed, _conclude_activity, _finish_listing_result,
+        _listing_round_input, _original_ticket, _register_listing,
+    )
+    from camctl.capture.media import RecordingFailure
+    from camctl.operations.attempts import RunOutcome
+
+    await runtime.resume_capture_completions(action_id)
+    action = await runtime.action(action_id)
+    if action["status"] in (int(_ACTION_STATUS.SUCCEEDED), int(_ACTION_STATUS.FAILED),
+                            int(_ACTION_STATUS.CANCELED), int(_ACTION_STATUS.EXPIRED)):
+        return None
+    listing = await _listing_round_input(runtime, action_id)
+    if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
+        return None
+    if listing.phase in (ListingPhase.LISTED, ListingPhase.CLOSED):
+        await _register_listing(runtime, action_id, listing)
+    invalid = False
+    unconfirmed = False
+    binding_error = None
+    if listing.phase is ListingPhase.LISTED:
+        if listing.outcome.error is not None:
+            invalid = listing.outcome.error.details.get("classification") == "invalid"
+            if listing.outcome.error.code == "device_binding_unavailable":
+                binding_error = listing.outcome.error
+            if invalid or binding_error is not None:
+                await _finish_listing_result(runtime, listing, end_run=RunOutcome.FAILED,
+                                             run_error=listing.outcome.error)
+            else:
+                await _finish_listing_result(runtime, listing, retry_wait=True)
+                return None
+        else:
+            await _finish_listing_result(runtime, listing, end_run=RunOutcome.SUCCEEDED)
+    elif listing.phase is ListingPhase.EXHAUSTED:
+        await _close_check_unconfirmed(runtime, action_id)
+        unconfirmed = True
+    elif listing.phase is ListingPhase.CLOSED and listing.outcome is not None and listing.outcome.error is not None:
+        invalid = listing.outcome.error.details.get("classification") == "invalid"
+        if listing.outcome.error.code == "device_binding_unavailable":
+            binding_error = listing.outcome.error
+        unconfirmed = not invalid and binding_error is None
+    ticket = listing.ticket
+    if ticket is None:
+        ticket = await _original_ticket(runtime, f"results/{await _activity_id(runtime, action_id)}", "result")
+    drafts = await _device_source_drafts(runtime, action_id, ticket)
+    if binding_error is not None:
+        failure = RecordingFailure("device_binding_unavailable", dict(binding_error.details))
+    elif unconfirmed:
+        failure = RecordingFailure("capture_result_unconfirmed", {
+            "activity_id": str(await _activity_id(runtime, action_id)), "reason": "outputs_unknown"})
+    elif invalid:
+        failure = RecordingFailure("capture_failed", {
+            "activity_id": str(await _activity_id(runtime, action_id)), "reason": "invalid_outputs"})
+    else:
+        failure = None
+        if len(drafts) != 2:
+            raise ConsistencyError("照片 RESULTS 成功但两个原角色尚未可靠完成")
+    await _conclude_activity(runtime, action_id)
+    return drafts, failure
+
+
 @owned_tool_call
 async def advance_host_photo(runtime, action_id: int) -> None:
     """消费原 START 结果、归档双文件并按固定模式登记正式产物。"""
@@ -427,10 +753,14 @@ async def advance_host_photo(runtime, action_id: int) -> None:
         _conclude_activity,
         _finish_canceled_capture,
         _handle_binding_failure,
+        _expire_unentered_photo,
     )
     from camctl.scheduling.rules import WindowPhase, window_phase
 
     action = (await runtime.action(action_id))
+    if is_saved_capture_photo(action) and not is_saved_host_photo(action):
+        await runtime.resume_capture_completions(action_id)
+        action = await runtime.action(action_id)
     if action["status"] in (
             int(_ACTION_STATUS.SUCCEEDED), int(_ACTION_STATUS.FAILED),
             int(_ACTION_STATUS.CANCELED), int(_ACTION_STATUS.EXPIRED)):
@@ -487,12 +817,76 @@ async def advance_host_photo(runtime, action_id: int) -> None:
     # 次尝试，不能生成另一个 START。
     if saved.result_json is None:
         if saved.status == int(_ATTEMPT.RUNNING):
-            (await runtime.recover_attempt(saved.ticket))
-            saved = (await _saved_start(runtime, action_id))
-            if saved is None or saved.result_json is None:
+            from camctl.devices.start_entry import EntryPhase
+            entry = runtime.start_entries.get(runtime.database.metadata.instance_id, action_id)
+            local_ready = (entry is not None and entry.ticket == saved.ticket and entry.phase is EntryPhase.READY
+                           and not entry.active and not action["cancel_requested"])
+            phase = window_phase(runtime.window_of(action), runtime.wall_us()) if local_ready else None
+            if local_ready and phase is WindowPhase.AFTER_WINDOW:
+                await _expire_unentered_photo(runtime, action, saved.ticket, entry)
                 return
+            if local_ready and phase is WindowPhase.IN_WINDOW:
+                step = await _control_call(runtime, action, "take_photo", "photo_taken",
+                    activity_facts=lambda confirmed: (
+                        {"sent_at": runtime.wall_us()}
+                        | ({"started_at": runtime.wall_us(), "activity_state": 2} if confirmed else {})))
+                if step.phase == "not_granted":
+                    return
+                saved = (await _saved_start(runtime, action_id))
+                if saved is None:
+                    raise ConsistencyError("原单张 START 结果保存后责任缺失")
+            if saved.result_json is None:
+                (await runtime.recover_attempt(saved.ticket))
+                saved = (await _saved_start(runtime, action_id))
+                if saved is None or saved.result_json is None:
+                    return
         else:
             raise ConsistencyError("主机单张 START 的结果事件缺失但尝试已终态")
+
+    if not is_saved_host_photo(action):
+        outcome = _load_outcome(saved)
+        if outcome.status.value != "succeeded" or outcome.effect is not EffectState.CONFIRMED:
+            await _failure_after_return(runtime, action_id, saved, outcome)
+            return
+        photos = [item for item in outcome.observations if item.type == "photo_taken" and item.version == 2]
+        if photos:
+            if len(photos) != 1 or photos[0].data.get("activity_id") != saved.ticket.target_id:
+                raise ConsistencyError("DEVICE 单张缺少原可靠相机控制观察")
+            if action["execution_spec_json"].get("photo_source_policy") == "deferred":
+                from camctl.devices.drivers.hasselblad.files import CameraFileLocator, CameraLocatorStatus
+                locator = CameraFileLocator.from_json(photos[0].data.get("camera_locator"))
+                if locator.status is CameraLocatorStatus.EXPLICIT_MISSING:
+                    await _conclude_activity(runtime, action_id)
+                    await _failure(runtime, action_id, unconfirmed=False,
+                                   occurred_at=saved.occurred_at, reason="invalid_outputs")
+                    return
+                drafts = await _deferred_device_drafts(runtime, action_id, saved, photos[0])
+                await archive_device_sync_cache(runtime, action_id, saved, photos[0], files, drafts)
+                await _conclude_activity(runtime, action_id)
+                current = await runtime.action(action_id)
+                if current["cancel_requested"]:
+                    from camctl.persistence.repositories.capture import FinishCanceledCapture
+                    request = FinishCanceledCapture(action_id, saved.occurred_at, drafts,
+                                                    OutputCatalogFacts(action_id, True))
+                else:
+                    request = FinishCapture(action_id, drafts, OutputCatalogFacts(action_id, True),
+                                            saved.occurred_at)
+                await runtime.save_capture_completion(request)
+                return
+            result = await _device_photo_results(runtime, action_id)
+            if result is None:
+                return
+            drafts, failure = result
+            current = await runtime.action(action_id)
+            if current["cancel_requested"]:
+                from camctl.persistence.repositories.capture import FinishCanceledCapture
+                request = FinishCanceledCapture(action_id, runtime.wall_us(), drafts,
+                                                OutputCatalogFacts(action_id, True))
+            else:
+                request = FinishCapture(action_id, drafts, OutputCatalogFacts(action_id, True),
+                                        runtime.wall_us(), failure=failure)
+            await runtime.save_capture_completion(request)
+            return
 
     outcome, artifacts = (await _photo_artifacts(runtime, action_id, saved))
     if artifacts is None:

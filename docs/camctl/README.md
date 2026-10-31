@@ -30,6 +30,8 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | Action6 与 OSMO 延时参数怎样生成候选命令？ | [延时摄影候选编码](timelapse-command-encoding.md)：完整模板、时间字节替换、历史解释及设备保障边界 |
 | 单文件与多段视频怎样选择，多段处理怎样共用？ | [视频结果模式与公共分段处理](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md)：每相机部署选择、公共集合、内容检查、固定范围、副本复用及报告；[Action6 特化](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)与[OSMO 特化](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)分别提供设备规则 |
 | Hasselblad 如何设置参数并执行单张拍摄？ | [Hasselblad CFV 100C 驱动设计](hasselblad-driver.md)：设备身份、`hb_cli` 调用及正式源部署选择；[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)定义格式、曝光、白平衡及对焦；公共生命周期见[相机拍摄](../architecture/camera-capture.md)与[正式产物](../architecture/outputs.md) |
+| Hasselblad 两种来源怎样确定内容和处理同步副本？ | [正式源与同步副本](hasselblad-source-authority.md)：冻结模式、可靠拍摄返回、固定等待者有限复用、按需读取、失败恢复及准确清理。 |
+| Hasselblad 拍摄结果未知后怎样无人值守继续工作？ | [可用性恢复](hasselblad-availability-recovery.md)：原活动与调度限制、固定身份、独立检查、拍摄和 DEVICE 读取、事务恢复及联合验收；[设计前验证](hasselblad-availability-preconditions-2026-10-28.md)单独记录软件证据与缺口。 |
 | 日志满载时怎么办，怎样安全写同一文件？ | [日志执行与适配](logging-runtime.md)：入口、队列水位、采样、取消、多进程轮换及持锁复制 |
 | 报告进程如何启动、复用、停止和回收？ | [报告进程与通信](report-runtime.md)：任务身份、结果确认、超时、管道和工作锁 |
 | 如何证明上述软件模块能共同工作？ | [软件验证与实施顺序](verification.md)：单元测试、集成测试、契约验证和阶段方向 |
@@ -40,6 +42,8 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 | 文档 | 用途 |
 | --- | --- |
+| [错误日志内容与诊断责任修复](../superpowers/plans/2026-10-28-error-log-projection-and-ownership.md) | ERROR 内容投影、同记录和跨记录引用、会话收场诊断及隔离验证。 |
+| [拍摄结果保存与交付恢复修复](../superpowers/plans/2026-10-28-capture-result-and-publication-recovery.md) | 首次配对事务边界、调用结果消费者处置、普通交付发现及取消收场的修复与隔离单元验证。 |
 | [空业务会话的后台收场与退出](../superpowers/plans/2026-10-26-idle-session-exit.md) | 数据库空闲后的原后台任务消费、关闭事务重查、错误及取消交付。 |
 | [全局错误诊断接入](../superpowers/plans/2026-10-26-global-error-diagnostics.md) | 全部错误结果、异常和第三方 ERROR 的接纳、原事实交付、取消与收场及覆盖验收。 |
 | [第一版实施路线图与模块计划目录](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口) | 引用 15 个模块计划及跨组件集成计划，按任务编排阶段、前置交付和完整业务链门禁 |
@@ -55,6 +59,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | [报告历史读取范围审查（2026-10-25）](report-history-read-scope-review-2026-10-25.md) | 公开字段依赖、完整动作恢复的额外工作、旧报告重建基准及待明确的校验范围 |
 | [事务事实读取与普通完成消费重构](../superpowers/plans/2026-10-26-transaction-facts-refactor.md) | 事实形成、内核读取、普通消费、批次依赖及真实副本对照的实施与验收 |
 | [录像完成保存的剩余查询优化](../superpowers/plans/2026-10-26-finish-select-reduction.md) | 190 次 SELECT 的归因、固定关系共享、分页消费、当前行失效及与真机验证并行的实施交接 |
+| [查询与流程性能优化](../superpowers/plans/2026-10-28-query-and-flow-performance.md) | 报告初始化、READ 发现及事务内查询复用；临时诊断的对照结果与限度见[验证记录](query-and-flow-performance-verification-2026-10-28.md)。 |
 
 各专题的验收要求共同约束实现。[真实设备联调](integration-readiness.md#设备证据与联调输入)及硬件性能测量单独安排，不作为第一版软件集成测试的运行前提或通过门槛；软件结论向部署与联调的交接口径见[部署交接与待核验项](verification.md#部署交接与待核验项)。
 

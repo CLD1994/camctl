@@ -26,15 +26,17 @@ def action(document):
 
 
 @pytest.mark.parametrize("database_format", [2, 3])
-async def test_legacy_reports_and_recovery_preserve_original_failure_and_frozen_bytes(owned, tmp_path, database_format, capture_resources):
+async def test_legacy_reports_and_recovery_preserve_original_failure_and_frozen_bytes(owned, tmp_path, database_format, capture_resources, baseline_case):
     runtime, driver, transport, activity = await failed_world(owned, tmp_path)
     active = owned
     if database_format == 2:
+        # 结束旧会话拥有的文件责任和数据库线程后，再改变格式并重开。
+        await baseline_case.drain()
+        await capture_resources.close()
         owned.connection.execute("UPDATE database_metadata SET format_version=2")
         owned.connection.execute("DROP TABLE software_recoveries")
         active = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        # 格式变化后关闭原数据库线程，从新元数据装配真实工厂。
-        database = await capture_resources.restart_database(tmp_path / "state.db")
+        database = await capture_resources.database(tmp_path / "state.db")
         from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
         registry = DriverRegistry((DriverEntry("dji-action6", driver,
             replace(driver.declaration, query_supported=False), driver.contract.evidence,
@@ -69,6 +71,7 @@ async def test_legacy_reports_and_recovery_preserve_original_failure_and_frozen_
             assert failed.kind is DbOutcomeKind.COMPLETED, failed.error
             for _ in range(8):
                 await pass_residual_gate(runtime, row_facts(active.connection, "actions", 2))
+            assert transport.reboots == 1
             after = _freeze(active)
             after_file = generate_report_file(_spec(tmp_path, after, name="staging/after-recovery.json"))
             after_document = json.loads(after_file.path.read_bytes())

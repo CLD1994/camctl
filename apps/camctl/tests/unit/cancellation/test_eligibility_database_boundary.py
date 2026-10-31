@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from unittest.mock import create_autospec
 
 import pytest
@@ -22,6 +23,8 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 from camctl.devices.start_entry import EntryPhase, StartEntryCoordinator
 from camctl.operations.models import AttemptTicket
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
@@ -169,8 +172,10 @@ async def test_apply_cancel_uses_start_entry_phase_changed_during_fact_read(mock
         start_entries=start_entries,
     )
 
-    progress = await apply_cancel(
-        ApplyCancel(origin_action_id=3, item_ids=(item_id,)), runtime)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        progress = await apply_cancel(
+            ApplyCancel(origin_action_id=3, item_ids=(item_id,)), runtime)
 
     repository.apply_cancel_target.assert_not_called()
     repository.record_cancel_result.assert_called_once()
@@ -183,3 +188,10 @@ async def test_apply_cancel_uses_start_entry_phase_changed_during_fact_read(mock
     ) is CancelEligibility.REJECT_UNSUPPORTED
     assert progress.items[0].status == 4
     settlement.settle.assert_not_awaited()
+    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    assert [(record["stage"], record["event"]) for record in records] == [
+        ("cancel.finish_member", "started"), ("cancel.finish_member", "committed"),
+        ("cancel.finish_member", "returned")]
+    assert records[1]["error_code"] == "task_cancel_unsupported"
+    assert all(record["action_id"] == 3 and record["target_action_id"] == target_id
+               and record["item_id"] == item_id for record in records)

@@ -81,7 +81,7 @@ def _transaction(work, key="outer"):
 
 
 def _summaries(channel):
-    return [json.loads(call.args[0].message.removeprefix("性能计时 "))
+    return [json.loads(call.args[0].message)
         for call in channel.slog.call_args_list]
 
 

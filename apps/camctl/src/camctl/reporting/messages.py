@@ -15,6 +15,8 @@ import re
 import secrets
 from dataclasses import dataclass
 
+from camctl.operations.error_diagnostics import ExceptionDiagnosticGraph, ExceptionDiagnosticReference
+
 __all__ = [
     "MAX_MESSAGE_BYTES",
     "ControlMessage",
@@ -232,6 +234,7 @@ ControlMessage = (
 _RESULT_SUCCESS_FIELDS = {"status"}
 _RESULT_FAILURE_FIELDS = {"status"}
 _DIAGNOSTIC_FIELDS = {"diagnostic", "diagnostic_fallback", "diagnostic_size_bytes"}
+_DIAGNOSTIC_WIRE_FIELDS = _DIAGNOSTIC_FIELDS | {"diagnostic_graphs"}
 
 
 def _diagnostic_fields(message: StartupFailedMessage | ResultFailureMessage) -> dict:
@@ -263,6 +266,13 @@ def encode_message(message: ControlMessage) -> bytes:
         payload["kind"] = MessageKind.SHUTDOWN.value
     else:
         raise MessageProtocolError(f"未知控制消息类型: {type(message).__name__}")
+    if isinstance(message, (StartupFailedMessage, ResultFailureMessage)) and message.diagnostic is not None:
+        try:
+            metadata = _diagnostic_graph_metadata(message.diagnostic)
+        except (TypeError, ValueError) as error:
+            raise MessageProtocolError("诊断图标记不能编码") from error
+        if metadata is not None:
+            payload["diagnostic_graphs"] = metadata
     try:
         data = json.dumps(payload, sort_keys=True, separators=(",", ":"),
                           ensure_ascii=False).encode("utf-8", "backslashreplace")
@@ -303,7 +313,8 @@ def decode_message(data: bytes) -> ControlMessage:
         _require_fields(fields, set())
         return ShutdownMessage()
     if message_kind is MessageKind.STARTUP_FAILED:
-        _require_fields(fields - _DIAGNOSTIC_FIELDS, {"phase", "reason"})
+        _require_fields(fields - _DIAGNOSTIC_WIRE_FIELDS, {"phase", "reason"})
+        _restore_wire_diagnostic(payload)
         try:
             phase = StartupPhase(payload["phase"])
         except ValueError as error:
@@ -338,8 +349,9 @@ def decode_message(data: bytes) -> ControlMessage:
             path=payload["path"], size_bytes=payload["size_bytes"],
             sha256=payload["sha256"])
     if status == "failure":
-        _require_fields(fields - _DIAGNOSTIC_FIELDS, _RESULT_FAILURE_FIELDS | {
+        _require_fields(fields - _DIAGNOSTIC_WIRE_FIELDS, _RESULT_FAILURE_FIELDS | {
             "job_id", "instance_id", "error_kind", "error_code", "error_message"})
+        _restore_wire_diagnostic(payload)
         try:
             error_kind = ErrorKind(payload["error_kind"])
         except ValueError as error:
@@ -351,6 +363,152 @@ def decode_message(data: bytes) -> ControlMessage:
             error_message=payload["error_message"],
             **{name: payload.get(name) for name in _DIAGNOSTIC_FIELDS})
     raise MessageProtocolError(f"结果消息缺少合法 status: {status!r}")
+
+
+def _pointer_part(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _pointer_parts(value: object) -> tuple[str, ...]:
+    if not isinstance(value, str) or (value != "#" and not value.startswith("#/")):
+        raise ValueError("诊断图路径不是 JSON pointer")
+    if value == "#":
+        return ()
+    parts = value[2:].split("/")
+    if any(re.search(r"~(?![01])", part) for part in parts):
+        raise ValueError("诊断图路径转义无效")
+    return tuple(part.replace("~1", "/").replace("~0", "~") for part in parts)
+
+
+def _json_key(key) -> str:
+    if isinstance(key, str):
+        return key
+    if key is None:
+        return "null"
+    if isinstance(key, bool):
+        return "true" if key else "false"
+    if isinstance(key, (int, float)):
+        return json.dumps(key)
+    raise TypeError("诊断对象键不能编码为 JSON")
+
+
+def _diagnostic_graph_metadata(diagnostic: dict) -> dict | None:
+    """仅传递编码器实际标记的图和引用；普通业务映射保持原义。"""
+    graphs, references, active = [], [], set()
+
+    def visit(value, path, ancestors):
+        if isinstance(value, ExceptionDiagnosticGraph):
+            graphs.append({"path": path, "root": value.root_path})
+            ancestors = (*ancestors, (path, value._scope))
+        elif isinstance(value, ExceptionDiagnosticReference):
+            owners = [item for item in ancestors if item[1] is value._scope]
+            if value._scope is not None and not owners:
+                raise ValueError("诊断引用缺少所属图")
+            if not ancestors:
+                raise ValueError("诊断引用缺少所属图")
+            owner = owners[-1] if owners else ancestors[-1]
+            references.append({"path": path, "graph": owner[0]})
+            return
+        if isinstance(value, (dict, list, tuple)):
+            identity = id(value)
+            if identity in active:
+                raise ValueError("诊断对象包含循环容器")
+            active.add(identity)
+            try:
+                if isinstance(value, dict):
+                    for key, child in value.items():
+                        visit(child, path + "/" + _pointer_part(_json_key(key)), ancestors)
+                else:
+                    for index, child in enumerate(value):
+                        visit(child, path + f"/{index}", ancestors)
+            finally:
+                active.remove(identity)
+
+    visit(diagnostic, "#", ())
+    if not graphs:
+        return None
+    return {"version": 1, "graphs": graphs, "references": references}
+
+
+def _pointer_get(root, parts):
+    node = root
+    for part in parts:
+        if isinstance(node, dict):
+            node = node[part]
+        elif isinstance(node, list) and re.fullmatch(r"0|[1-9][0-9]*", part):
+            node = node[int(part)]
+        else:
+            raise ValueError("诊断图路径不指向容器成员")
+    return node
+
+
+def _pointer_replace(root, parts, value):
+    if not parts:
+        return value
+    parent = _pointer_get(root, parts[:-1])
+    part = parts[-1]
+    if isinstance(parent, dict):
+        parent[part] = value
+    elif isinstance(parent, list) and re.fullmatch(r"0|[1-9][0-9]*", part):
+        parent[int(part)] = value
+    else:
+        raise ValueError("诊断图路径不指向容器成员")
+    return root
+
+
+def _restore_wire_diagnostic(payload: dict) -> None:
+    if "diagnostic_graphs" not in payload:
+        return
+    diagnostic, metadata = payload.get("diagnostic"), payload["diagnostic_graphs"]
+    try:
+        if (not isinstance(diagnostic, dict) or not isinstance(metadata, dict)
+                or set(metadata) != {"version", "graphs", "references"}
+                or type(metadata["version"]) is not int or metadata["version"] != 1
+                or not isinstance(metadata["graphs"], list) or not metadata["graphs"]
+                or not isinstance(metadata["references"], list)):
+            raise ValueError("诊断图标记字段无效")
+        graphs = {}
+        for entry in metadata["graphs"]:
+            if not isinstance(entry, dict) or set(entry) != {"path", "root"}:
+                raise ValueError("诊断图边界无效")
+            path, root = _pointer_parts(entry["path"]), _pointer_parts(entry["root"])
+            if path in graphs:
+                raise ValueError("诊断图边界重复")
+            node = _pointer_get(diagnostic, path)
+            if (not isinstance(node, dict) or not {"type", "traceback", "cause", "context", "suppress_context"} <= node.keys()):
+                raise ValueError("诊断图边界不是异常图")
+            graphs[path] = (entry["root"], root)
+        references = {}
+        for entry in metadata["references"]:
+            if not isinstance(entry, dict) or set(entry) != {"path", "graph"}:
+                raise ValueError("诊断图引用字段无效")
+            path, owner = _pointer_parts(entry["path"]), _pointer_parts(entry["graph"])
+            if path in references or path in graphs:
+                raise ValueError("诊断图引用重复或覆盖边界")
+            if owner not in graphs or len(owner) >= len(path) or path[:len(owner)] != owner:
+                raise ValueError("诊断图引用没有所属图")
+            node = _pointer_get(diagnostic, path)
+            if not isinstance(node, dict) or set(node) != {"$ref"}:
+                raise ValueError("诊断图引用节点无效")
+            target = _pointer_parts(node["$ref"])
+            source = graphs[owner][1]
+            if target[:len(source)] != source:
+                raise ValueError("诊断图引用超出原图")
+            _pointer_get(_pointer_get(diagnostic, owner), target[len(source):])
+            references[path] = owner
+        graph_scopes = {}
+        for path, (root, _) in sorted(graphs.items(), key=lambda item: len(item[0])):
+            node = _pointer_get(diagnostic, path)
+            graph = ExceptionDiagnosticGraph(node, root_path=root)
+            graph_scopes[path] = graph._scope
+            diagnostic = _pointer_replace(diagnostic, path, graph)
+        for path, owner in references.items():
+            node = _pointer_get(diagnostic, path)
+            diagnostic = _pointer_replace(diagnostic, path,
+                ExceptionDiagnosticReference(node, _scope=graph_scopes[owner]))
+    except (IndexError, KeyError, TypeError, ValueError) as error:
+        raise MessageProtocolError("诊断图标记不合法") from error
+    payload["diagnostic"] = diagnostic
 
 
 def _require_fields(actual: set, expected: set) -> None:

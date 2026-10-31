@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from typing import Any
 
 from camctl.capture.baseline import BaselinePreparation, PreparationPhase
@@ -12,7 +13,9 @@ from camctl.capture.models import ActivityReleaseSave
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.devices.bindings import DeviceBinding
-from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES, capture_operation
+from camctl.devices.capture_preparation import (
+    CAPTURE_ACTION_TYPES, capture_operation, preparation_lead_s,
+)
 from camctl.devices.ports import CapturePreparationDriver, ControlRequest, DeviceCallResult
 from camctl.devices.evidence import EvidenceRegistry
 from camctl.operations.attempts import (
@@ -26,6 +29,7 @@ from camctl.operations.models import (
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.diagnostic_controls import is_capture_control_error
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
+from camctl.logging_runtime.events import measure_stage
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
@@ -59,6 +63,7 @@ class PendingPreparation:
     canceled_before_dispatch_at: int | None = None
     wakeup_pending: bool = False
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    session_setup_timeout_s: Decimal = Decimal("0")
 
 
 @dataclass
@@ -70,6 +75,8 @@ class RuntimePreparationCache:
     endings: dict[int, tuple[str, Any, Any]] = field(default_factory=dict)
     request_saves: dict[OperationKey, SharedSave] = field(default_factory=dict)
     changed_actions: set[int] = field(default_factory=set)
+    scope_diagnostics: dict[int, DiagnosticState] = field(default_factory=dict)
+    binding_diagnostics: dict[int, DiagnosticState] = field(default_factory=dict)
 
     def take_wakeup(self, action_id):
         """合并本动作尚未交给调度的实际返回和首次保存应用。"""
@@ -209,6 +216,14 @@ async def _save_cached_request(database, cache, action_id, *, scheduling, captur
                 raise
             notification_error = error
         value = _completed(receipt, message)
+        if kind == "fail_binding_preparation":
+            outcome = getattr(value.outcome, "value", None)
+            if outcome == "failed" or outcome == "already" and value.reason == "saved":
+                state = cache.binding_diagnostics.setdefault(action_id, DiagnosticState())
+                error = ErrorValue("device_binding_unavailable", "execution", request.details)
+                record_error(error, stage="execution", context={"action_id": action_id}, state=state)
+            else:
+                cache.binding_diagnostics.pop(action_id, None)
         if kind == "release" and value.outcome.value == "rejected":
             raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
         if requests.get(action_id) is original:
@@ -319,13 +334,32 @@ async def _start_precedes_preparation(runtime, action):
             or facts.attempts_used >= runtime.start_config.max_attempts)
 
 
-def _request(runtime, action, *, ticket=None, prepared_by=None):
+def session_setup_budget(runtime, action):
+    owner = runtime.preparation_cache.owners.get(action["id"])
+    if owner is not None and owner.session_key == runtime.session_key and owner.intent is not None:
+        return owner.session_setup_timeout_s
+    query = runtime.session_setup_budget
+    return (query(DeviceBinding(action["device_id"], action["driver_id"]))
+        if callable(query) else Decimal("0"))
+
+
+def effective_preparation_lead_s(runtime, action):
+    return preparation_lead_s(runtime.prepare_lead_s, session_setup_budget(runtime, action))
+
+
+def _request(runtime, action, *, ticket=None, prepared_by=None,
+             timeout_s=None, session_setup_timeout_s=Decimal("0")):
+    from camctl.devices.start_entry import is_hasselblad_photo
+
     return ControlRequest(
         capture_operation(action["type"]),
         DeviceBinding(action["device_id"], action["driver_id"]), action["effective_params_json"],
-        ticket=ticket, timeout_s=runtime.start_config.timeout_s, prepared_by=prepared_by,
+        ticket=ticket, timeout_s=runtime.start_config.timeout_s if timeout_s is None else timeout_s,
+        prepared_by=prepared_by, session_setup_timeout_s=session_setup_timeout_s,
         dispatch_check=lambda: preparation_dispatch_reason(runtime, action["id"]),
         start_return_meaning=action["execution_spec_json"].get("start_return_meaning"),
+        output_storage=(action["execution_spec_json"]["output_storage"]
+                        if is_hasselblad_photo(action) else None),
     )
 
 
@@ -341,11 +375,15 @@ def prepared_by(runtime, action):
 @owned_tool_call
 async def _call_prepare(owner, runtime, request):
     owner.entered = True
-    owner.actual = await runtime.preparation_driver.prepare_capture(request)
-    if not isinstance(owner.actual, DeviceCallResult):
-        raise ConsistencyError("设置准备没有交回实际控制结果")
-    owner.wakeup_pending = True
-    owner.returned_at = runtime.wall_us()
+    with measure_stage("capture.preparation", action_id=owner.action_id,
+            device_id=request.binding.device_id, activity_id=owner.activity_id,
+            run_id=owner.ticket.run_id, attempt_id=owner.ticket.attempt_id,
+            timeout_s=str(request.timeout_s)):
+        owner.actual = await runtime.preparation_driver.prepare_capture(request)
+        if not isinstance(owner.actual, DeviceCallResult):
+            raise ConsistencyError("设置准备没有交回实际控制结果")
+        owner.wakeup_pending = True
+        owner.returned_at = runtime.wall_us()
     (await _save_owner(owner, runtime.database, runtime.operations))
 
 
@@ -396,8 +434,10 @@ async def _recover_old_preparation(runtime, action_id):
     return True
 
 
-async def _end(runtime, action_id, kind, request):
+async def _end(runtime, action_id, kind, request, *, diagnostic=None):
     cache = runtime.preparation_cache
+    if kind == "fail_binding_preparation":
+        cache.binding_diagnostics.setdefault(action_id, diagnostic or DiagnosticState())
     if action_id not in cache.endings:
         cache.endings[action_id] = kind, request, new_operation_key()
     (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,
@@ -553,18 +593,29 @@ async def _advance_preparation(runtime, action_id):
     if aborted is not None:
         return aborted
     now = runtime.wall_us()
-    if now < action["scheduled_at"] - runtime.prepare_lead_s * 1_000_000:
+    setup_budget = session_setup_budget(runtime, action)
+    lead = preparation_lead_s(runtime.prepare_lead_s, setup_budget)
+    if now < action["scheduled_at"] - lead * 1_000_000:
         return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
+    if runtime.scope_closure_supported is True:
+        from camctl.capture.scope_closure import advance_ended_scope
+        if not await advance_ended_scope(runtime, action):
+            return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
+        now = runtime.wall_us()
     activity = (await _activity(runtime, action_id))
     if activity is None:
         from camctl.persistence.repositories.scheduling import ReservePreparationRequest
         if action_id not in cache.reservations:
-            request = ReservePreparationRequest(action_id, now, now, runtime.prepare_lead_s)
+            request = ReservePreparationRequest(action_id, now, now, lead,
+                expected_identity=runtime.fixed_camera_identity)
             cache.reservations[action_id] = request, new_operation_key()
         value = await _save_cached_request(runtime.database, cache, action_id,
             scheduling=runtime.scheduling, capture=runtime.capture)
-        if value is None or value.outcome.value == "rejected":
+        if value is None:
             return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
+        if value.outcome.value == "rejected":
+            return BaselinePreparation(PreparationPhase.WAITING,
+                                       wakeup_required=value.reason == "physical_identity_conflict")
         activity = (await _activity(runtime, action_id))
     if activity is None:
         raise ConsistencyError("准备占用已可靠取得但原活动缺失")
@@ -573,10 +624,11 @@ async def _advance_preparation(runtime, action_id):
         if owner is None or owner.session_key != runtime.session_key:
             intent = AttemptIntent("control", action_id, OperationKind.PREPARE_CAPTURE,
                 AttemptTarget(activity_id=activity["id"]), None,
-                AttemptConfig(1, runtime.start_config.timeout_s), runtime.wall_us(),
+                AttemptConfig(1, runtime.start_config.timeout_s + setup_budget), runtime.wall_us(),
                 session_key=runtime.session_key)
             owner = PendingPreparation(action_id, activity["id"], runtime.session_key,
-                                       intent, runtime.evidence, runtime.preparation_driver)
+                                       intent, runtime.evidence, runtime.preparation_driver,
+                                       session_setup_timeout_s=setup_budget)
             cache.owners[action_id] = owner
             try:
                 await _save_owner(owner, runtime.database, runtime.operations)
@@ -593,7 +645,9 @@ async def _advance_preparation(runtime, action_id):
                 cache.owners.pop(action_id)
                 return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
             owner.task = asyncio.create_task(_call_prepare(owner, runtime,
-                _request(runtime, action, ticket=owner.ticket)))
+                _request(runtime, action, ticket=owner.ticket,
+                    timeout_s=owner.intent.config.timeout_s,
+                    session_setup_timeout_s=owner.session_setup_timeout_s)))
             try:
                 await _wait_preparation_task(owner.task)
             except asyncio.CancelledError as interrupted:

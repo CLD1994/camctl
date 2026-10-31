@@ -1,6 +1,7 @@
 """结果读取缓存只在实际拥有者交付后关闭，错误继续沿会话收场交付。"""
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import create_autospec
@@ -13,7 +14,7 @@ from camctl.bootstrap.background_flow import BackgroundFlow
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.capture.result_scans import PendingResultScan
 from camctl.session.outcome import SessionOutcome
-from camctl.logging_runtime.service import LogChannel
+from support.logging import recording_log_channel
 
 pytestmark = pytest.mark.asyncio
 
@@ -24,11 +25,13 @@ class _ClosableScan(PendingResultScan):
     def close(self): ...
 
 
-def _world(mocker):
+def _world(mocker, *, records=None):
     events = []
+    if records is None:
+        records = []
     deps = lifecycle.RuntimeDeps(CommandMode.SUBMIT, load_config({}, ConfigDefaults()),
         Path("/state.db"), Path("/session.lock"), Path("/admission.lock"), None)
-    deps.log_runtime = SimpleNamespace(channel=create_autospec(LogChannel, instance=True, spec_set=True))
+    deps.log_runtime = SimpleNamespace(channel=recording_log_channel(records))
     mocker.patch("camctl.logging_runtime.standard_logging.install_standard_logging", autospec=True)
     scan = create_autospec(_ClosableScan, instance=True, spec_set=True)
     scan.in_call = False
@@ -74,6 +77,53 @@ async def test_result_cache_closes_after_actual_owner_and_before_shared_log(mock
         release.set()
         await asyncio.gather(command, return_exceptions=True)
         await owner.settle()
+
+
+async def test_command_and_cleanup_events_are_queued_before_log_shutdown(mocker):
+    submitted = []
+    deps, scan, session, close_log, events = _world(mocker, records=submitted)
+    records = []
+    close_log.side_effect = lambda *args, **kwargs: records.extend(
+        json.loads(record.message) for record in submitted)
+    result = await lifecycle.execute_command(deps, None, flows={})
+    assert result.succeeded
+    assert [(record["stage"], record["event"]) for record in records] == [
+        ("command", "started"), ("session", "started"), ("session", "returned"),
+        ("session.cleanup", "started"), ("session.cleanup", "returned"),
+        ("command", "result")]
+    assert all(record["session_key"] == deps.session_key
+               and record["command_name"] == "submit" and record["level"] == "INFO"
+               for record in records)
+
+
+async def test_assembly_exception_ends_command_once_and_preserves_original_error(mocker):
+    submitted = []
+    deps, scan, session, close_log, events = _world(mocker, records=submitted)
+    original = ValueError("assembly failed")
+    lifecycle._failure_log_wiring.side_effect = original
+    with pytest.raises(ValueError) as caught:
+        await lifecycle.execute_command(deps, None, flows={})
+    assert caught.value is original
+    records = [json.loads(record.message) for record in submitted]
+    assert [(record["stage"], record["event"]) for record in records] == [
+        ("command", "started"), ("command", "raised")]
+    assert records[-1]["exception_type"] == "ValueError"
+    session.assert_not_awaited()
+
+
+@pytest.mark.parametrize("original", [OSError("log shutdown failed"), asyncio.CancelledError()])
+async def test_business_result_does_not_predict_successful_log_shutdown(mocker, original):
+    submitted = []
+    deps, scan, session, close_log, events = _world(mocker, records=submitted)
+    close_log.side_effect = original
+    with pytest.raises(type(original)) as caught:
+        await lifecycle.execute_command(deps, None, flows={})
+    assert caught.value is original
+    command_records = [json.loads(record.message) for record in submitted
+        if json.loads(record.message).get("stage") == "command"]
+    assert [record["event"] for record in command_records] == ["started", "result"]
+    assert command_records[-1]["business_succeeded"] is True
+    assert "succeeded" not in command_records[-1]
 
 
 async def test_result_cache_close_failure_preserves_error_and_closes_other_resources(mocker):

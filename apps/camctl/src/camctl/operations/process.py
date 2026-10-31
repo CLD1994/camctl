@@ -12,8 +12,10 @@ import asyncio
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
+from itertools import count
 from typing import Awaitable, Callable, Literal, Protocol, runtime_checkable
 
+from camctl.logging_runtime.events import record_event
 from camctl.operations.owned_calls import current_call_scope
 
 __all__ = [
@@ -33,6 +35,7 @@ __all__ = [
 
 #: 每个输出通道的捕获上限；超出部分丢弃并明确报告不完整。
 OUTPUT_LIMIT_BYTES = 1 << 20
+_tool_call_ids = count(1)
 
 ToolError = Literal["timeout", "cancelled", "output_failed"]
 #: 调用错误：正常期限、外部停止或输出读取失败；组合原因另存详情。
@@ -217,15 +220,24 @@ async def _execute_tool(
     请求终止时开始后延长。
     """
     loop = asyncio.get_running_loop()
-    deadline = None if spec.timeout_s is None else loop.time() + float(spec.timeout_s)
+    began = loop.time()
+    deadline = None if spec.timeout_s is None else began + float(spec.timeout_s)
+    fields = {
+        "tool_call_id": next(_tool_call_ids),
+        "tool_argv": list(spec.argv),
+        "timeout_s": None if spec.timeout_s is None else str(spec.timeout_s),
+    }
     try:
         if spawner is not None and stdout_sink is not None:
             raise ValueError("流式输出必须由共同受管启动边界持有")
         process = await (spawner(spec) if spawner is not None else
                          spawn_subprocess(spec, stdout_sink=stdout_sink))
     except OSError as error:
+        record_event("external_tool", event="start_failed", **fields,
+                     exception_type=type(error).__name__, exception_message=str(error))
         raise ToolStartError(f"{type(error).__name__}: {error}") from error
     expired_at_handoff = deadline is not None and loop.time() >= deadline
+    record_event("external_tool", event="started", **fields)
     exit_task = asyncio.ensure_future(process.wait())
     output_task = asyncio.ensure_future(process.wait_output())
     failure_task = asyncio.ensure_future(process.wait_output_failure())
@@ -239,6 +251,7 @@ async def _execute_tool(
     cancel_task = asyncio.create_task(wait_cancel.wait())
     watch.add(cancel_task)
 
+    observed_error = None
     try:
         done, _ = await asyncio.wait(watch, return_when=asyncio.FIRST_COMPLETED)
         if output_task in done:
@@ -267,7 +280,7 @@ async def _execute_tool(
         output_failure = process.output_failure
         if error is None and output_failure is not None:
             error = "output_failed"
-        return RawToolOutcome(
+        outcome = RawToolOutcome(
             exit=exit_value,
             output=process.output,
             error=error,
@@ -276,11 +289,31 @@ async def _execute_tool(
             output_failure=output_failure,
             stderr=process.stderr,
         )
+    except BaseException as error:
+        observed_error = error
+        raise
     finally:
         watchers = [stop_task, cancel_task, failure_task] + ([timeout_task] if timeout_task is not None else [])
         for watcher in watchers:
             watcher.cancel()
         await asyncio.gather(*watchers, return_exceptions=True)
+        if observed_error is not None:
+            event = "cancelled" if isinstance(observed_error, asyncio.CancelledError) else "raised"
+            record_event("external_tool", event=event, **fields,
+                         elapsed_ms=round((loop.time() - began) * 1000, 3),
+                         exception_type=type(observed_error).__name__)
+    record_event(
+        "external_tool", event="returned", **fields,
+        elapsed_ms=round((loop.time() - began) * 1000, 3),
+        local_exit_code=outcome.exit.exit_code,
+        local_signal=outcome.exit.signal,
+        tool_error=outcome.error,
+        output_failure=outcome.output_failure,
+        used_grace_s=None if outcome.used_grace_s is None else str(outcome.used_grace_s),
+        signal_failures=[{"stage": failure.stage.value, "message": failure.message}
+                         for failure in outcome.signal_failures],
+    )
+    return outcome
 
 
 async def _terminate_and_wait(

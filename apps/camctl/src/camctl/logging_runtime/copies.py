@@ -272,7 +272,11 @@ def _write_result_from_exception(failure: BaseException):
     """只读取原异常上由 FileChannel 写入的 typed 结果事实。"""
     from camctl.logging_runtime.clh_adapter import WriteResult
 
-    result = getattr(failure, "write_result", None)
+    try:
+        result = getattr(failure, "write_result", None)
+    except BaseException:
+        # 附属事实不可读时仍交付原异常，异常组的其他成员可以提供可靠事实。
+        result = None
     if isinstance(result, WriteResult):
         return result
     if isinstance(failure, BaseExceptionGroup):
@@ -859,7 +863,10 @@ class _CopyDeliveryFacts:
 
 def _copy_receipt_from_exception(failure: BaseException) -> CopyReceipt | None:
     """只接受原异常或异常组上明确交付的不可变回执。"""
-    receipt = getattr(failure, "copy_receipt", None)
+    try:
+        receipt = getattr(failure, "copy_receipt", None)
+    except BaseException:
+        receipt = None
     if isinstance(receipt, CopyReceipt):
         return receipt
     if isinstance(failure, BaseExceptionGroup):
@@ -876,11 +883,14 @@ def _attach_copy_receipt(
     """把统一阶段事实附在实际传播的同一个异常对象上。"""
     try:
         setattr(failure, "copy_receipt", receipt)
-    except (AttributeError, TypeError):
-        _add_exception_note(
-            failure,
-            "camctl_copy_receipt_unavailable: 副本阶段事实已形成但无法附加",
-        )
+    except BaseException:
+        try:
+            _add_exception_note(
+                failure,
+                "camctl_copy_receipt_unavailable: 副本阶段事实已形成但无法附加",
+            )
+        except BaseException:
+            pass  # 附属说明不能替换正在传播的原异常。
 
 
 class _LoggingOperationStopped(Exception):
@@ -1080,9 +1090,15 @@ async def deliver_failure_copy(
         result: WriteResult, primary: BaseException | None = None,
     ) -> None:
         nonlocal write_result_notified
-        if on_write_result is None or write_result_notified:
+        if write_result_notified:
             return
         write_result_notified = True
+        if result.appended is True:
+            from camctl.logging_runtime.diagnostics import acknowledge_diagnostic_record
+
+            acknowledge_diagnostic_record(request.trigger, result.completion)
+        if on_write_result is None:
+            return
         try:
             on_write_result(result)
         except BaseException as callback_error:
@@ -1159,12 +1175,13 @@ async def deliver_failure_copy(
     close_diagnostics = _copy_close_diagnostics(facts.write_result)
     if not _copy_handles_confirmed(facts.write_result):
         error = "; ".join(part for part in (
-            facts.copy_error, facts.write_result.append_error,
+            facts.copy_error, facts.write_result.append_error, facts.write_result.sync_error,
             *close_diagnostics) if part)
         return facts.receipt(CopyOutcome.COPY_UNKNOWN, error=error)
-    if not facts.write_result.appended or facts.copy_error is not None:
+    if (not facts.write_result.completion.delivered_for(request.trigger.level)
+            or facts.copy_error is not None):
         error = "; ".join(part for part in (
-            facts.copy_error, facts.write_result.append_error,
+            facts.copy_error, facts.write_result.append_error, facts.write_result.sync_error,
             *close_diagnostics) if part)
         await _cleanup_staging_once(
             facts, request, destination,
@@ -1174,7 +1191,7 @@ async def deliver_failure_copy(
             receipt_error=error,
         )
         error = "; ".join(part for part in (
-            facts.copy_error, facts.write_result.append_error,
+            facts.copy_error, facts.write_result.append_error, facts.write_result.sync_error,
             facts.cleanup_error) if part)
         return facts.receipt(CopyOutcome.COPY_FAILED, error=error)
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from functools import lru_cache
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import TransactionRange
@@ -71,6 +71,14 @@ class EventContext:
     obtain_check_reads: object | None = None
     baseline_read_reads: object | None = None
     preparation_reads: object | None = None
+    photo_result_reads: object | None = None
+    preview_reads: object | None = None
+    availability_reads: object | None = None
+    availability_finish_reads: object | None = None
+    retry_wait_reads: object | None = None
+    file_batch_reads: object | None = None
+    read_end_reads: object | None = None
+    validated_events: Sequence[ValidatedEvent] = ()
 
     def __post_init__(self) -> None:
         # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；
@@ -440,8 +448,8 @@ register_guard("report_impact", _report_impact_guard)
 def parse_preparation_request(value: Any) -> dict[str, Any]:
     """解析准备占用的完整原申请，保留秒数的精确表示。"""
     if (not isinstance(value, Mapping)
-            or set(value) != {"action_id", "trusted_wall_now", "prepare_lead_s", "occurred_at"}):
-        _fail("准备申请必须包含 action_id、trusted_wall_now、prepare_lead_s 和 occurred_at")
+            or set(value) != {"action_id", "trusted_wall_now", "prepare_lead_s", "occurred_at", "expected_identity"}):
+        _fail("准备申请必须包含动作、时间、提前量及固定身份")
     try:
         ObjectId(value["action_id"])
         UtcMicros(value["trusted_wall_now"])
@@ -452,7 +460,17 @@ def parse_preparation_request(value: Any) -> dict[str, Any]:
     if (isinstance(lead, bool) or not isinstance(lead, (int, Decimal))
             or (isinstance(lead, Decimal) and not lead.is_finite()) or lead < 0):
         _fail("准备申请的 prepare_lead_s 必须是有限非负精确数字")
-    return dict(value)
+    result = dict(value)
+    identity = value["expected_identity"]
+    if identity is not None:
+        if not isinstance(identity, Mapping) or set(identity) != {"serial", "product_id"}:
+            _fail("准备申请的固定机身身份格式无效")
+        from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+        try:
+            result["expected_identity"] = CameraIdentity(**identity)
+        except (TypeError, ValueError) as error:
+            raise EventValidationError("准备申请的固定机身身份无效") from error
+    return result
 
 
 def parse_preparation_failure_request(value: Any) -> dict[str, Any]:
@@ -524,8 +542,72 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
     elif member == "preparation_request":
         parse_preparation_request(value)
+    elif member == "normal_recording_stop":
+        from camctl.capture.models import NormalRecordingStop
+        try:
+            if not isinstance(value, Mapping) or set(value) != {"start_result_event_id", "elapsed_before_stop_ns"}:
+                raise ValueError("正常停止来源成员不符")
+            NormalRecordingStop(**value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的正常停止来源无效: {error}")
+    elif member == "capture_selection":
+        from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+        try:
+            CaptureSelectionInput.from_document(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的拍摄选择申请无效: {error}")
+    elif member == "availability_wait_finish_request":
+        from camctl.persistence.repositories.availability_wait_finish import _request
+        try:
+            _request(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"检查等待终结申请无效: {error}")
+    elif member == "availability_failure_request":
+        if (not isinstance(value, Mapping) or set(value) != {"check_id", "trusted_wall_now"}
+                or not is_json_integer(value["check_id"]) or value["check_id"] <= 0
+                or not is_json_integer(value["trusted_wall_now"]) or value["trusted_wall_now"] < 0):
+            _fail("可用性失败申请必须包含检查身份与可信时间")
+    elif member == "binding_read_finish":
+        if (not isinstance(value, Mapping) or set(value) != {"error", "cancel_event", "current_identity"}
+                or not isinstance(value["error"], Mapping) or value["error"].get("code") != "device_binding_unavailable"
+                or (value["cancel_event"] is not None and (not isinstance(value["cancel_event"], Mapping)
+                    or set(value["cancel_event"]) != {"event_id", "transaction_id", "occurred_at"}
+                    or any(not is_json_integer(value["cancel_event"][name]) or value["cancel_event"][name] <= 0
+                           for name in ("event_id", "transaction_id"))
+                    or not is_json_integer(value["cancel_event"]["occurred_at"])))):
+            _fail("绑定读取结果必须包含原绑定失败")
+        identity = value["current_identity"]
+        details = value["error"].get("details")
+        mismatch = isinstance(details, Mapping) and details.get("reason") == "physical_identity_mismatch"
+        if mismatch != (identity is not None):
+            _fail("机身不符的读取结果必须保存原次观察身份")
+        if identity is not None:
+            from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+            try:
+                CameraIdentity(**identity)
+            except (TypeError, ValueError) as error:
+                _fail(f"读取结果的原次机身身份无效: {error}")
+    elif member == "read_current_identity":
+        from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+        try:
+            CameraIdentity(**value)
+        except (TypeError, ValueError) as error:
+            _fail(f"读取绑定的当前机身身份无效: {error}")
     elif member == "preparation_failure_request":
         parse_preparation_failure_request(value)
+    elif member == "preparation_binding_request":
+        from camctl.persistence.repositories.scheduling import FailBindingPreparationRequest
+        if not isinstance(value, Mapping) or set(value) != {
+                "action_id", "trusted_wall_now", "occurred_at", "details", "prepare_lead_s", "current_identity"}:
+            _fail("准备绑定失败申请成员无效")
+        try:
+            parsed = dict(value)
+            if parsed["current_identity"] is not None:
+                from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+                parsed["current_identity"] = CameraIdentity(**parsed["current_identity"])
+            FailBindingPreparationRequest(**parsed)
+        except (TypeError, ValueError) as error:
+            _fail(f"准备绑定失败申请无效: {error}")
     elif member == "preparation_resolved":
         if value is not True:
             _fail(f"事件 {event_id} 的 evidence.preparation_resolved 只能为实际可靠的 true")
@@ -535,6 +617,24 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
                 or not isinstance(value["stage"], str) or not value["stage"]
                 or not isinstance(value["details"], Mapping)):
             _fail(f"事件 {event_id} 的 evidence.preparation_error 必须是完整实际错误")
+    elif member == "photo_cache_request":
+        from camctl.history.photo_cache_request import parse_photo_cache_request
+        try:
+            parse_photo_cache_request(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的 evidence.photo_cache_request 非法: {error}")
+    elif member == "photo_sync_cache_request":
+        from camctl.history.photo_cache_request import parse_photo_sync_cache_request
+        try:
+            parse_photo_sync_cache_request(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的 evidence.photo_sync_cache_request 非法: {error}")
+    elif member == "photo_read_start":
+        from camctl.outputs.photo_read import parse_photo_read_start
+        try:
+            parse_photo_read_start(value, 0)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的 evidence.photo_read_start 非法: {error}")
     elif member == "host_photo_request":
         try:
             parse_host_photo_request(value, reason=reason)

@@ -18,7 +18,7 @@ from referencing.jsonschema import DRAFT202012
 
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import MISSING
-from camctl.contracts.schemas import create_validator, validation_errors
+from camctl.contracts.schemas import create_reference_validator, create_type_validator, validation_errors
 from camctl.contracts.values import ObjectId
 
 _DRAFT = 'https://json-schema.org/draft/2020-12/schema'
@@ -286,7 +286,7 @@ class _Compiler:
     def finite(self, uri, path):
         resolved = self.registry.resolver().lookup(uri)
         self._preflight(DRAFT202012.create_resource(resolved.contents), resolved.resolver, uri)
-        validator = create_validator({'$schema': _DRAFT, '$ref': uri}, registry=self.registry)
+        validator = create_reference_validator(uri, registry=self.registry)
         self.finite_checks.append(FiniteCheck(uri, path))
         def valid(value):
             if value is MISSING:
@@ -336,7 +336,7 @@ class _Compiler:
             if keyword == '$ref':
                 checks.append(self.compile(_reference(uri, rule, self.registry), path).check)
             elif keyword == 'type':
-                validator = create_validator({'$schema': _DRAFT, 'type': rule}, registry=self.registry)
+                validator = create_type_validator(rule, registry=self.registry)
                 types = (rule,) if isinstance(rule, str) else tuple(rule)
                 checks.append(lambda value, v=validator, types=types:
                     'array' in types if isinstance(value, _Array) else any(v.is_type(value, kind) for kind in types))

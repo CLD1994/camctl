@@ -9,7 +9,8 @@ import pytest
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.read_attempts import ReadContinuation, save_read_business
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.outputs import OutputsRepository, FinishObtain
+from camctl.persistence.repositories.outputs import (
+    OutputsRepository, FinishObtain, ObtainStartDisposition, ObtainStartResult)
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from support.business_database import inline_business_database
 
@@ -58,7 +59,10 @@ async def test_cancel_during_read_business_save_still_applies_actual_pending_res
 
 
 @pytest.mark.asyncio
-async def test_start_due_uses_worker_operation_and_async_discovery():
+@pytest.mark.parametrize("disposition", list(ObtainStartDisposition))
+async def test_start_due_uses_worker_operation_and_async_discovery(disposition):
+    import json
+    from camctl.logging_runtime.events import event_logging
     from camctl.outputs.obtain_flow import _start_due
     from camctl.outputs.read_discovery import ReadDiscoveryOwner
     from camctl.contracts.pages import Page
@@ -68,14 +72,25 @@ async def test_start_due_uses_worker_operation_and_async_discovery():
     discovery = create_autospec(ReadDiscoveryOwner, instance=True, spec_set=True)
     discovery.rows = AsyncMock(return_value=Page(((31,),), None))
     outputs = create_autospec(OutputsRepository(), spec_set=True)
-    outputs.start_obtain_action.side_effect = lambda request, key, actual: (
-        DbOutcome(DbOutcomeKind.COMPLETED, (request.action_id, key, actual)))
+    outputs.start_obtain_action.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+                                                        ObtainStartResult(disposition))
     runtime = SimpleNamespace(database=inline_business_database(owned), discovery=discovery, outputs=outputs)
-    await _start_due(runtime, 9)
+    records = []
+
+    class Channel:
+        def slog(self, record):
+            records.append(json.loads(record.message))
+
+    with event_logging(Channel()):
+        await _start_due(runtime, 9)
     discovery.rows.assert_awaited_once()
     request, key, actual = outputs.start_obtain_action.call_args.args
     assert request.action_id == 31 and request.occurred_at == 9
     assert actual is owned and key
+    assert len(records) == (1 if disposition is ObtainStartDisposition.SAVED else 0)
+    if records:
+        assert records[0]["stage"] == "obtain.action" and records[0]["event"] == "started"
+        assert records[0]["action_id"] == 31
 
 
 @pytest.mark.asyncio

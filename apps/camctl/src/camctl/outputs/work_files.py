@@ -27,6 +27,7 @@ from camctl.contracts.workflow_errors import (
     registered_error, validate_error_details,
 )
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.models import LogLevel
 from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
@@ -696,7 +697,7 @@ async def _owned_deletion(
         task_id=FileTaskId(f"work-file/{file_id}/{new_operation_key()}"),
         file_ids=(file_id,), stage="work_file_cleanup",
         business="中间文件查询、删除及结果保存", resources=("state_db",),
-        body=perform))
+        body=perform, log_level=None if file_id in context.pending_results else LogLevel.INFO))
 
 
 async def clean_one_work_file(

@@ -93,6 +93,22 @@ class HandoffCleanupAbsenceCommand:
                 file_id,
             ),
         }
+        from camctl.outputs.cleanup_group import cleanup_group
+        from camctl.persistence.repositories.outputs import _ProductReads
+        reads = _ProductReads(c, state)
+        group = cleanup_group(reads, r.output_id)
+        for member in group:
+            target = reads.required("outputs", member)
+            target_table = "device_files" if target["device_file_id"] is not None else "intermediate_files"
+            target_file = target["device_file_id"] or target["intermediate_file_id"]
+            target_facts = reads.required(target_table, target_file)
+            target_column, target_done = ("presence_state", 3) if target_table == "device_files" else ("cleanup_state", 4)
+            if (target["availability"] == 3 and target["cleanup_status"] == 4
+                    and target_facts[target_column] != target_done):
+                raise ConsistencyError("共同照片的清理完成与承载文件事实矛盾")
+            owners[("outputs", member)] = ("output", member)
+            owners[(target_table, target_file)] = (
+                "device_file" if target_table == "device_files" else "intermediate_file", target_file)
         result = lambda disposition: CommandPlan(
             events=(),
             owners=owners,
@@ -102,7 +118,7 @@ class HandoffCleanupAbsenceCommand:
         )
         saved = saved_transaction_events(c, self.key)
         if saved is not None:
-            self._reuse(saved, table, column, done, file_id)
+            self._reuse(saved, reads, group)
             if (
                 output["availability"] == 3
                 and output["cleanup_status"] == 4
@@ -121,47 +137,39 @@ class HandoffCleanupAbsenceCommand:
             and output["cleanup_status"] == 4
             and output["cleanup_error_json"] is None
         )
-        if complete:
+        if complete and all(
+            reads.required("outputs", member)["availability"] == 3
+            and reads.required("outputs", member)["cleanup_status"] == 4
+            and reads.required("device_files" if reads.required("outputs", member)["device_file_id"] is not None else "intermediate_files",
+                reads.required("outputs", member)["device_file_id"] or reads.required("outputs", member)["intermediate_file_id"])[
+                    "presence_state" if reads.required("outputs", member)["device_file_id"] is not None else "cleanup_state"] ==
+                (3 if reads.required("outputs", member)["device_file_id"] is not None else 4)
+            for member in group):
             if file[column] != done:
                 raise ConsistencyError("产物清理完成与承载文件事实矛盾")
             return result(CleanupItemDisposition.ALREADY)
         specs = []
-        if file[column] != done:
-            specs.append(
-                (
-                    17 if table == "device_files" else 26,
-                    5 if table == "device_files" else 4,
-                    update_change(
-                        table, file_id, {column: file[column]}, {column: done}
-                    ),
-                    {}
-                    if table == "device_files"
-                    else {"cleanup_request": {"advance_cursor": False}},
-                )
-            )
+        for member in group:
+            target = reads.required("outputs", member)
+            target_table = "device_files" if target["device_file_id"] is not None else "intermediate_files"
+            target_file_id = target["device_file_id"] or target["intermediate_file_id"]
+            target_file = reads.required(target_table, target_file_id)
+            target_column, target_done = ("presence_state", 3) if target_table == "device_files" else ("cleanup_state", 4)
+            if target_file[target_column] != target_done:
+                specs.append((17 if target_table == "device_files" else 26,
+                    5 if target_table == "device_files" else 4,
+                    update_change(target_table, target_file_id, {target_column: target_file[target_column]}, {target_column: target_done}),
+                    {} if target_table == "device_files" else {"cleanup_request": {"advance_cursor": False}}))
         desired = {"availability": 3, "cleanup_status": 4, "cleanup_error_json": None}
-        before = {
-            name: output[name]
-            for name in desired
-            if not json_equal(output[name], desired[name])
-        }
-        after = {name: desired[name] for name in before}
-        # 必须有实际产物变化；无空事件或只更新文件的交接。
-        if not before:
-            raise ConsistencyError("缺席交接缺少实际产物变化")
-        specs.append(
-            (
-                20,
-                4,
-                update_change("outputs", r.output_id, before, after),
-                {
-                    "cleanup_result_source": {
-                        "item_id": r.item_id,
-                        "result_event_id": r.result_event_id,
-                    }
-                },
-            )
-        )
+        for member in group:
+            target = reads.required("outputs", member)
+            before = {name: target[name] for name in desired if not json_equal(target[name], desired[name])}
+            if before:
+                specs.append((20, 4, update_change("outputs", member, before,
+                    {name: desired[name] for name in before}),
+                    {"cleanup_result_source": {"item_id": r.item_id, "result_event_id": r.result_event_id}}))
+        if not specs:
+            raise ConsistencyError("缺席交接缺少实际变化")
         allocation = scope.allocate(len(specs))
         events = tuple(
             event_envelope(
@@ -179,68 +187,49 @@ class HandoffCleanupAbsenceCommand:
             events=events,
             owners=owners,
             state_rows=state,
+            read_coverage=reads.read_coverage(),
             result=CleanupItemSaved(CleanupItemDisposition.SAVED, r.item_id),
         )
 
-    def _reuse(self, saved, table, column, done, file_id):
+    def _reuse(self, saved, reads, group):
+        """核实原事务的来源、组成员及每条实际变化。"""
         r = self.request
-        if len(saved) not in (1, 2) or any(
-            e["occurred_at"] != r.occurred_at for e in saved
-        ):
-            raise TransactionError("原缺席交接的完整事件组或时刻不同")
-        output = saved[-1]
-        if (output["type"], output["reason"]) != (20, 4) or output["body"][
-            "evidence"
-        ] != {
-            "cleanup_result_source": {
-                "item_id": r.item_id,
-                "result_event_id": r.result_event_id,
-            }
-        }:
-            raise TransactionError("原缺席交接来源不同")
-        rows = output["body"]["rows"]
+        if not saved or any(e["occurred_at"] != r.occurred_at for e in saved):
+            raise TransactionError("原缺席交接的事件组或时刻不同")
+        files = {}
+        for member in group:
+            output = reads.required("outputs", member)
+            table = "device_files" if output["device_file_id"] is not None else "intermediate_files"
+            identity = output["device_file_id"] or output["intermediate_file_id"]
+            files[(table, identity)] = ("presence_state", 3) if table == "device_files" else ("cleanup_state", 4)
+        seen = set()
+        source = {"cleanup_result_source": {"item_id": r.item_id, "result_event_id": r.result_event_id}}
         desired = {"availability": 3, "cleanup_status": 4, "cleanup_error_json": None}
-        if (
-            len(rows) != 1
-            or rows[0]["table"] != "outputs"
-            or rows[0]["id"] != r.output_id
-            or not rows[0]["before"]["exists"]
-            or not rows[0]["after"]["exists"]
-            or not rows[0]["after"]["values"]
-            or set(rows[0]["after"]["values"]) != set(rows[0]["before"]["values"])
-            or any(
-                name not in desired
-                or not json_equal(value, desired[name])
-                or json_equal(rows[0]["before"]["values"][name], value)
-                for name, value in rows[0]["after"]["values"].items()
-            )
-        ):
-            raise TransactionError("原缺席交接的产物实际变化不同")
-        if len(saved) == 2:
-            event = saved[0]
-            row = event["body"]["rows"]
-            evidence = (
-                {}
-                if table == "device_files"
-                else {"cleanup_request": {"advance_cursor": False}}
-            )
-            if (
-                (event["type"], event["reason"])
-                != (
-                    17 if table == "device_files" else 26,
-                    5 if table == "device_files" else 4,
-                )
-                or event["body"]["evidence"] != evidence
-                or len(row) != 1
-                or row[0]["table"] != table
-                or row[0]["id"] != file_id
-                or not row[0]["before"]["exists"]
-                or not row[0]["after"]["exists"]
-                or row[0]["after"]["values"] != {column: done}
-                or set(row[0]["before"]["values"]) != {column}
-                or row[0]["before"]["values"][column] == done
-            ):
-                raise TransactionError("原缺席交接的承载文件实际变化不同")
+        for event in saved:
+            rows = event["body"]["rows"]
+            if len(rows) != 1 or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]:
+                raise TransactionError("原缺席交接事件行无效")
+            row = rows[0]
+            identity = (row["table"], row["id"])
+            if identity in seen:
+                raise TransactionError("原缺席交接事件重复")
+            seen.add(identity)
+            before, after = row["before"]["values"], row["after"]["values"]
+            if not after or set(before) != set(after) or any(json_equal(before[k], v) for k, v in after.items()):
+                raise TransactionError("原缺席交接未表达实际变化")
+            if identity[0] == "outputs" and identity[1] in group:
+                if ((event["type"], event["reason"]) != (20, 4)
+                        or event["body"]["evidence"] != source
+                        or any(k not in desired or not json_equal(v, desired[k]) for k, v in after.items())):
+                    raise TransactionError("原缺席交接产物或结果依据不同")
+            elif identity in files:
+                column, done = files[identity]
+                expected_evidence = {} if identity[0] == "device_files" else {"cleanup_request": {"advance_cursor": False}}
+                if ((event["type"], event["reason"]) != ((17, 5) if identity[0] == "device_files" else (26, 4))
+                        or event["body"]["evidence"] != expected_evidence or after != {column: done}):
+                    raise TransactionError("原缺席交接承载文件不同")
+            else:
+                raise TransactionError("原缺席交接包含其他目标")
 
 
 def cleanup_result_source_guard(event, context):
@@ -253,8 +242,11 @@ def cleanup_result_source_guard(event, context):
     if item is None or item.get("status") not in (4, 5, 6) or len(event.rows) != 1:
         raise EventValidationError("缺席来源观察必须属于原终态成员")
     row = event.rows[0]
-    output = context.state_rows.get("outputs", {}).get(item.get("output_id"))
-    if row.table != "outputs" or row.row_id != item.get("output_id") or output is None:
+    from camctl.outputs.cleanup_group import cleanup_group
+    from camctl.persistence.repositories.outputs import _CurrentProductReads
+    group = cleanup_group(_CurrentProductReads(context), item.get("output_id"))
+    output = context.state_rows.get("outputs", {}).get(row.row_id)
+    if row.table != "outputs" or row.row_id not in group or output is None:
         raise EventValidationError("缺席来源观察与原产物不同")
     if set(row.after.values) - {"availability", "cleanup_status", "cleanup_error_json"}:
         raise EventValidationError("缺席来源观察只能改变清理完成投影")

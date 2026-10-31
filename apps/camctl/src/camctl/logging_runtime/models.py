@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import enum
+from dataclasses import dataclass
 
-__all__ = ["LogFileStage", "LogLevel"]
+__all__ = ["LogFileStage", "LogLevel", "LogWriteResult"]
 
 
 class LogFileStage(str, enum.Enum):
@@ -31,3 +32,15 @@ class LogLevel(enum.Enum):
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
+
+
+@dataclass(frozen=True)
+class LogWriteResult:
+    """同一条记录的文件与 stderr 事实；完成要求由记录级别决定。"""
+
+    appended: bool
+    durable: bool = False
+    fallback_written: bool = False
+
+    def delivered_for(self, level: LogLevel) -> bool:
+        return self.appended and (level is not LogLevel.ERROR or self.durable)

@@ -60,6 +60,22 @@ def test_finalized_empty_page_is_a_real_empty_set():
     assert page.entries == () and page.set_finalized and page.next_cursor is None
 
 
+def test_scope_page_proves_range_with_unknown_file_metadata():
+    ticket = replace(_TICKET, responsibility_key="scope/71")
+    entry = {**_ENTRY, "size_bytes": None, "complete": False}
+    page = result_inputs.page_from_outcome(ticket, _outcome(entries=[entry], finalized=True))
+    assert page.scan_complete and page.set_finalized
+    assert page.entries[0].size_bytes is None and not page.entries[0].complete
+
+
+def test_scope_page_requires_continuous_v2_observation():
+    ticket = replace(_TICKET, responsibility_key="scope/71")
+    outcome = CallOutcome(observations=(DeviceObservation("result_files_listed", 1,
+        {"activity_id": "71", "entries": [_ENTRY]}),))
+    with pytest.raises(result_inputs.ConsistencyError):
+        result_inputs.page_from_outcome(ticket, outcome)
+
+
 @pytest.mark.parametrize("member,value", [
     ("activity_id", "72"), ("activity_id", "071"), ("extra", True),
     ("entries", None), ("set_finalized", 1), ("completion_evidence", {}),

@@ -95,7 +95,7 @@ def decide_device_work(facts: DeviceFacts) -> DeviceWork:
 
 
 def plan_device_work(connection, now_us: int, capture_read_parallel: Container[str] = (),
-                     *, candidates=None, limit=None) -> tuple[DeviceWork, ...]:
+                     *, candidates=None, limit=None, capture_selections=None) -> tuple[DeviceWork, ...]:
     """本批设备读取事实；当前持有者独立查询，不依赖它是否在本页。"""
     from camctl.outputs.read_discovery import (
         DEFAULT_BATCH_SIZE, ReadDiscoveryScope, database_identity, device_holder, read_candidates,
@@ -118,6 +118,8 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
     from camctl.scheduling.resources import current_preparation_holder
     work = []
     for device_id in devices:
+        from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+        batch = FileBatchReads(connection).holder(device_id)
         # 读取消费者只需要知道是否存在拍摄阻挡，不加载该设备所有活动。
         with closing(connection.execute(
             "SELECT a.id FROM actions a JOIN device_activities d ON d.action_id=a.id"
@@ -127,6 +129,18 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
             (device_id, now_us),
         )) as cursor:
             due = cursor.fetchone()
+        selection = None if capture_selections is None else capture_selections.get(device_id)
+        if selection is not None:
+            from camctl.contracts.values import ConsistencyError
+            from camctl.persistence.repositories.capture_selection import CaptureSelectionInput, selected_pending_capture
+            if (not isinstance(selection, CaptureSelectionInput) or selection.device_id != device_id
+                    or selection.trusted_wall_now != now_us):
+                raise ConsistencyError("读取规划的拍摄选择输入与设备或时刻不符")
+            with closing(connection.execute("SELECT COALESCE(MAX(id),0) FROM history_events")) as cursor:
+                boundary = cursor.fetchone()[0]
+            selected = selected_pending_capture(connection, selection, boundary)
+            if selected is not None and (due is None or selected.scheduled_at <= now_us):
+                due = (selected.action_id,)
         with closing(connection.execute(
             "SELECT a.id FROM actions a JOIN device_activities d ON d.action_id=a.id"
             " WHERE a.device_id=? AND d.activity_state<>3 AND d.occupancy_state=1"
@@ -142,6 +156,13 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
                 if cursor.fetchone()[0] is not None:
                     delivery_holder = holder
         reads = tuple(candidate.copy_id for candidate in candidates if candidate.device_id == device_id and not candidate.held)
+        if batch is not None:
+            due = None
+        elif delivery_holder is not None:
+            owner = connection.execute("SELECT action_id FROM deliveries WHERE id=(SELECT delivery_id FROM file_copies WHERE id=?)",
+                (delivery_holder,)).fetchone()
+            if owner is not None and FileBatchReads(connection).legacy_read_held(delivery_holder, owner[0], device_id):
+                due = None
         work.append(decide_device_work(DeviceFacts(
             device_id, () if due is None else (due[0],),
             () if held_capture is None else (held_capture[0],), reads if holder is None else (),

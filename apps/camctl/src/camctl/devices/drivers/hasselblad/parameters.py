@@ -6,12 +6,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
-from fractions import Fraction
+from functools import lru_cache
 from types import MappingProxyType
 
 from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat, CaptureFormatDescription
 
-from camctl.acceptance.schema import BodySchemaError, validate_precise
+from camctl.acceptance.schema import BodySchemaError, precise_validator_for, validate_precise_document
 from camctl.contracts.json_values import JsonValue, is_json_integer
 
 __all__ = [
@@ -123,82 +123,24 @@ class PhotoCommandVocabulary(StrEnum):
 PHOTO_COMMANDS = PhotoCommandVocabulary
 
 
-def _finite_fraction(value: Fraction) -> Decimal | None:
-    denominator = value.denominator
-    twos = fives = 0
-    while denominator % 2 == 0:
-        twos += 1
-        denominator //= 2
-    while denominator % 5 == 0:
-        fives += 1
-        denominator //= 5
-    if denominator != 1:
-        return None
-    scale = max(twos, fives)
-    coefficient = value.numerator * 2 ** (scale - twos) * 5 ** (scale - fives)
-    digits = tuple(int(digit) for digit in str(abs(coefficient)))
-    return Decimal((int(coefficient < 0), digits, -scale))
-
-
-def _round_fraction_to_three_significant_digits(value: Fraction) -> Decimal:
-    """用整数运算把循环分数按三位有效数字 half-up 舍入一次。"""
-    numerator = abs(value.numerator)
-    denominator = value.denominator
-    if numerator == 0:
-        return Decimal(0)
-
-    exponent = len(str(numerator)) - len(str(denominator))
-    if exponent >= 0:
-        if numerator < denominator * 10**exponent:
-            exponent -= 1
-    elif numerator * 10 ** (-exponent) < denominator:
-        exponent -= 1
-
-    decimal_places = 2 - exponent
-    if decimal_places >= 0:
-        scaled_numerator = numerator * 10**decimal_places
-        scaled_denominator = denominator
-    else:
-        scaled_numerator = numerator
-        scaled_denominator = denominator * 10 ** (-decimal_places)
-    coefficient, remainder = divmod(scaled_numerator, scaled_denominator)
-    if 2 * remainder >= scaled_denominator:
-        coefficient += 1
-    if coefficient == 1000:
-        coefficient //= 10
-        decimal_places -= 1
-
-    digits = tuple(int(digit) for digit in str(coefficient))
-    return Decimal((int(value.numerator < 0), digits, -decimal_places))
-
-
-def _shutter_seconds(value: Decimal | Fraction) -> Decimal:
-    if isinstance(value, Decimal):
-        return value
-    exact = _finite_fraction(value)
-    if exact is not None:
-        return exact
-    return _round_fraction_to_three_significant_digits(value)
-
-
 _ISO_VALUES = (64, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600)
 _APERTURE_VALUES = tuple(Decimal(value) for value in (
     "4", "4.8", "5.6", "6.8", "8", "9.5", "11", "13", "16", "19", "22", "27", "32",
 ))
-_SHUTTER_INPUTS: tuple[tuple[str, Decimal | Fraction], ...] = (
-    ("32 秒", Decimal("32")), ("23 秒", Decimal("23")), ("16 秒", Decimal("16")),
-    ("11 秒", Decimal("11")), ("8 秒", Decimal("8")), ("6 秒", Decimal("6")),
-    ("4 秒", Decimal("4")), ("3 秒", Decimal("3")), ("2 秒", Decimal("2")),
-    ("1.4 秒", Decimal("1.4")), ("1 秒", Decimal("1")), ("0.7 秒", Decimal("0.7")),
-    ("0.5 秒", Decimal("0.5")), ("0.3 秒", Decimal("0.3")), ("0.25 秒", Decimal("0.25")),
-    ("1/6 秒", Fraction(1, 6)), ("0.125 秒", Decimal("0.125")), ("0.1 秒", Decimal("0.1")),
-    ("1/15 秒", Fraction(1, 15)), ("1/20 秒", Fraction(1, 20)), ("1/30 秒", Fraction(1, 30)),
-    ("1/45 秒", Fraction(1, 45)), ("1/60 秒", Fraction(1, 60)), ("1/90 秒", Fraction(1, 90)),
-    ("1/125 秒", Fraction(1, 125)), ("1/180 秒", Fraction(1, 180)),
-    ("1/250 秒", Fraction(1, 250)), ("1/350 秒", Fraction(1, 350)),
-    ("1/500 秒", Fraction(1, 500)), ("1/1000 秒", Fraction(1, 1000)),
-    ("1/1500 秒", Fraction(1, 1500)), ("1/2000 秒", Fraction(1, 2000)),
-    ("1/3000 秒", Fraction(1, 3000)), ("1/4000 秒", Fraction(1, 4000)),
+_SHUTTER_INPUTS: tuple[tuple[str, str], ...] = (
+    ("32 秒", "32/1"), ("23 秒", "23/1"), ("16 秒", "16/1"),
+    ("11 秒", "11/1"), ("8 秒", "8/1"), ("6 秒", "6/1"),
+    ("4 秒", "4/1"), ("3 秒", "3/1"), ("2 秒", "2/1"),
+    ("1.4 秒", "7/5"), ("1 秒", "1/1"), ("0.7 秒", "7/10"),
+    ("0.5 秒", "1/2"), ("0.3 秒", "3/10"), ("0.25 秒", "1/4"),
+    ("1/6 秒", "1/6"), ("0.125 秒", "1/8"), ("0.1 秒", "1/10"),
+    ("1/15 秒", "1/15"), ("1/20 秒", "1/20"), ("1/30 秒", "1/30"),
+    ("1/45 秒", "1/45"), ("1/60 秒", "1/60"), ("1/90 秒", "1/90"),
+    ("1/125 秒", "1/125"), ("1/180 秒", "1/180"),
+    ("1/250 秒", "1/250"), ("1/350 秒", "1/350"),
+    ("1/500 秒", "1/500"), ("1/1000 秒", "1/1000"),
+    ("1/1500 秒", "1/1500"), ("1/2000 秒", "1/2000"),
+    ("1/3000 秒", "1/3000"), ("1/4000 秒", "1/4000"),
 )
 
 
@@ -209,7 +151,7 @@ def _options(values: tuple[tuple[str | int | Decimal, str], ...]) -> tuple[Photo
 _iso_options = _options(tuple((value, str(value)) for value in _ISO_VALUES))
 _aperture_options = _options(tuple((value, f"f/{value:f}") for value in _APERTURE_VALUES))
 _shutter_options = _options(tuple((
-    _shutter_seconds(value), title,
+    value, title,
 ) for title, value in _SHUTTER_INPUTS))
 
 PHOTO_FIELDS: Mapping[str, PhotoFieldDefinition] = MappingProxyType({
@@ -218,7 +160,7 @@ PHOTO_FIELDS: Mapping[str, PhotoFieldDefinition] = MappingProxyType({
         "aperture", "光圈", "number", command_field="aperture", options=_aperture_options,
     ),
     "shutter_s": PhotoFieldDefinition(
-        "shutter_s", "快门", "number", command_field="shutter", options=_shutter_options,
+        "shutter_s", "快门", "string", command_field="shutter", options=_shutter_options,
     ),
     "temperature_k": PhotoFieldDefinition(
         "temperature_k", "色温", "integer", minimum=2000, maximum=10000,
@@ -263,7 +205,7 @@ class PhotoExposure:
     mode: ExposureMode
     iso: int
     aperture: Decimal | None
-    shutter_s: Decimal | None
+    shutter_s: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,6 +340,12 @@ def photo_schema() -> dict[str, object]:
     return deepcopy(_PHOTO_SCHEMA)
 
 
+@lru_cache(maxsize=1)
+def _photo_validator():
+    """固定照片规则只检查一次；每份参数仍使用精确规则校验。"""
+    return precise_validator_for(_PHOTO_SCHEMA)
+
+
 def _decimal(value: JsonValue, field: str) -> Decimal:
     if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
         raise BodySchemaError(f"Hasselblad 参数 {field} 必须是精确 JSON 数值")
@@ -415,7 +363,7 @@ def parse_photo_settings(params: Mapping[str, JsonValue]) -> PhotoSettings:
     if not isinstance(params, Mapping):
         raise BodySchemaError("Hasselblad 参数必须是对象")
     document = dict(params)
-    validate_precise(_PHOTO_SCHEMA, document, label="Hasselblad 拍摄参数")
+    validate_precise_document(_photo_validator(), document, label="Hasselblad 拍摄参数")
 
     capture_format = CaptureFormat(document["capture_format"])
     exposure_raw = document["exposure"]
@@ -428,7 +376,7 @@ def parse_photo_settings(params: Mapping[str, JsonValue]) -> PhotoSettings:
             if "aperture" in exposure_raw else None
         ),
         shutter_s=(
-            _decimal(exposure_raw["shutter_s"], "exposure.shutter_s")
+            exposure_raw["shutter_s"]
             if "shutter_s" in exposure_raw else None
         ),
     )

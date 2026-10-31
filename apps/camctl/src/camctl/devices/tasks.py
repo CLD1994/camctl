@@ -63,6 +63,12 @@ class CancelCompletionPolicy(StrEnum):
     FINITE_DEVICE_END = "finite_device_end"
 
 
+class PhotoSourcePolicy(StrEnum):
+    """单张照片的设备来源事实形成方式。"""
+
+    DEFERRED = "deferred"
+
+
 @dataclass(frozen=True)
 class CaptureTask:
     """驱动从生效参数取得任务事实；目标与结果余量用秒，启动余量用整数毫秒。"""
@@ -85,6 +91,7 @@ class CaptureTask:
     output_storage: CaptureStorage | None = None
     cancel_completion_policy: CancelCompletionPolicy | None = None
     startup_margin_ms: int | None = None
+    photo_source_policy: PhotoSourcePolicy | None = None
 
 
 class CaptureTaskFactory(Protocol):

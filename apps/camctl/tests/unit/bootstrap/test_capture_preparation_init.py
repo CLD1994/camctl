@@ -1,5 +1,6 @@
 """拍摄准备升级通过显式 init 接入，普通初始化保持验证语义。"""
 
+from contextlib import nullcontext
 from io import StringIO
 from pathlib import Path
 import sqlite3
@@ -15,6 +16,14 @@ from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection, StateD
 from camctl.session.locks import SessionLease
 
 
+@pytest.fixture(autouse=True)
+def isolate_one_shot_logging(monkeypatch):
+    from camctl.logging_runtime import one_shot
+
+    monkeypatch.setattr(one_shot, "stderr_logging", create_autospec(
+        one_shot.stderr_logging, return_value=nullcontext()))
+
+
 def test_init_parses_capture_preparation_upgrade_as_explicit_option():
     assert cli.parse_command(["init", "--upgrade-capture-preparation"]) == cli.Command(
         cli.CommandKind.INIT, None, None, upgrade_capture_preparation=True,
@@ -28,7 +37,7 @@ def test_two_upgrade_options_are_mutually_exclusive():
 
 
 def test_init_cli_forwards_explicit_option_and_keeps_output_contract(monkeypatch):
-    config, state_db = object(), Path("/state/state.db")
+    config, state_db = SimpleNamespace(log=object()), Path("/state/state.db")
     adapter = create_autospec(application.ConfigAdapter, instance=True, spec_set=True)
     adapter.load.return_value = config
     adapter.state_db_path.return_value = state_db
@@ -41,7 +50,8 @@ def test_init_cli_forwards_explicit_option_and_keeps_output_contract(monkeypatch
     out, err = StringIO(), StringIO()
     assert cli._run_init(cli.parse_command(["init", "--upgrade-capture-preparation"]), out, err) == 0
     initialize.assert_called_once_with(config, state_db,
-        upgrade_software_recovery=False, upgrade_capture_preparation=True)
+        upgrade_software_recovery=False, upgrade_capture_preparation=True, upgrade_output_scope=False,
+        upgrade_photo_source=False, upgrade_preview_selection=False)
     assert out.getvalue() == "" and err.getvalue() == ""
 
 
@@ -67,7 +77,8 @@ def test_initialize_keeps_upgrade_inside_owned_lease_and_forwards_it(monkeypatch
 
     def under_lease(*args, **kwargs):
         lease.close.assert_not_called()
-        assert kwargs == {"upgrade_software_recovery": False, "upgrade_capture_preparation": True}
+        assert kwargs == {"upgrade_software_recovery": False, "upgrade_capture_preparation": True,
+                          "upgrade_output_scope": False, "upgrade_photo_source": False, "upgrade_preview_selection": False}
         return initialization.InitResult(initialization.InitOutcome.VERIFIED_EXISTING, "验证通过")
 
     monkeypatch.setattr(initialization, "_initialize_under_lease",
@@ -158,4 +169,5 @@ def test_initial_publish_race_preserves_the_capture_upgrade_request(monkeypatch)
     result = initialization._create_new(state_db, roots, binding, upgrade_capture_preparation=True)
     assert result.outcome is initialization.InitOutcome.VERIFIED_EXISTING
     verify.assert_called_once_with(state_db, roots, binding,
-        upgrade_software_recovery=False, upgrade_capture_preparation=True)
+        upgrade_software_recovery=False, upgrade_capture_preparation=True, upgrade_output_scope=False,
+        upgrade_photo_source=False, upgrade_preview_selection=False)

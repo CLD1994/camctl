@@ -1,6 +1,7 @@
 """设置准备的实际返回、可靠保存和当前会话凭据分别成立。"""
 
 import asyncio
+import json
 import sqlite3
 from decimal import Decimal
 from types import SimpleNamespace
@@ -33,6 +34,9 @@ from camctl.persistence.business import BusinessDatabase, SharedSave
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.service import LogChannel
 
 
 def _world(mocker, *, recover=True):
@@ -120,6 +124,107 @@ async def test_existing_ready_preparation_has_no_new_completion_notice(mocker):
     assert first.wakeup_required is True
     assert second.phase is PreparationPhase.READY
     assert second.wakeup_required is False
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+async def test_preparation_logs_actual_call_once_when_original_save_is_retried(mocker):
+    runtime, _, ticket = _world(mocker)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.UNKNOWN)
+    with event_logging(channel):
+        with pytest.raises(ConsistencyError):
+            await advance_preparation(runtime, 1)
+        runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+            FinishAttemptResult(FinishDisposition.SAVED))
+        await resume_preparation_saves(runtime.database, runtime.preparation_cache,
+            operations=runtime.operations)
+        await advance_preparation(runtime, 1)
+    records = [call.args[0] for call in channel.slog.call_args_list]
+    payloads = [json.loads(record.message) for record in records]
+    stages = [payload for payload in payloads if payload["stage"] == "capture.preparation"]
+    assert [payload["event"] for payload in stages] == ["started", "returned"]
+    assert all(record.level is LogLevel.INFO for record in records)
+    assert all((payload["action_id"], payload["activity_id"], payload["device_id"],
+        payload["run_id"], payload["attempt_id"]) == (1, 7, "cam-1", ticket.run_id, 1)
+        for payload in stages)
+    assert "elapsed_ms" in stages[-1]
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+async def test_preparation_wait_does_not_log_an_unexecuted_stage(mocker):
+    runtime, action, _ = _world(mocker)
+    runtime.wall_us.return_value = action["scheduled_at"] - 30_000_000
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.WAITING
+    channel.slog.assert_not_called()
+
+
+async def test_first_session_setup_reserves_extra_lead_and_freezes_total_budget(mocker):
+    from camctl.capture import preparation
+    from camctl.persistence.repositories.scheduling import ReservePreparationOutcome, ReservePreparationResult
+
+    runtime, action, _ = _world(mocker)
+    runtime.start_config = AttemptConfig(3, Decimal("10"), Decimal("3"))
+    runtime.session_setup_budget = mocker.Mock(return_value=Decimal("30"))
+    runtime.wall_us.return_value = action["scheduled_at"] - 40_000_000
+    preparation._activity.side_effect = (None, {"id": 7, "occupancy_state": 1, "dispatch_state": 1})
+    runtime.scheduling.reserve_preparation.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ReservePreparationResult(ReservePreparationOutcome.RESERVED, 7))
+
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+
+    reserve = runtime.scheduling.reserve_preparation.call_args.args[0]
+    intent = runtime.operations.begin_attempt.call_args.args[0]
+    request = runtime.preparation_driver.prepare_capture.call_args.args[0]
+    assert reserve.prepare_lead_s == Decimal("40")
+    assert intent.config.timeout_s == request.timeout_s == Decimal("40")
+    assert request.session_setup_timeout_s == Decimal("30")
+    runtime.session_setup_budget.return_value = Decimal("0")
+    assert runtime.preparation_cache.owners[1].intent.config.timeout_s == Decimal("40")
+
+
+@pytest.mark.parametrize("configured_lead", [Decimal("0"), Decimal("10")])
+async def test_setup_cache_and_disabled_advance_keep_their_ordinary_time_boundaries(mocker, configured_lead):
+    runtime, action, _ = _world(mocker)
+    runtime.prepare_lead_s = configured_lead
+    runtime.session_setup_budget = mocker.Mock(return_value=Decimal("0"))
+    runtime.wall_us.return_value = action["scheduled_at"] - 30_000_000
+
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.WAITING
+    runtime.preparation_driver.prepare_capture.assert_not_awaited()
+
+    runtime.session_setup_budget.return_value = Decimal("30")
+    if configured_lead == 0:
+        assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.WAITING
+        runtime.preparation_driver.prepare_capture.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action_type", [2, 3], ids=["recording", "timelapse"])
+async def test_ready_preparation_stays_ready_after_action_starts_with_scope_closure(mocker, action_type):
+    runtime, action, ticket = _world(mocker)
+    action["type"] = action_type
+    runtime.scope_closure_supported = True
+    runtime.prepare_baseline.return_value = BaselinePreparation(
+        PreparationPhase.READY, wakeup_required=False)
+    original_execute = runtime.owned.connection.execute.side_effect
+
+    def execute(sql, parameters=()):
+        if sql.startswith("SELECT d.id,d.action_id"):
+            cursor = create_autospec(sqlite3.Cursor, instance=True)
+            cursor.fetchone.return_value = None
+            return cursor
+        return original_execute(sql, parameters)
+
+    runtime.owned.connection.execute.side_effect = execute
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    assert prepared_by(runtime, action) == ticket
+
+    action.update(status=2, execution_started=1)
+    runtime.wall_us.return_value = action["scheduled_at"]
+
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    assert prepared_by(runtime, action) == ticket
     runtime.preparation_driver.prepare_capture.assert_awaited_once()
 
 

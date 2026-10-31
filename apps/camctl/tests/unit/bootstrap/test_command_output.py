@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -25,6 +27,14 @@ from camctl.session.outcome import SessionOutcome
 
 
 @pytest.fixture(autouse=True)
+def isolate_one_shot_logging(monkeypatch):
+    from camctl.logging_runtime import one_shot
+
+    monkeypatch.setattr(one_shot, "stderr_logging", create_autospec(
+        one_shot.stderr_logging, return_value=nullcontext()))
+
+
+@pytest.fixture(autouse=True)
 def isolate_builtin_driver_registration(monkeypatch):
     from camctl.devices.drivers import builtin
     monkeypatch.setattr(builtin, "register_builtin_drivers",
@@ -32,6 +42,14 @@ def isolate_builtin_driver_registration(monkeypatch):
 
 
 class TestParseCommand:
+    @pytest.mark.parametrize("flag", ["-h", "--help"])
+    def test_help_keeps_successful_exit(self, flag, capsys) -> None:
+        with pytest.raises(SystemExit) as result:
+            parse_command([flag])
+        assert result.value.code == 0
+        captured = capsys.readouterr()
+        assert captured.out and captured.err == ""
+
     def test_all_command_forms(self) -> None:
         assert parse_command(["init"]) == Command(CommandKind.INIT, None, None)
         assert parse_command(["init", "--config", "/x/c.toml"]) == Command(
@@ -112,6 +130,36 @@ class TestSessionResultChannel:
 
 
 class TestMainSyntaxExitCode:
+    @pytest.mark.parametrize("prefix", [(), ("init",), ("run",), ("submit",), ("describe",)])
+    @pytest.mark.parametrize("flag", ["-h", "--help"])
+    def test_help_outputs_to_requested_stream_and_exits_zero(self, prefix, flag, capsys) -> None:
+        from camctl.cli import main
+
+        out, err = StringIO(), StringIO()
+        assert main([*prefix, flag], stdout=out, stderr=err) == 0
+        assert "camctl" in out.getvalue()
+        assert err.getvalue() == ""
+        captured = capsys.readouterr()
+        assert captured.out == captured.err == ""
+
+    def test_help_output_failure_preserves_real_error(self, capsys) -> None:
+        from camctl.cli import main
+
+        class UnavailableOutput(StringIO):
+            def write(self, text):
+                raise OSError("help-output-unavailable")
+
+        out, err = UnavailableOutput(), StringIO()
+        with pytest.raises(OSError, match="help-output-unavailable"):
+            main(["--help"], stdout=out, stderr=err)
+        records = [json.loads(line) for line in err.getvalue().splitlines()]
+        assert len(records) == 1
+        assert records[0]["level"] == "ERROR"
+        assert records[0]["exception"]["type"] == "builtins.OSError"
+        assert out.getvalue() == ""
+        captured = capsys.readouterr()
+        assert captured.out == captured.err == ""
+
     def test_syntax_error_exits_one_not_two(self, capsys) -> None:
         from camctl.cli import main
 
@@ -124,7 +172,9 @@ class TestMainSyntaxExitCode:
         from camctl.cli import main
 
         assert main(["--version"]) == 0
-        assert capsys.readouterr().out.endswith("\n")
+        captured = capsys.readouterr()
+        assert captured.out.endswith("\n")
+        assert captured.err == ""
 
     def test_run_not_assembled_exits_one_with_stderr(self, capsys, monkeypatch) -> None:
         from camctl.cli import main
@@ -157,7 +207,7 @@ def test_describe_schema_error_returns_diagnostic(monkeypatch, error_kind) -> No
 
     failure = (SchemaRuleError if error_kind == "rule" else SchemaValidationError)("schema-case-17")
     monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: cls("/unused")))
-    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: object())
+    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: SimpleNamespace(log=object()))
     monkeypatch.setattr(catalog, "build_catalog", lambda *args: object())
     monkeypatch.setattr(catalog, "default_driver_definitions", lambda: {})
     monkeypatch.setattr(application, "describe", lambda *args: {"devices": []})
@@ -178,7 +228,7 @@ def test_describe_catalog_rule_error_returns_diagnostic(monkeypatch):
     from camctl.devices import catalog
     from camctl.acceptance.schema import RuleError
     monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls:cls("/unused")))
-    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args:object())
+    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: SimpleNamespace(log=object()))
     def fail(*args):
         raise RuleError("驱动未部署 driver-case-17")
     monkeypatch.setattr(catalog, "build_catalog", fail)

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
+
 from support.repository_ports import repository_port
 
 from ..support.capture import capture_database, capture_runtime
@@ -108,8 +110,8 @@ pytestmark = pytest.mark.asyncio
 
 _NOW = 1_750_000_000_000_000
 _ORIGINAL = b"II*\x00hasselblad-raw"
-_PREVIEW = b"\xff\xd8preview\xff\xd9"
-_JPEG_ORIGINAL = b"\xff\xd8jpeg-original\xff\xd9"
+_PREVIEW = JPEG_IMAGE + b"preview"
+_JPEG_ORIGINAL = JPEG_IMAGE + b"jpeg-original"
 _RETURNED = EvidenceRegistry((
     ENTERED,
     EvidenceContract("operation_returned", 1, "control", frozenset()),
@@ -972,8 +974,9 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
         owned.connection.close()
 
 
+@pytest.mark.parametrize("verifier_failure", ["unknown", "raises"])
 async def test_unknown_host_photo_verification_error_retains_original_request_and_recovers(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, verifier_failure,
 ):
     from dataclasses import replace
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
@@ -1018,13 +1021,17 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
                 self.saved.append((request, key))
                 receipt = self.delegate.save_host_photo_complete(request, key, current_owned)
                 assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-                current_owned.connection.execute("BEGIN").close()
-                return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("提交回执未知"))
+                if len(self.saved) == 1:
+                    current_owned.connection.execute("BEGIN").close()
+                    return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("提交回执未知"))
+                return receipt
 
             def verify_operation(self, request, key, verifier):
                 self.verified.append((request, key))
                 if self.fail_verification:
-                    raise OSError("测试仓储核实错误")
+                    if verifier_failure == "raises":
+                        raise OSError("测试仓储核实错误")
+                    return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("核实仍未知"))
                 return self.delegate.verify_operation(request, key, verifier)
 
         uncertain = UnknownCommittedReceipt()
@@ -1032,7 +1039,8 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
             with repository_port(HostCaptureRepository, uncertain,
                     ("save_host_photo_complete", "verify_operation"),
                     matches=lambda _name, args, _kwargs: args[0].action_id == 1):
-                with pytest.raises(OSError, match="测试仓储核实错误"):
+                expected_error = ConsistencyError if verifier_failure == "unknown" else OSError
+                with pytest.raises(expected_error):
                     await capture_handler("camera_take_photo")(1, runtime)
             assert len(driver.requests) == 1
             assert len(uncertain.saved) == len(uncertain.verified) == 1
@@ -1053,7 +1061,7 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
                 await capture_handler("camera_take_photo")(1, runtime)
             assert len(driver.requests) == 1
             assert uncertain.saved == [uncertain.saved[0]] * 2
-            assert uncertain.verified == uncertain.saved
+            assert uncertain.verified == [uncertain.saved[0]]
             assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
             assert len(_saved_output_rows(owned)) == 2
         finally:

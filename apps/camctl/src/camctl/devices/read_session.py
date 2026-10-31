@@ -29,6 +29,7 @@ __all__ = [
     "ReadPreparationError",
     "ReadPreparationSettlement",
     "SourceFile",
+    "DeferredSourceFile",
     "SourceStream",
     "open_read",
 ]
@@ -69,7 +70,7 @@ class ReadError(Exception):
 
 @dataclass(frozen=True)
 class SourceFile:
-    """设备源文件：原身份、驱动定位信息及固定长度。"""
+    """设备源文件：原身份、驱动定位信息及已经取得的完整长度。"""
 
     file_id: str
     locator: Mapping[str, Any]
@@ -78,6 +79,19 @@ class SourceFile:
     def __post_init__(self) -> None:
         if type(self.size_bytes) is not int or self.size_bytes < 0:
             raise ValueError(f"源文件长度必须是整数: {self.size_bytes!r}")
+
+
+@dataclass(frozen=True)
+class DeferredSourceFile:
+    """尚待实际下载确定长度的设备照片来源。"""
+
+    file_id: str
+    locator: Mapping[str, Any]
+    size_bytes: None = None
+
+    def __post_init__(self) -> None:
+        if self.size_bytes is not None:
+            raise ValueError("按需照片来源不能预设读取长度")
 
 
 @dataclass(frozen=True)
@@ -129,6 +143,8 @@ class ReadSession:
         stream: SourceStream,
         no_data_timeout_s: Decimal,
     ) -> None:
+        if source.size_bytes is None:
+            raise ReadSessionError("读取会话必须具有本次完整来源长度")
         if type(offset) is not int or not 0 <= offset <= source.size_bytes:
             raise ReadSessionError(
                 f"读取偏移必须是 0~{source.size_bytes} 范围内的整数: {offset!r}"
@@ -154,6 +170,11 @@ class ReadSession:
 
     def position(self) -> int:
         return self._position
+
+    @property
+    def source_size(self) -> int:
+        """本次打开的完整读取源长度。"""
+        return self._source.size_bytes
 
     def poll_stopped(self) -> ReadEnd | None:
         """非阻塞观察关闭：未完成返回 None，完成则返回事实或抛出关闭错误。"""

@@ -22,6 +22,7 @@ from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
 from camctl.logging_runtime.diagnostics import DiagnosticState
+from camctl.outputs.preview_facts import PREVIEW_VALIDATION_VERSION
 
 __all__ = [
     "ActionFacts",
@@ -57,6 +58,7 @@ _ITEM_OUTPUT_UNAVAILABLE = item_error_id("obtain_items", "output_unavailable")
 _ITEM_OUTPUT_CLEANUP_STARTED = item_error_id("obtain_items", "output_cleanup_started")
 _ITEM_SOURCE_FILE_UNCONFIRMED = item_error_id("obtain_items", "source_file_unconfirmed")
 _ITEM_PREVIEW_MISSING = item_error_id("obtain_items", "preview_missing")
+_ITEM_PREVIEW_UNCONFIRMED = item_error_id("obtain_items", "preview_unconfirmed")
 
 #: 来源级选择错误编号。
 SELECTION_SOURCE_ACTION_FAILED = item_error_id(
@@ -364,7 +366,7 @@ class CatalogEntry:
 
 @dataclass(frozen=True)
 class OriginalOutputs:
-    """同一来源的一份原片及已登记派生产物；空值表示可靠不存在。"""
+    """同一来源的一份原片及已登记派生产物；空值表示尚未登记。"""
 
     source_action_id: int
     original: CatalogEntry
@@ -391,6 +393,8 @@ class SelectionFacts:
     checked_output_sources: Mapping[int, int | None] = field(default_factory=dict)
     previously_confirmed_ids: frozenset[int] = field(default=frozenset())
     source_failed: bool = False
+    unconfirmed_preview_ids: frozenset[int] = field(default=frozenset())
+    preview_validation_version: int = PREVIEW_VALIDATION_VERSION
 
 
 @dataclass(frozen=True)
@@ -570,6 +574,7 @@ def select_for_original(
     *,
     preview: CatalogEntry | None = None,
     repaired: CatalogEntry | None = None,
+    preview_unconfirmed: bool = False,
 ) -> SelectedItem:
     """按默认或预览规则选择一份原片的目标，不保存选择或授予资格。
 
@@ -598,7 +603,8 @@ def select_for_original(
     if preview is None:
         return SelectedItem(
             basis=ItemBasis.PREVIEW, status=ItemStatus.FAILED,
-            original_output_id=original.output_id, error_code=_ITEM_PREVIEW_MISSING,
+            original_output_id=original.output_id,
+            error_code=_ITEM_PREVIEW_UNCONFIRMED if preview_unconfirmed else _ITEM_PREVIEW_MISSING,
             error_details={"source_action_instance_id": str(source_action_id),
                            "original_output_id": str(original.output_id)},
         )
@@ -639,11 +645,13 @@ def _select_families(facts: SelectionFacts, mode: SelectionMode) -> SelectionSna
         repaired = _unique_derived(facts.outputs, OutputKind.REPAIRED, original.output_id)
         any_preview_target |= preview is not None
         items.append(select_for_original(facts.source_action_id, original, mode,
-                                         preview=preview, repaired=repaired))
-    source_error = (_SELECTION_PREVIEW_MISSING
-                    if mode is SelectionMode.PREVIEW and not any_preview_target else None)
+                                         preview=preview, repaired=repaired,
+                                         preview_unconfirmed=original.output_id in facts.unconfirmed_preview_ids))
     return SelectionSnapshot(
-        is_fixed=True, items=tuple(items), source_error_code=source_error
+        is_fixed=True, items=tuple(items),
+        source_error_code=(_SELECTION_PREVIEW_MISSING
+            if facts.preview_validation_version == 0 and mode is SelectionMode.PREVIEW and not any_preview_target
+            else None),
     )
 
 

@@ -1,0 +1,68 @@
+FFFFFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+_ TestDispatchLoop.test_unstarted_action_finishes_without_device_work[False-11-1] _
+apps/camctl/tests/integration/capture/test_capture_contract.py:678: in test_unstarted_action_finishes_without_device_work
+    runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ TestDispatchLoop.test_unstarted_action_finishes_without_device_work[False-12-2] _
+apps/camctl/tests/integration/capture/test_capture_contract.py:678: in test_unstarted_action_finishes_without_device_work
+    runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ TestDispatchLoop.test_unstarted_action_finishes_without_device_work[False-13-3] _
+apps/camctl/tests/integration/capture/test_capture_contract.py:678: in test_unstarted_action_finishes_without_device_work
+    runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ TestDispatchLoop.test_unstarted_action_finishes_without_device_work[True-11-1] _
+apps/camctl/tests/integration/capture/test_capture_contract.py:678: in test_unstarted_action_finishes_without_device_work
+    runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ TestDispatchLoop.test_unstarted_action_finishes_without_device_work[True-12-2] _
+apps/camctl/tests/integration/capture/test_capture_contract.py:678: in test_unstarted_action_finishes_without_device_work
+    runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ TestDispatchLoop.test_unstarted_action_finishes_without_device_work[True-13-3] _
+apps/camctl/tests/integration/capture/test_capture_contract.py:678: in test_unstarted_action_finishes_without_device_work
+    runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+____ TestTimelapseHandler.test_open_start_without_sent_at_fails_unconfirmed ____
+apps/camctl/tests/integration/capture/test_capture_contract.py:640: in test_open_start_without_sent_at_fails_unconfirmed
+    runtime = _runtime(owned, files={})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_____ TestRecordHandler.test_open_start_without_sent_at_fails_unconfirmed ______
+apps/camctl/tests/integration/capture/test_capture_contract.py:577: in test_open_start_without_sent_at_fails_unconfirmed
+    original = _runtime(owned)
+               ^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestDispatchLoop::test_unstarted_action_finishes_without_device_work[False-11-1]
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestDispatchLoop::test_unstarted_action_finishes_without_device_work[False-12-2]
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestDispatchLoop::test_unstarted_action_finishes_without_device_work[False-13-3]
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestDispatchLoop::test_unstarted_action_finishes_without_device_work[True-11-1]
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestDispatchLoop::test_unstarted_action_finishes_without_device_work[True-12-2]
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestDispatchLoop::test_unstarted_action_finishes_without_device_work[True-13-3]
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestTimelapseHandler::test_open_start_without_sent_at_fails_unconfirmed
+FAILED apps/camctl/tests/integration/capture/test_capture_contract.py::TestRecordHandler::test_open_start_without_sent_at_fails_unconfirmed
+8 failed in 1.02s

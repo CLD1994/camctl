@@ -29,7 +29,7 @@ CREATE TABLE actions (
     status INTEGER NOT NULL CHECK (status IN (1,2,3,4,5,6)),
     execution_started INTEGER NOT NULL CHECK (execution_started IN (0,1)),
     cancel_requested INTEGER NOT NULL CHECK (cancel_requested IN (0,1)),
-    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4,10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29,30)),
+    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4,10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29,30,31)),
     error_details_json TEXT CHECK (error_details_json IS NULL OR (json_valid(error_details_json) AND json_type(error_details_json) = 'object')),
     first_window_observed_at INTEGER,
     expiration_reason INTEGER CHECK (expiration_reason IS NULL OR expiration_reason IN (1,2)),
@@ -53,6 +53,8 @@ CREATE TABLE actions (
     CHECK (status <> 4 OR (execution_started = 0 AND error_code IN (1,2,3,4))
         OR (execution_started = 0 AND type IN (1,2,3) AND error_code = 13
             AND COALESCE(json_extract(error_details_json, '$.reason') IN ('device_failed','baseline_read_failed'), 0))
+        OR (execution_started = 0 AND type = 1 AND error_code = 31)
+        OR (execution_started = 0 AND type = 1 AND error_code = 17)
         OR (execution_started = 1 AND error_code IN (10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29,30))),
     CHECK ((execution_spec_json IS NULL AND status = 4 AND execution_started = 0 AND error_code IN (1,2,3,4))
         OR (execution_spec_json IS NOT NULL AND NOT (status = 4 AND execution_started = 0 AND error_code IN (1,2,3,4)))),
@@ -80,3 +82,7 @@ CREATE INDEX actions_plan_members ON actions(plan_id, id);
 CREATE INDEX actions_group_members ON actions(plan_id, group_name, id) WHERE group_name IS NOT NULL;
 CREATE INDEX actions_schedule ON actions(scheduled_at, id) WHERE status IN (1,2);
 CREATE INDEX actions_device_active ON actions(device_id, scheduled_at, id) WHERE status IN (1,2) AND device_id IS NOT NULL;
+CREATE INDEX actions_device_all ON actions(device_id, id) WHERE device_id IS NOT NULL;
+CREATE INDEX actions_pending_capture_selection
+    ON actions(device_id, driver_id, scheduled_at, plan_id, input_index, id)
+    WHERE status = 1 AND execution_started = 0 AND cancel_requested = 0;

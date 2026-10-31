@@ -1,6 +1,9 @@
 """内置驱动注册从一个部署入口协调静态定义与运行端口。"""
 
+from contextlib import nullcontext
 from io import StringIO
+from types import SimpleNamespace
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -268,8 +271,11 @@ def test_cli_describe_uses_unified_builtin_registration(monkeypatch):
     from camctl import cli
     from camctl.bootstrap import application
     from camctl.devices import catalog
+    from camctl.logging_runtime import one_shot
 
-    config = object()
+    config = SimpleNamespace(log=object())
+    monkeypatch.setattr(one_shot, "stderr_logging", create_autospec(
+        one_shot.stderr_logging, return_value=nullcontext()))
     calls = []
     monkeypatch.setattr(builtin, "register_builtin_drivers", calls.append)
     monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: cls("/unused")))

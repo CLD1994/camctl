@@ -66,10 +66,12 @@ udev 按规则文件名顺序处理设备；系统默认规则会设置 USB 节�
 ./hb_cli set drive-mode single    # single / continuous / self-timer / interval / exposure-bracketing / focus-bracketing
 ./hb_cli set iso 100              # ISO
 ./hb_cli set aperture 8           # 光圈 f/8
-./hb_cli set shutter 0.008        # 快门秒数，小数格式；0.008 约为 1/125 秒
+./hb_cli set shutter 1/125       # 快门使用分数形式，表示 1/125 秒
 ./hb_cli set capture-format raw   # RAW（3FR）
 ./hb_cli set capture-format jpeg  # JPEG（固件允许时）
 ```
+
+camctl 的 `shutter_s` 使用相同的分数字符串，例如 `"1/125"` 和 `"32/1"`；允许档位由[单张参数规格](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#快门档位与分数字符串)定义。
 
 读取参数：
 
@@ -138,7 +140,7 @@ udev 按规则文件名顺序处理设备；系统默认规则会设置 USB 节�
 
 不指定图片名称时下载全部；指定名称时只下载对应图片。
 
-指定图片时，`download original` 和 `download thumbnail` 只接受机内文件名，不接受完整机内路径。拍摄响应中的本地文件名与机内文件名分别表示主机副本和相机原图；下载使用 `camera file:` 返回路径中的文件名。
+指定图片时，`download original` 和 `download thumbnail` 只接受机内文件名，不接受完整机内路径。`hb_cli` 保证指定的机内文件名唯一匹配，并读取匹配原图或其缩略图。拍摄响应中的本地文件名与机内文件名分别表示主机副本和相机原图；下载使用 `camera file:` 返回路径中的文件名。
 
 机身只保存原图，不单独保存缩略图文件。`download thumbnail` 按需从指定原图提取或生成缩略图，并将结果保存到主机：
 

@@ -321,6 +321,8 @@ async def prepare_action6_segment_set(runtime, action, listing, *, canceled=Fals
             return None
         if finalized:
             await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+        elif canceled and not exhausted:
+            await common._finish_listing_result(runtime, listing, end_run=common.RunOutcome.CANCELED)
         request = await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(
             action_id, occurred_at, owned
         ))
@@ -684,13 +686,32 @@ async def publish_action6_segment_result(runtime, action, ref, decision, *, fail
     )
 
 
+async def _resume_action6_segment_decision(runtime, action, ref, repository):
+    """已保存的范围决定和检查责任优先于重新分类正常结果。"""
+    row = await runtime.database.read(lambda owned: repository.read_set(ref, owned))
+    if row["state"] == int(enum_for("segment_sets.state").ASSESSED):
+        from camctl.capture.segment_completion import release_segment_occupancy
+
+        decision = await runtime.database.read(lambda owned: repository.read_decision(ref, owned))
+        await release_segment_occupancy(runtime, action["id"])
+        await publish_action6_segment_result(runtime, action, ref, decision)
+        return True
+    inspection = await runtime.database.read(lambda owned: owned.connection.execute(
+        "SELECT 1 FROM segment_inspections WHERE set_id=? LIMIT 1", (row["id"],)
+    ).fetchone())
+    if inspection is None:
+        return False
+    from camctl.capture.action6_recovery import advance_action6_recovery
+
+    await advance_action6_recovery(runtime, action)
+    return True
+
+
 async def advance_action6_segmented_recording(runtime, action, decision):
     """普通录像与原生有限延时共用的完整结果推进。"""
     from camctl.capture import handlers as common
     from camctl.capture.segment_completion import release_segment_occupancy
     from camctl.capture.recording import RecordingPhase
-    from camctl.capture.segment_completion import _control_facts
-    from camctl.capture.segment_models import EvidenceState
 
     action_id = action["id"]
     if action["cancel_requested"]:
@@ -722,13 +743,16 @@ async def advance_action6_segmented_recording(runtime, action, decision):
         await finish_action6_retained_unconfirmed(runtime, action, ref)
         return
     repository = SegmentRepository()
+    if await _resume_action6_segment_decision(runtime, action, ref, repository):
+        return
     facts = await classify_action6_segment_set(action, ref, repository, runtime.database)
     await release_segment_occupancy(runtime, action_id)
     activity_id = await common._activity_id_of(runtime, action_id)
-    activity = await runtime.database.read(lambda owned: row_facts(
-        owned.connection, "device_activities", activity_id,
+    from camctl.persistence.repositories.normal_recording_stop import read_normal_recording_stop
+
+    normal_stop = await runtime.database.read(lambda owned: read_normal_recording_stop(
+        owned.connection, action, activity_id
     ))
-    _, overrun = _control_facts(runtime, action, activity)
     # RESULTS 可能刚刚保存了本轮 STOP+filewait 证据。入口传入的 decision
     # 是读取之前的快照，需依据此刻持久化事实重算，不能因此把正常完成送去媒体检查。
     from camctl.capture.handlers import _recording_port
@@ -739,23 +763,18 @@ async def advance_action6_segmented_recording(runtime, action, decision):
     )
     control_complete = (
         current_decision.phase is RecordingPhase.CONTROL_COMPLETE
-        and overrun is not EvidenceState.CONFIRMED
+        and normal_stop
     )
     if not control_complete:
         from dataclasses import replace
 
-        reason = (
-            "control_overrun"
-            if overrun is EvidenceState.CONFIRMED
-            else "completion_unknown"
-        )
         facts = replace(
             facts,
             decision=replace(
                 facts.decision,
                 status=SegmentDecisionStatus.UNCONFIRMED,
                 failure_code="capture_result_unconfirmed",
-                reason=reason,
+                reason="completion_unknown",
             ),
         )
     if control_complete and facts.decision.status is SegmentDecisionStatus.SUCCEEDED:
@@ -793,6 +812,8 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
             await finish_action6_retained_unconfirmed(runtime, action, ref)
         return
     repository = SegmentRepository()
+    if not canceled and await _resume_action6_segment_decision(runtime, action, ref, repository):
+        return
     facts = await classify_action6_segment_set(
         action, ref, repository, runtime.database, canceled=canceled
     )

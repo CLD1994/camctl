@@ -14,7 +14,7 @@ export function titledParameter(): ParameterType {
     ],
   };
   const shutter = parseJson(
-    '{"type":"number","title":"快门","oneOf":[{"const":0.000667,"title":"1/1500 秒"},{"const":0.000333,"title":"1/3000 秒"},{"const":0.00025,"title":"1/4000 秒"}]}',
+    '{"type":"string","title":"快门","oneOf":[{"const":"1/1500","title":"1/1500 秒"},{"const":"1/3000","title":"1/3000 秒"},{"const":"1/4000","title":"1/4000 秒"}]}',
   );
   const branch = (
     mode: string,

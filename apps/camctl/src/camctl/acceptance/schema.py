@@ -14,7 +14,8 @@ from camctl.contracts.schemas import (
     SchemaRuleError, create_validator, load_schema, validation_errors,
 )
 
-__all__ = ["BodySchemaError", "RuleError", "precise_validator_for", "validate_precise"]
+__all__ = ["BodySchemaError", "RuleError", "precise_validator_for", "validate_precise",
+           "validate_precise_document"]
 
 _PLAN_SCHEMA_RESOURCE = "protocol/plan.schema.json"
 
@@ -40,7 +41,11 @@ def precise_validator_for(schema: Any) -> Draft202012Validator:
 
 def validate_precise(schema: Any, document: Any, *, label: str = "输入") -> None:
     """校验文档；不符合时抛 BodySchemaError，规则无效抛 RuleError。"""
-    validator = precise_validator_for(schema)
+    validate_precise_document(precise_validator_for(schema), document, label=label)
+
+
+def validate_precise_document(validator: Draft202012Validator, document: Any, *, label: str = "输入") -> None:
+    """使用已核对的精确校验器检查文档，保留统一的错误分类。"""
     try:
         errors = validation_errors(validator, document)
     except SchemaRuleError as error:

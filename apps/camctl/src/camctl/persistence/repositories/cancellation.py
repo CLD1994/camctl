@@ -85,6 +85,8 @@ _ACTION_STARTED_REASON = 1
 
 _ACTION_STATUS = enum_for("actions.status")
 _SYNC_STATUS = enum_for("state_syncs.status")
+_DELIVERY_STATUS = enum_for("deliveries.status")
+_WITHDRAWAL_STATUS = enum_for("deliveries.withdrawal_state")
 _TARGET_PENDING, _TARGET_FIXED, _TARGET_FAILED = 1, 2, 3
 #: 动作终态集合。
 _ACTION_TERMINAL = (3, 4, 5, 6)
@@ -216,6 +218,12 @@ class _StartCancelCommand:
             result=CancelStartResult(disposition=CancelStartDisposition.SAVED))
 
 
+def _cancel_origin_abandoned(action):
+    return (action is not None and action['type'] == _CANCEL_ACTION_TYPE
+            and action['target_selection_state'] == _TARGET_PENDING
+            and (action['cancel_requested'] or action['status'] in (3, 4, 5, 6)))
+
+
 class _FixCancelTargetsCommand:
     """固定取消动作的完整目标集合（TARGETS_FIXED.CANCEL）。
 
@@ -243,6 +251,8 @@ class _FixCancelTargetsCommand:
             raise ConsistencyError(f"取消动作不存在: {command.action_id}")
         if action["type"] != _CANCEL_ACTION_TYPE:
             raise ConsistencyError("取消目标固定要求取消动作")
+        if _cancel_origin_abandoned(action):
+            return CommandPlan((), {}, {}, CancelTargetsSaved(CancelTargetsDisposition.ABANDONED), read_only=True)
         if action["target_selection_state"] == _TARGET_FAILED:
             raise TransactionError("目标集合已失败，不重新固定")
         if action["target_selection_state"] == _TARGET_FIXED:
@@ -753,9 +763,10 @@ class _ApplyCancelTargetCommand:
             return ()
         next_item = next_row_id(connection, "cancel_delivery_items")
         with closing(connection.execute(
-            "SELECT id FROM deliveries WHERE action_id = ? AND status = ?"
-            " ORDER BY id",
-            (target["id"], _DELIVERY_PUBLISHED),
+            "SELECT id FROM deliveries WHERE action_id = ? AND (status = ?"
+            " OR (status = ? AND withdrawal_state = ?)) ORDER BY id",
+            (target["id"], _DELIVERY_PUBLISHED, int(_DELIVERY_STATUS.CANCELED),
+             int(_WITHDRAWAL_STATUS.UNKNOWN)),
         )) as cursor:
             delivery_ids = tuple(int(row[0]) for row in cursor.fetchall())
         rows = []
@@ -1921,9 +1932,9 @@ def _guard_cancel_apply(event, context, items) -> None:
         request = event.evidence.get("cancel_request")
         if (not isinstance(request, dict)
                 or set(request) != {"item_id", "mode", "occurred_at"}
-                or type(request["item_id"]) is not int
+                or isinstance(request["item_id"], bool) or not isinstance(request["item_id"], int)
                 or request["item_id"] != member.row_id
-                or type(request["occurred_at"]) is not int
+                or isinstance(request["occurred_at"], bool) or not isinstance(request["occurred_at"], int)
                 or request["occurred_at"] != event.occurred_at):
             raise EventValidationError("取消生效必须携带原成员与时间的完整 cancel_request")
         if "motor_request" in event.evidence or "motor_permit" in event.evidence:
@@ -2078,6 +2089,23 @@ def _withdrawal_guard(event, context) -> None:
                 "target_action_id"):
             raise EventValidationError(
                 f"撤回明细的交付不属于目标取回: {values.get('delivery_id')!r}")
+        if event.event_type == 23 and event.reason == 7:
+            origin = context.state_rows.get("actions", {}).get(item.get("action_id"))
+            target = context.state_rows.get("actions", {}).get(item.get("target_action_id"))
+            if (values.get("status") != 1 or values.get("error_code") is not None
+                    or values.get("error_details_json") is not None
+                    or item.get("status") != _ITEM_RUNNING
+                    or origin is None or origin.get("type") != _CANCEL_ACTION_TYPE
+                    or origin.get("status") != int(_ACTION_STATUS.RUNNING)
+                    or origin.get("cancel_requested") != 0
+                    or target is None or target.get("type") != _OBTAIN_TARGET_TYPE
+                    or target.get("cancel_requested") != 1
+                    or not (delivery.get("status") in (int(_DELIVERY_STATUS.PUBLISHED),
+                                                        int(_DELIVERY_STATUS.WITHDRAWN))
+                            or delivery.get("status") in (int(_DELIVERY_STATUS.PUBLISHING),
+                                                          int(_DELIVERY_STATUS.CANCELED))
+                            and delivery.get("withdrawal_state") == int(_WITHDRAWAL_STATUS.UNKNOWN))):
+                raise EventValidationError("撤回明细必须属于仍有效的原取消责任")
 
 
 def register_cancellation_guards() -> None:
@@ -2140,6 +2168,9 @@ class _FixPhotoEntriesCommand:
                 raise TransactionError('原入口取消复合申请内容不同')
             result = _FixCancelTargetsCommand(self.command, self.key)._reuse(scope.connection, fixed)
             return result
+        origin = row_facts(scope.connection, 'actions', self.command.action_id)
+        if _cancel_origin_abandoned(origin):
+            return CommandPlan((), {}, {}, CancelTargetsSaved(CancelTargetsDisposition.ABANDONED), read_only=True)
         plans = []
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         for block in self.command.entry_blocks:

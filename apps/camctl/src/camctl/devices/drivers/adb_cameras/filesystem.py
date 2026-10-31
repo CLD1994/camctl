@@ -11,6 +11,7 @@ import re
 import shlex
 from pathlib import PurePosixPath
 import threading
+import time
 from typing import Any, TYPE_CHECKING
 
 from camctl.contracts.pages import Page
@@ -19,6 +20,7 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.logging_runtime.performance import measure_performance
+from camctl.logging_runtime.events import log_context
 from camctl.operations.error_diagnostics import DiagnosticError
 from camctl.operations.models import AttemptTicket, ErrorValue
 from camctl.operations.process import OUTPUT_LIMIT_BYTES, RawToolOutcome, ToolSpec, ToolStartError
@@ -50,6 +52,9 @@ def _error(raw, operation, reason):
         if raw.stderr is not None:
             details["stderr"] = raw.stderr.decode("utf-8", "backslashreplace")
             details["stderr_hex"] = raw.stderr.hex()
+        if raw.output is not None:
+            details["stdout_hex"] = raw.output.hex()
+            details["stdout_text"] = raw.output.decode("utf-8", "backslashreplace")
     return ErrorValue(f"adb_{operation}_failed", "device_file_access", details)
 
 
@@ -229,6 +234,27 @@ def decode_directory(request, raw):
 class ShellFileTools:
     """候选 Linux 工具组合，真实选项和退出契约由设备验证确认。"""
 
+    def family_script(self, path):
+        """重新核对同目录、同完整主干的候选，不递归扫描其他文件。"""
+        original = PurePosixPath(path)
+        return '\n'.join((
+            'tmp=$(mktemp) || exit $?',
+            'trap \'rm -f -- "$tmp"\' 0',
+            f'find {shlex.quote(str(original.parent))} -maxdepth 1 -type f -print0 > "$tmp" || exit $?',
+            "printf '\\000' >> \"$tmp\" || exit $?",
+            f'stem={shlex.quote(str(original.with_suffix("")))}',
+            "printf 'CAMCTL-FAMILY/1\\000' || exit $?",
+            'while :; do',
+            "    IFS= read -r -d '' path || exit $?",
+            '    if [ -z "$path" ]; then',
+            "        printf 'END\\000' || exit $?",
+            '        break',
+            '    fi',
+            '    [ "${path%.*}" = "$stem" ] || continue',
+            '    printf \'%s\\000\' "$path" || exit $?',
+            'done < "$tmp"',
+        ))
+
     def directory_script(self, root, after, batch):
         # 各命令分别检查退出；不能从管道最后一段的成功推断 find 成功。
         return '\n'.join((
@@ -380,7 +406,7 @@ class ShellFileTools:
 @dataclass(frozen=True)
 class FileAccessRead:
     outcome: RawToolOutcome | None
-    value: int | str | bool | None
+    value: int | str | bool | tuple[FileIdentity, ...] | None
     error: ErrorValue | None
     failure: BaseException | None = None
 
@@ -422,20 +448,49 @@ class AdbFilesystem:
 
     async def _run(self, script, timeout_s, stop):
         spec = ToolSpec(shell_argv(self.serial, script), timeout_s, self.terminate_grace_s)
-        return await self.transport.run(spec, stop)
+        with log_context(device_id=self.binding.device_id, driver_id=self.binding.driver_id):
+            return await self.transport.run(spec, stop)
 
     async def _file_call(self, identity, operation, script_for, decode, timeout_s, stop):
         path = self._identity(identity)
+        script = script_for(path)
+        began = time.monotonic_ns()
+
+        def failure(raw, reason):
+            error = _error(raw, operation, reason)
+            return replace(error, details={**error.details, "identity": path,
+                "command": list(shell_argv(self.serial, script)),
+                "timeout_s": None if timeout_s is None else str(timeout_s),
+                "elapsed_ms": (time.monotonic_ns() - began) // 1_000_000})
+
         try:
-            raw = await self._run(script_for(path), timeout_s, stop)
+            with log_context(device_path=path, file_operation=operation):
+                raw = await self._run(script, timeout_s, stop)
         except ToolStartError as error:
-            return FileAccessRead(None, None, _error(None, operation, str(error)), error)
+            return FileAccessRead(None, None, failure(None, str(error)), error)
         if not _returned(raw):
-            return FileAccessRead(raw, None, _error(raw, operation, "call_failed"))
+            return FileAccessRead(raw, None, failure(raw, "call_failed"))
         try:
             return FileAccessRead(raw, decode(raw.output), None)
         except ValueError as error:
-            return FileAccessRead(raw, None, _error(raw, operation, str(error)), error)
+            return FileAccessRead(raw, None, failure(raw, str(error)), error)
+
+    async def read_family(self, identity, *, timeout_s, stop):
+        """取得原文件同目录、同主干的完整候选；错误不表示候选为空。"""
+        path = PurePosixPath(self._identity(identity))
+
+        def decode(data):
+            parts = data.split(b"\0")
+            if len(parts) < 3 or parts[0] != b"CAMCTL-FAMILY/1" or parts[-2:] != [b"END", b""]:
+                raise ValueError("配对目录响应缺少完整版本帧")
+            entries = tuple(FileIdentity(self.binding, part.decode("utf-8", "strict")) for part in parts[1:-2])
+            if len(set(entries)) != len(entries) or any(
+                    PurePosixPath(entry.path).parent != path.parent
+                    or PurePosixPath(entry.path).stem != path.stem for entry in entries):
+                raise ValueError("配对目录包含重复、跨目录或不同主干的身份")
+            return entries
+
+        return await self._file_call(identity, "directory", self.tools.family_script, decode, timeout_s, stop)
 
     async def metadata(self, identity, *, timeout_s, stop):
         def decode(data):
@@ -451,12 +506,21 @@ class AdbFilesystem:
             raise ValueError("批量文件元数据请求必须包含 1 到 128 个身份")
         paths = tuple(self._identity(identity) for identity in identities)
         _metadata_paths(paths)
+        script = self.tools.metadata_many_script(paths)
+        began = time.monotonic_ns()
+
+        def diagnostic(error):
+            return replace(error, details={**error.details, "identities": list(paths),
+                "command": list(shell_argv(self.serial, script)),
+                "timeout_s": None if timeout_s is None else str(timeout_s),
+                "elapsed_ms": (time.monotonic_ns() - began) // 1_000_000})
+
         try:
             with measure_performance("adb_metadata", device_id=self.binding.device_id,
                                      path_count=len(paths)):
-                raw = await self._run(self.tools.metadata_many_script(paths), timeout_s, stop)
+                raw = await self._run(script, timeout_s, stop)
         except ToolStartError as error:
-            return FileMetadataBatch(None, (), _error(None, "metadata", str(error)))
+            return FileMetadataBatch(None, (), diagnostic(_error(None, "metadata", str(error))))
 
         items, frame_errors, frame_complete = _decode_metadata_frame(raw.output, identities)
         if raw.output_failure is not None:
@@ -466,7 +530,7 @@ class AdbFilesystem:
         item_errors = tuple(item.error for item in items if item.error is not None)
         error = None
         if not _returned(raw) or not frame_complete or frame_errors or item_errors:
-            error = _metadata_batch_error(raw, frame_errors=frame_errors, item_errors=item_errors)
+            error = diagnostic(_metadata_batch_error(raw, frame_errors=frame_errors, item_errors=item_errors))
         return FileMetadataBatch(raw, items, error)
 
     async def exists(self, identity, *, timeout_s, stop):
@@ -499,7 +563,7 @@ class AdbFilesystem:
         if type(offset) is not int or not 0 <= offset <= source.size_bytes:
             raise ValueError("读取偏移不在原固定长度范围内")
         # 先校验会话输入，再启动唯一受管流，避免无效输入产生进程。
-        stream = _AdbSourceStream(self, path, offset, source.size_bytes)
+        stream = _AdbSourceStream(self, path, offset, source.size_bytes, ticket, source.file_id)
         session = ReadSession(source, offset, stream, idle_timeout_s)
         stream.start()
         return session
@@ -520,9 +584,10 @@ class AdbReadError(DiagnosticError, OSError):
 class _AdbSourceStream:
     """一个读取尝试持有一个受管进程，文件字节经两块有界队列交付。"""
 
-    def __init__(self, filesystem, path, offset, size):
+    def __init__(self, filesystem, path, offset, size, ticket, file_id):
         self.fs, self.path, self.offset = filesystem, path, offset
         self.expected_size = size
+        self.ticket, self.file_id = ticket, file_id
         self.remaining = size - offset
         self.skip = offset % 65536
         self.queue = queue.Queue(maxsize=2)
@@ -563,7 +628,11 @@ class _AdbSourceStream:
     async def _run(self):
         spec = ToolSpec(shell_argv(self.fs.serial, self.fs.tools.read_script(self.path, self.offset)),
                         None, self.fs.terminate_grace_s)
-        return await self.fs.transport.run_stream(spec, self.stop, self._receive)
+        with log_context(device_id=self.fs.binding.device_id, driver_id=self.fs.binding.driver_id,
+                         run_id=self.ticket.run_id, attempt_id=self.ticket.attempt_id,
+                         copy_id=self.ticket.target_id, file_id=self.file_id,
+                         device_path=self.path, offset=self.offset):
+            return await self.fs.transport.run_stream(spec, self.stop, self._receive)
 
     async def _receive(self, data):
         skipped = min(self.skip, len(data))

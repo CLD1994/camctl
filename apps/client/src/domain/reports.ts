@@ -121,11 +121,17 @@ function indexReport(report: StatusReport): Index {
 }
 function failureIdentity(item: ObtainFailure): string {
   const requested = item.error.details.requested_output_id;
+  const original = item.error.details.original_output_id;
   return JSON.stringify([
     item.source_action_instance_id,
     item.output_id ?? null,
     item.delivery_id ?? null,
     typeof requested === "string" ? requested : null,
+    (item.error.code === "preview_missing" ||
+      item.error.code === "preview_unconfirmed") &&
+    typeof original === "string"
+      ? original
+      : null,
   ]);
 }
 function consistentSegmentFacts(indexes: Index[]) {
@@ -574,7 +580,34 @@ function associations(index: Index, sameBoundary = true) {
           );
           selected(owner, failure.source_action_instance_id, requested);
         }
-        // 同份报告与历史比较使用相同身份，保留多个无效请求 ID。
+        if (
+          failure.error.code === "preview_missing" ||
+          failure.error.code === "preview_unconfirmed"
+        ) {
+          const original = failure.error.details.original_output_id;
+          requireFact(
+            failure.error.details.source_action_instance_id ===
+              failure.source_action_instance_id,
+            "预览失败项的来源身份不一致",
+          );
+          if (original !== undefined) {
+            requireFact(
+              isCanonicalId(original) &&
+                failure.output_id === undefined &&
+                failure.delivery_id === undefined,
+              "预览尚未取得时只能关联已经确认的原片",
+            );
+            selected(owner, failure.source_action_instance_id, original);
+            const known = index.outputs.get(original);
+            if (known)
+              requireFact(
+                known.value.kind === "original" &&
+                  known.parent === failure.source_action_instance_id,
+                "预览失败项的原片来源或类别不一致",
+              );
+          }
+        }
+        // 同份报告与历史比较使用相同身份，区分请求产物和缺少预览的原片。
         const identity = failureIdentity(failure);
         requireFact(!seen.has(identity), "取回失败项重复");
         seen.add(identity);

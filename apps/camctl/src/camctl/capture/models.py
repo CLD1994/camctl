@@ -251,7 +251,8 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
     if action_type == "camera_take_photo":
         if not spec:
             return {}
-        if set(spec) != {"output_storage", "start_call_timeout_s"}:
+        if (set(spec) not in ({"output_storage", "start_call_timeout_s"},
+                             {"output_storage", "start_call_timeout_s", "photo_source_policy"})):
             raise ValueError("单张拍摄定义必须恰好声明存储位置和启动调用期限")
         if not isinstance(spec["output_storage"], str):
             raise ValueError("单张拍摄正式产物的存储位置必须是字符串")
@@ -259,10 +260,20 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
         timeout = spec["start_call_timeout_s"]
         if isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal)):
             raise ValueError("单张拍摄启动期限必须是精确数值秒数")
-        return {
+        result = {
             "output_storage": storage.value,
             "start_call_timeout_s": AttemptConfig(1, timeout_s=timeout).timeout_s,
         }
+        if "photo_source_policy" in spec:
+            from camctl.devices.tasks import PhotoSourcePolicy
+
+            if storage is not CaptureStorage.DEVICE:
+                raise ValueError("照片来源策略只适用于设备正式源")
+            policy = spec["photo_source_policy"]
+            if not isinstance(policy, str):
+                raise ValueError("照片来源策略必须是字符串")
+            result["photo_source_policy"] = PhotoSourcePolicy(policy).value
+        return result
     result_mode = _video_result_mode(action_type, spec)
     products = {}
     if "product_rules" in spec:
@@ -380,7 +391,8 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
             )
         ):
             raise ValueError("单张任务不能携带时长、停止、完成或产物范围字段")
-        if task.output_storage is None and task.start_call_timeout_s is None:
+        if (task.output_storage is None and task.start_call_timeout_s is None
+                and task.photo_source_policy is None):
             return validate_capture_spec(action_type, {})
         if task.output_storage is None or task.start_call_timeout_s is None:
             raise ValueError("单张任务必须同时声明存储位置和启动调用期限")
@@ -392,9 +404,17 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
             spec["output_storage"] = storage
         if task.start_call_timeout_s is not None:
             spec["start_call_timeout_s"] = task.start_call_timeout_s
+        if task.photo_source_policy is not None:
+            from camctl.devices.tasks import PhotoSourcePolicy
+
+            if not isinstance(task.photo_source_policy, PhotoSourcePolicy):
+                raise ValueError("照片来源策略必须由驱动明确声明")
+            spec["photo_source_policy"] = task.photo_source_policy.value
         return validate_capture_spec(action_type, spec)
     if not isinstance(task, CaptureTask) or task.action_type != action_type:
         raise ValueError("驱动未提供对应动作的固定拍摄任务")
+    if task.photo_source_policy is not None:
+        raise ValueError("只有单张拍摄可以声明照片来源策略")
     ownership = {}
     if task.ownership_mode is not None or task.output_scope is not None:
         ownership = {"ownership_mode": task.ownership_mode, "output_scope": task.output_scope}
@@ -440,15 +460,37 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
 
 
 @dataclass(frozen=True)
+class NormalRecordingStop:
+    """正常到时停止派发前的原启动结果与会话计时。"""
+
+    start_result_event_id: int
+    elapsed_before_stop_ns: int
+
+    def __post_init__(self) -> None:
+        if (not is_json_integer(self.start_result_event_id)
+                or not 1 <= self.start_result_event_id <= MAX_OBJECT_ID
+                or not is_json_integer(self.elapsed_before_stop_ns)
+                or not 0 <= self.elapsed_before_stop_ns <= MAX_OBJECT_ID):
+            raise ValueError("正常停止来源必须携带原启动结果和非负计时")
+
+    def document(self):
+        return {"start_result_event_id": self.start_result_event_id,
+                "elapsed_before_stop_ns": self.elapsed_before_stop_ns}
+
+
+@dataclass(frozen=True)
 class HostTimerStopSave:
     """原停止确认同时保存的控制时长；None 明确表示无法证明。"""
 
     control_elapsed_ns: int | None
+    normal_recording_stop: NormalRecordingStop | None = None
 
     def __post_init__(self) -> None:
         value = self.control_elapsed_ns
         if value is not None and (not is_json_integer(value) or not 0 <= value <= MAX_OBJECT_ID):
             raise ValueError("控制时长必须是可保存的非负整数纳秒或未知")
+        if self.normal_recording_stop is not None and not isinstance(self.normal_recording_stop, NormalRecordingStop):
+            raise ValueError("正常停止来源格式无效")
 
 
 @dataclass(frozen=True)

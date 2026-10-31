@@ -142,10 +142,17 @@ async def test_stop_return_is_resaved_with_original_key_without_second_device_ca
     _assert_actual_saved(case.owned, request.ticket, assumed=False, confirmed=True,
         occurred_at=_RETURNED_AT, activity_id=request.ticket.target_id)
     assert len(set(case.fault.result_keys)) == 1
+    saved_key, = case.owned.connection.execute(
+        "SELECT t.operation_key FROM operation_attempts a"
+        " JOIN history_events e ON e.id=a.result_event_id"
+        " JOIN history_transactions t ON t.id=e.transaction_id WHERE a.run_id=?",
+        (request.ticket.run_id,)).fetchone()
+    assert saved_key == case.fault.result_keys[0]
     result_json, = case.owned.connection.execute(
         "SELECT result_json FROM operation_attempts WHERE run_id=?", (request.ticket.run_id,)).fetchone()
     assert json.loads(result_json)["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
     if mode in ("projection", "commit_before"):
+        assert len(before_result) == 1
         assert case.fault.rolled_back_images == before_result
 
 
@@ -191,7 +198,14 @@ async def test_stop_pending_actual_result_precedes_unknown_recovery_without_boun
     _assert_actual_saved(case.owned, request.ticket, assumed=False, confirmed=True,
         occurred_at=_RETURNED_AT, activity_id=request.ticket.target_id)
     assert len(case.stop.calls) == 1 and len(set(case.fault.result_keys)) == 1
-    assert all(item == original[0] for item in _for_ticket(case, request.ticket))
+    saved = _for_ticket(case, request.ticket)
+    assert len(saved) == 3 and all(item == original[0] for item in saved)
+    saved_key, = case.owned.connection.execute(
+        "SELECT t.operation_key FROM operation_attempts a"
+        " JOIN history_events e ON e.id=a.result_event_id"
+        " JOIN history_transactions t ON t.id=e.transaction_id WHERE a.run_id=?",
+        (request.ticket.run_id,)).fetchone()
+    assert saved_key == str(original[0][1])
 
 
 async def _write(case, method, command, key):

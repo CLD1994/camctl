@@ -36,6 +36,13 @@ EVIDENCE = EvidenceRegistry((RETURNED, ASSUMED, SETTING, STARTED, PREVENTED,
                              CAPTURE_PREPARATION_COMPLETED))
 
 
+def _assert_control_error_with_dispatched_call(result, expected, transport):
+    call = transport.calls[-1]
+    command = shlex.split(shlex.split(call.argv[5])[2])
+    assert result.error == {**expected, "details": {
+        **expected["details"], "command": command, "timeout_s": str(call.timeout_s)}}
+
+
 ACTION6_AUTO_TIMELAPSE_SCRIPTS = (
     "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
@@ -837,7 +844,8 @@ async def test_generic_camera_contract_keeps_unconfirmed_aperture_setting_blocki
     assert not any(command[-2:] == ["02", "01"] for command in scripts)
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
-    assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": response.decode()}}
+    _assert_control_error_with_dispatched_call(result,
+        {"code": "response_unconfirmed", "stage": "device", "details": {"response": response.decode()}}, transport)
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
     assert not result.observations
@@ -891,7 +899,8 @@ async def test_generic_camera_contract_keeps_unconfirmed_simulate_setting_blocki
     assert not any(command[-2:] == ["02", "01"] for command in scripts)
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
-    assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": response.decode()}}
+    _assert_control_error_with_dispatched_call(result,
+        {"code": "response_unconfirmed", "stage": "device", "details": {"response": response.decode()}}, transport)
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert not result.observations
 
@@ -975,7 +984,8 @@ async def test_action6_timelapse_unconfirmed_setting_preserves_error_and_blocks_
     assert scripts == list(ACTION6_AUTO_TIMELAPSE_SCRIPTS[:setting_number])
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
-    assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}
+    _assert_control_error_with_dispatched_call(result,
+        {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}, transport)
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
     assert not result.observations
@@ -995,8 +1005,8 @@ async def test_timelapse_unconfirmed_setting_blocks_every_later_command_for_each
         assert scripts == list(expected[:setting_number])
         assert result.outcome.status is AttemptStatus.FAILED
         assert result.outcome.effect is EffectState.NO_EFFECT
-        assert result.error == {"code": "response_unconfirmed", "stage": "device",
-                                "details": {"response": "UNKNOWN"}}
+        _assert_control_error_with_dispatched_call(result,
+            {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}, transport)
         assert not result.observations
 
 
@@ -1101,7 +1111,8 @@ async def test_action6_timelapse_unknown_start_is_not_repeated_or_followed_by_st
     assert scripts == list(ACTION6_AUTO_TIMELAPSE_SCRIPTS)
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
-    assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}
+    _assert_control_error_with_dispatched_call(result,
+        {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}, transport)
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
     assert not result.observations
@@ -1205,7 +1216,8 @@ async def test_setting_error_prevents_start_and_keeps_actual_return():
     result = await _driver(CameraModel.ACTION6, transport).control(_request())
     assert len(transport.calls) == 2
     assert result.outcome.status is AttemptStatus.FAILED and result.outcome.effect is EffectState.NO_EFFECT
-    assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}
+    _assert_control_error_with_dispatched_call(result,
+        {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}, transport)
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
     assert not result.observations

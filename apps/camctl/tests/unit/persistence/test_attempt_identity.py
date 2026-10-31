@@ -8,6 +8,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts import enums
+from camctl.capture import software_recovery  # 导入期枚举属于稳定协作者，不参与独立仓储实例。
 from camctl.contracts.values import ConsistencyError
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventContext, EventValidationError
@@ -20,6 +21,7 @@ _CASES = (
     ("START", 1, None, None, "start/7", "activity", 7),
     ("STOP", 2, None, None, "stop/7", "activity", 7),
     ("CHECK_CAPTURE_RESULTS", 7, None, None, "results/4", "activity", 7),
+    ("RESOLVE_OUTPUT_SCOPE", 11, None, None, "scope/4", "activity", 7),
     ("STOP_RESIDUAL", 8, None, None, "followup/7/4", "activity", 9),
     ("READ_FILE", 3, None, None, "read/3", "delivery", 7),
     ("READ_FILE", 3, None, None, "read/3", "processing", 7),

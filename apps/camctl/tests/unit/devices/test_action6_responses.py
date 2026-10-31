@@ -49,6 +49,34 @@ def test_complete_single_zero_ack_confirms_only_its_recording_phase(kind, operat
     }),)
 
 
+@pytest.mark.parametrize("operation,basis", [
+    ("stop_recording", "action6_record_ack/v1"),
+    ("stop_timelapse", "action6_timelapse_ack/v1"),
+])
+@pytest.mark.parametrize("payload", ["df", "DF"])
+def test_stop_confirms_camera_already_stopped_and_preserves_response(operation, basis, payload):
+    result = _interpreter(CameraCall.STOP, operation).interpret(
+        _raw(f"Resp message, len = 1, data:\n {payload}\n".encode()))
+
+    assert result.error is None
+    assert result.effect is EffectState.CONFIRMED
+    assert result.observations == (DeviceObservation("stop_confirmed", 1, {
+        "activity_id": "7", "response_payload": "df", "confirmation_basis": basis,
+    }),)
+
+
+@pytest.mark.parametrize("kind", [CameraCall.SETTING, CameraCall.START])
+@pytest.mark.parametrize("operation", ["start_recording", "start_timelapse"])
+def test_already_stopped_response_does_not_confirm_settings_or_start(kind, operation):
+    result = _interpreter(kind, operation).interpret(
+        _raw(b"Resp message, len = 1, data:\n df\n"))
+
+    assert result.error.details["reason"] == "response_payload_unconfirmed"
+    assert result.error.details["response_payload"] == "df"
+    assert result.effect is EffectState.UNKNOWN
+    assert result.observations == ()
+
+
 @pytest.mark.parametrize("output, reason, details", [
     (b"", "response_missing", {"response_count": 0}),
     (b"Send message, data: 00\n", "response_missing", {"response_count": 0}),
@@ -108,8 +136,14 @@ def test_unconfirmed_response_keeps_actual_partition_without_device_facts(output
         "transport_error": "output_failed", "output_failure": "read_failed",
     }),
 ])
-def test_call_failure_with_visible_zero_ack_does_not_confirm_recording(changes, reason, details):
-    result = _interpreter().interpret(replace(_raw(), **changes))
+@pytest.mark.parametrize("kind,operation,payload", [
+    (CameraCall.START, "start_recording", "00"),
+    (CameraCall.STOP, "stop_recording", "df"),
+    (CameraCall.STOP, "stop_timelapse", "df"),
+])
+def test_call_failure_with_visible_ack_does_not_confirm_recording(changes, reason, details, kind, operation, payload):
+    raw = _raw(f"Resp message, len = 1, data:\n {payload}\n".encode())
+    result = _interpreter(kind, operation).interpret(replace(raw, **changes))
 
     assert result.effect is EffectState.UNKNOWN
     assert result.observations == ()
@@ -190,7 +224,7 @@ def test_frozen_sent_contract_reports_acceptance_without_started_observation():
     (CameraCall.START, "start_timelapse", "timelapse_sent"),
     (CameraCall.STOP, "stop_timelapse", "stop_confirmed"),
 ])
-def test_action6_timelapse_accepts_only_complete_zero_response_for_its_phase(
+def test_action6_timelapse_complete_zero_response_confirms_its_phase(
         kind, operation, observation):
     parser = _interpreter(kind, operation, start_return_meaning=StartReturn.SENT)
 
@@ -209,8 +243,8 @@ def test_action6_timelapse_accepts_only_complete_zero_response_for_its_phase(
     (CameraCall.START, "start_timelapse"),
     (CameraCall.STOP, "stop_timelapse"),
 ])
-@pytest.mark.parametrize("payload", ["e3", "ee", "df", "01"])
-def test_action6_timelapse_never_treats_nonzero_response_as_confirmation(kind, operation, payload):
+@pytest.mark.parametrize("payload", ["e3", "ee", "01"])
+def test_action6_timelapse_rejects_unrecognized_response(kind, operation, payload):
     parser = _interpreter(kind, operation, start_return_meaning=StartReturn.SENT)
 
     result = parser.interpret(_raw(f"Resp message, len = 1, data:\n {payload}\n".encode()))

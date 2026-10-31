@@ -284,7 +284,8 @@ class RecoveredControlFacts:
     """恢复停止后控制完成依据判定的输入事实。
 
     本会话锚点的正常停止以锚点加目标为停止目标，不超门槛；恢复
-    停止以启动墙钟到停止确认墙钟的控制耗时判定多录。
+    停止以启动墙钟到停止确认墙钟的控制耗时判定多录。此前已停止
+    的响应只确认结束，不能以该响应时刻构造采集时长。
     """
 
     session_anchor: bool
@@ -293,6 +294,7 @@ class RecoveredControlFacts:
     target_duration_ms: int
     repair_margin_s: Decimal
     startup_margin_ms: int = 0
+    stop_already_stopped: bool = False
 
 
 def decide_recovered_control(
@@ -305,6 +307,8 @@ def decide_recovered_control(
     计时证据缺失时不折叠为连续控制完成，返回 None 由调用方保持
     未定决定等待对账。
     """
+    if facts.stop_already_stopped:
+        return RecoveredControlDecision(RecoveredControlReason.DURATION_UNCERTAIN)
     if facts.session_anchor:
         return RecoveredControlDecision(RecoveredControlReason.CONTINUOUS)
     if (facts.started_at_us is None or facts.stop_confirmed_at_us is None

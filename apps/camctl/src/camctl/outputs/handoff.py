@@ -15,7 +15,7 @@ import os
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
@@ -32,6 +32,7 @@ from camctl.outputs.copy import CopyTargetRef
 from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.session.supervision import Supervisor
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.events import log_context
 from camctl.operations.models import ErrorValue
 
 if TYPE_CHECKING:
@@ -297,6 +298,72 @@ def decide_handoff(facts: DeliveryFacts, files: DeliveryLocations) -> DeliveryDe
     )
 
 
+class CanceledPublicationChoice(Enum):
+    """取消生效后对原发布意图的文件观察结论。"""
+
+    CANCEL_STAGING = "cancel_staging"
+    CONFIRM_HANDOFF = "confirm_handoff"
+    UNKNOWN = "unknown"
+    NOT_ACTIVE = "not_active"
+
+
+def decide_canceled_publication(
+    facts: DeliveryFacts, files: DeliveryLocations,
+) -> CanceledPublicationChoice:
+    """分类原发布责任，取消生效后不再移动 staging 副本。"""
+    if not isinstance(facts, DeliveryFacts) or not isinstance(files, DeliveryLocations):
+        raise TypeError("取消对账必须使用原交付事实和三位置观察")
+    if facts.status in (int(_DELIVERY_STATUS.PUBLISHED), int(_DELIVERY_STATUS.FAILED),
+                        int(_DELIVERY_STATUS.CANCELED), int(_DELIVERY_STATUS.WITHDRAWN)):
+        return CanceledPublicationChoice.NOT_ACTIVE
+    if facts.status != int(_DELIVERY_STATUS.PUBLISHING) or facts.publication_intent_event_id is None:
+        raise ConsistencyError("取消对账要求原发布意图")
+    if facts.published_event_id is not None or facts.prepared_size is None or facts.prepared_sha256 is None:
+        raise ConsistencyError("取消对账缺少一致的原准备及发布事实")
+    if any(not files.at(place).observed for place in HandoffPlace):
+        return CanceledPublicationChoice.UNKNOWN
+    delivered = [place for place in (HandoffPlace.READY, HandoffPlace.PROCESSING)
+                 if files.at(place).present]
+    if len(delivered) > 1 or delivered and files.staging.present:
+        return CanceledPublicationChoice.UNKNOWN
+    if delivered:
+        place = delivered[0]
+        if not _confirm_prepared_copy(facts, files.at(place), place):
+            return CanceledPublicationChoice.UNKNOWN
+        return CanceledPublicationChoice.CONFIRM_HANDOFF
+    staging = files.staging
+    if not staging.present or staging.length != facts.prepared_size:
+        return CanceledPublicationChoice.UNKNOWN
+    if staging.sha256 is not None and staging.sha256 != facts.prepared_sha256:
+        return CanceledPublicationChoice.UNKNOWN
+    return CanceledPublicationChoice.CANCEL_STAGING
+
+
+async def reconcile_canceled_publication(
+    facts: DeliveryFacts, files: DeliveryLocations, copy_id: int, file_id: int, *,
+    confirm_handoff, save_unknown, ensure_waiters, withdraw,
+) -> tuple[int, int, int] | Literal[False] | None:
+    """把一次取消对账交给原事实保存和撤回责任。"""
+    ObjectId(copy_id)
+    ObjectId(file_id)
+    choice = decide_canceled_publication(facts, files)
+    if choice is CanceledPublicationChoice.CANCEL_STAGING:
+        if not facts.withdrawal_requested:
+            return facts.delivery_id, copy_id, file_id
+        # 先前撤回结果尚未保存；不将其解释为本次已确认的撤回结果。
+        choice = CanceledPublicationChoice.UNKNOWN
+    if choice is CanceledPublicationChoice.NOT_ACTIVE:
+        return None
+    if choice is CanceledPublicationChoice.CONFIRM_HANDOFF:
+        await confirm_handoff(facts.delivery_id)
+    else:
+        await save_unknown(facts.delivery_id, files)
+    if await ensure_waiters(facts.delivery_id) is False:
+        return False
+    await withdraw(facts.delivery_id)
+    return None
+
+
 # ---- 仓储输入与结果 ----
 
 
@@ -382,6 +449,8 @@ class FailureSaveDisposition(Enum):
 
     SAVED = "saved"
     ALREADY = "already"
+    RETIRED = "retired"
+    CANCELED = "canceled"
 
 
 @dataclass(frozen=True)
@@ -554,20 +623,31 @@ async def _save_publication(delivery_id: int, context: DeliveryContext) -> None:
 
 async def _save_unconfirmed(
     delivery_id: int, failure: DeliveryFailure, context: DeliveryContext, *, publish_error=None,
-) -> None:
-    """保存终局未知失败；不安排自动重投。"""
-    record_error(ErrorValue(failure.code, failure.stage, dict(failure.details)),
-        stage=failure.stage, context={"delivery_id": delivery_id}, state=failure.diagnostic,
-        details=None if publish_error is None else {"publish_error": publish_error})
+) -> FailureSaveDisposition:
+    """保存终局未知失败；取消已生效时交给原取消责任。"""
+    def diagnose():
+        record_error(ErrorValue(failure.code, failure.stage, dict(failure.details)),
+            stage=failure.stage, context={"delivery_id": delivery_id}, state=failure.diagnostic,
+            details=None if publish_error is None else {"publish_error": publish_error})
+
     key = new_operation_key()
     request = UnconfirmedFailureSave(
         delivery_id=delivery_id, failure=failure,
         occurred_at=context.occurred_at)
-    outcome = await context.database.write(
-        lambda owned: context.repository.save_unconfirmed_failure(request, key, owned),
-        key=key, description="交付未知结论保存")
+    try:
+        outcome = await context.database.write(
+            lambda owned: context.repository.save_unconfirmed_failure(request, key, owned),
+            key=key, description="交付未知结论保存")
+    except BaseException:
+        diagnose()
+        raise
+    if (outcome.kind is DbOutcomeKind.COMPLETED and outcome.value.disposition in
+            (FailureSaveDisposition.CANCELED, FailureSaveDisposition.RETIRED)):
+        return outcome.value.disposition
+    diagnose()
     _require_completed(
         outcome, "unconfirmed_save_failed", "unconfirmed_save_unknown")
+    return outcome.value.disposition
 
 
 def _decide_again(
@@ -600,10 +680,23 @@ async def publish_delivery(
         lambda owned: context.repository.load_delivery_state(delivery_id, owned),
         description="交付发布状态读取")
     executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
-    return await executor.run_owned_async_file_task(AsyncFileTask(
-        FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),
-        "delivery_publication", "副本发布及实际结果保存",
-        lambda _control: _publish_delivery(delivery_id, context, state), resources=("state_db",)))
+    if state.target.file_id in executor.unfinished_files():
+        return DeliveryResult(DeliveryPhase.HELD, DeliveryDecision(
+            DeliveryHandoffOutcome.HOLD, error="file_in_use"))
+    async def body(_control):
+        current = await context.database.read(
+            lambda owned: context.repository.load_delivery_state(delivery_id, owned),
+            description="持有原文件资格后核对交付状态")
+        if (current.action_id != state.action_id or current.target.file_id != state.target.file_id
+                or current.target.relative_path != state.target.relative_path
+                or current.file_name != state.file_name):
+            raise ConsistencyError("取得文件资格后原交付身份发生变化")
+        return await _publish_delivery(delivery_id, context, current)
+
+    with log_context(delivery_id=delivery_id):
+        return await executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),
+            "delivery_publication", "副本发布及实际结果保存", body, resources=("state_db",)))
 
 
 def _record_location_errors(delivery_id, decision) -> None:
@@ -617,6 +710,14 @@ def _record_location_errors(delivery_id, decision) -> None:
 
 
 async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
+    facts = state.facts
+    if facts.status == int(_DELIVERY_STATUS.PUBLISHED):
+        return DeliveryResult(DeliveryPhase.PUBLISHED,
+                              DeliveryDecision(DeliveryHandoffOutcome.COMPLETED))
+    if facts.status in (int(_DELIVERY_STATUS.FAILED), int(_DELIVERY_STATUS.CANCELED),
+                        int(_DELIVERY_STATUS.WITHDRAWN)) or facts.withdrawal_requested:
+        return DeliveryResult(DeliveryPhase.NOT_ACTIVE,
+                              DeliveryDecision(DeliveryHandoffOutcome.NOT_ACTIVE))
     decision = await asyncio.to_thread(_decide_again, state, context)
     _record_location_errors(delivery_id, decision)
     if decision.outcome is DeliveryHandoffOutcome.COMPLETED:
@@ -633,7 +734,10 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
         return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
     if decision.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL:
         assert decision.failure is not None
-        await _save_unconfirmed(delivery_id, decision.failure, context)
+        disposition = await _save_unconfirmed(delivery_id, decision.failure, context)
+        if disposition in (FailureSaveDisposition.CANCELED, FailureSaveDisposition.RETIRED):
+            return DeliveryResult(DeliveryPhase.NOT_ACTIVE,
+                                  DeliveryDecision(DeliveryHandoffOutcome.NOT_ACTIVE))
         return DeliveryResult(DeliveryPhase.FAILED_FINAL, decision)
     await _save_intent(delivery_id, context)
     ref, roots, directories = _staging_ref(state, context.directories)
@@ -660,7 +764,10 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
             return DeliveryResult(DeliveryPhase.PUBLISHED, retry)
         if retry.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL:
             assert retry.failure is not None
-            await _save_unconfirmed(delivery_id, retry.failure, context, publish_error=publish.error)
+            disposition = await _save_unconfirmed(delivery_id, retry.failure, context, publish_error=publish.error)
+            if disposition in (FailureSaveDisposition.CANCELED, FailureSaveDisposition.RETIRED):
+                return DeliveryResult(DeliveryPhase.NOT_ACTIVE,
+                                      DeliveryDecision(DeliveryHandoffOutcome.NOT_ACTIVE))
             return DeliveryResult(DeliveryPhase.FAILED_FINAL, retry)
         raise DeliveryHandoffError("publish_move_failed", publish.error or "") from retry.cause
     raise DeliveryHandoffError(

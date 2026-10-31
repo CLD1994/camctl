@@ -6,6 +6,7 @@
 #include "config.h"
 #include "diagnostic.h"
 #include "input.h"
+#include "host_version.h"
 #include "process.h"
 #include "scheduler.h"
 #include <errno.h>
@@ -545,6 +546,7 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
     e = host_logger_init(&h->logger, &h->config);
     if (e)
         goto pipe;
+    host_log(&h->logger, "camctl_host version=%s", CAMCTL_HOST_VERSION);
     e = host_diagnostic_init(&h->diagnostics, &h->config, &h->logger, &h->claim_mutex,
                              h->wake[1], h->children);
     if (e)

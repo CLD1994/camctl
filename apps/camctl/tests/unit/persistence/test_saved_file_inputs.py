@@ -57,7 +57,8 @@ def input_facts(monkeypatch, request):
     monkeypatch.setattr(files, 'read_event', create_autospec(files.read_event,
         return_value=EventRecord((), None, TransactionRange(590,872,874))))
     monkeypatch.setattr(files, 'read_file_at_boundary', create_autospec(files.read_file_at_boundary, return_value=file))
-    return SimpleNamespace(db=db,ref=ref,file=file,boundary=HistoryBoundary(600,885))
+    return SimpleNamespace(db=db,ref=ref,file=file,boundary=HistoryBoundary(600,885),
+        action=action, run=run, saved=saved)
 
 
 def test_saved_completion_does_not_reexecute_source_algorithm(input_facts):
@@ -96,3 +97,34 @@ def test_unknown_saved_completion_is_not_promoted(input_facts):
     assert result.completion is FileCompletionState.UNKNOWN
     assert type(result.page_event_id) is int
     assert document(result)['page_event_id'] == state.ref.event_id
+
+
+@pytest.mark.parametrize('completed', [False, True])
+def test_scope_input_preserves_prior_result_file_facts(input_facts, monkeypatch, completed):
+    from dataclasses import replace
+
+    state = input_facts
+    scope_run = dict(state.run, id=29,
+        kind=int(enum_for('operation_runs.kind').RESOLVE_OUTPUT_SCOPE), responsibility_key='scope/6')
+    original_run = dict(state.run,
+        kind=int(enum_for('operation_runs.kind').CHECK_CAPTURE_RESULTS), responsibility_key='results/6')
+    ticket = replace(state.ref.ticket, run_id=29, responsibility_key='scope/6')
+    ref = replace(state.ref, ticket=ticket, event_id=884)
+    entry = replace(state.saved.page.entries[0], complete=False, size_bytes=None)
+    scope_page = replace(state.saved, ref=ref, page=replace(state.saved.page,
+        entries=(entry,), set_finalized=True))
+    files.result_pages.read_saved_page.side_effect = lambda connection, identity: (
+            (scope_page, {'run_id': 29}) if identity == 884
+            else (state.saved, {'run_id': 28}))
+    files.row_facts.side_effect = lambda connection, table, identity: state.action if table == 'actions' else (
+        scope_run if identity == 29 else original_run)
+    if not completed:
+        state.file['completion_state'] = int(enum_for('device_files.completion_state').UNKNOWN)
+        state.file['completion_evidence_json'] = None
+        state.file['size_bytes'] = None
+
+    actual = files.read_result_file_input(state.db, ref, 30, state.boundary)
+
+    assert actual.ownership is OwnershipState.OWNED
+    assert actual.completion is (FileCompletionState.COMPLETE if completed else FileCompletionState.UNKNOWN)
+    assert actual.page_event_id == (872 if completed else 884)

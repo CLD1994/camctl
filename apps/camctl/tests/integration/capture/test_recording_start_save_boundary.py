@@ -100,6 +100,7 @@ async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_sa
         with pytest.raises(ConsistencyError):
             await capture_handler('camera_record')(start_case.aid, runtime)
         assert start_case.stopper.calls == []
+        assert len(observed.requests) == 2 and observed.requests[0] == observed.requests[1]
         finish, observation, key, options = observed.requests[0]
         assert finish.outcome.outcome is actual
         assert finish.ticket.responsibility_key == 'start/1'
@@ -109,6 +110,7 @@ async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_sa
         start_case.wall[0] = _NOW + 5_000_000
         start_case.mono[0] = _ANCHOR + 1_000_000_000
         await capture_handler('camera_record')(start_case.aid, runtime)
+        assert len(observed.requests) == 3
         assert all(value == (finish, observation, key, options) for value in observed.requests)
         assert len(driver.calls) == 1
         assert owned.connection.execute(

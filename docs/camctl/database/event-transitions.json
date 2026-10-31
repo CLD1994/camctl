@@ -435,10 +435,10 @@
         "delivery_id",
         "processing_id",
         "inspection_id",
-        "target_file_id",
-        "source_size"
+        "target_file_id"
       ],
       "mutable": [
+        "source_size",
         "source_device_file_id",
         "source_intermediate_file_id",
         "round",
@@ -448,6 +448,7 @@
         "committed_bytes",
         "reset_state",
         "slot_device_id",
+        "read_end_event_id",
         "verification_state",
         "target_sha256",
         "verification_error_json"
@@ -507,6 +508,7 @@
         "copy_id",
         "cleanup_item_id",
         "obtain_item_id",
+        "availability_check_id",
         "session_key"
       ],
       "mutable": [
@@ -561,6 +563,22 @@
         "retry_wait_required"
       ]
     },
+    "device_availability_checks": {
+      "immutable": ["action_id", "trigger_copy_id", "device_id", "driver_id", "expected_identity_json", "resource_key", "rule_version", "target_boundary_event_id"],
+      "mutable": [],
+      "derived": ["id"],
+      "write_once": [],
+      "owner": {"entity": "action", "id": "action_id", "via": []},
+      "state_columns": []
+    },
+    "device_availability_targets": {
+      "immutable": ["check_id", "action_id", "activity_id"],
+      "mutable": [],
+      "derived": ["id"],
+      "write_once": [],
+      "owner": {"entity": "action", "id": "action_id", "via": []},
+      "state_columns": []
+    },
     "operation_attempts": {
       "immutable": [
         "run_id",
@@ -601,6 +619,8 @@
       "immutable": [
         "action_id",
         "task_key",
+        "expected_identity_json",
+        "resource_key",
         "state_query_supported",
         "stop_supported",
         "safe_repeat_stop",
@@ -617,6 +637,7 @@
         "dispatch_state",
         "activity_state",
         "occupancy_state",
+        "availability_release_attempt_id",
         "sent_at",
         "started_at",
         "result_wait_margin_ms",
@@ -639,7 +660,8 @@
         "sent_at",
         "started_at",
         "wait_completed_event_id",
-        "output_set_finalized_event_id"
+        "output_set_finalized_event_id",
+        "availability_release_attempt_id"
       ],
       "owner": {
         "entity": "action",
@@ -1116,6 +1138,29 @@
         "phase"
       ],
       "minimum_format": 3
+    },
+    "device_file_batches": {
+      "minimum_format": 9,
+      "immutable": [
+        "action_id",
+        "device_id",
+        "acquired_event_id"
+      ],
+      "mutable": [
+        "released_event_id"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [
+        "released_event_id"
+      ],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": []
     }
   },
   "guards": {
@@ -1230,6 +1275,11 @@
       "rule": "原尝试已结束且普通资格与预算允许才建立重试间隔；与失败结果共同保存。间隔完成即清零，仍受阻时不登记新尝试；新尝试、取消或额度不足与清除责任共同提交。重启只对标记为1的原责任按本次配置重新计量。",
       "scope": "transaction"
     },
+    "availability_check": {
+      "contract": "../hasselblad-availability-recovery.md#原子保存与历史归属",
+      "rule": "独立核对固定机身、全部目标、调用收场与成功观察；整批释放必须与原尝试结果和检查终结共同提交。",
+      "scope": "transaction"
+    },
     "attempt_intent": {
       "contract": "waiting.md#首次启动机会与尝试的共同提交",
       "rule": "沿 run_id 核对父流程属于普通操作，拒绝 kind=9；核对原责任、取消、窗口、预算、兼容性与机会。新 attempt_no 连续，attempts_used 同增1，intent_event_id 必须非空并等于本事件；读取 copy_round 等于当前轮次。启动身份、ACTIVE 流程、尝试、额度及可能效果共同保存，提交后派发。",
@@ -1308,7 +1358,12 @@
     },
     "copy": {
       "contract": "file-fields.md#文件拷贝",
-      "rule": "固定源、目标和长度；committed_bytes 在同轮只增且不超长度，先同步后保存；重拷 round 与 recopies_used 同增1、进度归零及重置待办共同保存，实际截断同步后才 READY。匹配/不匹配/源不支持都要求完整目标摘要，不能由查询失败推断不支持。",
+      "rule": "固定源和目标；按需照片为每次下载保存长度并在重读前登记目标重置。committed_bytes 在有效读取内只增且不超长度，先同步后保存；重拷 round 与 recopies_used 同增1、进度归零及重置待办共同保存，实际截断同步后才 READY。匹配、不匹配及源不支持都要求完整目标摘要，不能由查询失败推断不支持。",
+      "scope": "transaction"
+    },
+    "read_end": {
+      "contract": "file-fields.md#当前轮次的完整读取结束依据",
+      "rule": "核对原 READ 票据、完整可靠进度、实际停止结果和同一轮次的源及目标，保存原读取结束事件。",
       "scope": "transaction"
     },
     "read_slot": {
@@ -1521,6 +1576,11 @@
       "contract": "operation-fields.md#无人值守的软件重启责任",
       "rule": "原活动唯一的独立责任，可靠意图先于派发，累计预算和期限不可重置；同绑定新boot及驱动重启合同证明设备结束；完整分页范围和会话准备分别判定。",
       "scope": "transaction"
+    },
+    "file_batch": {
+      "contract": "../../architecture/file-batches.md",
+      "rule": "根据同一事务的原持有者、完整来源和成员、旧读取依赖及实际调用收场核对整批取得与释放。",
+      "scope": "transaction"
     }
   },
   "state_models": {
@@ -1642,7 +1702,9 @@
           "to": 4,
           "by": [
             "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
-            "ACTION_FINISHED.PREPARATION_FAILED"
+            "ACTION_FINISHED.PREPARATION_FAILED",
+            "ACTION_FINISHED.PREPARATION_BINDING_FAILED",
+            "ACTION_FINISHED.AVAILABILITY_FAILED"
           ],
           "id": "transition_8"
         }
@@ -2313,7 +2375,8 @@
           "to": 2,
           "by": [
             "DEVICE_OBSERVED.RELEASE",
-            "EMERGENCY_RECORDED.FINAL"
+            "EMERGENCY_RECORDED.FINAL",
+            "AVAILABILITY_CHECK.RELEASE"
           ],
           "id": "transition_1"
         }
@@ -3220,7 +3283,8 @@
           "from": 1,
           "to": 2,
           "by": [
-            "COPY_CHANGED.RECOPY"
+            "COPY_CHANGED.RECOPY",
+            "COPY_CHANGED.PHOTO_READ_START"
           ],
           "id": "transition_1"
         },
@@ -4217,7 +4281,8 @@
             "source_selection"
           ],
           "evidence": [
-            "segment_selection_request"
+            "segment_selection_request",
+            "preview_validation_version"
           ]
         },
         "CLEANUP": {
@@ -4533,7 +4598,9 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -4586,7 +4653,9 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -4618,7 +4687,7 @@
             "report_impact",
             "retry"
           ],
-          "evidence": []
+          "evidence": ["attempt_id"]
         },
         "ABANDON": {
           "reason": 3,
@@ -4639,7 +4708,9 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -4933,6 +5004,39 @@
             "segment_finish_request"
           ]
         },
+        "PREPARATION_BINDING_FAILED": {
+          "reason": 6,
+          "title": "保存单张准备绑定失败",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": ["status", "error_code", "error_details_json"],
+              "before": {"type": [1], "status": [1], "execution_started": [0], "cancel_requested": [0]},
+              "after": {"status": [4], "error_code": [17]},
+              "required": ["status", "error_code", "error_details_json"],
+              "transitions": {"status": ["transition_8"]}
+            }
+          ],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "action_finish", "plan_aggregate", "output"],
+          "evidence": ["preparation_binding_request"]
+        },
+        "AVAILABILITY_FAILED": {
+          "reason": 7,
+          "title": "保存拍摄准备的设备可用性失败",
+          "rows": [
+            {
+              "table": "actions", "op": "update",
+              "columns": ["status", "error_code", "error_details_json"],
+              "before": {"type": [1], "status": [1], "execution_started": [0], "cancel_requested": [0]},
+              "after": {"status": [4], "error_code": [31]},
+              "required": ["status", "error_code", "error_details_json"],
+              "transitions": {"status": ["transition_8"]}
+            }
+          ],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "action_finish", "plan_aggregate", "output"],
+          "evidence": ["availability_failure_request"]
+        },
         "PREPARATION_FAILED": {
           "reason": 5,
           "title": "保存拍摄准备失败",
@@ -5110,7 +5214,8 @@
                   6,
                   7,
                   8,
-                  10
+                  10,
+                  11
                 ],
                 "status": [
                   1
@@ -5156,7 +5261,8 @@
                   6,
                   7,
                   8,
-                  10
+                  10,
+                  11
                 ],
                 "status": [
                   1,
@@ -5201,7 +5307,9 @@
                   6,
                   7,
                   8,
-                  10
+                  10,
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -5251,7 +5359,10 @@
             "retry"
           ],
           "evidence": [
-            "stale_run_request"
+            "stale_run_request",
+            "availability_wait_finish_request",
+            "binding_read_finish",
+            "attempt_id"
           ]
         }
       }
@@ -5306,7 +5417,9 @@
                   6,
                   7,
                   8,
-                  10
+                  10,
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -5373,7 +5486,8 @@
                   6,
                   7,
                   8,
-                  10
+                  10,
+                  11
                 ],
                 "status": [
                   2
@@ -5396,7 +5510,7 @@
             "attempt_intent",
             "query_configuration"
           ],
-          "evidence": []
+          "evidence": ["start_camera_identity", "availability_intent_request", "capture_selection"]
         }
       }
     },
@@ -5452,7 +5566,8 @@
             "attempt_result"
           ],
           "evidence": [
-            "attempt_id"
+            "attempt_id",
+            "normal_recording_stop"
           ]
         },
         "FAIL": {
@@ -7166,7 +7281,8 @@
             "segment_query_resolution"
           ],
           "evidence": [
-            "obtain_check_source"
+            "obtain_check_source",
+            "read_current_identity"
           ]
         },
         "RELEASE": {
@@ -7329,6 +7445,9 @@
                 "slot_device_id": [
                   null
                 ],
+                "read_end_event_id": [
+                  null
+                ],
                 "reset_state": [
                   1
                 ],
@@ -7392,6 +7511,7 @@
               "op": "update",
               "columns": [
                 "source_sha256",
+                "slot_device_id",
                 "verification_state",
                 "target_sha256",
                 "verification_error_json"
@@ -7443,7 +7563,8 @@
                 "reset_state",
                 "verification_state",
                 "target_sha256",
-                "verification_error_json"
+                "verification_error_json",
+                "read_end_event_id"
               ],
               "before": {
                 "reset_state": [
@@ -7558,7 +7679,7 @@
             "report_impact",
             "read_slot"
           ],
-          "evidence": []
+          "evidence": ["capture_selection"]
         },
         "CONFIGURE": {
           "reason": 7,
@@ -7594,7 +7715,8 @@
               "op": "update",
               "columns": [
                 "source_device_file_id",
-                "source_intermediate_file_id"
+                "source_intermediate_file_id",
+                "read_end_event_id"
               ],
               "before": {},
               "after": {},
@@ -7615,6 +7737,25 @@
           "evidence": [
             "attempt_id"
           ]
+        },
+        "READ_END": {
+          "reason": 9,
+          "title": "保存当前轮次实际读取结束",
+          "rows": [{"table": "file_copies", "op": "update",
+            "columns": ["read_end_event_id", "slot_device_id"],
+            "before": {}, "after": {}, "required": ["read_end_event_id"], "transitions": {}}],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "read_end"],
+          "evidence": ["read_end"]
+        },
+        "PHOTO_READ_START": {
+          "reason": 10,
+          "title": "固定本次照片下载的读取长度并准备目标",
+          "rows": [{"table": "file_copies", "op": "update",
+            "columns": ["source_size", "committed_bytes", "reset_state"],
+            "before": {}, "after": {}, "required": [],
+            "transitions": {"reset_state": ["transition_1"]}}],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "copy"],
+          "evidence": ["photo_read_start"]
         }
       }
     },
@@ -7834,7 +7975,7 @@
             "delivery",
             "read_permission"
           ],
-          "evidence": []
+          "evidence": ["read_current_identity"]
         },
         "CANCEL": {
           "reason": 6,
@@ -7882,7 +8023,7 @@
             "cancel",
             "read_permission"
           ],
-          "evidence": []
+          "evidence": ["canceled_publication"]
         },
         "WITHDRAW": {
           "reason": 7,
@@ -7926,6 +8067,15 @@
                   "transition_16",
                   "transition_17"
                 ]
+              }
+            },
+            {
+              "table": "cancel_delivery_items",
+              "op": "create",
+              "after": {
+                "status": [1],
+                "error_code": [null],
+                "error_details_json": [null]
               }
             },
             {
@@ -8593,7 +8743,10 @@
             "processing",
             "output"
           ],
-          "evidence": []
+          "evidence": [
+            "photo_cache_request",
+            "photo_sync_cache_request"
+          ]
         },
         "HOST_PHOTO_COMPLETE": {
           "reason": 5,
@@ -10599,6 +10752,32 @@
         }
       }
     },
+    "AVAILABILITY_CHECK": {
+      "id": 39,
+      "version": 1,
+      "branches": {
+        "CREATE": {
+          "reason": 1,
+          "title": "固定设备检查责任与目标",
+          "rows": [
+            {"table": "device_availability_checks", "op": "create", "after": {}},
+            {"table": "device_availability_targets", "op": "create", "after": {}},
+            {"table": "operation_runs", "op": "create", "after": {"kind": [12], "status": [1], "attempts_used": [0], "retry_wait_required": [0]}}
+          ],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "availability_check"],
+          "evidence": ["availability_create_request"]
+        },
+        "RELEASE": {
+          "reason": 2,
+          "title": "按可用性检查解除旧活动限制",
+          "rows": [
+            {"table": "device_activities", "op": "update", "columns": ["occupancy_state", "availability_release_attempt_id"], "before": {"occupancy_state": [1], "activity_state": [1]}, "after": {"occupancy_state": [2]}, "required": ["occupancy_state", "availability_release_attempt_id"], "transitions": {"occupancy_state": ["transition_1"]}}
+          ],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "availability_check"],
+          "evidence": []
+        }
+      }
+    },
     "SEGMENT_INSPECTION": {
       "id": 38,
       "version": 1,
@@ -10674,9 +10853,76 @@
           "evidence": []
         }
       }
+    },
+    "FILE_BATCH_CHANGED": {
+      "id": 40,
+      "version": 1,
+      "branches": {
+        "GRANT": {
+          "reason": 1,
+          "title": "取得同机文件批次",
+          "rows": [
+            {
+              "table": "device_file_batches",
+              "op": "create",
+              "after": {
+                "released_event_id": [
+                  null
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "file_batch"
+          ],
+          "evidence": []
+        },
+        "RELEASE": {
+          "reason": 2,
+          "title": "释放同机文件批次",
+          "rows": [
+            {
+              "table": "device_file_batches",
+              "op": "update",
+              "columns": [
+                "released_event_id"
+              ],
+              "before": {
+                "released_event_id": [
+                  null
+                ]
+              },
+              "after": {},
+              "required": [
+                "released_event_id"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "file_batch"
+          ],
+          "evidence": []
+        }
+      }
     }
   },
   "history_references": {
+    "file_copies.read_end_event_id": {
+      "target": "assigning_event",
+      "exception": "READ_END 建立本轮引用；重拷或换源时清空。"
+    },
+    "device_availability_checks.target_boundary_event_id": {
+      "target": "prior_event"
+    },
     "operation_attempts.intent_event_id": {
       "target": "creating_event",
       "exception": "应急尝试为空。"
@@ -10835,6 +11081,12 @@
     "segment_sets.cancel_event_id": {
       "target": "prior_event",
       "exception": "同原动作实际取消请求事件。"
+    },
+    "device_file_batches.acquired_event_id": {
+      "target": "creating_event"
+    },
+    "device_file_batches.released_event_id": {
+      "target": "assigning_event"
     }
   },
   "non_event_tables": {

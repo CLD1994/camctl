@@ -121,3 +121,17 @@ def test_diagnosis_never_looks_up_source_files(monkeypatch):
     monkeypatch.setattr(linecache, 'checkcache', unexpected_lookup)
     diagnostic = exception_diagnostic(_original_error())
     assert diagnostic['traceback']
+def test_argument_only_exception_group_preserves_children_as_json_graph():
+    class UnprintableGroup(ExceptionGroup):
+        def __str__(self):
+            raise ValueError("cannot format group")
+    child = ValueError("original child")
+    child.add_note("original note")
+    group = UnprintableGroup("original group", [child, child])
+    document = exception_diagnostic(group, include_message=False)
+    assert json.loads(json.dumps(document)) == document
+    assert document["exceptions"][0]["arguments"] == ["original child"]
+    assert document["exceptions"][0]["notes"] == ["original note"]
+    assert document["exceptions"][1] == {"$ref": "#/exceptions/0"}
+    assert document["arguments"] == ["original group", [
+        {"$ref": "#/exceptions/0"}, {"$ref": "#/exceptions/0"}]]

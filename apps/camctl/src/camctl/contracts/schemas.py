@@ -7,6 +7,7 @@ Schema 全部来自包内权威资源，相互引用按兄弟文件名解析；�
 
 from __future__ import annotations
 
+from copy import deepcopy
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Iterator
@@ -15,7 +16,7 @@ import referencing
 import referencing.jsonschema
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
-from jsonschema.validators import extend
+from jsonschema.validators import extend, validator_for
 from referencing.exceptions import CannotDetermineSpecification, Unresolvable
 
 from camctl.resources import ResourceError, resource_bytes
@@ -92,13 +93,19 @@ def _check_schema(schema: Any) -> None:
         pending.extend((child, False) for child in resource.subresources())
 
 
+@lru_cache(maxsize=len(_SCHEMA_RESOURCES))
+def _checked_schema(contents: bytes) -> Any:
+    document = parse_exact_json(contents.decode("utf-8"))
+    _check_schema(document)
+    return document
+
+
 def load_schema(name: str) -> Any:
     """精确读取登记的 Schema；不可用资源及非法 JSON 属于规则错误。"""
     if name not in _SCHEMA_RESOURCES:
         raise SchemaRuleError(f"未打包的公共 Schema: {name}")
     try:
-        document = parse_exact_json(resource_bytes(name).decode("utf-8"))
-        _check_schema(document)
+        document = deepcopy(_checked_schema(resource_bytes(name)))
     except (ResourceError, OSError, UnicodeDecodeError, JsonParseError, SchemaError) as error:
         raise SchemaRuleError(f"Schema 规则不可用: {name}: {error}") from error
     return document
@@ -130,6 +137,43 @@ def create_validator(schema: Any, *, registry: referencing.Registry | None = Non
     """使用统一精确数字规则构造校验器；规则错误与文档错误分开。"""
     _check_schema(schema)
     return _precise_draft()(schema, registry=schema_registry() if registry is None else registry)
+
+
+@lru_cache(maxsize=1)
+def _reference_rule_validator():
+    """复用固定包装的检查，并用元 Schema 检查每个实际引用值。"""
+    _check_schema({"$schema": Draft202012Validator.META_SCHEMA["$id"], "$ref": ""})
+    meta_validator = validator_for(_precise_draft().META_SCHEMA, default=_precise_draft())
+    return meta_validator(
+        {"$ref": "https://json-schema.org/draft/2020-12/meta/core#/properties/$ref"},
+        format_checker=meta_validator.FORMAT_CHECKER,
+    )
+
+
+def create_reference_validator(reference: str, *, registry: referencing.Registry) -> Draft202012Validator:
+    """构造只含本地引用的固定包装，保留完整规则检查的失败语义。"""
+    schema = {"$schema": Draft202012Validator.META_SCHEMA["$id"], "$ref": reference}
+    if next(_reference_rule_validator().iter_errors(reference), None) is not None:
+        _check_schema(schema)
+    return _precise_draft()(schema, registry=registry)
+
+
+@lru_cache(maxsize=32)
+def _check_type_rule(rule: str | tuple[str, ...]) -> None:
+    value = list(rule) if isinstance(rule, tuple) else rule
+    _check_schema({"$schema": Draft202012Validator.META_SCHEMA["$id"], "type": value})
+
+
+def create_type_validator(rule: Any, *, registry: referencing.Registry) -> Draft202012Validator:
+    """复用相同 type 规则的成功检查；非法规则继续按原入口报错。"""
+    schema = {"$schema": Draft202012Validator.META_SCHEMA["$id"], "type": rule}
+    if type(rule) is str:
+        _check_type_rule(rule)
+    elif type(rule) is list and all(type(item) is str for item in rule):
+        _check_type_rule(tuple(rule))
+    else:
+        _check_schema(schema)
+    return _precise_draft()(schema, registry=registry)
 
 
 def validation_errors(validator: Draft202012Validator, document: Any) -> list[ValidationError]:

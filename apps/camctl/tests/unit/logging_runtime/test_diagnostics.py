@@ -16,6 +16,7 @@ from camctl.logging_runtime.diagnostics import (
     error_diagnostics_context, flush_diagnostics, record_call_outcome, record_error,
 )
 from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult
 from camctl.operations.error_diagnostics import DiagnosticError
 from camctl.operations.models import (
@@ -34,9 +35,48 @@ class MemoryChannel:
         self.kind = kind
         self.records = []
 
-    async def alog(self, record):
+    def submit(self, record, *, receipt=None):
+        receipt = receipt if receipt is not None else LogReceipt()
         self.records.append(record)
-        return AdmissionResult(AdmissionDecision(self.kind, record.level), 0)
+        self.complete(record, receipt)
+        return receipt
+
+    def complete(self, record, receipt):
+        fallback_written = False
+        if self.kind is AdmissionKind.CHANNEL_FAILED and record.fallback is not None:
+            fallback_written = record.fallback(record.message) is not False
+        result = AdmissionResult(AdmissionDecision(self.kind, record.level), 0,
+                                 fallback_written=fallback_written)
+        receipt.complete_admission(result)
+        receipt.complete_write(AdmissionResult(
+            result.decision, result.queue_depth,
+            delivered=self.kind is AdmissionKind.ACCEPTED,
+            fallback_written=fallback_written,
+        ))
+
+
+class GatedChannel(MemoryChannel):
+    def __init__(self):
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.released = False
+        self.pending = []
+
+    def submit(self, record, *, receipt=None):
+        receipt = receipt if receipt is not None else LogReceipt()
+        self.records.append(record)
+        self.entered.set()
+        if self.released:
+            self.complete(record, receipt)
+        else:
+            self.pending.append((record, receipt))
+        return receipt
+
+    def release_admission(self):
+        self.released = True
+        for record, receipt in self.pending:
+            self.complete(record, receipt)
+        self.pending.clear()
 
 
 def document(channel, index=0):
@@ -86,16 +126,7 @@ async def test_background_context_creates_one_consumer_for_all_records():
 
 
 async def test_background_scope_never_blocks_later_stop_or_same_device_work():
-    class BlockedChannel(MemoryChannel):
-        entered = asyncio.Event()
-        release = asyncio.Event()
-
-        async def alog(self, record):
-            self.entered.set()
-            await self.release.wait()
-            return await super().alog(record)
-
-    channel = BlockedChannel()
+    channel = GatedChannel()
     operations = []
     with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
         async with diagnostic_scope():
@@ -106,7 +137,7 @@ async def test_background_scope_never_blocks_later_stop_or_same_device_work():
             operations.append("same-device-next-body")
         operations.append("required-stop")
         assert first.status is second.status is DiagnosticStatus.HELD
-        channel.release.set()
+        channel.release_admission()
         await flush_diagnostics()
     assert operations == ["same-device-next-body", "required-stop"]
     assert first.status is second.status is DiagnosticStatus.ADMITTED
@@ -116,8 +147,8 @@ async def test_background_consumer_can_admit_while_business_body_is_still_runnin
     admitted = asyncio.Event()
 
     class SignallingChannel(MemoryChannel):
-        async def alog(self, record):
-            result = await super().alog(record)
+        def submit(self, record, *, receipt=None):
+            result = super().submit(record, receipt=receipt)
             admitted.set()
             return result
 
@@ -130,16 +161,7 @@ async def test_background_consumer_can_admit_while_business_body_is_still_runnin
 
 
 async def test_background_flush_protects_existing_task_from_repeated_parent_cancel():
-    class BlockedChannel(MemoryChannel):
-        entered = asyncio.Event()
-        release = asyncio.Event()
-
-        async def alog(self, record):
-            self.entered.set()
-            await self.release.wait()
-            return await super().alog(record)
-
-    channel = BlockedChannel()
+    channel = GatedChannel()
     with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
         states = [record_error(ValueError(str(number)), stage="cleanup") for number in range(3)]
         await channel.entered.wait()
@@ -150,7 +172,7 @@ async def test_background_flush_protects_existing_task_from_repeated_parent_canc
         flushing.cancel("repeat parent cancellation")
         await asyncio.sleep(0)
         assert not flushing.done()
-        channel.release.set()
+        channel.release_admission()
         with pytest.raises(asyncio.CancelledError) as raised:
             await flushing
         assert raised.value.args == ("first parent cancellation",)
@@ -164,7 +186,7 @@ async def test_background_serve_control_error_is_owned_until_flush():
     fallback = []
 
     class ControlledChannel(MemoryChannel):
-        async def alog(self, record):
+        def submit(self, record, *, receipt=None):
             raise original
 
     with error_diagnostics_context(ControlledChannel(), fallback.append, background=True):
@@ -182,11 +204,11 @@ async def test_background_serve_admission_cancel_is_reported_after_remaining_rec
     accepted = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
 
     class ControlledChannel(MemoryChannel):
-        async def alog(self, record):
-            self.records.append(record)
+        def submit(self, record, *, receipt=None):
+            receipt = super().submit(record, receipt=receipt)
             if len(self.records) == 1:
                 raise original
-            return accepted
+            return receipt
 
     channel = ControlledChannel()
     with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=accepted):
@@ -249,7 +271,7 @@ async def test_background_context_requires_flush_even_if_consumer_already_failed
     original = KeyboardInterrupt("serve control")
 
     class ControlledChannel(MemoryChannel):
-        async def alog(self, record):
+        def submit(self, record, *, receipt=None):
             raise original
 
     with pytest.raises(RuntimeError) as raised:
@@ -395,13 +417,13 @@ async def test_root_flush_finishes_all_records_before_propagating_first_cancella
     accepted = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
 
     class CancellingChannel(MemoryChannel):
-        async def alog(self, record):
-            self.records.append(record)
+        def submit(self, record, *, receipt=None):
+            receipt = super().submit(record, receipt=receipt)
             if len(self.records) == 1:
                 raise first_cancel
             if len(self.records) == 2:
                 raise repeat_cancel
-            return accepted
+            return receipt
 
     channel = CancellingChannel()
     with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=accepted):
@@ -470,7 +492,8 @@ async def test_successful_call_with_run_error_still_records_all_known_facts():
     assert payload["outcome"]["effect"] == "confirmed"
     assert payload["outcome"]["call_info"]["local_exit_code"] == 0
     assert payload["ticket"]["run_id"] == 5
-    assert payload["run_error"]["stage"] == "save"
+    assert payload["error"]["stage"] == "save"
+    assert payload["run_error"] == {"$ref": "#/error"}
 
 
 async def test_call_error_and_run_error_are_one_diagnostic_with_both_facts():
@@ -480,8 +503,10 @@ async def test_call_error_and_run_error_are_one_diagnostic_with_both_facts():
         async with diagnostic_scope():
             record_call_outcome(outcome, run_error=ValueError("save"))
     assert len(channel.records) == 1
-    assert document(channel)["outcome"]["error"]["code"] == "E1"
-    assert document(channel)["run_error"]["message"] == "save"
+    payload = document(channel)
+    assert payload["error"]["code"] == "E1"
+    assert payload["outcome"]["error"] == {"$ref": "#/error"}
+    assert payload["run_error"]["message"] == "save"
 
 
 async def test_call_without_error_has_no_diagnostic():
@@ -508,7 +533,7 @@ async def test_complete_exception_graph_and_nested_details_are_frozen():
     assert len(error["exceptions"]) == 2
     assert error["exceptions"][0]["notes"] == ["known note"]
     assert error["exceptions"][1]["diagnostic_details"] == {"known": [1]}
-    assert error["exceptions"][0]["cause"] == {"$ref": "#/exceptions/1"}
+    assert error["exceptions"][0]["cause"] == {"$ref": "#/error/exceptions/1"}
     assert state.status is DiagnosticStatus.ADMITTED
 
 
@@ -528,6 +553,86 @@ async def test_tool_stderr_is_complete_and_readable_but_stdout_bytes_are_not_log
     assert b"MEDIA-SECRET".hex() not in channel.records[0].message
 
 
+async def test_non_media_call_stdout_is_lossless_and_resends_share_the_record():
+    channel = MemoryChannel()
+    stdout, stderr = b"doctor: FAIL\x00\xff", b"reason\xff"
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(ToolStreamState.COMPLETE, stdout),
+        ToolStream(ToolStreamState.COMPLETE, stderr)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    media = ToolDiagnostics(1, (ToolCallOutput(
+        1, "read", ToolStream(ToolStreamState.COMPLETE, b"MEDIA-SECRET"),
+        ToolStream(ToolStreamState.COMPLETE, b"")),))
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        state = record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True,
+                                    context={"other": media})
+        assert record_call_outcome(outcome, ticket=ticket, state=state, include_tool_stdout=True) is state
+        await flush_diagnostics()
+    assert len(channel.records) == 1
+    streams = document(channel)["outcome"]["diagnostics"]["calls"][0]
+    assert streams["stdout"] == {"state": "complete", "hex": stdout.hex()}
+    assert streams["stderr"]["hex"] == stderr.hex()
+    assert streams["stderr"]["text"] == stderr.decode("utf-8", "backslashreplace")
+    assert document(channel)["context"]["other"]["calls"][0]["stdout"] == {
+        "state": "complete", "byte_count": 12}
+    assert b"MEDIA-SECRET".hex() not in channel.records[0].message
+
+
+async def test_non_media_stdout_survives_tool_encoding_failure():
+    channel, fallback = MemoryChannel(), []
+    stdout, stderr = b"doctor\xff", b"failure\xff"
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(ToolStreamState.COMPLETE, stdout),
+        ToolStream(ToolStreamState.COMPLETE, stderr)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    with patch("camctl.logging_runtime.diagnostics.encode_diagnostics", side_effect=ValueError("format")):
+        with error_diagnostics_context(channel, fallback.append):
+            record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True)
+            await flush_diagnostics()
+    assert len(fallback) == 1
+    assert stdout.hex() in fallback[0]
+    assert stderr.hex() in fallback[0]
+    assert not channel.records
+
+
+@pytest.mark.parametrize("stream_state,data", [
+    (ToolStreamState.UNCONFIRMED, b"partial\xff"),
+    (ToolStreamState.UNAVAILABLE, None),
+])
+async def test_non_media_stdout_retains_incomplete_stream_state(stream_state, data):
+    channel = MemoryChannel()
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(stream_state, data), ToolStream(stream_state, data)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True)
+        await flush_diagnostics()
+    stdout = document(channel)["outcome"]["diagnostics"]["calls"][0]["stdout"]
+    assert stdout == {"state": stream_state.value, "hex": None if data is None else data.hex()}
+
+
+@pytest.mark.parametrize("ticket", [None, AttemptTicket(2, "read", "3", "copy/3", 5)])
+async def test_non_availability_ticket_cannot_expose_tool_stdout(ticket):
+    channel = MemoryChannel()
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "read", ToolStream(ToolStreamState.COMPLETE, b"MEDIA-SECRET"),
+        ToolStream(ToolStreamState.COMPLETE, b"error")),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "read"),
+                          diagnostics=diagnostics)
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True)
+        await flush_diagnostics()
+    assert document(channel)["outcome"]["diagnostics"]["calls"][0]["stdout"] == {
+        "state": "complete", "byte_count": 12}
+    assert b"MEDIA-SECRET".hex() not in channel.records[0].message
+
+
 @pytest.mark.parametrize("encoding", ["hex", "base64"])
 async def test_stderr_in_existing_error_details_gets_readable_text(encoding):
     channel = MemoryChannel()
@@ -541,11 +646,16 @@ async def test_stderr_in_existing_error_details_gets_readable_text(encoding):
     assert nested["stderr_text"] == "problem\\xff"
 
 
-@pytest.mark.parametrize("kind", [AdmissionKind.CHANNEL_FAILED, AdmissionKind.FILTERED_OUT])
-async def test_unavailable_admission_falls_back_once_with_complete_diagnostic(kind):
-    channel = MemoryChannel(kind)
+@pytest.mark.parametrize("fallback_result", [None, False])
+async def test_unavailable_admission_falls_back_once_with_complete_diagnostic(fallback_result):
+    channel = MemoryChannel(AdmissionKind.CHANNEL_FAILED)
     fallback = []
-    with error_diagnostics_context(channel, fallback.append):
+
+    def write_fallback(message):
+        fallback.append(message)
+        return fallback_result
+
+    with error_diagnostics_context(channel, write_fallback):
         state = record_error(ValueError("original"), stage="read")
         await flush_diagnostics()
         record_error(ValueError("replacement"), stage="read", state=state)
@@ -565,7 +675,7 @@ async def test_missing_channel_uses_fallback():
 
 async def test_log_exception_uses_fallback_without_replacing_business_result():
     class FailingChannel(MemoryChannel):
-        async def alog(self, record):
+        def submit(self, record, *, receipt=None):
             raise OSError("log disabled")
 
     fallback = []
@@ -614,11 +724,11 @@ async def test_cancelled_admission_remembers_actual_acceptance_and_preserves_rem
     accepted = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
 
     class CancellingChannel(MemoryChannel):
-        async def alog(self, record):
-            self.records.append(record)
+        def submit(self, record, *, receipt=None):
+            receipt = super().submit(record, receipt=receipt)
             if len(self.records) == 1:
                 raise original
-            return accepted
+            return receipt
 
     channel = CancellingChannel()
     with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=accepted):
@@ -708,12 +818,11 @@ async def test_unadmitted_cancel_keeps_state_for_root_without_replacing_cancella
     class CancellingChannel(MemoryChannel):
         cancelled = False
 
-        async def alog(self, record):
+        def submit(self, record, *, receipt=None):
             if not self.cancelled:
                 self.cancelled = True
                 raise original
-            self.records.append(record)
-            return accepted
+            return super().submit(record, receipt=receipt)
 
     channel = CancellingChannel()
     with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=None):

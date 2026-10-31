@@ -81,7 +81,7 @@ it.each(["plan", "action"] as const)("默认 %s 取回导出的请求排除已�
   await page.getByRole("button", { name: scope === "plan" ? "取回计划产物" : "取回默认产物", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "加入草稿", exact: true }).click();
   await check(page.getByTestId("save-status")).toContainText("已保存");
-  await check(page.getByText("跳过 1 个本地已有产物。", { exact: true })).toBeVisible();
+  await check(page.getByText(/1 个产物排除项/)).toBeVisible();
   await page.getByLabel("执行时间", { exact: true }).fill("2026-10-26T10:00");
   await page.getByTestId("export-button").click();
   await check.poll(() => app.store.all("requests").length).toBe(1);

@@ -1,5 +1,6 @@
 """拷贝及交付的数据库等待与文件责任分别保留。"""
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ import pytest
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.outputs.copy import (
-    CompletionPhase, PreparedCopy, PreparedDisposition, PreparedSaveOutcome,
+    CompletionPhase, CopyCompletionError, PreparedCopy, PreparedDisposition, PreparedSaveOutcome,
     SegmentOutcome, complete_copy, copy_next_segment,
 )
 from camctl.outputs.handoff import (
@@ -22,6 +23,9 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from camctl.persistence.repositories.outputs import OutputsRepository
 from support.business_database import inline_business_database
+from camctl.host_files.tasks import FileTaskExecutor
+from camctl.logging_runtime.events import event_logging
+from camctl.session.supervision import Supervisor
 
 pytestmark = pytest.mark.asyncio
 KEY = OperationKey("a" * 32)
@@ -61,6 +65,32 @@ async def test_saved_verification_prepares_copy_using_original_key():
     assert result.prepared == prepared
     request, key, _owned = repository.save_prepared.call_args.args
     assert (request.copy_id, request.size_bytes, request.target_sha256, key) == (2, 9, DIGEST, KEY)
+
+
+@pytest.mark.parametrize("state", ["MATCHED", "SOURCE_CHECKSUM_UNAVAILABLE"])
+async def test_saved_verification_result_redelivery_has_no_new_file_stage(state):
+    repository = Mock(spec=OutputsRepository)
+    repository.load_copy_state.return_value = SimpleNamespace(source_size=9,
+        committed_bytes=9, target=SimpleNamespace(file_id=3), target_sha256=DIGEST,
+        verification_state=int(getattr(enum_for("file_copies.verification_state"), state)))
+    prepared = PreparedCopy(2, 3, 9, DIGEST, True)
+    repository.save_prepared.side_effect = [DbOutcome(DbOutcomeKind.UNKNOWN),
+        DbOutcome(DbOutcomeKind.COMPLETED, PreparedSaveOutcome(PreparedDisposition.SAVED, prepared))]
+    context = context_for(repository)
+    context.executor = FileTaskExecutor(Supervisor())
+    records = []
+
+    class Channel:
+        def slog(self, record):
+            records.append(json.loads(record.message))
+
+    with event_logging(Channel()):
+        with pytest.raises(CopyCompletionError) as caught:
+            await complete_copy(2, context)
+        assert caught.value.stage == "prepared_save_unknown"
+        assert (await complete_copy(2, context)).phase is CompletionPhase.PREPARED
+    assert records == []
+    assert [call.args[1] for call in repository.save_prepared.call_args_list] == [KEY, KEY]
 
 
 async def test_known_handoff_result_is_saved_before_publication_returns(monkeypatch):

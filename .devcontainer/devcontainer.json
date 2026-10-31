@@ -38,6 +38,7 @@
     "source=camctl-extensions,target=/opt/devcontainer/vscode-extensions,type=volume"
   ],
   "containerEnv": {
+    "ADB_SERVER_SOCKET": "tcp:host.docker.internal:5037",
     "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
   },
   "runArgs": [

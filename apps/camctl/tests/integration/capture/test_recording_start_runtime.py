@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from decimal import Decimal
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -16,6 +17,8 @@ from camctl.capture.handlers import capture_handler
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
 from camctl.operations.attempts import AttemptConfig
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 from camctl.operations.models import (
     AttemptStatus, CallInfo, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
@@ -121,6 +124,36 @@ async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(
         owned.connection.close()
 
 
+async def test_actual_start_info_preserves_anchor_and_wait_does_not_repeat(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
+    try:
+        mono = [_ANCHOR]
+        driver = StartDriver(_result(activity_id="1", confirmed=True))
+        runtime = await start_case.runtime(owned, driver, mono=mono)
+        channel = create_autospec(LogChannel, instance=True, spec_set=True)
+
+        def consume(record):
+            payload = json.loads(record.message)
+            if payload["stage"] == "capture.start" and payload["event"] == "returned":
+                mono[0] += 5_000_000_000
+
+        channel.slog.side_effect = consume
+        with event_logging(channel):
+            await capture_handler("camera_record")(start_case.aid, runtime)
+            await capture_handler("camera_record")(start_case.aid, runtime)
+        payloads = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+        starts = [payload for payload in payloads if payload["stage"] == "capture.start"]
+        assert [payload["event"] for payload in starts] == ["started", "returned"]
+        assert all((payload["level"], payload["action_id"], payload["activity_id"],
+                    payload["run_id"], payload["attempt_id"]) ==
+                   ("INFO", start_case.aid, str(start_case.aid), _start(owned, start_case.aid)[0], 1)
+                   for payload in starts)
+        assert len(driver.calls) == 1
+        await start_case.assert_stop_deadline(runtime, _ANCHOR + 60_000_000_000)
+    finally:
+        owned.connection.close()
+
+
 async def test_reliable_permanent_start_rejection_finishes_without_using_remaining_attempts(tmp_path, start_case):
     owned = await start_case.world(tmp_path)
     try:
@@ -154,6 +187,7 @@ async def test_confirmation_anchor_precedes_database_commit_delay(tmp_path, star
 
         await runtime.database.read(lambda current: current.connection.set_trace_callback(delay_commits))
         await capture_handler("camera_record")(1, runtime)
+        assert mono[0] > _ANCHOR
         assert owned.connection.execute(
             "SELECT started_at FROM device_activities WHERE action_id = 1"
         ).fetchone() == (_NOW,)
@@ -514,6 +548,7 @@ async def test_sent_response_anchor_precedes_commit_delay(tmp_path, start_case, 
                 mono[0] += 5000000000
         await runtime.database.read(lambda current: current.connection.set_trace_callback(delay_commits))
         await capture_handler("camera_record")(1, runtime)
+        assert mono[0] > _ANCHOR
         assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=1").fetchone() == (_NOW, None)
         await runtime.database.read(lambda current: current.connection.set_trace_callback(None))
         await start_case.assert_stop_deadline(runtime, deadline_ns)

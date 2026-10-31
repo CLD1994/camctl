@@ -14,7 +14,7 @@ from camctl.devices.drivers.hasselblad.parameters import (
     photo_schema,
 )
 from camctl.devices.ports import DriverDeclaration
-from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
+from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory, PhotoSourcePolicy
 from camctl.devices.task_metadata import cancellation_description
 
 __all__ = [
@@ -33,13 +33,17 @@ DRIVER_DECLARATION = DriverDeclaration(
     control_supported=True,
     stop_supported=False,
     query_supported=False,
-    result_supported=False,
+    result_supported=True,
     read_supported=True,
     digest_supported=False,
-    delete_supported=False,
+    delete_supported=True,
+    file_query_supported=True,
+    local_file_recovery_operations=frozenset({"delete", "query"}),
     directory_supported=False,
     local_read_recovery_supported=True,
+    local_result_recovery_supported=True,
     local_control_recovery_supported=True,
+    local_availability_recovery_supported=True,
     capture_preparation_supported=True,
 )
 
@@ -63,7 +67,8 @@ def _deployed_photo_factory(declaration: Mapping[str, object]) -> CaptureTaskFac
     storage = resolve_source_storage(declaration)
 
     def photo_task(effective_params: Mapping[str, JsonValue]) -> CaptureTask:
-        return replace(_photo_task(effective_params), output_storage=storage)
+        return replace(_photo_task(effective_params), output_storage=storage,
+                       photo_source_policy=(PhotoSourcePolicy.DEFERRED if storage is CaptureStorage.DEVICE else None))
 
     return photo_task
 

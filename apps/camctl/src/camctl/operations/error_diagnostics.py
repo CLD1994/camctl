@@ -7,6 +7,23 @@ import traceback
 _FACTS_ATTRIBUTE = "_camctl_exception_diagnostic_facts"
 
 
+class ExceptionDiagnosticGraph(dict):
+    """内存中标识独立异常图边界；JSON 内容与普通字典一致。"""
+
+    def __init__(self, *args, root_path: str = "#", _scope=None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.root_path = root_path
+        self._scope = object() if _scope is None else _scope
+
+
+class ExceptionDiagnosticReference(dict):
+    """只标识编码器生成的图内引用，不解释调用方的普通字典。"""
+
+    def __init__(self, *args, _scope=None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._scope = _scope
+
+
 def attach_diagnostic_facts(error: BaseException, facts: Mapping) -> None:
     """事实所属模块附加有限诊断；原异常由共同编码器按对象身份引用。"""
     setattr(error, _FACTS_ATTRIBUTE, dict(facts))
@@ -27,30 +44,43 @@ def _own_traceback(error: BaseException) -> list[dict]:
             for frame, lineno in traceback.walk_tb(error.__traceback__)]
 
 
-def exception_diagnostic(error: BaseException | None) -> dict | None:
+def exception_diagnostic(error: BaseException | None, *, include_message: bool = True,
+                         reference_for=None, root_path: str = "#") -> dict | None:
     """保存全部标准异常关系；循环和共享节点引用首次出现的路径。"""
     if error is None:
         return None
-    result = {}
-    seen = {id(error): "#"}
-    remaining = [(error, result, "#")]
+    result = ExceptionDiagnosticGraph(root_path=root_path)
+    seen = {id(error): root_path}
+    remaining = [(error, result, root_path)]
 
     def reference(original, path):
         if original is None:
             return None
         previous = seen.get(id(original))
         if previous is not None:
-            return {"$ref": previous}
+            return ExceptionDiagnosticReference({"$ref": previous}, _scope=result._scope)
+        if reference_for is not None:
+            external = reference_for(original, path)
+            if external is not None:
+                return external
         seen[id(original)] = path
         node = {}
         remaining.append((original, node, path))
         return node
 
     def facts_document(value, path):
+        if isinstance(value, ExceptionDiagnosticGraph):
+            # 已编码的独立图有自己的引用根，复制内容时保留该边界。
+            copy = ExceptionDiagnosticGraph(root_path=value.root_path, _scope=value._scope)
+            copy.update({name: facts_document(item, path + "/" + str(name).replace("~", "~0").replace("/", "~1"))
+                           for name, item in value.items()})
+            return copy
+        if isinstance(value, ExceptionDiagnosticReference):
+            return ExceptionDiagnosticReference(value, _scope=value._scope)
         if isinstance(value, BaseException):
             return reference(value, path)
         if isinstance(value, Mapping):
-            return {name: facts_document(item, path + "/" + name)
+            return {name: facts_document(item, path + "/" + str(name).replace("~", "~0").replace("/", "~1"))
                     for name, item in value.items()}
         if isinstance(value, (tuple, list)):
             return [facts_document(item, path + f"/{index}")
@@ -62,16 +92,20 @@ def exception_diagnostic(error: BaseException | None) -> dict | None:
         kind = type(original)
         node.update(
             type=f"{kind.__module__}.{kind.__qualname__}",
-            message=str(original), traceback=_own_traceback(original),
+            traceback=_own_traceback(original),
             cause=reference(original.__cause__, path + "/cause"),
             context=reference(original.__context__, path + "/context"),
             suppress_context=original.__suppress_context__,
         )
+        if include_message:
+            node["message"] = str(original)
         if hasattr(original, "__notes__"):
             node["notes"] = list(original.__notes__)
         if isinstance(original, BaseExceptionGroup):
             node["exceptions"] = [reference(child, f"{path}/exceptions/{index}")
                                   for index, child in enumerate(original.exceptions)]
+        if not include_message:
+            node["arguments"] = facts_document(original.args, path + "/arguments")
         if isinstance(original, OSError):
             node["errno"] = original.errno
             for name in ("filename", "filename2"):

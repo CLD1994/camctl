@@ -27,6 +27,8 @@ camctl describe [--config <path>]
 camctl --version
 ```
 
+顶层命令及各子命令的 `-h`、`--help` 将帮助文本写入 stdout，以退出码 `0` 结束；不启动业务流程，也不记录错误诊断。帮助输出本身发生写入错误时，保留真实错误诊断。命令语法或参数不合法时，stderr 保留诊断，退出码为 `1`。
+
 `init`、`run`、`submit`、`describe` 的本地配置均采用[默认值与文件覆盖规则](configuration.md#本地配置的加载与更新)。默认文件为 `$HOME/.camctl/config.toml`；`--config` 选择另一份覆盖文件，所选文件不存在时使用内置默认值。
 
 ### `init`

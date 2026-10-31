@@ -12,7 +12,7 @@ from camctl.capture.media import RecordingFailure
 from camctl.capture.diagnostics import preparation_failure_diagnostic
 from camctl.capture.models import ActivityReleaseSave
 from camctl.capture.segment_errors import segment_error_header
-from camctl.capture.segment_finish import FinishSegmentRecording
+from camctl.capture.segment_finish import FinishSegmentRecording, SegmentFinishResult
 from camctl.capture.segment_models import (
     CompletionFacts,
     DefaultScopeState,
@@ -39,6 +39,7 @@ from camctl.persistence.transaction import row_facts
 from camctl.logging_runtime.performance import measure_performance
 from camctl.logging_runtime.transaction_timing import db_operation_context
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.events import record_event
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,8 @@ async def _write_segment_request(database, pending_writes, action_id, pending):
         if receipt is not None and receipt.kind in (DbOutcomeKind.COMPLETED, DbOutcomeKind.ROLLED_BACK):
             if pending_writes.get(action_id) is pending:
                 del pending_writes[action_id]
+                if receipt.kind is DbOutcomeKind.COMPLETED:
+                    _record_completion(action_id, pending, receipt.value)
         raise
     if receipt.kind is not DbOutcomeKind.COMPLETED:
         if receipt.kind is DbOutcomeKind.ROLLED_BACK and pending_writes.get(action_id) is pending:
@@ -101,7 +104,19 @@ async def _write_segment_request(database, pending_writes, action_id, pending):
         raise db_failure(ConsistencyError, f"原分段保存尚未可靠完成: {receipt.error}", receipt)
     if pending_writes.get(action_id) is pending:
         del pending_writes[action_id]
+        _record_completion(action_id, pending, receipt.value)
     return receipt.value
+
+
+def _record_completion(action_id, pending, result):
+    if pending.method != "finish_segment_recording" or not isinstance(pending.args[0], FinishSegmentRecording):
+        return
+    request = pending.args[0]
+    fields = {"action_id": action_id, "activity_id": request.activity_id,
+        "run_id": request.run_id, "request_type": type(request).__name__}
+    if isinstance(result, SegmentFinishResult):
+        fields.update(action_status=result.action_status, output_count=result.output_count)
+    record_event("capture.completion", event="settled", **fields)
 
 
 async def _save_segment_request(runtime, action_id, repository, method, args):
@@ -134,9 +149,11 @@ async def release_segment_occupancy(runtime, action_id):
 async def register_segment_observations(runtime, action_id, listing):
     """先保存全部原始 OSV/LRF 归属，再独立保存完成及跨页配对。"""
     from camctl.capture.result_scans import SavedResultEntries
+    from camctl.operations.models import AttemptStatus
 
     if not isinstance(listing.entries, SavedResultEntries):
-        if (listing.entries == () and listing.already_saved
+        if (listing.entries == () and (listing.already_saved
+                or listing.outcome is not None and listing.outcome.status is AttemptStatus.UNKNOWN)
                 and (await runtime.database.read(lambda owned: runtime.capture.read_last_result_page(listing.ticket, owned))) is None):
             return
         raise ConsistencyError("分段策略要求可靠原始结果页")
@@ -258,12 +275,11 @@ async def register_segment_observations(runtime, action_id, listing):
                     action_id,
                     runtime.capture,
                     "save_result_file_pairing",
-                    (await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): PairResultFilesSave(
+                    PairResultFilesSave(
                         file_id,
                         listing.entries.last_ref,
-                        _boundary(owned.connection),
-                        occurred_at,
-                    ))),
+                        runtime.wall_us(),
+                    ),
                 )
 
 
@@ -288,10 +304,7 @@ def _control_facts(runtime, action, activity):
     )
     lower = timing.recording_lower_bound_ns(elapsed)
     complete = lower >= timing.duration_ms * 1_000_000
-    # 正常控制的轻微余量沿既有异常多录门槛处理。
-    overrun = lower > (
-        timing.duration_ms * 1_000_000 + runtime.repair_margin_s * 1_000_000_000
-    )
+    overrun = lower > timing.duration_ms * 1_000_000
     return (
         EvidenceState.CONFIRMED if complete else EvidenceState.UNKNOWN,
         EvidenceState.CONFIRMED if overrun else EvidenceState.UNKNOWN,
@@ -364,6 +377,9 @@ async def advance_segmented_recording(runtime, action, decision):
         explicit_error = (
             listing.outcome is not None and listing.outcome.error is not None
         )
+        if explicit_error and used < runtime.check_config.max_attempts and not listing.already_saved:
+            await common._finish_listing_result(runtime, listing, retry_wait=True)
+            return
         if (
             not explicit_error
             and used < runtime.check_config.max_attempts

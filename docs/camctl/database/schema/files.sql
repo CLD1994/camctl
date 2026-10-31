@@ -26,7 +26,7 @@ CREATE TABLE device_files (
     CHECK ((source_action_id IS NULL) = (ownership_evidence_json IS NULL)),
     CHECK ((original_device_file_id IS NULL) = (pairing_evidence_json IS NULL)),
     CHECK (original_device_file_id IS NULL OR (role = 3 AND original_device_file_id <> id)),
-    CHECK (completion_state <> 3 OR (size_bytes IS NOT NULL AND completion_evidence_json IS NOT NULL)),
+    CHECK (completion_state <> 3 OR completion_evidence_json IS NOT NULL),
     CHECK (completion_state = 3 OR size_bytes IS NULL),
     CHECK (completion_state <> 4 OR last_error_json IS NOT NULL),
     CHECK (sha256 IS NULL OR (completion_state = 3 AND checksum_support = 2))
@@ -134,11 +134,14 @@ CREATE TABLE file_copies (
     round INTEGER NOT NULL CHECK (round >= 1),
     recopies_used INTEGER NOT NULL CHECK (recopies_used >= 0),
     max_recopies_used INTEGER NOT NULL CHECK (max_recopies_used >= 0),
-    source_size INTEGER NOT NULL CHECK (source_size >= 0),
+    source_size INTEGER CHECK (source_size IS NULL OR source_size >= 0),
     source_sha256 TEXT CHECK (source_sha256 IS NULL OR (length(source_sha256) = 64 AND source_sha256 NOT GLOB '*[^0-9a-f]*')),
-    committed_bytes INTEGER NOT NULL CHECK (committed_bytes BETWEEN 0 AND source_size),
+    committed_bytes INTEGER NOT NULL CHECK (committed_bytes >= 0 AND
+        ((source_size IS NULL AND committed_bytes = 0)
+            OR (source_size IS NOT NULL AND committed_bytes <= source_size))),
     reset_state INTEGER NOT NULL CHECK (reset_state IN (1,2)),
     slot_device_id TEXT UNIQUE CHECK (slot_device_id IS NULL OR length(slot_device_id) > 0),
+    read_end_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     verification_state INTEGER NOT NULL CHECK (verification_state BETWEEN 1 AND 6),
     target_sha256 TEXT CHECK (target_sha256 IS NULL OR (length(target_sha256) = 64 AND target_sha256 NOT GLOB '*[^0-9a-f]*')),
     verification_error_json TEXT CHECK (verification_error_json IS NULL OR (json_valid(verification_error_json) AND json_type(verification_error_json) = 'object')),
@@ -146,9 +149,24 @@ CREATE TABLE file_copies (
     CHECK ((source_device_file_id IS NOT NULL) + (source_intermediate_file_id IS NOT NULL) = 1),
     CHECK (source_intermediate_file_id IS NULL OR source_intermediate_file_id <> target_file_id),
     CHECK (round = recopies_used + 1),
+    CHECK (source_size IS NOT NULL OR (read_end_event_id IS NULL AND
+        source_sha256 IS NULL AND target_sha256 IS NULL AND verification_state IN (1,2,6))),
     CHECK (verification_state NOT IN (3,4,5) OR (target_sha256 IS NOT NULL AND committed_bytes = source_size AND reset_state = 1)),
     CHECK (verification_state <> 3 OR (source_sha256 IS NOT NULL AND source_sha256 = target_sha256)),
     CHECK (verification_state <> 4 OR (source_sha256 IS NOT NULL AND source_sha256 <> target_sha256)),
     CHECK (verification_state <> 5 OR source_sha256 IS NULL),
     CHECK (verification_state <> 6 OR verification_error_json IS NOT NULL)
 ) STRICT;
+
+-- 格式 9：取得时登记整批，单文件机会释放不改变该归属。
+CREATE TABLE device_file_batches (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    device_id TEXT NOT NULL CHECK (length(device_id) > 0),
+    acquired_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    released_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (action_id, device_id),
+    CHECK (released_event_id IS NULL OR released_event_id > acquired_event_id)
+) STRICT;
+CREATE UNIQUE INDEX one_device_file_batch ON device_file_batches(device_id)
+    WHERE released_event_id IS NULL;

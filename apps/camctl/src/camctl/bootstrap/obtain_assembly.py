@@ -59,6 +59,7 @@ def session_obtain_assembly(
     file_executor: FileTaskExecutor | None = None,
     read_discovery_batch_size: int = DEFAULT_BATCH_SIZE,
     max_query_attempts: int = 3,
+    availability: Any = None,
 ) -> Callable[[Any], ObtainRuntime]:
     """构造会话级取回推进工厂：解析各设备读取协作者并组装运行时。
 
@@ -78,6 +79,7 @@ def session_obtain_assembly(
     pending_read_ends: dict = {}
     pending_segment_selections: dict = {}
     pending_segment_queries: dict = {}
+    pending_file_batches: dict = {}
     discovery = ReadDiscoveryOwner(read_discovery_batch_size)
 
     def factory(database: Any) -> ObtainRuntime:
@@ -169,8 +171,10 @@ def session_obtain_assembly(
             pending_read_ends=pending_read_ends,
             pending_segment_selections=pending_segment_selections,
             pending_segment_queries=pending_segment_queries,
+            pending_file_batches=pending_file_batches,
             file_executor=file_executor,
             discovery=discovery,
+            availability=availability,
         )
 
     return factory
@@ -178,9 +182,24 @@ def session_obtain_assembly(
 
 def obtain_flow(factory: Callable[[Any], ObtainRuntime]):
     """构造推进取回执行的流程端口；每轮驱动一次。"""
+    from camctl.outputs.retry_wakeup import ReadRetryWakeup
+
+    wakeup = ReadRetryWakeup()
 
     async def flow(context: Any) -> None:
+        import asyncio
+        from camctl.scheduling.notifications import WakeReason
+
+        wakeup.consume_due(asyncio.get_running_loop().time())
         runtime = factory(context.database)
+        if runtime.availability is not None:
+            runtime.availability.coordinator.wake = context.wake
+        def schedule(target_ns, now_ns):
+            if wakeup.schedule(target_ns, now_ns, asyncio.get_running_loop().time()):
+                notifier = getattr(context, "wake", None)
+                if notifier is not None:
+                    notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
+        runtime.on_read_retry_deadline = schedule
         await advance_obtain(runtime)
         if runtime.discovery.pending:
             from camctl.scheduling.notifications import WakeReason
@@ -189,8 +208,12 @@ def obtain_flow(factory: Callable[[Any], ObtainRuntime]):
                 notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
 
     async def settle_diagnostics(context: Any) -> None:
-        await settle_obtain_diagnostics(factory(context.database))
+        from camctl.outputs.batches import retry_file_batches
+        runtime = factory(context.database)
+        await retry_file_batches(context.database, runtime.pending_file_batches)
+        await settle_obtain_diagnostics(runtime)
 
     flow.settle_diagnostics = settle_diagnostics
+    flow.next_wakeup_at = wakeup.next_at
 
     return flow

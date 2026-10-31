@@ -43,6 +43,10 @@ def _document(message):
     return json.loads(message.split("异常诊断: ", 1)[1].splitlines()[0])
 
 
+def _cli_document(message):
+    return json.loads(message)["exception"]
+
+
 def _assert_complete(document, kind):
     if kind == "ordinary":
         assert document["diagnostic_details"] == {"stderr_hex": "ff00", "remaining": 17}
@@ -89,7 +93,7 @@ def test_cli_stderr_keeps_every_exception_before_original_control_propagates(mon
 
     assert out.getvalue() == ""
     assert "会话错误" in err.getvalue()
-    _assert_complete(_document(err.getvalue()), kind)
+    _assert_complete(_cli_document(err.getvalue()), kind)
     close.assert_called_once()
     assert close.call_args.kwargs["primary_error"] is failure
 
@@ -128,7 +132,7 @@ def test_runtime_close_control_is_diagnosed_before_the_same_object_propagates(mo
         cli._execute_session_command(cli.Command(cli.CommandKind.RUN, None, None), out, err, None)
 
     assert caught.value is selected
-    assert _document(err.getvalue())["message"] == "close canceled"
+    assert _cli_document(err.getvalue())["message"] == "close canceled"
     assert any("ff00" in note for note in selected.__notes__)
     assert out.getvalue() == ""
 
@@ -150,7 +154,7 @@ def test_actual_runtime_close_diagnostic_cannot_replace_an_existing_control_grou
     assert caught.value is original
     assert any(json.loads(note.split("异常诊断: ", 1)[1])["message"] == "close diagnostic canceled"
                for note in original.__notes__ if "异常诊断: " in note)
-    _assert_complete(_document(err.getvalue()), "cancel_group")
+    _assert_complete(_cli_document(err.getvalue()), "cancel_group")
     assert out.getvalue() == ""
 
 
@@ -187,7 +191,7 @@ def test_actual_runtime_close_stderr_keeps_a_secondary_ordinary_error(monkeypatc
 
     assert "异常诊断: " in closing_stderr.getvalue()
     assert _document(closing_stderr.getvalue())["diagnostic_details"] == {"errno": 28}
-    assert _document(err.getvalue())["diagnostic_details"]["stderr_hex"] == "ff00"
+    assert _cli_document(err.getvalue())["diagnostic_details"]["stderr_hex"] == "ff00"
     assert out.getvalue() == ""
 
 
@@ -295,7 +299,7 @@ async def test_actual_session_failure_is_fully_logged_and_rethrows_the_same_obje
 
     assert caught.value is failure
     assert len(records) == 1
-    _assert_complete(_document(records[0].message), kind)
+    _assert_complete(json.loads(records[0].message)["exception"], kind)
 
 
 @pytest.mark.asyncio
@@ -311,7 +315,7 @@ async def test_failed_outcome_log_retains_the_existing_details(monkeypatch, star
 
     assert await lifecycle.execute_command(deps, None, flows={}) is outcome
     assert len(records) == 1
-    assert json.loads(records[0].message.split("诊断详情: ", 1)[1]) == details
+    assert json.loads(records[0].message)["details"] == details
 
 
 @pytest.mark.asyncio

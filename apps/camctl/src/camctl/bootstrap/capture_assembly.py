@@ -54,6 +54,8 @@ from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recove
 from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
+from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
+from camctl.devices.capture_preparation import preparation_lead_s
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError,
     DriverRegistry,
@@ -73,7 +75,7 @@ from camctl.persistence.repositories.host_capture import HostCaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing, OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION
 from camctl.persistence.transaction import row_facts
 from camctl.logging_runtime.performance import measure_performance, record_performance
 from camctl.scheduling.rules import LaunchWindow
@@ -122,6 +124,15 @@ def _device_attempts(
     value = subtable.get(key, default)
     return value if isinstance(value, int) and not isinstance(value, bool) \
         else default
+
+
+def query_attempt_config(declaration):
+    """状态查询与独立设备检查使用同一组设备配置。"""
+    return AttemptConfig(
+        max_attempts=_device_attempts(declaration, "query", 3),
+        timeout_s=_device_seconds(declaration, "query", "timeout_s", Decimal("10")),
+        retry_interval_s=_device_seconds(declaration, "query", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S),
+    )
 
 #: 源端摘要观察的契约类型与版本（devices 契约测试共用同一形态）。
 _DIGEST_TYPE = "file_digest"
@@ -261,6 +272,92 @@ class DriverDigestReader:
             return SourceDigest(
                 digest=None, error=f"digest_observation_invalid: {error}",
                 raw_outcome=raw, diagnostic_error=error)
+
+
+class HasselbladPhotoListing:
+    """从原 START 与可靠角色页装配一次指定来源读取。"""
+
+    def __init__(self, driver, binding, evidence, *, capture_repository, database):
+        self._driver, self._binding, self._evidence = driver, binding, evidence
+        self._capture_repository, self._database = capture_repository, database
+
+    def close_scan(self, ticket):
+        pass
+
+    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
+                        completion_context=None, reading_context=None, **kwargs):
+        from camctl.capture.files import file_identity_key
+        from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant, PhotoResultCursor
+        from camctl.operations.result_format import read_result_document
+
+        def load(owned):
+            connection = owned.connection
+            activity = row_facts(connection, "device_activities", int(ticket.target_id))
+            action = None if activity is None else row_facts(connection, "actions", activity["action_id"])
+            if (action is None or activity["action_id"] != action["id"]
+                    or DeviceBinding(action["device_id"], action["driver_id"]) != self._binding
+                    or action["execution_spec_json"].get("output_storage") != "device"):
+                raise ConsistencyError("照片来源读取缺少原 DEVICE 动作及设备绑定")
+            with closing(connection.execute(
+                    "SELECT r.id,a.attempt_no,a.status,a.effect_state,a.result_json,a.error_json"
+                    " FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+                    " WHERE r.responsibility_key=? ORDER BY a.attempt_no DESC LIMIT 2",
+                    (f"start/{action['id']}",))) as reader:
+                rows = reader.fetchall()
+            if len(rows) != 1:
+                raise ConsistencyError("照片来源读取缺少唯一原 START 尝试")
+            run_id, attempt_no, status, effect, result, error = rows[0]
+            start_ticket = AttemptTicket(attempt_no, "control", ticket.target_id, f"start/{action['id']}", run_id)
+            outcome = read_result_document(status, effect, parse_exact_json(result),
+                None if error is None else parse_exact_json(error))
+            validate_outcome(start_ticket, outcome, self._evidence)
+            photos = [item for item in outcome.observations if item.type == "photo_taken" and item.version == 2]
+            if outcome.status.value != "succeeded" or outcome.effect.value != "confirmed" or len(photos) != 1:
+                raise ConsistencyError("照片来源读取缺少原可靠 DEVICE START")
+            original = None
+            position = None
+            while True:
+                page = self._capture_repository.read_result_sources(ticket, position, 32, owned)
+                for entry, file, _file_id in page.items:
+                    identity = CameraFileIdentity.from_source(
+                        file_identity_key(action["device_id"], action["driver_id"], entry.identity), entry.locator)
+                    if identity.variant is DownloadVariant.ORIGINAL and file.complete:
+                        if original is not None:
+                            raise ConsistencyError("照片来源存在多个已完成原图")
+                        original = entry.identity
+                if page.next_cursor is None:
+                    break
+                position = page.next_cursor
+            return action, photos[0].data, original
+
+        action, start, original = await self._database.read(load, description="读取原照片 START 和角色来源")
+        if cursor is not None:
+            if not isinstance(cursor, PhotoResultCursor) or cursor.binding != self._binding or cursor.activity_id != ticket.target_id:
+                raise ConsistencyError("照片来源页改变原游标")
+            previous = await self._database.read(
+                lambda owned: self._capture_repository.read_last_result_page(ticket, owned),
+                description="核对照片来源原末页")
+            if previous is None or previous.ref.next_cursor != cursor:
+                raise ConsistencyError("照片来源后续页缺少原可靠末游标")
+            if original is None:
+                raise ConsistencyError("照片预览前缺少原图完整子责任")
+            role = cursor.role
+        else:
+            role = DownloadVariant.THUMBNAIL if original is not None else DownloadVariant.ORIGINAL
+        request = ControlRequest("result", self._binding, {
+            "activity_id": ticket.target_id, "camera_identity": start["camera_identity"],
+            "camera_locator": start["camera_locator"],
+            "capture_format": action["effective_params_json"]["capture_format"],
+            "role": role.value, "cursor": None if cursor is None else cursor.as_json(),
+            "original_identity": original if role is DownloadVariant.THUMBNAIL else None,
+            "sync_candidate": start["original" if role is DownloadVariant.ORIGINAL else "preview"],
+            "sync_error": start["original_error" if role is DownloadVariant.ORIGINAL else "preview_error"],
+        }, ticket=ticket, timeout_s=timeout_s)
+        result = await self._driver.list_results(request, 1)
+        if result.outcome is None:
+            raise ConsistencyError("照片来源读取缺少原实际返回")
+        validate_outcome(ticket, result.outcome, self._evidence)
+        return page_from_outcome(ticket, result.outcome, cursor=cursor, binding=self._binding)
 
 
 class DriverResultListing:
@@ -496,12 +593,16 @@ class DriverResultListing:
                         timeout_s: Decimal, output_scope: Mapping | None = None,
                         completion_context: Mapping | None = None,
                         video_result_mode: str | None = None,
-                        reading_context: ResultReadingContext | None = None) -> ResultPage:
+                        reading_context: ResultReadingContext | None = None,
+                        scope_only: bool = False) -> ResultPage:
         """一次页调用保持原票据和期限，不在驱动适配层循环或重试。"""
+        prefix = "scope" if scope_only else "results"
         if (ticket.operation != "result" or ticket.target_id is None
-                or ticket.responsibility_key != f"results/{ticket.target_id}"):
+                or ticket.responsibility_key != f"{prefix}/{ticket.target_id}"):
             raise ValueError("结果列举要求原 RESULTS 活动票据")
         params = {"activity_id": ticket.target_id}
+        if scope_only:
+            params["scope_only"] = True
         if video_result_mode is not None:
             params["video_result_mode"] = video_result_mode
         if cursor is not None:
@@ -622,6 +723,14 @@ def _digest_reader_factory(
     return resolve
 
 
+def _hasselblad_identity(declaration):
+    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+
+    config = read_camera_config(declaration)
+    return CameraIdentity(config.serial, config.product_id)
+
+
 def execution_wait_config(action: Mapping[str, Any]) -> CaptureWaitConfig:
     """从已保存的动作行取得延时等待配置。
 
@@ -660,6 +769,25 @@ def _window_of(action: Mapping[str, Any]) -> LaunchWindow:
         window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000)
 
 
+class _PreparationLeads(Mapping):
+    """每次发现读取驱动的会话配置缓存，保持首次及后续提前量一致。"""
+
+    def __init__(self, ordinary, setup_budgets):
+        self._ordinary = ordinary
+        self._setup_budgets = setup_budgets
+
+    def __getitem__(self, device_id):
+        query = self._setup_budgets.get(device_id)
+        setup = Decimal("0") if query is None else query()
+        return preparation_lead_s(self._ordinary[device_id], setup)
+
+    def __iter__(self):
+        return iter(self._ordinary)
+
+    def __len__(self):
+        return len(self._ordinary)
+
+
 def session_capture_assembly(
     *,
     devices: Mapping[str, Mapping[str, Any]],
@@ -694,7 +822,7 @@ def session_capture_assembly(
     pending_segment_writes: dict | None = None,
     pending_segment_inspection_results: dict | None = None,
     pending_host_photo_prepares: dict[int, Any] | None = None,
-    pending_host_photo_completions: dict[int, Any] | None = None,
+    pending_host_photo_completions: dict[int | tuple[int, str], Any] | None = None,
     start_entries=None,
     read_discovery_batch_size: int | None = None,
     preparation_cache=None,
@@ -727,16 +855,23 @@ def session_capture_assembly(
     """
 
     from camctl.devices.start_entry import StartEntryCoordinator
+    from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
     from camctl.capture.preparation import RuntimePreparationCache
     from uuid import uuid4
     preparation_cache = RuntimePreparationCache() if preparation_cache is None else preparation_cache
     session_key = uuid4().hex if session_key is None else session_key
-    preparation_leads = {}
+    ordinary_preparation_leads = {}
+    session_setup_budgets = {}
     for device_id, declaration in devices.items():
         entry = drivers.entry(declaration.get("driver"))
         if entry is not None and getattr(entry.declaration, "capture_preparation_supported", False) is True:
-            preparation_leads[device_id] = declaration.get("connection", {}).get(
+            ordinary_preparation_leads[device_id] = declaration.get("connection", {}).get(
                 "prepare_lead_s", entry.driver.default_prepare_lead_s)
+            if isinstance(entry.driver, AdbCameraDriver):
+                session_setup_budgets[device_id] = (
+                    lambda driver=entry.driver, binding=DeviceBinding(device_id, entry.driver_id):
+                    driver.pending_session_setup_timeout_s(binding))
+    preparation_leads = _PreparationLeads(ordinary_preparation_leads, session_setup_budgets)
     start_entries = StartEntryCoordinator() if start_entries is None else start_entries
     anchors = {} if recording_anchors is None else recording_anchors
     listings: dict[int, tuple[tuple, tuple]] = {}
@@ -856,7 +991,8 @@ def session_capture_assembly(
             except CapabilityNotDeclaredError:
                 results_port = None
             else:
-                results_port = DriverResultListing(
+                listing_type = HasselbladPhotoListing if driver_id == HASSELBLAD_DRIVER_ID else DriverResultListing
+                results_port = listing_type(
                     result_port,
                     DeviceBinding(device_id=device_id, driver_id=str(driver_id)),
                     entry.evidence,
@@ -870,6 +1006,10 @@ def session_capture_assembly(
                 read_discovery_batch_size=read_discovery_batch_size)
             if media_enabled else None)
         if media is not None:
+            if driver_id == HASSELBLAD_DRIVER_ID:
+                from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+                media.capture_selection = lambda now: CaptureSelectionInput(
+                    device_id, str(driver_id), _hasselblad_identity(declaration), preparation_leads[device_id], now)
             media.segment_size = segment_size
             media.recovery_boundary = recovery_boundary
             media.recovery_max_event_id = fixed_recovery_boundary()
@@ -914,16 +1054,22 @@ def session_capture_assembly(
             window_of=_window_of,
             wait_config=current_wait_config,
             binding_check=lambda saved: check_binding(saved, current_config),
+            fixed_camera_identity=(
+                _hasselblad_identity(declaration) if driver_id == HASSELBLAD_DRIVER_ID else None),
             recovery_boundary=recovery_boundary,
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
             start_entries=start_entries,
             capture_preparation_supported=preparation_driver is not None,
+            scope_closure_supported=isinstance(entry.driver, AdbCameraDriver)
+                and database.metadata.format_version >= OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION,
             preparation_driver=preparation_driver,
             preparation_cache=preparation_cache,
             session_key=session_key,
-            prepare_lead_s=preparation_leads.get(device_id, Decimal(0)),
+            prepare_lead_s=ordinary_preparation_leads.get(device_id, Decimal(0)),
+            session_setup_budget=(entry.driver.pending_session_setup_timeout_s
+                if isinstance(entry.driver, AdbCameraDriver) else None),
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,
@@ -977,15 +1123,7 @@ def session_capture_assembly(
                     _DEFAULT_RETRY_INTERVAL_S,
                 ),
             ),
-            query_config=AttemptConfig(
-                max_attempts=_device_attempts(declaration, "query", 3),
-                timeout_s=_device_seconds(
-                    declaration, "query", "timeout_s", Decimal("10")
-                ),
-                retry_interval_s=_device_seconds(
-                    declaration, "query", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S
-                ),
-            ),
+            query_config=query_attempt_config(declaration),
             residual_config=AttemptConfig(
                 max_attempts=_device_attempts(declaration, "residual_stop", 3),
                 timeout_s=_device_seconds(

@@ -33,7 +33,7 @@ def _event_boundary(connection, event_id):
     return {**boundary, "operation_key": row["operation_key"], "first_event_id": row["first_event_id"]}
 
 
-def _assert_start_result(attempt, raw, target, expected):
+def _validated_control_result(attempt, raw, target):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.operations.result_format import read_result_document
     from camctl.operations.models import AttemptTicket, AttemptStatus, EffectState
@@ -46,23 +46,11 @@ def _assert_start_result(attempt, raw, target, expected):
                            target["responsibility_key"], target["run_id"])
     validate_outcome(ticket, outcome, EVIDENCE)
     assert outcome.status is AttemptStatus.SUCCEEDED and outcome.effect is EffectState.CONFIRMED
-    assert [item["type"] for item in result["observations"]] == ["photo_taken", "hasselblad_start_entered"]
-    for observation in result["observations"]:
-        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
-    photo = result["observations"][0]["data"]
-    for role in ("original", "preview"):
-        assert photo[role] == expected["artifacts"][role], ("原角色字节身份不符", role)
-    steps = photo["steps"]
-    assert [step["name"] for step in steps] == expected["steps"]
-    assert expected["steps"].count("capture") == 1
-    streams = _assert_step_calls(result, steps, expected)
-    return {"result_json": raw, "size": len(raw.encode()), "sha256": hashlib.sha256(raw.encode()).hexdigest(),
-            "ticket": {"attempt_no": ticket.attempt_id, "run_id": ticket.run_id,
-                       "activity_id": ticket.target_id, "responsibility_key": ticket.responsibility_key},
-            "photo": photo, "streams": streams}
+    return result, ticket
 
 
-def _assert_step_calls(result, steps, expected):
+def _assert_steps(result, steps, expected_steps, expected):
+    assert [step["name"] for step in steps] == expected_steps
     calls = result["diagnostics"]["calls"]
     assert len(calls) == len(steps)
     streams = []
@@ -88,36 +76,41 @@ def _assert_step_calls(result, steps, expected):
             if name == "stdout":
                 assert len(data) == step["stdout_size_bytes"] and facts[name]["sha256"] == step["stdout_sha256"]
             else:
-                # 真实 step 只登记 stdout 摘要；本成功工具样例的 stderr 独立预期为空。
                 assert data == b""
         streams.append({"step_index": index, "step_name": step["name"], **facts})
     return streams
 
 
+def _assert_start_result(attempt, raw, target, expected):
+    result, ticket = _validated_control_result(attempt, raw, target)
+    assert [item["type"] for item in result["observations"]] == ["photo_taken", "hasselblad_start_entered"]
+    for observation in result["observations"]:
+        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
+    photo = result["observations"][0]["data"]
+    for role in ("original", "preview"):
+        assert photo[role] == expected["artifacts"][role], ("原角色字节身份不符", role)
+    steps = photo["steps"]
+    assert expected["steps"].count("capture") == 1
+    streams = _assert_steps(result, steps, expected["steps"], expected)
+    return {"result_json": raw, "size": len(raw.encode()), "sha256": hashlib.sha256(raw.encode()).hexdigest(),
+            "ticket": {"attempt_no": ticket.attempt_id, "run_id": ticket.run_id,
+                       "activity_id": ticket.target_id, "responsibility_key": ticket.responsibility_key},
+            "photo": photo, "streams": streams}
+
+
 def _assert_preparation_result(attempt, raw, target, expected):
-    from camctl.contracts.json_values import parse_exact_json
-    from camctl.operations.result_format import read_result_document
-    from camctl.operations.models import AttemptTicket, AttemptStatus, EffectState
-    from camctl.operations.validation import validate_outcome
-    from camctl.devices.drivers.hasselblad.driver import EVIDENCE
-    result = parse_exact_json(raw)
-    outcome = read_result_document(attempt["status"], attempt["effect_state"], result,
-                                   None if attempt["error_json"] is None else parse_exact_json(attempt["error_json"]))
-    ticket = AttemptTicket(attempt["attempt_no"], "control", str(target["activity_id"]),
-                           target["responsibility_key"], target["run_id"])
-    validate_outcome(ticket, outcome, EVIDENCE)
-    assert outcome.status is AttemptStatus.SUCCEEDED and outcome.effect is EffectState.CONFIRMED
+    result, ticket = _validated_control_result(attempt, raw, target)
     assert [item["type"] for item in result["observations"]] == [
         "capture_preparation_completed", "photo_preparation_steps"]
     for observation in result["observations"]:
         assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
     steps = result["observations"][1]["data"]["steps"]
-    assert [step["name"] for step in steps] == expected["prepare_steps"]
     assert not {"focus", "autofocus", "capture"} & {step["name"] for step in steps}
+    streams = _assert_steps(result, steps, expected["prepare_steps"], expected)
     return {"result_json": raw, "size": len(raw.encode()), "sha256": hashlib.sha256(raw.encode()).hexdigest(),
             "ticket": {"attempt_no": ticket.attempt_id, "run_id": ticket.run_id,
                        "activity_id": ticket.target_id, "responsibility_key": ticket.responsibility_key},
-            "streams": _assert_step_calls(result, steps, expected)}
+            "streams": streams}
 
 
 def _history_facts(database, request, expected, original=None):
@@ -150,16 +143,17 @@ def _history_facts(database, request, expected, original=None):
         target = {"request_id": str(plan["request_id"]), "plan_id": plan["id"], "action_id": action["id"],
                   "run_id": run["id"], "attempt_id": attempt["id"], "activity_id": activity["id"],
                   "responsibility_key": run["responsibility_key"], "result_event_id": attempt["result_event_id"]}
+        preparation_run = one("SELECT * FROM operation_runs WHERE action_id=? AND kind=?",
+                              (action["id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))
+        preparation_attempt = one("SELECT * FROM operation_attempts WHERE run_id=?", (preparation_run["id"],))
+        assert preparation_run["activity_id"] == activity["id"]
+        assert preparation_run["responsibility_key"].startswith(f"prepare/{action['id']}/")
+        assert preparation_attempt["result_event_id"] < attempt["intent_event_id"]
+        preparation_target = {**target, "run_id": preparation_run["id"],
+                              "responsibility_key": preparation_run["responsibility_key"]}
+        preparation = _assert_preparation_result(preparation_attempt, preparation_attempt["result_json"],
+                                                 preparation_target, expected)
         start = _assert_start_result(attempt, attempt["result_json"], target, expected)
-        prepare_run = one("SELECT * FROM operation_runs WHERE action_id=? AND kind=?",
-                          (action["id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))
-        prepare_attempt = one("SELECT * FROM operation_attempts WHERE run_id=?", (prepare_run["id"],))
-        assert prepare_run["activity_id"] == activity["id"]
-        assert prepare_run["responsibility_key"].startswith(f"prepare/{action['id']}/")
-        assert prepare_attempt["result_event_id"] < attempt["intent_event_id"]
-        preparation = _assert_preparation_result(prepare_attempt, prepare_attempt["result_json"],
-            {"activity_id": activity["id"], "responsibility_key": prepare_run["responsibility_key"],
-             "run_id": prepare_run["id"]}, expected)
         files = [dict(row) for row in connection.execute(
             "SELECT * FROM intermediate_files WHERE owner_action_id=? AND purpose IN (?,?) ORDER BY purpose",
             (action["id"], int(enum_for("intermediate_files.purpose").CAPTURE_ORIGINAL),
@@ -232,13 +226,13 @@ def _history_facts(database, request, expected, original=None):
             assert action_rows[("device_activities", activity["id"])]["action_id"] == action["id"]
             assert saved_attempt["result_json"] == parse_exact_json(attempt["result_json"])
             assert saved_attempt["result_event_id"] == attempt["result_event_id"]
-            saved_preparation = action_rows[("operation_attempts", prepare_attempt["id"])]
-            historical_preparation = action_rows[("operation_runs", prepare_run["id"])]
+            saved_preparation = action_rows[("operation_attempts", preparation_attempt["id"])]
+            historical_preparation = action_rows[("operation_runs", preparation_run["id"])]
             for field in ("action_id", "activity_id", "responsibility_key", "kind"):
-                assert historical_preparation[field] == prepare_run[field]
+                assert historical_preparation[field] == preparation_run[field]
             for field in ("run_id", "attempt_no", "result_event_id"):
-                assert saved_preparation[field] == prepare_attempt[field]
-            assert saved_preparation["result_json"] == parse_exact_json(prepare_attempt["result_json"])
+                assert saved_preparation[field] == preparation_attempt[field]
+            assert saved_preparation["result_json"] == parse_exact_json(preparation_attempt["result_json"])
             for index, role in enumerate(("original", "preview")):
                 file_rows = image[f"intermediate_file/{files[index]['id']}"]
                 completed = h.last_event_id >= boundaries["files_complete"]["last_event_id"]

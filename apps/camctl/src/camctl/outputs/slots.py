@@ -49,9 +49,15 @@ class SlotRequest:
 
     copy_id: int
     occurred_at: int
+    capture_selection: object | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.copy_id)
         timestamp = UtcMicros(self.occurred_at)
         if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
             raise ValueError(f"事件时间超出 SQLite 整数微秒范围: {self.occurred_at!r}")
+        if self.capture_selection is not None:
+            from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+            if (not isinstance(self.capture_selection, CaptureSelectionInput)
+                    or self.capture_selection.trusted_wall_now != timestamp):
+                raise ValueError("读取机会的拍摄选择输入与事实时刻不符")

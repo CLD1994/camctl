@@ -7,6 +7,12 @@ close_runtime 兜底关闭且不补写摘要。
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
+import sys
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -18,9 +24,12 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import (
     build_runtime, close_runtime, execute_command,
 )
+from camctl.logging_runtime.lifecycle import close_logging
+from camctl.logging_runtime.clh_adapter import WriteResult
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogRecord
 from camctl.persistence.initialization import InitOutcome, initialize_state
+from integration.logging_runtime.sync_support import FileSyncProbe
 
 from .test_composition import (
     RecordingCatalog, RecordingNotifier, _config_for, _parsed, _plan_body,
@@ -35,6 +44,35 @@ def _log_text(home: Path) -> str:
 
 
 class TestSessionLogging:
+    async def test_submit_info_stages_are_written_before_channel_closes(self, tmp_path: Path) -> None:
+        cfg = _config_for(tmp_path)
+        cfg = replace(cfg, log=replace(cfg.log, level="INFO"))
+        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        deps = build_runtime(CommandMode.SUBMIT, cfg,
+            catalog=RecordingCatalog(), notifier=RecordingNotifier())
+        try:
+            outcome = await execute_command(deps, await _parsed(tmp_path, _plan_body()))
+            assert outcome.succeeded
+            assert not deps.log_runtime.channel.listener_alive
+            records = [json.loads(line) for line in _log_text(tmp_path).splitlines()]
+            important = [record for record in records if record["stage"] in (
+                "command", "session", "session.cleanup")]
+            assert [(record["stage"], record["event"]) for record in important] == [
+                ("command", "started"), ("session", "started"), ("session", "returned"),
+                ("session.cleanup", "started"), ("session.cleanup", "returned"),
+                ("command", "result")]
+            assert all(record["level"] == "INFO" and record["pid"] == os.getpid()
+                and record["session_key"] == deps.session_key for record in important)
+            assert all(datetime.fromisoformat(record["logged_at_utc"]).utcoffset().total_seconds() == 0
+                for record in important)
+            assert not any(record.get("event") == "timing" for record in records)
+            assert important[0]["logger"] == "camctl.bootstrap.lifecycle"
+            assert "submit" in important[0]["message"]
+            assert important[-1]["business_succeeded"] is True
+            assert "succeeded" not in important[-1]
+        finally:
+            close_runtime(deps)
+
     async def test_run_failure_error_recorded_and_logging_closed(
         self, tmp_path: Path,
     ) -> None:
@@ -144,3 +182,110 @@ async def test_log_config_drives_wiring(tmp_path: Path) -> None:
         )
     finally:
         close_runtime(deps)
+
+
+@pytest.mark.parametrize("sync_kind", ["file", "directory"])
+async def test_runtime_sync_failure_preserves_append_without_file_success(
+        tmp_path: Path, monkeypatch, capsys, sync_kind):
+    cfg = _config_for(tmp_path)
+    assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+    deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=RecordingCatalog(),
+                         notifier=RecordingNotifier())
+    fallback = []
+    probe = FileSyncProbe(monkeypatch, Path(cfg.paths.log_file), fail=sync_kind)
+    receipt = deps.log_runtime.channel.submit(LogRecord(
+        LogLevel.ERROR, "runtime-sync-failure", fallback=fallback.append))
+
+    async def observe():
+        return await receipt
+
+    waiter = asyncio.create_task(observe())
+    try:
+        done, _ = await asyncio.wait({waiter}, timeout=5)
+        assert waiter in done, "生产日志装配未结算同步失败回执"
+        result = waiter.result()
+        assert result.delivered is False
+        assert result.appended is True and result.durable is False
+        assert result.fallback_written is True
+        assert probe.events.count((sync_kind, "started")) == 1
+        assert (sync_kind, "completed") not in probe.events
+        records = [json.loads(line) for line in _log_text(tmp_path).splitlines()]
+        assert [record["message"] for record in records] == ["runtime-sync-failure"]
+        assert len(fallback) == 1 and "runtime-sync-failure" in fallback[0]
+        diagnostic = capsys.readouterr().err
+        assert f"stage={sync_kind}_sync" in diagnostic
+        assert "appended=true" in diagnostic and "durable=false" in diagnostic
+        assert f"controlled original {sync_kind} sync failure" in diagnostic
+        outcome = await execute_command(deps, await _parsed(tmp_path, _plan_body()))
+        assert outcome.succeeded is True
+    finally:
+        if not waiter.done():
+            waiter.cancel("test cleanup")
+            done, _ = await asyncio.wait({waiter}, timeout=1)
+            assert waiter in done
+        await asyncio.gather(waiter, return_exceptions=True)
+        close_runtime(deps)
+
+
+async def test_runtime_writer_keeps_original_control_when_write_facts_are_read_only(
+        tmp_path: Path, monkeypatch):
+    cfg = _config_for(tmp_path)
+    assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+    deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=RecordingCatalog())
+    FileSyncProbe(monkeypatch, Path(cfg.paths.log_file), fail="file")
+
+    class ReadOnlyControl(asyncio.CancelledError):
+        @property
+        def write_result(self):
+            return WriteResult(appended=True, rotated=False, durable=False)
+
+    original = ReadOnlyControl("original stderr control")
+
+    class FailedStderr:
+        def write(self, message):
+            raise original
+
+        def flush(self):
+            raise original
+
+    async def observe():
+        return await deps.log_runtime.channel.submit(LogRecord(
+            LogLevel.ERROR, "readonly-control-record"))
+
+    async def close_and_capture():
+        try:
+            await close_logging(deps.log_runtime)
+        except BaseException as error:
+            return error
+        pytest.fail("生产装配关闭没有交付原控制异常")
+
+    previous_stderr = sys.stderr
+    monkeypatch.setattr(sys, "stderr", FailedStderr())
+    waiter = asyncio.create_task(observe())
+    closing = None
+    try:
+        done, _ = await asyncio.wait({waiter}, timeout=5)
+        assert waiter in done
+        result = waiter.result()
+        closing = asyncio.create_task(close_and_capture())
+        done, _ = await asyncio.wait({closing}, timeout=5)
+        assert closing in done
+        control = closing.result()
+    finally:
+        monkeypatch.setattr(sys, "stderr", previous_stderr)
+        if closing is None:
+            closing = asyncio.create_task(close_and_capture())
+        done, pending = await asyncio.wait({waiter, closing}, timeout=5)
+        for task in pending:
+            task.cancel("test cleanup")
+        if pending:
+            later, pending = await asyncio.wait(pending, timeout=1)
+            done.update(later)
+        await asyncio.gather(*done, return_exceptions=True)
+        assert not pending
+        close_runtime(deps)
+    assert control is original
+    assert result.delivered is False and result.appended is True and result.durable is False
+    assert result.fallback_written is False
+    records = [json.loads(line) for line in _log_text(tmp_path).splitlines()]
+    assert [record["message"] for record in records] == ["readonly-control-record"]

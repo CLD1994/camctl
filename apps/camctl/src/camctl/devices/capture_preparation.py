@@ -22,6 +22,14 @@ CAPTURE_OPERATIONS = MappingProxyType({
 })
 CAPTURE_ACTION_TYPES = tuple(CAPTURE_OPERATIONS)
 DEFAULT_PREPARE_LEAD_S = Decimal("10")
+DEFAULT_SESSION_SETUP_TIMEOUT_S = Decimal("30")
+
+
+def preparation_lead_s(ordinary_lead_s: Decimal, session_setup_s: Decimal) -> Decimal:
+    """首次设备配置额外预留时间；0 仍表示关闭提前准备。"""
+    return ordinary_lead_s + session_setup_s if ordinary_lead_s > 0 else ordinary_lead_s
+
+
 CAPTURE_PREPARATION_COMPLETED = EvidenceContract(
     "capture_preparation_completed", 1, "control", frozenset({"activity_id"}),
     identity_field="activity_id")
@@ -42,6 +50,7 @@ class _PreparedCapture:
     operation: str
     params: Mapping
     ticket: AttemptTicket
+    output_storage: str | None
 
 
 class PreparedCaptureCache:
@@ -64,7 +73,8 @@ class PreparedCaptureCache:
         if request.ticket is None or request.ticket.operation != "control":
             raise ValueError("准备凭据必须属于原 control 尝试")
         self._captures[request.binding.device_id] = _PreparedCapture(
-            request.binding, device_identity, request.operation, deepcopy(dict(request.params)), request.ticket)
+            request.binding, device_identity, request.operation, deepcopy(dict(request.params)),
+            request.ticket, request.output_storage)
 
     def matches(self, request: ControlRequest, device_identity: Hashable) -> bool:
         ready = self._captures.get(request.binding.device_id)
@@ -75,4 +85,5 @@ class PreparedCaptureCache:
                 and ready.ticket == request.prepared_by
                 and ready.ticket.target_id == request.ticket.target_id
                 and ready.operation == request.operation
+                and ready.output_storage == request.output_storage
                 and json_equal(ready.params, request.params))

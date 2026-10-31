@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from camctl.history.snapshot_stream import PreparedSnapshotSource
 
 from camctl.contracts.history_values import HistoryBoundary
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.contracts.json_values import parse_exact_json
 from camctl.persistence.transaction import encode_json_value
 
@@ -409,44 +410,50 @@ async def maintain_snapshots(
         if not candidates:
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.IDLE, saved=tuple(saved), batches=batches)
-        try:
-            images = await context.store.load_entity_images(tuple(candidates))
-        except SnapshotEnqueueTimeout as error:
-            context.state.disable()
-            return MaintenanceResult(
-                outcome=MaintenanceOutcome.DISABLED,
-                saved=tuple(saved), batches=batches, exception=error)
-        prepared = []
-        enqueue_failure = None
-        try:
-            if context.state.closing:
-                return MaintenanceResult(
-                    outcome=MaintenanceOutcome.CLOSING,
-                    saved=tuple(saved), batches=batches)
-            prepared = await _prepare_images(images)
-            if context.state.closing:
-                return MaintenanceResult(
-                    outcome=MaintenanceOutcome.CLOSING,
-                    saved=tuple(saved), batches=batches)
-            if prepared:
-                try:
-                    batch_saved = await context.store.save_snapshots(tuple(prepared))
-                except SnapshotEnqueueTimeout as error:
-                    enqueue_failure = error
-                    context.state.disable()
-                    return MaintenanceResult(
-                        outcome=MaintenanceOutcome.DISABLED,
-                        saved=tuple(saved), batches=batches, exception=error)
-                saved.extend(batch_saved)
-        finally:
+        with measure_stage("snapshot.batch", entity_count=len(candidates),
+                           entity_refs=[{"entity_type": ref.entity_type,
+                                         "entity_id": ref.entity_id}
+                                        for ref in candidates]):
             try:
-                _close_resources((*prepared,*images))
-            except BaseException as close_error:
-                if enqueue_failure is not None:
-                    previous = close_error.__cause__
-                    close_error.__cause__ = (enqueue_failure if previous is None else
-                        BaseExceptionGroup("快照入队及关闭原因", (enqueue_failure, previous)))
-                raise
+                images = await context.store.load_entity_images(tuple(candidates))
+            except SnapshotEnqueueTimeout as error:
+                context.state.disable()
+                return MaintenanceResult(
+                    outcome=MaintenanceOutcome.DISABLED,
+                    saved=tuple(saved), batches=batches, exception=error)
+            prepared = []
+            enqueue_failure = None
+            try:
+                if context.state.closing:
+                    return MaintenanceResult(
+                        outcome=MaintenanceOutcome.CLOSING,
+                        saved=tuple(saved), batches=batches)
+                prepared = await _prepare_images(images)
+                if context.state.closing:
+                    return MaintenanceResult(
+                        outcome=MaintenanceOutcome.CLOSING,
+                        saved=tuple(saved), batches=batches)
+                if prepared:
+                    try:
+                        batch_saved = await context.store.save_snapshots(tuple(prepared))
+                    except SnapshotEnqueueTimeout as error:
+                        enqueue_failure = error
+                        context.state.disable()
+                        return MaintenanceResult(
+                            outcome=MaintenanceOutcome.DISABLED,
+                            saved=tuple(saved), batches=batches, exception=error)
+                    saved.extend(batch_saved)
+                    record_event("snapshot.saved", event="committed",
+                                 entity_count=len(batch_saved))
+            finally:
+                try:
+                    _close_resources((*prepared,*images))
+                except BaseException as close_error:
+                    if enqueue_failure is not None:
+                        previous = close_error.__cause__
+                        close_error.__cause__ = (enqueue_failure if previous is None else
+                            BaseExceptionGroup("快照入队及关闭原因", (enqueue_failure, previous)))
+                    raise
         batches += 1
         await asyncio.sleep(0)
         if len(candidates) < context.batch_size:

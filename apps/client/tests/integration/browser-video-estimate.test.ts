@@ -513,6 +513,7 @@ it.each(["/actions/00/params/ghost", "/actions/0/params/ghost~2"])(
     );
     const { page, app, draft, pageErrors } = await setup(initial);
     const before = app.draft(draft.id);
+    await page.getByTestId("export-button").click();
     await check(page.getByTestId("validation-issues")).toBeVisible();
     await check(page.getByLabel("参数类型", { exact: true })).toBeDisabled();
     await check(
@@ -1020,8 +1021,8 @@ it("保存回执丢失的唯一核实观察恢复估算且不重入pendingWrite"
     } else await route.continue();
   });
   await page.getByLabel("录像时长 (duration_s)", { exact: true }).fill("30");
-  // 只触发450ms自动保存，不触发从同一冻结点起算的900ms轮询。
-  await page.clock.runFor(450);
+  // 推进自动保存窗口；故障门继续拒绝普通轮询，仅放行保存核实的一次观察。
+  await page.clock.runFor(1000);
   await check(page.getByTestId("save-status")).toContainText("已保存");
   await check(page.getByTestId("video-size-value")).toContainText("300 MB");
   expect(writes).toBe(1);

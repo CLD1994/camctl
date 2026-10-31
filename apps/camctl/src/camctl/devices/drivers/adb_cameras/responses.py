@@ -17,6 +17,7 @@ from .contracts import CameraCall
 _ACK_FIELDS = frozenset({"activity_id", "response_payload", "confirmation_basis"})
 ACTION6_RECORD_ACK_BASIS = "action6_record_ack/v1"
 ACTION6_TIMELAPSE_ACK_BASIS = "action6_timelapse_ack/v1"
+STOP_RESPONSE_PAYLOADS = frozenset({"00", "df"})
 _ACK_PHASES = {
     CameraCall.SETTING: ("start_recording", EvidenceContract(
         "setting_applied", 1, "control", _ACK_FIELDS, identity_field="activity_id")),
@@ -61,7 +62,7 @@ def _call_details(raw: RawToolOutcome) -> dict[str, JsonValue]:
     }
 
 
-def _call_failure(raw: RawToolOutcome) -> _FailureReason | None:
+def _call_failure(raw: RawToolOutcome, *, ignore_stderr_text: bool = False) -> _FailureReason | None:
     if raw.error is not None:
         return _FailureReason.TRANSPORT_ERROR
     if raw.output_failure is not None:
@@ -74,7 +75,7 @@ def _call_failure(raw: RawToolOutcome) -> _FailureReason | None:
         return _FailureReason.EXIT_NONZERO
     if raw.stderr is None:
         return _FailureReason.STDERR_UNAVAILABLE
-    if raw.stderr != b"":
+    if not ignore_stderr_text and raw.stderr != b"":
         return _FailureReason.STDERR_PRESENT
     if raw.output is None:
         return _FailureReason.STDOUT_UNAVAILABLE
@@ -95,7 +96,8 @@ def _simulation_call_failure(raw: RawToolOutcome) -> _FailureReason | None:
     return None
 
 
-def _response_failure(output: bytes | None, details: dict[str, JsonValue]) -> _FailureReason | None:
+def _response_failure(output: bytes | None, details: dict[str, JsonValue], *,
+                      accepted_payloads: frozenset[str] = frozenset({"00"})) -> _FailureReason | None:
     if output is None:
         details["response_count"] = None
         return _FailureReason.STDOUT_UNAVAILABLE
@@ -120,7 +122,7 @@ def _response_failure(output: bytes | None, details: dict[str, JsonValue]) -> _F
     details["response_payload"] = payload.hex()
     if len(payload) != declared_length:
         return _FailureReason.RESPONSE_LENGTH_MISMATCH
-    if payload != b"\x00":
+    if payload.hex() not in accepted_payloads:
         return _FailureReason.RESPONSE_PAYLOAD_UNCONFIRMED
     return None
 
@@ -151,7 +153,8 @@ class Action6DjiInterpreter:
 
     def interpret(self, raw: RawToolOutcome) -> InterpretedFacts:
         details = _call_details(raw)
-        response_failure = _response_failure(raw.output, details)
+        response_failure = (_response_failure(raw.output, details, accepted_payloads=STOP_RESPONSE_PAYLOADS)
+                            if self.kind is CameraCall.STOP else _response_failure(raw.output, details))
         details["response_reason"] = None if response_failure is None else response_failure.value
         failure = _call_failure(raw) or response_failure
         if failure is not None:
@@ -165,7 +168,7 @@ class Action6DjiInterpreter:
         confirmation_basis = (ACTION6_TIMELAPSE_ACK_BASIS
             if self.operation.endswith("timelapse") else ACTION6_RECORD_ACK_BASIS)
         observation = DeviceObservation(name, contract.version, {
-            "activity_id": self.activity_id, "response_payload": "00",
+            "activity_id": self.activity_id, "response_payload": details["response_payload"],
             "confirmation_basis": confirmation_basis,
         })
         return InterpretedFacts((observation,), None, EffectState.CONFIRMED)
@@ -173,16 +176,18 @@ class Action6DjiInterpreter:
 
 @dataclass(frozen=True)
 class Action6SimulationSettingInterpreter:
-    """`simulate_device` 的本地成功只确认设置命令已接受，不确认相机实际状态。"""
+    """解释设置调用；临时忽略文字时只确认本地调用完成，不确认设置有效。"""
 
     activity_id: str
+    ignore_output_text: bool = False
 
     def __post_init__(self):
         parse_object_id(self.activity_id)
 
     def interpret(self, raw: RawToolOutcome) -> InterpretedFacts:
         details = _call_details(raw)
-        failure = _simulation_call_failure(raw)
+        failure = (_call_failure(raw, ignore_stderr_text=True) if self.ignore_output_text
+                   else _simulation_call_failure(raw))
         if failure is not None:
             details["reason"] = failure.value
             return InterpretedFacts((), ErrorValue(
@@ -190,6 +195,7 @@ class Action6SimulationSettingInterpreter:
         observation = DeviceObservation("setting_command_accepted", 1, {
             "activity_id": self.activity_id,
             "response_payload": None,
-            "confirmation_basis": "action6_simulate_device_exit/v1",
+            "confirmation_basis": ("action6_simulate_device_output_unchecked/v1" if self.ignore_output_text
+                                   else "action6_simulate_device_exit/v1"),
         })
         return InterpretedFacts((observation,), None, EffectState.CONFIRMED)

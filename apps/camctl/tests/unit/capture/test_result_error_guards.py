@@ -103,7 +103,7 @@ def _world(branch="observe", *, current=None, changes=None):
         TransactionRange(1, 1, 1),
         {("device_activities", _ACTIVITY_ID): ("action", _ACTION_ID)},
         {"device_activities": {_ACTIVITY_ID: facts},
-         "actions": {_ACTION_ID: {"id": _ACTION_ID, "type": 1}},
+         "actions": {_ACTION_ID: {"id": _ACTION_ID, "type": 1, "driver_id": "driver"}},
          "operation_runs": {9: {"id": 9, "status": 3, "activity_id": _ACTIVITY_ID}}},
     )
     return event, context

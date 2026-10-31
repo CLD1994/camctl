@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 from decimal import Decimal
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -67,21 +68,28 @@ class Filesystem:
         self.pair_scan_error = pair_scan_error
         self.change_after_metadata = change_after_metadata
         self.directory_calls = []
+        self.family_calls = []
         self.metadata_paths = []
 
     async def read_directory(self, request, *, stop):
         self.directory_calls.append(request)
         if len(self.directory_calls) == 1 and self.main_error is not None:
             return DirectoryRead(None, self.main_error, None)
-        if len(self.directory_calls) > 1 and self.pair_scan_error:
-            return DirectoryRead(None, ErrorValue("adb_directory_failed", "device_file_access",
-                {"reason": "pair_scan_failed"}), None)
         after = None if request.cursor is None else request.cursor.after_path
         values = [path for path in self.paths if after is None or path > after]
         selected = values[:request.batch]
         cursor = (DirectoryCursor(request.binding, request.directories, 0, selected[-1])
                   if len(values) > len(selected) else None)
         return DirectoryRead(None, None, Page(tuple(FileIdentity(request.binding, path) for path in selected), cursor))
+
+    async def read_family(self, identity, *, timeout_s, stop):
+        self.family_calls.append(identity)
+        if self.pair_scan_error:
+            return FileAccessRead(None, None, ErrorValue("adb_directory_failed", "device_file_access",
+                {"reason": "pair_scan_failed"}))
+        target = PurePosixPath(identity.path)
+        return FileAccessRead(None, tuple(FileIdentity(identity.binding, path) for path in self.paths
+            if PurePosixPath(path).parent == target.parent and PurePosixPath(path).stem == target.stem), None)
 
     async def metadata(self, identity, *, timeout_s, stop):
         self.metadata_paths.append(identity.path)
@@ -283,10 +291,11 @@ async def test_pair_scan_handles_lrf_before_mp4_without_changing_main_cursor():
     assert page["cursor"] is None
     assert page["next_cursor"] == DirectoryCursor(BINDING, (ROOT,), 0, LRF).as_json()
     assert [(item["identity"], item["paired_identity"]) for item in page["entries"]] == [(LRF, MP4)]
-    assert len(fs.directory_calls) > 2
+    assert len(fs.directory_calls) == 1
+    assert [item.path for item in fs.family_calls] == [LRF]
     assert fs.metadata_paths == [LRF]
     assert all(call.batch == 1 for call in fs.directory_calls)
-    assert fs.directory_calls[0].cursor is None and fs.directory_calls[1].cursor is None
+    assert fs.directory_calls[0].cursor is None
     _validate(first)
 
 
@@ -304,7 +313,8 @@ async def test_pair_scan_handles_mp4_before_lrf_on_later_primary_page():
     second_page = _page(second)
     assert [(item["identity"], item["paired_identity"]) for item in second_page["entries"]] == [(preview, video)]
     assert second_page["cursor"] == first_page["next_cursor"]
-    assert len(fs.directory_calls) >= 3
+    assert len(fs.directory_calls) == 2
+    assert [item.path for item in fs.family_calls] == [preview]
 
 
 @pytest.mark.asyncio
@@ -468,15 +478,15 @@ async def test_main_directory_failure_does_not_become_a_final_empty_page():
 
 
 @pytest.mark.asyncio
-async def test_call_diagnostics_are_capped_but_total_count_is_exact():
+async def test_pair_diagnostics_and_calls_stay_bounded_with_200_unrelated_files():
     paths = [LRF, MP4] + [ROOT + f"/zz/{index:04}.tmp" for index in range(200)]
     fs = Filesystem(paths)
     result = await _list(fs, context=_natural(), batch=1)
     data = _evidence(result)
 
-    assert len(data["calls"]) == 128
-    assert data["call_count"] > 200
-    assert data["call_count"] == len(fs.directory_calls) + len(fs.metadata_paths)
+    assert data["call_count"] == len(data["calls"]) == 3
+    assert data["call_count"] == len(fs.directory_calls) + len(fs.family_calls) + len(fs.metadata_paths)
+    assert [entry["identity"] for entry in _page(result)["entries"]] == [LRF]
 
 
 @pytest.mark.asyncio

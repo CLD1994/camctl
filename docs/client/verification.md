@@ -2,6 +2,54 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 预览失败身份与原始报告复核（2026-10-29）
+
+客户端对 `preview_missing`、`preview_unconfirmed` 使用详情中的原片身份区分逐项失败，单份报告与跨报告历史沿同一规则去重；继续拒绝同一原片重复失败、错误来源及错误产物类别，兼容旧来源级预览汇总。
+
+Linux 开发容器、Node.js 24.22.1 中，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/reports.test.ts --maxWorkers=2`，454 项通过，退出 0；`npm run typecheck` 退出 0。原样读取用户报告 114、118，通过实际 `parseReport` 校验文件名、原字节 SHA-256、Schema 和关联，两份分别自校验并通过双向历史检查。没有修改报告字节或客户端数据库。
+
+日志及诊断回放入口为 `tmp/adb-preview-client-unit.log`、`tmp/adb-preview-client-typecheck.log`、`tmp/adb-preview-report-replay.ts` 和 `tmp/adb-preview-report-replay.log`。本项未运行集成测试、生产构建、浏览器或实际数据库导入；解析与历史校验通过不替代完整导入事务验收。配套生产及状态库验证边界见[ADB 结果读取验证](../camctl/verification.md#adb-结果扫描与预览失败分类2026-10-29)。
+
+## 用户测试部署包构建（2026-10-29）
+
+用户要求制作交付包后，在独立源码快照中使用 Node.js 24.22.1、npm 11.21.1 执行 `npm ci --engine-strict --no-audit --no-fund` 和 `npm run build`，均退出 0；后者包含 TypeScript 类型检查和 Vite 生产构建。保留 npm 的 esbuild 安装脚本提示及 Vite 大 chunk 提示，未放宽构建配置。生成四个网页产物，客户端交付还包含源码、锁文件、Node.js 启动和 Docker Compose 材料。
+
+打包时补齐 Dockerfile 构建与运行阶段对 `protocol/errors/workflow-codes.json` 的复制，修复提交为 `77f43729`；Sol 静态评审无阻断。实际编译基线为 `179e6bee`，客户端编译输入未因该 Docker 复制修复变化；最终 96 个客户端源文件逐字节核对交付提交，四个构建文件单独保存摘要。配套能力说明由本包 camctl 的实际驱动导出，快门为规范分数字符串。
+
+ZIP 与 tar.gz 位于 `.local/delivery/camctl-user-test-20261029-77f43729.*`，包含预构建客户端、camctl wheel、锁定依赖、C 源码、新目录安装脚本和操作说明。116 个载荷文件的压缩包内容及摘要核对通过；内部 `SHA256SUMS` 与外部压缩包摘要分别提供。构建与归档原始收据保存在 `.local/delivery/camctl-user-test-20261029-179e6bee/receipts/`。
+
+本项仅完成用户交付所需构建和打包检查，未运行单元或软件集成测试、客户端服务、浏览器、Docker 镜像构建或容器，也未执行用户目标机安装。安装脚本仅通过语法、帮助入口与静态审查；相机工具须由目标机提供匹配架构的版本，未随包交付。
+
+## Hasselblad 快门分数字符串同步（2026-10-29）
+
+参数契约采用[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#快门档位与分数字符串)。`23a7a7c5` 将客户端有限照片样例的三个短快门改为字符串 `const`，并同步对象分支恢复、预设保存与重开、应用到独立草稿及计划导出的现有断言；通用精确数字覆盖保持。样例不维护设备的完整快门目录，实际选项继续来自 camctl 导出的能力说明。
+
+静态核对从能力加载、字符串选项和表单写入，到预设保存、计划校验、JSON 导出及报告展示的实际生产调用：现有通用逻辑保留字符串原值，校验不转换类型，未发现需要增加的 Hasselblad 专属生产逻辑。Sol 对三个变更文件及其生产接线的只读评审无阻断，`git diff --check` 通过。
+
+未运行客户端代码、单元、集成、类型检查、构建或浏览器，也未启动服务、操作设备或改写已有客户端数据。因此本项只有静态核对，预设重开和导出等实际运行结果仍待验证。新能力说明来自独立真机实例 `fraction-shutter/device-capabilities.json`；主机四种来源／格式的真实结果见[专项真机记录](../camctl/hasselblad-real-device-verification-2026-10-28.md#快门分数字符串的统一接入)，不计作客户端验证。
+
+## MP4 类型缺失时的预览（2026-10-26）
+
+Windows、Node.js 24.22.1 中，四项新增用例先在原实现复现 MP4 类型缺失或为通用二进制类型时无法取得查看类型、按交付名称识别失败及产物归入其他文件的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/media.test.ts tests/unit/result-model.test.ts --maxWorkers=2`，两个单元文件的 44 项全部通过，退出 0。覆盖原始名称与已关联交付名称、扩展名大小写、明确类型优先、扩展名后的额外后缀及未关联文件的读取边界。`npm run build` 完成类型检查与生产构建，退出 0，保留既有主包超过 500 kB 的提示。
+
+设置 `CAMCTL_TEST_BROWSER_CHANNEL=chrome` 后，执行 `node node_modules/vitest/vitest.mjs run tests/integration/browser-media-download.test.ts tests/integration/media.test.ts --maxWorkers=1`，两个集成文件的 17 项全部通过，退出 0。其中 13 项使用系统 Chrome；新增 MP4 用例通过真实报告导入、文件核验、视频播放与进度、HTTP 范围读取及完整原文件下载，核对报告原类型保持不变。另四项使用与图片名称一致的 PNG 夹具，核对媒体先到或报告先到、明确类型与未知类型、文件恢复及不可用状态。既有 LRF、OSV、图片与其他文件的播放、下载、核验前拒绝读取及解码失败处理同时通过。
+
+测试使用独立临时目录与项目生成的媒体夹具，未在用户原始 MP4 上执行播放复测，也未运行完整客户端测试套件。日志为 `tmp/mp4-preview-red.log`、`tmp/mp4-preview-unit.log`、`tmp/mp4-preview-build.log` 和 `tmp/mp4-preview-integration.log`。
+
+## 计划记录分页与草稿编辑反馈（2026-10-26）
+
+Windows、Node.js 24.22.1 中，保存时机和编辑器静态渲染用例先复现自动保存等待过短、在途请求结束立即续存新输入，以及正常保存详情和首次校验汇总常驻的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2`，76 个单元文件的 3314 项全部通过，退出 0。覆盖记录分页和指定记录所在页、连续输入重计时、自动保存期间的新修改、显式完成全部保存、失败与冲突恢复，以及正常保存反馈和恢复操作入口。
+
+`npm run build` 完成类型检查与生产构建，退出 0，保留既有主包超过 500 kB 的提示。页面集成用例更新了导出检查触发时机、保存等待和反馈预期；本项未执行集成测试或浏览器自动化，因此没有新增浏览器滚动位置和像素布局的运行证据。未启动服务或改写日常数据。完整日志为 `tmp/client-records-editor-unit.log` 和 `tmp/client-records-editor-build.log`。
+
+## 默认取回的产物排除项（2026-10-26）
+
+Windows、Node.js 24.22.1 中，新增用例先在原实现复现计划范围外产物及预览进入排除列表、列表长度被直接表述为跳过数量的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/obtain.test.ts tests/unit/builtin-obtain-fields.test.ts tests/unit/web-editing.test.ts tests/unit/result-model.test.ts --maxWorkers=2`，四个单元文件的 116 项全部通过，退出 0。
+
+覆盖计划与动作默认取回、其他计划交付同一来源产物、当前计划仅取回其他来源、本地只有预览、来源明细尚未到达、原片与修复成品分别排除、重复交付去重、可读取性核对失败及精确预览取回。草稿参数的静态渲染用例确认排除项数量与默认范围说明，并核对显示过程保持已保存参数。
+
+`npm run build` 完成类型检查与生产构建，退出 0，保留既有主包超过 500 kB 的提示。`browser-media` 中相关文案断言随界面更新；本项未运行集成测试或浏览器自动化测试，未改写当前服务的草稿和媒体数据。
+
 ## 自动预览名称与用户动作序号（2026-10-26）
 
 Windows、Node.js 24.22.1 和系统 Chrome 中，`automatic-previews`、`validation-presentation`、`preview-renaming`、`preview-current-state`、`preview-editor`、`preview-reload`、`web-editing` 七个单元文件的 273 项通过，`automatic-previews` 集成文件的 76 项通过。覆盖源动作改名后派生名称与引用同步、重名及 128 字符边界、能力不可用、无效名称保留，以及多个来源消除名称冲突后保存、重开、复制和直接导出。

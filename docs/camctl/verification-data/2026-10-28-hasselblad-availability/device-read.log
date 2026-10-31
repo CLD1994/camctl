@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-hb-spec-gsHiLJ9d/env/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-hb-spec-gsHiLJ9d/repo/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 7 items
+
+apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_partial_or_replaced_content_is_rejected_before_session[II*\x00fixed camera original conten] PASSED [ 14%]
+apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_partial_or_replaced_content_is_rejected_before_session[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx] PASSED [ 28%]
+apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_original_binding_and_serial_fail_before_download[missing] PASSED [ 42%]
+apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_original_binding_and_serial_fail_before_download[mismatch] PASSED [ 57%]
+apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_original_binding_and_serial_fail_before_download[serial] PASSED [ 71%]
+apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_real_timeout_or_cancel_waits_for_process_exit_before_removing_partial[False] PASSED [ 85%]
+apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_real_timeout_or_cancel_waits_for_process_exit_before_removing_partial[True] PASSED [100%]
+
+============================== 7 passed in 0.84s ===============================
