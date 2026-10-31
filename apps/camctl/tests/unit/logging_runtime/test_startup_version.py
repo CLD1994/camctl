@@ -15,6 +15,7 @@ from camctl import version
 from camctl.logging_runtime.events import event_logging, log_context
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel
+from camctl.logging_runtime import startup
 from camctl.logging_runtime.startup import record_startup
 
 
@@ -110,4 +111,44 @@ def test_failed_submission_uses_fallback_without_stopping_caller(monkeypatch):
     lines = []
     with event_logging(channel, fallback=lines.append), log_context(command_name="run"):
         record_startup()
-    assert len(lines) == 1 and json.loads(lines[0])["version"] == "7.8.9"
+    assert len(lines) == 2
+    error, started = map(json.loads, lines)
+    assert error["level"] == "ERROR"
+    assert error["exception"]["type"] == "builtins.RuntimeError"
+    assert error["exception"]["message"] == "unavailable"
+    assert error["exception"]["traceback"]
+    assert started["version"] == "7.8.9"
+
+
+def test_startup_encoding_failure_reports_original_exception(monkeypatch):
+    monkeypatch.setattr(version.metadata, "version", lambda name: "7.8.9")
+    def failed_encoding(level, payload):
+        raise ValueError("encoding unavailable")
+    monkeypatch.setattr(startup, "encode_record", failed_encoding)
+    lines = []
+    with event_logging(None, fallback=lines.append), log_context(command_name="run"):
+        record_startup()
+    assert len(lines) == 1
+    error = json.loads(lines[0])
+    assert error["level"] == "ERROR"
+    assert error["exception"]["type"] == "builtins.ValueError"
+    assert error["exception"]["message"] == "encoding unavailable"
+    assert error["exception"]["traceback"]
+
+
+def test_metadata_diagnostic_submission_failure_keeps_exception_context(monkeypatch):
+    def missing(name):
+        raise PackageNotFoundError(name)
+    monkeypatch.setattr(version.metadata, "version", missing)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    channel.slog.side_effect = OSError("diagnostic unavailable")
+    lines = []
+    with event_logging(channel, fallback=lines.append), log_context(command_name="run"):
+        record_startup()
+    assert len(lines) == 1
+    error = json.loads(lines[0])
+    assert error["level"] == "ERROR"
+    assert error["exception"]["type"] == "builtins.OSError"
+    assert error["exception"]["message"] == "diagnostic unavailable"
+    assert "PackageNotFoundError" in error["exception"]["context"]["type"]
+    assert json.loads(channel.submit.call_args.args[0].message)["version"] is None

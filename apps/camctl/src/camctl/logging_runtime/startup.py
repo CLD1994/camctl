@@ -1,5 +1,6 @@
 """在命令日志上下文中交付启动事实。"""
 
+import json
 import sys
 
 from camctl.logging_runtime.events import current_logging_context
@@ -21,6 +22,20 @@ def _fallback(context, message):
         pass  # 诊断通道失效不改变业务结果。
 
 
+def _delivery_failed(context, error, event):
+    try:
+        # 在原异常处理上下文中冻结异常图，不重复使用失败的日志通道或编码器。
+        diagnostic = exception_diagnostic(error)
+        message = json.dumps({"level": "ERROR", "stage": "command", "event": event,
+                              "exception": diagnostic}, ensure_ascii=False,
+                             separators=(",", ":"), default=str)
+    except Exception as diagnostic_error:
+        message = json.dumps({"level": "ERROR", "stage": "command", "event": event,
+                              "exception_type": type(error).__name__,
+                              "diagnostic_error_type": type(diagnostic_error).__name__})
+    _fallback(context, message)
+
+
 def record_startup():
     context = current_logging_context()
     try:
@@ -37,13 +52,8 @@ def record_startup():
             else:
                 context.channel.slog(LogRecord(LogLevel.ERROR, diagnostic,
                                                fallback=context.fallback, structured=True))
-        except Exception:
-            # 诊断自身不可用时仍尝试交付原错误事实。
-            try:
-                detail = repr(error)
-            except Exception:
-                detail = type(error).__name__
-            _fallback(context, f"无法读取 camctl 发行版本: {detail}")
+        except Exception as delivery_error:
+            _delivery_failed(context, delivery_error, "version_diagnostic_failed")
     message = None
     try:
         message = encode_record(LogLevel.INFO, {
@@ -55,7 +65,7 @@ def record_startup():
             _fallback(context, message)
         else:
             context.channel.submit(record)
-    except Exception:
-        # 启动辅助记录不能阻挡业务及必要收场。
+    except Exception as delivery_error:
+        _delivery_failed(context, delivery_error, "startup_delivery_failed")
         if message is not None:
             _fallback(context, message)

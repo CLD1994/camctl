@@ -546,6 +546,7 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
     e = host_logger_init(&h->logger, &h->config);
     if (e)
         goto pipe;
+    host_log(&h->logger, "camctl_host version=%s", CAMCTL_HOST_VERSION);
     e = host_diagnostic_init(&h->diagnostics, &h->config, &h->logger, &h->claim_mutex,
                              h->wake[1], h->children);
     if (e)
@@ -572,7 +573,6 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
     }
     instance = h;
     registrations.initialized = true;
-    host_log(&h->logger, "camctl_host version=%s", CAMCTL_HOST_VERSION);
     pthread_mutex_unlock(&instance_mutex);
     return 0;
 callback_cond:
