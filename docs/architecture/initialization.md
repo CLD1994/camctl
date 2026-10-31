@@ -4,6 +4,8 @@
 
 本专题定义首次部署建立运行目录和初始状态库，以及显式核对已有部署的方式。初始化由用户或部署人员执行，主程序的日常调用仍使用 `run` / `submit`。已有状态库需要更换交接目录时，按[目录切换条件](configuration.md#文件目录的绑定与变更)处理，不迁移文件。
 
+已有部署的软件更新由[自动迁移与失败恢复](versioning-and-updates.md#停机离线更新-python-包)负责；更新器在副本上执行已登记的迁移步骤，持有原库锁期间不另行调用会争夺同一锁的初始化进程。
+
 从配置到客户端报告确认的完整步骤与可用输入文件见[首次部署与联调样例](deployment-example.md)。
 
 **阅读提示：** 这是主机首次部署入口。先确认依赖和配置，再初始化目录与状态库；已有业务数据的环境按表中分类处理，完整操作步骤见[部署联调样例](deployment-example.md)。
@@ -27,7 +29,7 @@ Python 实际链接的 SQLite 必须满足[统一运行库要求](../camctl/sqli
 ## 部署入口
 
 ```text
-camctl init [--upgrade-software-recovery | --upgrade-capture-preparation | --upgrade-output-scope | --upgrade-photo-source | --upgrade-preview-selection] [--config <path>]
+camctl init [--upgrade-software-recovery | --upgrade-capture-preparation | --upgrade-output-scope | --upgrade-photo-source | --upgrade-preview-selection | --upgrade-device-file-batches] [--config <path>]
 ```
 
 `init` 使用[本地配置的默认值与覆盖规则](configuration.md#本地配置的加载与更新)。没有配置文件时可直接使用默认值初始化，默认状态库为 `$HOME/.camctl/state.db`；指定 `--config` 时使用对应的生效路径。初始化不生成或覆盖配置文件。
