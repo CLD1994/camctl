@@ -1,0 +1,1388 @@
+{
+  "schema_version": 1,
+  "stage": 24,
+  "artifact_state": "四轮运行证据与维护源码检查收据已封存，待独立复核",
+  "archive_base": "cfb2ae6b433e6728e730ddccd8af3df52b6d8b27",
+  "worktree": {
+    "path": "/tmp/camctl-merge-implement-20261031/stage24-evidence",
+    "branch": "evidence/stage24-implement-merge-20261031",
+    "base_commit": "cfb2ae6b433e6728e730ddccd8af3df52b6d8b27"
+  },
+  "scope": "本 worktree 仅整理与归档证据材料；没有在此 worktree 运行测试或修改生产代码。测试数据来自各轮各自固定源码，按来源分别报告。",
+  "merge": {
+    "merge_commit": "594673ebb9aedd0ed4ab51df8001f1b623ae92c7",
+    "parents": [
+      "e22ac88d471e735a6e7b8c0787124a7eb0c9125e",
+      "d72c1135a2ad65bd98491100c583539ab198f30d"
+    ],
+    "parent_roles": {
+      "ours": "e22ac88d471e735a6e7b8c0787124a7eb0c9125e",
+      "theirs": "d72c1135a2ad65bd98491100c583539ab198f30d"
+    },
+    "merge_base": "27713c14dbdf6dda445e3dd123745ba11d66a9cc",
+    "conflict_path_count": 46,
+    "production_conflict_path_count": 7,
+    "conflict_list_member": "merge/conflicts.txt",
+    "resolution_map_member": "merge/resolutions.json",
+    "automatic_merge_variable_scope_repair": {
+      "reference": "971",
+      "repair_commit": "783f84925f2a0c77c93d2ce46d1929968f7a1631",
+      "classification": "只修复本次合并自动合并引入的变量作用域错误，不表示旧生产版本另有该缺陷或此次修复了旧生产缺陷。",
+      "attribution": "按根协调者交接；七个冲突生产路径在 resolutions.json 中由该修复提交负责。"
+    },
+    "code_review": {
+      "reviewer": "Sol",
+      "mode": "只读审查",
+      "review_is_execution_or_test": false
+    },
+    "resolution_map_entry_count": 43,
+    "conflict_paths_without_resolution_map_entry": [
+      "apps/camctl/tests/integration/capture/test_recording_start_query_cancel.py",
+      "docs/camctl/verification.md",
+      "tests/integration/_wsl_host_demo.py"
+    ],
+    "resolution_map_note": "conflicts.txt 列46个路径，resolutions.json 记录43条。上列3个冲突路径没有对应映射记录；本清单不推断其实际处理方式。"
+  },
+  "first_completed_regression": {
+    "source_commit": "594673ebb9aedd0ed4ab51df8001f1b623ae92c7",
+    "runner_summary_member": "regression/summary.json",
+    "runner_plan_member": "regression/plan.json",
+    "raw_command_member": "runner/command.json",
+    "jobs": 4,
+    "selection_scope": "all",
+    "selected_target_count": 43,
+    "nodes": 874,
+    "passed_nodes": 467,
+    "failed_nodes": 407,
+    "setup_error_nodes_not_entering_call": 8,
+    "call_phase_failed_nodes": 399,
+    "teardown_failed_nodes": 0,
+    "wall_seconds": 324.3483649989994,
+    "exit_code": 1,
+    "status": "finished",
+    "task_counts": {
+      "camctl/history": {
+        "passed": 9
+      },
+      "camctl/bootstrap": {
+        "failed": 96,
+        "passed": 43
+      },
+      "camctl/capture": {
+        "passed": 296,
+        "failed": 288
+      },
+      "camctl/outputs": {
+        "failed": 14
+      },
+      "root/test_hasselblad_photo_roundtrip": {
+        "failed": 2
+      },
+      "camctl/reporting": {
+        "passed": 110
+      },
+      "root/test_camctl_host_deployment": {
+        "passed": 5
+      },
+      "camctl/host_files": {
+        "passed": 3
+      },
+      "camctl/logging_runtime": {
+        "failed": 7,
+        "passed": 1
+      }
+    },
+    "timing_csv": {
+      "path": "regression-594-node-timings.csv.gz",
+      "rows": 874,
+      "sha256": "fb09a63785c5e6ca98a4dc85eb18e0b3a222c9c36282c7dc17b4fa8a45ff2f38",
+      "size_bytes": 49928,
+      "nodeid_rule": "camctl 组件节点补 apps/camctl/ 前缀，根 tests/integration 节点保留原路径。",
+      "timing_rule": "分别保留 setup/call/teardown 时长与 total；setup error 单列，不计作 call/function 失败。"
+    }
+  },
+  "limits_and_nonclaims": [
+    "594673e 首轮选择43 targets、874节点，467通过、407失败，其中8个在setup失败且未进入call、399个call阶段失败；不是全量集成回归。",
+    "cfb2ae6 后续四组件选择31 targets、747节点，649通过、98在call阶段失败；同身份交叉核对中307个原失败节点后来通过、98个仍失败，不能跨源码拼作一次全绿。",
+    "9806747 部署验证只运行根目录 host deployment 5个实例并全部通过；6da494e 维护 CLI 烟测只运行同一公开测试函数的2个 init/run 实例并通过。两者范围和源码各自独立，不合并成7个共同通过或替代完整部署更新恢复验收。",
+    "未运行 Node 测试；16项用户暂缓和原两百万字节的 Python 临时峰值增量判据未选；后续98个失败未逐因核实，不能统一归因为生产缺陷。",
+    "本归档不包含完整源码快照、逐文件指纹清单、node_modules、wheel或临时数据库目录。各 runner summary 的聚合 snapshot_sha256 是原始字段，不是逐文件指纹清单。",
+    "已批准删除的两个 unknown-start-query 函数和 test_recording_start_query_cancel.py 不恢复；公开仓储3例继续承担已议定覆盖。",
+    "HBF host case 的两份输入事实保留；host 到达核实调用后的 observer 失败点，输入记录为 main_readonly=false、query_only=0、writer_closed=true，未调用 delegate/real_verify，后续照片发布/取回断言未执行。device case 仍是旧 complete-commit 故障，未命中新 deferred 路径；两者不是同一种只读结论。",
+    "四个 launcher 均 finished、errors 为空、remaining_pids 为空且 removal.ok=true；first/followup 的被控 pytest exit_code=1，deployment/maintenance 为0。"
+  ],
+  "missing_requested_inputs": [],
+  "payload": {
+    "tar_path": "diagnostics.tar.gz",
+    "member_count": 168,
+    "size_bytes": 567309,
+    "sha256": "1e81bde5d3d3a8bfbdbb027f2513d3927f4c3f294f237573908d1580fd75d41a",
+    "members": [
+      {
+        "member": "cancellation/cancel-staging-bootstrap-retest.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/cancel-staging-bootstrap-retest.log",
+        "size_bytes": 117,
+        "sha256": "8f474404c267ff374c99e1d1cbf5c8ed52daa915319db8091485b5f1ce4f844b"
+      },
+      {
+        "member": "cancellation/cancel-staging-bootstrap.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/cancel-staging-bootstrap.log",
+        "size_bytes": 4861,
+        "sha256": "d988231010aa35fcb440a5d05542b55036eed7e61d53f58d8bec7cb1ef62e3bc"
+      },
+      {
+        "member": "cancellation/cancel-staging-capture.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/cancel-staging-capture.log",
+        "size_bytes": 117,
+        "sha256": "f0b0606001f3ab543e6fdce4054c97b446a2d21643c77dd8863f18f6f8b447c9"
+      },
+      {
+        "member": "diagnostics/read-diagnostics-41a67177.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/read-diagnostics-41a67177.log",
+        "size_bytes": 6318,
+        "sha256": "f0a0ec85bbe09f702df58133fd0cf262ba581f2b27891475cb50e4f9073bfd05"
+      },
+      {
+        "member": "diagnostics/read-diagnostics-41a67177.xml",
+        "source_path": "/tmp/camctl-merge-implement-20261031/read-diagnostics-41a67177.xml",
+        "size_bytes": 16091,
+        "sha256": "e9a18328702273cc121cb72234d95e3c5da901cf1062f4898980ac441ca776d6"
+      },
+      {
+        "member": "diagnostics/read-diagnostics-e4d98da8.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/read-diagnostics-e4d98da8.log",
+        "size_bytes": 101239,
+        "sha256": "16f8126d8e2597941dcb41f6c4dabc319d972c8d117423765d50a4938080d95c"
+      },
+      {
+        "member": "diagnostics/read-diagnostics-e4d98da8.xml",
+        "source_path": "/tmp/camctl-merge-implement-20261031/read-diagnostics-e4d98da8.xml",
+        "size_bytes": 111012,
+        "sha256": "db5aea67496ae24aa96ee7242a9f226fadd4d0c9e5b5d84aacf8b0790cba9321"
+      },
+      {
+        "member": "merge/conflicts.txt",
+        "source_path": "/tmp/camctl-merge-implement-20261031/conflicts.txt",
+        "size_bytes": 2922,
+        "sha256": "09dec0687adcd6fbd099ded173d22ccf113ef27413e25d04961445509d43e5d1"
+      },
+      {
+        "member": "merge/merge.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/merge.log",
+        "size_bytes": 10439,
+        "sha256": "8be71287c9a552d50538daf5383d2a554d877c75921637c60b0a9a4169941359"
+      },
+      {
+        "member": "merge/preview.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/preview.log",
+        "size_bytes": 25956,
+        "sha256": "ec6b86d8eec0c3b2047eae8d7deeccf1d5c1b6beb17e107c52f53ce02f588404"
+      },
+      {
+        "member": "merge/resolutions.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/resolutions.json",
+        "size_bytes": 5717,
+        "sha256": "42efa5080f1d40ff3c5392d5248553ee9d2e4c7a62cc540cee5aa20297b0562f"
+      },
+      {
+        "member": "merge/source.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/source.json",
+        "size_bytes": 166,
+        "sha256": "388b6f99033052136fad46d9dbf59b7677e10d3291f92995766aaed4361d9ad4"
+      },
+      {
+        "member": "regression/plan.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/plan.json",
+        "size_bytes": 5232,
+        "sha256": "fcaca793b5d3928caaadc83db31fca01257e7d464d0cd539ba4e247dfc3a28a6"
+      },
+      {
+        "member": "regression/summary.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/summary.json",
+        "size_bytes": 40708,
+        "sha256": "befb6dd08a41f4b67a6467fda6006290d4d0385f4cd409ef9dd5e3b7b2ceb4dd"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/cases.json",
+        "size_bytes": 4845,
+        "sha256": "e6f4b3673f7d09713b4d93f6069648fc6e8741deb8bc7446d1e26821428ea972"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/command.json",
+        "size_bytes": 3161,
+        "sha256": "0400feff723ce0cd5edddba9c32ce6f8705a70d5f19c5be723c36a14d4064693"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/events.jsonl",
+        "size_bytes": 16846,
+        "sha256": "100a6e8752a933ffdfef0a612be3a736b5207392c489e1776fcf6228312ec59e"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/inventory.json",
+        "size_bytes": 1036,
+        "sha256": "85286e903c5ea3918f321662c10f4352ddd33be28b9cf40f99bb2811031ddb56"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/output.log",
+        "size_bytes": 3102,
+        "sha256": "d34d9b09e150f85c69a76406c56e6916b948a80d786b2f22a63b690c4cf7feb6"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/preparations.json",
+        "size_bytes": 537,
+        "sha256": "590368f21db08d56103d15082144bb9cd82b2b6966458f514b71bf937de77f01"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/progress.json",
+        "size_bytes": 220,
+        "sha256": "60d23d1cbbde5b91365fc4fd09004ecc0b721f785dc5cc8e88d70e3afb6de714"
+      },
+      {
+        "member": "regression/tasks/001-camctl-history/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/001-camctl-history/artifacts/result.json",
+        "size_bytes": 2892,
+        "sha256": "161006bbd5468577a02b4ede26578a98c9e6833d5c0584ab19e18809f6495860"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/cases.json",
+        "size_bytes": 79167,
+        "sha256": "79ec215071fa394dfc0bcc0ea12e58cd0fcf9535f43885b588b0ab951969859c"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/command.json",
+        "size_bytes": 4573,
+        "sha256": "bca7648f9548e6d0196d96b4f05f601099cdf0218e78c58ad661dacc1c6e0cb7"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/events.jsonl",
+        "size_bytes": 279600,
+        "sha256": "289c1c6975efbdf0d163d8451aaaf484f6e76c8b5699fa7690762012a4ffded4"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/inventory.json",
+        "size_bytes": 20279,
+        "sha256": "daf30da7819fdcfe011c9510bc2151df5eab0d7fe3a9d18d6074d603aad9de98"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/output.log",
+        "size_bytes": 520145,
+        "sha256": "4255146436a097a7f4f90ff03365aa60a119ac2dbe31229997162ea0b760c097"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/preparations.json",
+        "size_bytes": 541,
+        "sha256": "4c84d7453ce108c2aab4ce0f9c8af1a19bffbdcc7f14479a7ba6834a90751c76"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/progress.json",
+        "size_bytes": 241,
+        "sha256": "887173b5194733b8c7ab53c255abdba2ad451ff8819c71379f2425512662eaf8"
+      },
+      {
+        "member": "regression/tasks/002-camctl-bootstrap/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/002-camctl-bootstrap/artifacts/result.json",
+        "size_bytes": 4325,
+        "sha256": "cf63d4efc2d758e2ce13499f5dd3a9b3acd6c8ceb660ec770d62f5118158d8f4"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/cases.json",
+        "size_bytes": 335792,
+        "sha256": "cb9d7a1117c6e1a56c6e76bb65e4ac56501dd7d08c256dc8a014644024b6a1ff"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/command.json",
+        "size_bytes": 6079,
+        "sha256": "abba5d5a97669d5225873fdd423730b45795d6502c6dac7747d2b684d1f9a308"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/events.jsonl",
+        "size_bytes": 1191350,
+        "sha256": "0270dbeda5706cf4e6d9b51af8e6f60ec7095ea4eafa7ed527d03fe6db446873"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/inventory.json",
+        "size_bytes": 87778,
+        "sha256": "072f72862dd1e025fe3799deaf659b3a49d96f9fc0392374682e2f6cdeb0d0e1"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/output.log",
+        "size_bytes": 1476603,
+        "sha256": "09ca213a8e3fad2b15c918966b46edc5d37e1fac0a26901caa11e30ec7dae8a4"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/preparations.json",
+        "size_bytes": 536,
+        "sha256": "560d141caa321ff76b0f9412da458c275956977747b40569ca44df96ee183828"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/progress.json",
+        "size_bytes": 244,
+        "sha256": "e73e2d35205570f5b24c10fb811b0cbbb0da1e853166c5e9e853e8d1d66680d0"
+      },
+      {
+        "member": "regression/tasks/003-camctl-capture/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/003-camctl-capture/artifacts/result.json",
+        "size_bytes": 5837,
+        "sha256": "13821f56a973eb3b19589ef98e0792eb071e776e275331e7ecd11dc33f66ce0d"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/cases.json",
+        "size_bytes": 6903,
+        "sha256": "2edf74ec8fd5c6de32bdb76de39f83d090ca03bf5146826532dcc202409ecd22"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/command.json",
+        "size_bytes": 3168,
+        "sha256": "9eeca6ee3a4aa8ab96972018050aed865daa1eaef5306b3ec7a556908985a203"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/events.jsonl",
+        "size_bytes": 22685,
+        "sha256": "112d865e3f5e7ea329b8acfaea9fd5a232a35cf9ddc6798adbe7284f9a398ba4"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/inventory.json",
+        "size_bytes": 1709,
+        "sha256": "eed8af1ab9973cdebf631769c56744c4a7fdf30467e460c8c1da0a24c48373a7"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/output.log",
+        "size_bytes": 115673,
+        "sha256": "6fba91f07329d1ed8353565b5a8fe70af99704b41961f06653388480d5ceccd8"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/preparations.json",
+        "size_bytes": 537,
+        "sha256": "3b3ba3a153547b864e1be9a0b94365c30349188e54cd73705a29d74f3022a448"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/progress.json",
+        "size_bytes": 223,
+        "sha256": "e5b00b4838440a4b512f995832790168f5abb8be69f918c9ba648fc0f9b0f622"
+      },
+      {
+        "member": "regression/tasks/004-camctl-outputs/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/004-camctl-outputs/artifacts/result.json",
+        "size_bytes": 2902,
+        "sha256": "01be133b4f46638400eebf994563af3be3e9720f97569a4854a4f615750b122c"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+        "size_bytes": 1143,
+        "sha256": "9a03f2567ae452b19eb3085efd92c543e02590e99160b210924b2317e2d6d442"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+        "size_bytes": 4431,
+        "sha256": "1c16cb24f66a8fc24b0fb61298575bfe59e9f88b3423dd6b5fc44292fbf6c8c1"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/events.jsonl",
+        "size_bytes": 5007,
+        "sha256": "ad22bb4693a1d31cfd755b0fa567c84b461a8f19c85f94e10acd72756535f9ea"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/inventory.json",
+        "size_bytes": 299,
+        "sha256": "716a843ae59cdba4a839b86da9dda05add8bd581dc2a9785ab1be44bb3023f62"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+        "size_bytes": 17411,
+        "sha256": "35046e1039bc1ad79c54fdc5ede992f8bd3af9937370e198cbefefb006d0d733"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/preparations.json",
+        "size_bytes": 1019,
+        "sha256": "c1ef9acfcb6c95657affe722a9b9b1230982141039e4973f29aeaf92b7fa9983"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/prepare.log",
+        "size_bytes": 184234,
+        "sha256": "cc70f999c58efd823f2109249c6f1bdf653b3571108cbe21f473fd3ca309f192"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/progress.json",
+        "size_bytes": 220,
+        "sha256": "a1c92a881eea83fbe64171ccdc62c6243694487f23b432abc345e4cf6b5dbc2c"
+      },
+      {
+        "member": "regression/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+        "size_bytes": 4147,
+        "sha256": "e85e81a7e284f31bff3a98c11cb53617218006b24b5e793b964f8526e2c438e5"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/cases.json",
+        "size_bytes": 59587,
+        "sha256": "4b0724e7a52813bd59ef09f1be16b961dfa843e3dc92862e1d84969a8baf3775"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/command.json",
+        "size_bytes": 4227,
+        "sha256": "675d4287905764f72b9bed16e59f3cf1b3b1fd9c3aeb9462664bf89813ee26d5"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/events.jsonl",
+        "size_bytes": 200603,
+        "sha256": "704e8094b708234aefaa8def9d2578c8eb16f7298f2dc141afa8de9988003d40"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/inventory.json",
+        "size_bytes": 13037,
+        "sha256": "a789ffa8b0c4fbc0ec0a2888f5c869bff431cbfc8252dc62b0f7269fc60b30ee"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/output.log",
+        "size_bytes": 41052,
+        "sha256": "16520259937c4e0e5927a1927888b2b31f36c868ce8c7664749be830fec1278a"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/preparations.json",
+        "size_bytes": 541,
+        "sha256": "3fc982d52bf3e5ad6751d47bfd04045eab00c0a407619f9d8004b1735a03ae70"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/progress.json",
+        "size_bytes": 224,
+        "sha256": "05cd67b0ac62b56bf6fc8bd6a32c47163b894d8a8481e262e1457785507e8c4b"
+      },
+      {
+        "member": "regression/tasks/006-camctl-reporting/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/006-camctl-reporting/artifacts/result.json",
+        "size_bytes": 3960,
+        "sha256": "7ef1b6b6d5bee7f814fe0cee915904578314e1aa3cd0b87d8dba7794cc2ce2b2"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/cases.json",
+        "size_bytes": 2702,
+        "sha256": "0cbdfeae2941edb3b6dac11075f88a71c8c14affbff90f83306459b8bfcca2ef"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/command.json",
+        "size_bytes": 3477,
+        "sha256": "4c38305f95463256fcc0272742b137e047a4dbc906562a1116090c8989826231"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/events.jsonl",
+        "size_bytes": 9886,
+        "sha256": "fb7fe7fd75e16aa19aa9baf88cfe1d4fe5b802c43602b8beb3fe49144e20a40a"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/inventory.json",
+        "size_bytes": 586,
+        "sha256": "9759c4be907ea17a81e3c5f439ff3dde0554c50aa16cc683e8541c7c121fe7ab"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/output.log",
+        "size_bytes": 1525,
+        "sha256": "3ee2e422005755b7fb5fdbe1fa3dcc8b7b27986e7c58a24dd9a575fd1ea3886d"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/preparations.json",
+        "size_bytes": 573,
+        "sha256": "26460bcc9ca3401ddf75ce4e81ade75c709da4b73f13d086ccda498be4526031"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/progress.json",
+        "size_bytes": 221,
+        "sha256": "a114d229d36e3f493d1f6437afec5150471136160604845cba824256a5e80d27"
+      },
+      {
+        "member": "regression/tasks/007-root-test_camctl_host_deployment/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/007-root-test_camctl_host_deployment/artifacts/result.json",
+        "size_bytes": 3198,
+        "sha256": "046616711ca0e600abb1cbaf07e89136c112fe569abae9346762e55c311e8550"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/cases.json",
+        "size_bytes": 1652,
+        "sha256": "b70d870a217c9d2561143cb1f29d65482e53f603a7ab00f4f53c54219d60412c"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/command.json",
+        "size_bytes": 3220,
+        "sha256": "748d4da00ddcddc2decfbe8c04fe91dd5a58e606e9c773b5612b8f98b95d33c8"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/events.jsonl",
+        "size_bytes": 6251,
+        "sha256": "6bec910a6b70b0e0a35aa2f71b5452080e395e45e8aeb50d2b70e507c698c99d"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/inventory.json",
+        "size_bytes": 360,
+        "sha256": "dab8e57c197610d474a838f6a08b5b47bb3b4fe8c1a398d60f6c56a1fd9f5ab6"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/output.log",
+        "size_bytes": 245,
+        "sha256": "f82e62b54675197c6456c4c1d4fc0d3e05c7f3ec380972de6e0b2cd463bd352c"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/preparations.json",
+        "size_bytes": 543,
+        "sha256": "6477e182ff05b7ae820507e5e1b12ef463f277349d7adb1ec005c6b023c1513e"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/progress.json",
+        "size_bytes": 221,
+        "sha256": "081e7540b3053ea59239d63f555fbc612fc33e8f65f3b4edf10b790a19bdbdab"
+      },
+      {
+        "member": "regression/tasks/008-camctl-host_files/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/008-camctl-host_files/artifacts/result.json",
+        "size_bytes": 2950,
+        "sha256": "9b8004362012322d8fd024ecd24803f4d548f0bd577b4033bc3e33f8b62fd31c"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/cases.json",
+        "size_bytes": 4462,
+        "sha256": "a2736a1ac921c63366f7f74450e95104f027e82c86152b48e34919346c8125d4"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/command.json",
+        "size_bytes": 3263,
+        "sha256": "da37992cd89ddaf2e13587d28f191682e3549f430049711e28c1918fb4bb46f9"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/events.jsonl",
+        "size_bytes": 16033,
+        "sha256": "48d9e1bf190eb7c57a60f422363cdf1c42cdb82174d254dbf058c3cb8d2edacb"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/inventory.json",
+        "size_bytes": 1054,
+        "sha256": "ad6a4be91c670b4592fd395efe94a21598059df5fda97660391cd1e3ab7099f1"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/output.log",
+        "size_bytes": 20523,
+        "sha256": "428ed702f826bfb23877f7ef45684d56329b1d50c384ff75866d87923cab29e6"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/preparations.json",
+        "size_bytes": 553,
+        "sha256": "0d5cf04343cbc8457c94ec185dfbb76f70c84c01f107159d742ec5c938f438f3"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/progress.json",
+        "size_bytes": 237,
+        "sha256": "0cf31a48c5a350b8ebe4807fc8854dfb88a841d2992fac95cc443051aafeca72"
+      },
+      {
+        "member": "regression/tasks/009-camctl-logging_runtime/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/009-camctl-logging_runtime/artifacts/result.json",
+        "size_bytes": 3005,
+        "sha256": "c15d4929418d64e5ad5b9f9a3ff7d9cb6253e81f9bdb246f272f0b8b2f57cda3"
+      },
+      {
+        "member": "runner/budget-launcher/launcher.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/budget-launcher/launcher.json",
+        "size_bytes": 10666,
+        "sha256": "7023865c603b61299714dac354443f6bfb149669b243197a519c91a19c40ee60"
+      },
+      {
+        "member": "runner/command.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/command.json",
+        "size_bytes": 8305,
+        "sha256": "01de1985312b67174fdd5d8e3fed0d8b262a8692117ad08f1505b7e3f2da6a39"
+      },
+      {
+        "member": "runner/entry.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/entry.log",
+        "size_bytes": 9308,
+        "sha256": "07c964141775af499739b30e4d5590c4c9c24763bc272ff77d536c38b3778bb2"
+      },
+      {
+        "member": "runner/exit.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/exit.json",
+        "size_bytes": 57,
+        "sha256": "bf14866522c28a82175578afa5f82aa806077a39f946580aece7f62fd81d880c"
+      },
+      {
+        "member": "runner/run.py",
+        "source_path": "/tmp/camctl-merge-implement-20261031/run.py",
+        "size_bytes": 565,
+        "sha256": "2d4f1640e66387df46cbc90e89f1b0699b0f2df5c5af6b3ec334a0148e4041bf"
+      },
+      {
+        "member": "deployment/budget-launcher/launcher.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/deployment-budget-launcher/launcher.json",
+        "size_bytes": 2594,
+        "sha256": "7c3b7186ae4dbe83cb2018d9ef30a08a864bda51dcf64658eb8569e9d5931f81"
+      },
+      {
+        "member": "deployment/command.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/deployment-command.json",
+        "size_bytes": 973,
+        "sha256": "4d94746f1227d60efdb5117d360ad74cb3ffd7696b528fd47dc4e34aee19f13b"
+      },
+      {
+        "member": "deployment/entry.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/deployment-entry.log",
+        "size_bytes": 1087,
+        "sha256": "94da88dc0700b68dbe55c97b00f0e65dc74a75a93bca7173829aafd82c58604f"
+      },
+      {
+        "member": "deployment/exit.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/deployment-exit.json",
+        "size_bytes": 56,
+        "sha256": "77087a324728ebb038656c7dcf0c41c9c3b7c49bcc3f3e7df8444d3b187c49d1"
+      },
+      {
+        "member": "deployment/regression/plan.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/plan.json",
+        "size_bytes": 310,
+        "sha256": "d51abddffbecea3285e795f52e698272749e8ba015afdc5182882ba124dab3be"
+      },
+      {
+        "member": "deployment/regression/summary.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/summary.json",
+        "size_bytes": 4599,
+        "sha256": "11db4ef8933c2e5302eba14da100ec05de6da9ffdc61a68261ad6e37cc027caa"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/cases.json",
+        "size_bytes": 2692,
+        "sha256": "ab6b0b9cbc41a41b1a9486b03d80e1ada4bea4fe667d923052e43a87dbd9a2f1"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/command.json",
+        "size_bytes": 3477,
+        "sha256": "b96736a6aa0234fcc3f2c38c230031757ffff1ee492178a0eabbdf08acf5fd66"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/events.jsonl",
+        "size_bytes": 9880,
+        "sha256": "01a61171dc748a18e94ef380fb5feb42d548e306e2afdca98e278417883eb19d"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/inventory.json",
+        "size_bytes": 586,
+        "sha256": "9759c4be907ea17a81e3c5f439ff3dde0554c50aa16cc683e8541c7c121fe7ab"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/output.log",
+        "size_bytes": 1650,
+        "sha256": "145c86a6880cd73eff8f84d6580f6e78d0d1cf7ecd977973025e300ceea6358f"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/preparations.json",
+        "size_bytes": 573,
+        "sha256": "879b5284639caa6b05a9c2d5da86ac45dd344941d0d8d4c63996b326700a63eb"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/progress.json",
+        "size_bytes": 221,
+        "sha256": "1e982a246aac261821eaf578353cba6ff89050115ee93c06b2755199043bc61f"
+      },
+      {
+        "member": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-deployment-20261031-98067474/tasks/001-root-test_camctl_host_deployment/artifacts/result.json",
+        "size_bytes": 3197,
+        "sha256": "57c9e61982dc58847f0220c17892e2d056966d69d7cb515ccc5dac87f0d3e4c1"
+      },
+      {
+        "member": "deployment/run.py",
+        "source_path": "/tmp/camctl-merge-implement-20261031/deployment-run.py",
+        "size_bytes": 570,
+        "sha256": "da4cb214346266f89830706da0bfe35b13f04ab3af11ae5d2ba05f3fac74703a"
+      },
+      {
+        "member": "followup/budget-launcher/launcher.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/followup-budget-launcher/launcher.json",
+        "size_bytes": 8221,
+        "sha256": "4ec274f95ba6876946cfcbaca0bafbc0a00c3522a604b68070a7e35381c6f2f1"
+      },
+      {
+        "member": "followup/command.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/followup-command.json",
+        "size_bytes": 6195,
+        "sha256": "63dfd8738c3b875dc1099650fb440c6d92335d6e7af90d20eb57dc0e96fb0a6b"
+      },
+      {
+        "member": "followup/entry.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/followup-entry.log",
+        "size_bytes": 4972,
+        "sha256": "a1182b3e66b30d1cf4b4dc0065b77e96108ccbdb353f5287c58d5a1e7b3b74b8"
+      },
+      {
+        "member": "followup/exit.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/followup-exit.json",
+        "size_bytes": 57,
+        "sha256": "ccc9f1a6fa293f7620afd12519383a40b9efc7246742de77afcfad6953eca68a"
+      },
+      {
+        "member": "followup/regression/plan.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/plan.json",
+        "size_bytes": 3232,
+        "sha256": "fc5075ef0b28504b0b5e9c1b980c1134620b372f624c4b87fb6ff17f3028656a"
+      },
+      {
+        "member": "followup/regression/summary.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/summary.json",
+        "size_bytes": 20889,
+        "sha256": "71976da1066ee8f7d17cf5d77f29d6eb458357ab2f75f1fcb148e195f0cdc0c4"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/cases.json",
+        "size_bytes": 79223,
+        "sha256": "5a46baa7aab57fdc208d5edaa33512974029f92cbf6eefce202a908c58fdfd6f"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/command.json",
+        "size_bytes": 4549,
+        "sha256": "aec65fa6e2c183da08e7cd5b5243bcd30234621e91e7ccbe2f6fc49ee2a8d78f"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/events.jsonl",
+        "size_bytes": 280132,
+        "sha256": "7393a796aafde87d77b272bf5280828c8eb60d66b2e197069b5ed8254025ed1c"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/inventory.json",
+        "size_bytes": 20279,
+        "sha256": "daf30da7819fdcfe011c9510bc2151df5eab0d7fe3a9d18d6074d603aad9de98"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/output.log",
+        "size_bytes": 377609,
+        "sha256": "026e247da2c0708c936152e4dbbca7e02aac4a0d5ab27dc86e3b289d782172fd"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/preparations.json",
+        "size_bytes": 537,
+        "sha256": "d23fe29947599dacee18c30149b3b12563ee406a0cc8dff8ad16b386daa5535b"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/progress.json",
+        "size_bytes": 241,
+        "sha256": "a5085ef21f251de10a54b5f47eebf56e45a2cbbf809d340eeecf3d7a657ec520"
+      },
+      {
+        "member": "followup/regression/tasks/001-camctl-bootstrap/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/001-camctl-bootstrap/artifacts/result.json",
+        "size_bytes": 4302,
+        "sha256": "b4e35799a96f91eff369364a5eb89a56f9fc4b0c4862402e8e95704778356c7b"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/cases.json",
+        "size_bytes": 336799,
+        "sha256": "4fffffb5e09c9cb40d9aadfdcc2387089cceeed37d1ad6a2b130261093d720a9"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/command.json",
+        "size_bytes": 6056,
+        "sha256": "cf960eff031c980e354c09a467e2eb27ee81aeb71cef15653b9ca53796c942fb"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/events.jsonl",
+        "size_bytes": 1195036,
+        "sha256": "c9bc7761a33c6a2b6b2b6a0fcf70e55b71bf9c94591337911476517ceca06713"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/inventory.json",
+        "size_bytes": 88028,
+        "sha256": "99bf06fc7d3ced533df3c0c71f81b11484437e703c9424777818e1d012f2e095"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/output.log",
+        "size_bytes": 327787,
+        "sha256": "bd768418563d808fadfcc312185b14dde740137bff08689854921d3297f16064"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/preparations.json",
+        "size_bytes": 533,
+        "sha256": "e904076cdbd572b5b380e0310d5848747db6d6cd46a20f4a841e9468c3aba836"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/progress.json",
+        "size_bytes": 243,
+        "sha256": "20a609f5da903a28fe5a6bbac36e3842fcc770e73843cec2efd04e5ec340e16b"
+      },
+      {
+        "member": "followup/regression/tasks/002-camctl-capture/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/002-camctl-capture/artifacts/result.json",
+        "size_bytes": 5813,
+        "sha256": "fef454a7b5af61fe54affbe437a8ff034a917009bffb5bb6ade5abc1ec29a233"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/cases.json",
+        "size_bytes": 7632,
+        "sha256": "539206e5b7b557357f33e129dc7c8be835b19d6511fcd8d22f83943cf7ee6bb4"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/command.json",
+        "size_bytes": 3144,
+        "sha256": "13aae1206c169095ed00a75a36998212e09714ac91b96b506232953d2d496d5d"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/events.jsonl",
+        "size_bytes": 26485,
+        "sha256": "99c73ae447484a06deff35b3936614f48d690a99744083ba575f56517f391861"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/inventory.json",
+        "size_bytes": 1709,
+        "sha256": "eed8af1ab9973cdebf631769c56744c4a7fdf30467e460c8c1da0a24c48373a7"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/output.log",
+        "size_bytes": 13942,
+        "sha256": "dd37dd2245cf253ca983284d962b8610254d1b040f888dc1292e1536594e5848"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/preparations.json",
+        "size_bytes": 533,
+        "sha256": "e2da43f4643fd43cc579e3a0db452d9edea110d8be1fef4a18ee5eb0cfd38f78"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/progress.json",
+        "size_bytes": 239,
+        "sha256": "d510b39dd18de85f5c7088a3c3af305497901952a80913655dbceebc0cfa5c93"
+      },
+      {
+        "member": "followup/regression/tasks/003-camctl-outputs/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/003-camctl-outputs/artifacts/result.json",
+        "size_bytes": 2896,
+        "sha256": "fd7dfdd4064afbcddae1fa775c418c76019450c0ecdf78591b1ee8de2b54479b"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/cases.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/cases.json",
+        "size_bytes": 4461,
+        "sha256": "ee825b6c90c92d098f402ad4a1d09c7085cfe87b4b97054ff2d6db7520da2fc4"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/command.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/command.json",
+        "size_bytes": 3239,
+        "sha256": "cb96b8f684a9ce40278f2854ece30ddc5cf1bb8f2cd9adf639eaf840358b5de2"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/events.jsonl",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/events.jsonl",
+        "size_bytes": 16022,
+        "sha256": "481c1c7631ef3d1047cb8081e4ada2f866c58a13cc66e707199a0b3e2bdb9f8c"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/inventory.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/inventory.json",
+        "size_bytes": 1054,
+        "sha256": "ad6a4be91c670b4592fd395efe94a21598059df5fda97660391cd1e3ab7099f1"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/output.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/output.log",
+        "size_bytes": 1652,
+        "sha256": "1c31f4e250628836e63ff5acfd6d0cd3342db0e526158151376abf732039565f"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/preparations.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/preparations.json",
+        "size_bytes": 549,
+        "sha256": "487a0dcf8060f2292464aba4fe393f33996b0cbbe6cf20f04b7d3d1db4598764"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/prepare.log",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/prepare.log",
+        "size_bytes": 26,
+        "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/progress.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/progress.json",
+        "size_bytes": 221,
+        "sha256": "ffa52ee6f07e559208a5e362d3abac32d74117feb99bfeb3584967a6849c715d"
+      },
+      {
+        "member": "followup/regression/tasks/004-camctl-logging_runtime/artifacts/result.json",
+        "source_path": "/tmp/camctl-merge-followup-20261031-cfb2ae6b/tasks/004-camctl-logging_runtime/artifacts/result.json",
+        "size_bytes": 2963,
+        "sha256": "97af85277b5834a29d6bb343cafa788e315e8a941292e823436969af25b2bfbf"
+      },
+      {
+        "member": "followup/run.py",
+        "source_path": "/tmp/camctl-merge-implement-20261031/followup-run.py",
+        "size_bytes": 592,
+        "sha256": "d2256b3f15f5a6b1f6270906fee2aa032b9badd81513f686a18d5790178316f8"
+      },
+      {
+        "member": "hbf/host-case/complete-commit.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/complete-commit.json",
+        "size_bytes": 765,
+        "sha256": "d2d947be8724a95b9ddcf58ff4881c0331e864d03bddf161ece7c836dda7b638"
+      },
+      {
+        "member": "hbf/host-case/complete-verifier-input.json",
+        "source_path": "/tmp/camctl-merge-regression-20261031-594673eb/tasks/005-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/complete-verifier-input.json",
+        "size_bytes": 567,
+        "sha256": "e35285683239d58a8d62ab8adc295194aca48240c625825f1c9757c4375f259d"
+      },
+      {
+        "member": "maintenance/budget-launcher/launcher.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/maintenance-budget-launcher/launcher.json",
+        "size_bytes": 2341,
+        "sha256": "c740a1950046c4fdf28eb0597f944073e460ec53917e10d54214dbea47a1c295"
+      },
+      {
+        "member": "maintenance/command.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/maintenance-command.json",
+        "size_bytes": 1030,
+        "sha256": "1a4c0a2b192bdd3e8036a2859257b8ab55820f132f5b0f0e97e3e0a9f2813ea4"
+      },
+      {
+        "member": "maintenance/entry.log",
+        "source_path": "/tmp/camctl-merge-implement-20261031/maintenance-entry.log",
+        "size_bytes": 793,
+        "sha256": "97e72ed77f5961392dfd96a562bb56c655daad1be837866062a6d9187c95ef54"
+      },
+      {
+        "member": "maintenance/exit.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/maintenance-exit.json",
+        "size_bytes": 52,
+        "sha256": "f1eb631a4993eb4ff181432824a15400ac980b2cc397e842bbfcdd920ff67747"
+      },
+      {
+        "member": "maintenance/run.py",
+        "source_path": "/tmp/camctl-merge-implement-20261031/maintenance-run.py",
+        "size_bytes": 600,
+        "sha256": "ac792a2ab0f2f40913b7f5f2d1d62a42e47f9ed52c1ed8a07edd582cf61ea1c6"
+      },
+      {
+        "member": "maintenance/smoke.xml",
+        "source_path": "/tmp/camctl-merge-implement-20261031/maintenance-smoke.xml",
+        "size_bytes": 639,
+        "sha256": "2199079a0e310e54d90dabc8757737c76998e321ab0302afda1141d5572e326f"
+      },
+      {
+        "member": "maintenance/checks.json",
+        "source_path": "/tmp/camctl-merge-implement-20261031/checks.json",
+        "size_bytes": 2210,
+        "sha256": "431ccc1343d9e2eb41301a99a80b204df1f4aa6862a26ca7c50994602901b527"
+      }
+    ],
+    "verification_note": "归档前后逐成员比较SHA256与字节；既有100个成员载荷未变。新增成员仅为已结束轮次的精确控制文件、summary/plan、任务artifacts及指定HBF小型JSON。 新增1个6da源码/文档差异与Python语法检查收据；既有167成员载荷未变。"
+  },
+  "timing_csv": {
+    "path": "regression-594-node-timings.csv.gz",
+    "size_bytes": 49928,
+    "sha256": "fb09a63785c5e6ca98a4dc85eb18e0b3a222c9c36282c7dc17b4fa8a45ff2f38"
+  },
+  "optional_inputs_not_present": [
+    {
+      "source_path": "/tmp/camctl-merge-implement-20261031/cancel-staging.log",
+      "status": "检查时不存在；其余存在的 cancel-staging 日志均已归档。"
+    }
+  ],
+  "followup_comparison": {
+    "old_source_commit": "594673ebb9aedd0ed4ab51df8001f1b623ae92c7",
+    "new_source_commit": "cfb2ae6b433e6728e730ddccd8af3df52b6d8b27",
+    "component_groups": [
+      "camctl/bootstrap",
+      "camctl/capture",
+      "camctl/outputs",
+      "camctl/logging_runtime"
+    ],
+    "old_nodes": 745,
+    "new_nodes": 747,
+    "common_nodes": 745,
+    "old_only_nodes": 0,
+    "new_only_nodes": 2,
+    "same_node_outcomes": {
+      "passed_to_passed": 340,
+      "failed_to_passed": 307,
+      "failed_to_failed": 98,
+      "passed_to_failed": 0
+    },
+    "new_only_nodeids": [
+      "apps/camctl/tests/integration/capture/test_host_photo_flow.py::test_device_photo_registers_deferred_sources_from_real_driver_result",
+      "apps/camctl/tests/integration/capture/test_host_photo_flow.py::test_start_without_fixed_hasselblad_identity_rejects_before_activity"
+    ],
+    "note": "仅同一节点身份对照。不能把不同源码版本的轮次拼作同一轮全绿或合计通过数。"
+  },
+  "followup_completed_regression": {
+    "source_commit": "cfb2ae6b433e6728e730ddccd8af3df52b6d8b27",
+    "summary_member": "followup/regression/summary.json",
+    "plan_member": "followup/regression/plan.json",
+    "command_member": "followup/command.json",
+    "runner_script_member": "followup/run.py",
+    "launcher_member": "followup/budget-launcher/launcher.json",
+    "jobs": 4,
+    "selected_target_count": 31,
+    "nodes": 747,
+    "passed_nodes": 649,
+    "failed_nodes": 98,
+    "setup_failed_nodes": 0,
+    "call_phase_failed_nodes": 98,
+    "teardown_failed_nodes": 0,
+    "wall_seconds": 285.40326111600007,
+    "outer_wall_seconds": 286.2758337720006,
+    "exit_code": 1,
+    "status": "finished",
+    "task_counts": {
+      "camctl/bootstrap": {
+        "nodes": 139,
+        "passed": 79,
+        "failed": 60
+      },
+      "camctl/capture": {
+        "nodes": 586,
+        "passed": 549,
+        "failed": 37
+      },
+      "camctl/outputs": {
+        "nodes": 14,
+        "passed": 13,
+        "failed": 1
+      },
+      "camctl/logging_runtime": {
+        "nodes": 8,
+        "passed": 8,
+        "failed": 0
+      }
+    },
+    "launcher_closure": {
+      "status": "finished",
+      "errors": [],
+      "command_exit_code": 1,
+      "exit_code": 1,
+      "remaining_pids": [
+        []
+      ],
+      "removal_ok": true,
+      "removal_exit_code": 0
+    },
+    "timing_csv": {
+      "path": "regression-cfb-node-timings.csv.gz",
+      "rows": 747,
+      "sha256": "386477a009eb3499954798e0f06021d96e9e10e9c56679e02c065b727496aec9",
+      "size_bytes": 41933,
+      "nodeid_rule": "camctl 节点补 apps/camctl/ 前缀。",
+      "timing_rule": "分别保留 setup/call/teardown 与 total 时长；失败阶段单列。"
+    }
+  },
+  "deployment_validation": {
+    "source_commit": "980674744642db58e2f879a420335525c4ed00ed",
+    "summary_member": "deployment/regression/summary.json",
+    "plan_member": "deployment/regression/plan.json",
+    "command_member": "deployment/command.json",
+    "runner_script_member": "deployment/run.py",
+    "launcher_member": "deployment/budget-launcher/launcher.json",
+    "selected_targets": [
+      "tests/integration/test_camctl_host_deployment.py"
+    ],
+    "nodes": 5,
+    "passed_nodes": 5,
+    "failed_nodes": 0,
+    "wall_seconds": 87.30624134500067,
+    "exit_code": 0,
+    "status": "finished",
+    "task_artifacts_member_prefix": "deployment/regression/tasks/001-root-test_camctl_host_deployment/artifacts/",
+    "launcher_closure": {
+      "status": "finished",
+      "errors": [],
+      "command_exit_code": 0,
+      "exit_code": 0,
+      "remaining_pids": [
+        []
+      ],
+      "removal_ok": true,
+      "removal_exit_code": 0
+    },
+    "scope_note": "仅部署/自动迁移/更新 worker 合并后的 host deployment 定向验证；不是全量更新恢复验收。"
+  },
+  "maintenance_cli_smoke": {
+    "source_commit": "6da494ed67f147cf59312abd708cc5bbd8d16437",
+    "upstream_tip": "13e45119b2d1cbf244b2265d35dafd983b271184",
+    "command_member": "maintenance/command.json",
+    "runner_script_member": "maintenance/run.py",
+    "entry_log_member": "maintenance/entry.log",
+    "exit_member": "maintenance/exit.json",
+    "xml_member": "maintenance/smoke.xml",
+    "launcher_member": "maintenance/budget-launcher/launcher.json",
+    "test_target": "tests/integration/test_camctl_host_deployment.py::test_default_configuration_is_shared_by_init_and_run",
+    "instances": 2,
+    "passed_instances": 2,
+    "failed_instances": 0,
+    "pytest_wall_seconds": 2.39,
+    "outer_wall_seconds": 2.7898058310001943,
+    "exit_code": 0,
+    "scope_note": "只验证新维护增量后默认/缺省配置的真实CLI init/run两个实例，不是完整更新恢复验收。",
+    "warning_note": "pytest 日志有1条缓存目录 PytestCacheWarning；2个测试实例均通过。此项不是完整更新恢复验收，命令环境用于定位已测源码，不含 runner snapshot。",
+    "launcher_closure": {
+      "status": "finished",
+      "errors": [],
+      "command_exit_code": 0,
+      "exit_code": 0,
+      "remaining_pids": [
+        []
+      ],
+      "removal_ok": true,
+      "removal_exit_code": 0
+    }
+  },
+  "launcher_closure_checks": {
+    "first_594": {
+      "status": "finished",
+      "errors": [],
+      "command_exit_code": 1,
+      "exit_code": 1,
+      "remaining_pids": [
+        []
+      ],
+      "removal_ok": true,
+      "removal_exit_code": 0
+    },
+    "followup_cfb": {
+      "status": "finished",
+      "errors": [],
+      "command_exit_code": 1,
+      "exit_code": 1,
+      "remaining_pids": [
+        []
+      ],
+      "removal_ok": true,
+      "removal_exit_code": 0
+    },
+    "deployment_980": {
+      "status": "finished",
+      "errors": [],
+      "command_exit_code": 0,
+      "exit_code": 0,
+      "remaining_pids": [
+        []
+      ],
+      "removal_ok": true,
+      "removal_exit_code": 0
+    },
+    "maintenance_6da": {
+      "status": "finished",
+      "errors": [],
+      "command_exit_code": 0,
+      "exit_code": 0,
+      "remaining_pids": [
+        []
+      ],
+      "removal_ok": true,
+      "removal_exit_code": 0
+    }
+  },
+  "timing_csvs": [
+    {
+      "path": "regression-594-node-timings.csv.gz",
+      "rows": 874,
+      "sha256": "fb09a63785c5e6ca98a4dc85eb18e0b3a222c9c36282c7dc17b4fa8a45ff2f38",
+      "size_bytes": 49928,
+      "nodeid_rule": "camctl 组件节点补 apps/camctl/ 前缀，根 tests/integration 节点保留原路径。",
+      "timing_rule": "分别保留 setup/call/teardown 时长与 total；setup error 单列，不计作 call/function 失败。"
+    },
+    {
+      "path": "regression-cfb-node-timings.csv.gz",
+      "rows": 747,
+      "sha256": "386477a009eb3499954798e0f06021d96e9e10e9c56679e02c065b727496aec9",
+      "size_bytes": 41933,
+      "nodeid_rule": "camctl 节点补 apps/camctl/ 前缀。",
+      "timing_rule": "分别保留 setup/call/teardown 与 total 时长；失败阶段单列。"
+    }
+  ],
+  "maintenance_source_checks": {
+    "source_commit": "6da494ed67f147cf59312abd708cc5bbd8d16437",
+    "check_member": "maintenance/checks.json",
+    "source_and_docs_check": {
+      "exit_code": 0,
+      "excluded_upstream_raw_log": "docs/camctl/verification-data/2026-10-28-hasselblad-availability/missing-start-adjusted.log"
+    },
+    "full_diff_check": {
+      "argv": [
+        "git",
+        "diff",
+        "e22ac88d",
+        "HEAD",
+        "--check"
+      ],
+      "exit_code": 2,
+      "finding_count": 4,
+      "finding": "只有上游既有 missing-start-adjusted.log 的4处尾随空格；该原始日志与 d72c1135a2ad65bd98491100c583539ab198f30d 字节相同并保持不变。"
+    },
+    "python_ast_paths_count": 10,
+    "python_ast_paths": [
+      ".agents/skills/camctl-real-device-deploy/scripts/package.py",
+      ".agents/skills/camctl-real-device-deploy/scripts/update-camctl.py",
+      ".agents/skills/camctl-real-device-deploy/scripts/update_transaction.py",
+      ".agents/skills/camctl-real-device-deploy/scripts/verify_bundle.py",
+      ".agents/skills/camctl-real-device-deploy/tests/unit/test_deployment_inspect.py",
+      ".agents/skills/camctl-real-device-deploy/tests/unit/test_maintenance_integrity.py",
+      ".agents/skills/camctl-real-device-deploy/tests/unit/test_update.py",
+      ".agents/skills/camctl-real-device-deploy/tests/unit/test_update_transaction.py",
+      "apps/camctl/src/camctl/deployment.py",
+      "apps/camctl/src/camctl/persistence/maintenance_integrity.py"
+    ],
+    "result_boundary": "语法与差异检查，不是功能测试；未清理上游原始日志尾随空格。"
+  }
+}
