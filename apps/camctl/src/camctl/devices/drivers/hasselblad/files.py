@@ -118,6 +118,38 @@ class CameraFileLocator:
 
 
 @dataclass(frozen=True, slots=True)
+class CameraPathResolution:
+    """原始定位的比较键与本次命令路径，不改变已保存文件身份。"""
+
+    original_path: str
+    comparison_key: str
+    delete_path: str
+    firmware_rule: str | None
+
+
+# 当前固件目录报告 bug；后续路径不一致优先复核此例外。
+# 完整边界见 docs/camctl/hasselblad-driver.md 的“固件路径例外”。
+_SSD_DIRECTORY_ALIAS = ("106HASBL", "100HASBL")
+_SSD_PATH_RULE = "cfv100c_ssd_directory_alias_v1"
+_SSD_PREFIXES = ("/mnt/media_rw/ssd/DCIM/", "/mnt/media_rw/ssd/", "/SSD/DCIM/", "/SSD/")
+
+
+def resolve_camera_path(path: str) -> CameraPathResolution:
+    """仅在已知 SSD 根处理目录别名；其他定位保持精确比较。"""
+    _camera_name_from_path(path)
+    for prefix in _SSD_PREFIXES:
+        if not path.startswith(prefix):
+            continue
+        relative = path[len(prefix):]
+        directory, separator, tail = relative.partition("/")
+        if separator and directory == _SSD_DIRECTORY_ALIAS[0]:
+            relative = _SSD_DIRECTORY_ALIAS[1] + separator + tail
+        return CameraPathResolution(path, "/SSD/" + relative,
+                                    prefix + relative, _SSD_PATH_RULE)
+    return CameraPathResolution(path, path, path, None)
+
+
+@dataclass(frozen=True, slots=True)
 class CameraFileIdentity:
     """原设备绑定、完整机内路径、下载文件名及拍摄时核验的内容摘要。"""
 

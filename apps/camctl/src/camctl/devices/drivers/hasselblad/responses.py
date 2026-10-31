@@ -6,7 +6,7 @@ import re
 import unicodedata
 from pathlib import PurePosixPath
 
-from .files import CameraFileLocator, CameraLocatorStatus
+from .files import CameraFileLocator, CameraLocatorStatus, resolve_camera_path
 from .parameters import CAPTURE_FORMATS, CaptureFormat, CaptureFormatDescription
 
 
@@ -445,6 +445,7 @@ def parse_deleted(output: bytes, stderr: bytes, *, camera_path: str) -> None:
 def parse_images_presence(output: bytes, stderr: bytes, *, camera_path: str) -> bool | None:
     """仅已核验的列表条目能确认在场；列表缺项不能确认缺席。"""
     CameraFileLocator(CameraLocatorStatus.PATH, camera_path, PurePosixPath(camera_path).name)
+    target = resolve_camera_path(camera_path)
     if type(output) is not bytes or type(stderr) is not bytes or stderr:
         raise CliParseError("images 双流不完整或 stderr 包含未知输出")
     text = _decode(output, "images")
@@ -461,7 +462,8 @@ def parse_images_presence(output: bytes, stderr: bytes, *, camera_path: str) -> 
             CameraFileLocator(CameraLocatorStatus.PATH, path, PurePosixPath(path).name)
         except (TypeError, ValueError) as error:
             raise CliParseError("images 条目的机内路径无效") from error
-        if path in seen:
-            raise CliParseError("images 输出重复包含同一路径")
-        seen.add(path)
-    return True if camera_path in seen else None
+        key = resolve_camera_path(path).comparison_key
+        if key in seen:
+            raise CliParseError("images 条目经固件路径规则归一后重复或存在歧义")
+        seen.add(key)
+    return True if target.comparison_key in seen else None

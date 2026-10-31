@@ -84,7 +84,8 @@ from .responses import (
     parse_images_presence,
 )
 from .files import (CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DeferredCameraFileIdentity,
-                    DownloadVariant, PhotoResultCursor, camera_file_identity_from_source, decide_photo_cache)
+                    DownloadVariant, PhotoResultCursor, camera_file_identity_from_source, decide_photo_cache,
+                    resolve_camera_path)
 
 __all__ = ["AvailabilityCall", "AvailabilityCancelled", "AvailabilityResult", "EVIDENCE", "HasselbladDriver"]
 
@@ -948,6 +949,9 @@ class HasselbladDriver:
                 or request.timeout_s <= 0):
             raise ValueError("文件调用必须携带有限正期限")
         identity = camera_file_identity_from_source(request.params["identity_key"], request.params["locator"])
+        path = resolve_camera_path(identity.camera_path)
+        path_details = {"original_path": path.original_path, "comparison_key": path.comparison_key,
+                        "delete_path": path.delete_path, "firmware_rule": path.firmware_rule}
         if identity.binding != request.binding:
             raise ValueError("文件调用改变原设备绑定")
         config = self._binding_config(request.binding)
@@ -967,7 +971,7 @@ class HasselbladDriver:
                          else FILE_QUERY_NOT_DISPATCHED).type)
             effect = (EffectState.CONFIRMED if observations else
                       EffectState.UNKNOWN if returned else EffectState.NO_EFFECT)
-            details = {"reason": reason, "steps": deepcopy(steps)}
+            details = {"reason": reason, "steps": deepcopy(steps), "file_path": path_details}
             if diagnostic is not None:
                 details["response_error"] = str(diagnostic)
             if start_errors:
@@ -1000,10 +1004,10 @@ class HasselbladDriver:
             budget = request.timeout_s - Decimal(now - began) / _NANOSECONDS_PER_SECOND
             if budget <= 0:
                 return finish(reason="deadline_elapsed")
-            args = ("delete", identity.camera_path) if name == "delete" else (name,)
+            args = ("delete", path.delete_path) if name == "delete" else (name,)
             with log_context(device_id=request.binding.device_id, driver_id=request.binding.driver_id,
                              run_id=ticket.run_id, attempt_id=ticket.attempt_id,
-                             operation=operation, **{owner: ticket.target_id}):
+                             operation=operation, file_path=path_details, **{owner: ticket.target_id}):
                 raw = await self._run_step(config=config, name=name, args=args,
                                            timeout_s=budget, steps=steps, start_errors=start_errors)
             complete = (raw is not None and raw.output is not None and raw.stderr is not None
@@ -1038,7 +1042,7 @@ class HasselbladDriver:
                     if serial != identity.serial:
                         return finish(reason="serial_mismatch")
                 elif operation == "delete":
-                    parse_deleted(raw.output, raw.stderr, camera_path=identity.camera_path)
+                    parse_deleted(raw.output, raw.stderr, camera_path=path.delete_path)
                     return finish(observations=(DeviceObservation("file_absent", 1,
                                           {"cleanup_item_id": ticket.target_id}),))
                 else:

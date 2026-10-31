@@ -1074,11 +1074,169 @@ def test_images_accepts_aligned_raw_and_jpeg_rows(responses, output, path):
     assert api.parse_images_presence(output, b"", camera_path=path) is True
 
 
-def test_images_keeps_distinct_camera_paths_unconfirmed(responses):
+@pytest.mark.parametrize("path", [
+    "/SSD/106HASBL/B0000333.JPG",
+    "/SSD/DCIM/106HASBL/B0000333.JPG",
+    "/mnt/media_rw/ssd/106HASBL/B0000333.JPG",
+    "/mnt/media_rw/ssd/DCIM/106HASBL/B0000333.JPG",
+    "/mnt/media_rw/ssd/DCIM/100HASBL/B0000333.JPG",
+])
+def test_images_matches_confirmed_ssd_firmware_alias(responses, path):
     api, _ = responses
     assert api.parse_images_presence(
         b"JPEG      6508544  /SSD/100HASBL/B0000333.JPG\n", b"",
-        camera_path="/mnt/media_rw/ssd/DCIM/106HASBL/B0000333.JPG") is None
+        camera_path=path) is True
+
+
+@pytest.mark.parametrize("path", [
+    "/mnt/media_rw/ssd/DCIM/107HASBL/B0000333.JPG",
+    "/SD/106HASBL/B0000333.JPG",
+    "/SSD/106HASBL/b0000333.JPG",
+    "/SSD/106HASBL/B0000334.JPG",
+    "/SSD/other/106HASBL/B0000333.JPG",
+])
+def test_images_keeps_other_directories_names_and_missing_files_unconfirmed(responses, path):
+    api, _ = responses
+    assert api.parse_images_presence(
+        b"JPEG 10 /SSD/100HASBL/B0000333.JPG\n", b"", camera_path=path) is None
+
+
+@pytest.mark.parametrize("second", [
+    "/SSD/106HASBL/a.JPG", "/mnt/media_rw/ssd/100HASBL/a.JPG",
+    "/mnt/media_rw/ssd/DCIM/106HASBL/a.JPG",
+])
+def test_images_rejects_ambiguous_alias_entries(responses, second):
+    api, _ = responses
+    with pytest.raises(api.CliParseError):
+        api.parse_images_presence(f"JPEG 10 /SSD/100HASBL/a.JPG\nJPEG 10 {second}\n".encode(),
+                                  b"", camera_path="/SSD/100HASBL/a.JPG")
+
+
+@pytest.mark.parametrize("original,target,key", [
+    ("/mnt/media_rw/ssd/DCIM/106HASBL/a.JPG", "/mnt/media_rw/ssd/DCIM/100HASBL/a.JPG", "/SSD/100HASBL/a.JPG"),
+    ("/mnt/media_rw/ssd/106HASBL/a.JPG", "/mnt/media_rw/ssd/100HASBL/a.JPG", "/SSD/100HASBL/a.JPG"),
+    ("/SSD/106HASBL/a.JPG", "/SSD/100HASBL/a.JPG", "/SSD/100HASBL/a.JPG"),
+    ("/SSD/106HASBL/106HASBL/a.JPG", "/SSD/100HASBL/106HASBL/a.JPG", "/SSD/100HASBL/106HASBL/a.JPG"),
+    ("/SSD/100HASBL/a.JPG", "/SSD/100HASBL/a.JPG", "/SSD/100HASBL/a.JPG"),
+    ("/SD/106HASBL/a.JPG", "/SD/106HASBL/a.JPG", "/SD/106HASBL/a.JPG"),
+])
+def test_firmware_resolution_retains_original_locator_and_limits_command_change(responses, original, target, key):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    resolved = files.resolve_camera_path(original)
+    assert (resolved.original_path, resolved.delete_path, resolved.comparison_key) == (original, target, key)
+    assert resolved.firmware_rule == (None if original.startswith("/SD/") else "cfv100c_ssd_directory_alias_v1")
+
+
+@pytest.fixture
+def file_driver(responses):
+    """公开文件端口，复用可用性单元的进程传输替身，不读取包资源。"""
+    import ast
+    from copy import deepcopy
+    from decimal import Decimal
+    import hashlib
+    from .test_h2_availability_port_isolated import driver_type, RawToolOutcome
+
+    base, _ = driver_type()
+    namespace = dict(base.__init__.__globals__)
+    api, _ = responses
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    namespace.update(deepcopy=deepcopy, hashlib=hashlib,
+        camera_file_identity_from_source=files.camera_file_identity_from_source,
+        resolve_camera_path=files.resolve_camera_path,
+        parse_deleted=api.parse_deleted, parse_images_presence=api.parse_images_presence,
+        CliParseError=api.CliParseError,
+        EffectState=SimpleNamespace(NO_EFFECT="no_effect", UNKNOWN="unknown", CONFIRMED="confirmed"),
+        EvidenceValue=lambda kind, version, data: SimpleNamespace(type=kind, version=version, data=data),
+        CallInfo=lambda **values: SimpleNamespace(**values),
+        ToolCallOutput=lambda index, name, stdout, stderr: SimpleNamespace(
+            step_index=index, step_name=name, stdout=stdout, stderr=stderr),
+        DeviceCallResult=lambda observations, error, outcome, **values: SimpleNamespace(
+            observations=observations, error=error, outcome=outcome, **values),
+        FILE_DELETE_NOT_DISPATCHED=SimpleNamespace(type="file_delete_not_dispatched"),
+        FILE_QUERY_NOT_DISPATCHED=SimpleNamespace(type="file_query_not_dispatched"))
+    namespace["DeviceCallResult"]._error_view = lambda outcome: outcome.error
+    source = Path(__file__).parents[3] / "src/camctl/devices/drivers/hasselblad/driver.py"
+    original = next(node for node in ast.parse(source.read_text()).body
+                    if isinstance(node, ast.ClassDef) and node.name == "HasselbladDriver")
+    methods = {"__init__", "_binding_config", "_run_step", "_step_fact", "_local_return_failure",
+               "_call_info", "_file_call", "delete", "query_file"}
+    driver = ast.ClassDef(name="HasselbladDriver", bases=[], keywords=[], decorator_list=[],
+        body=[ast.parse('driver_id = "hasselblad_cfv100c"').body[0], *[
+            node for node in original.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in methods]])
+    program = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), driver], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(program), str(source), "exec"), namespace)
+
+    def make(command, output, *, exit_code=0):
+        class Transport:
+            calls = None
+
+            async def run(self, spec, stop):
+                self.calls.append(spec.argv)
+                value = {"list": b"list", "info": b"SERIAL"}.get(spec.argv[3], output)
+                code = exit_code if spec.argv[3] == command else 0
+                return RawToolOutcome(SimpleNamespace(exit_code=code, signal=None), value,
+                                      b"delete failed" if code else b"")
+
+        transport = Transport()
+        transport.calls = []
+        config = SimpleNamespace(serial="SERIAL", product_id=10, executable="hb")
+        instance = namespace["HasselbladDriver"]({"camera": config}, None, monotonic_ns=lambda: 0, transport=transport)
+        binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+        path = "/mnt/media_rw/ssd/DCIM/106HASBL/a.JPG"
+        identity = files.DeferredCameraFileIdentity(binding, "1", path, "a.JPG",
+            files.DownloadVariant.ORIGINAL, "SERIAL", 10)
+        operation = "delete" if command == "delete" else "query"
+        ticket = SimpleNamespace(operation=operation, target_id="31", run_id=1, attempt_id=1,
+            responsibility_key=("delete/31" if operation == "delete" else "exists/31"))
+        import json
+        params = {"cleanup_item_id": "31", "file_id": "7",
+                  "identity_key": json.dumps(["camera", "hasselblad_cfv100c", identity.file_identity]),
+                  "locator": identity.locator()}
+        request = SimpleNamespace(operation=operation, ticket=ticket, params=params, binding=binding, timeout_s=Decimal(10))
+        return instance, request, transport
+    return make
+
+
+@pytest.mark.asyncio
+async def test_delete_uses_resolved_path_and_confirms_actual_command_path(file_driver):
+    driver, request, transport = file_driver("delete", b"deleted /mnt/media_rw/ssd/DCIM/100HASBL/a.JPG\n")
+    result = await driver.delete(request)
+    assert transport.calls[-1] == ("hb", "--pid", "0x000a", "delete", "/mnt/media_rw/ssd/DCIM/100HASBL/a.JPG")
+    assert result.error is None and result.observations[0].type == "file_absent"
+    assert request.params["locator"]["camera_path"] == "/mnt/media_rw/ssd/DCIM/106HASBL/a.JPG"
+
+
+@pytest.mark.asyncio
+async def test_delete_error_preserves_original_target_and_firmware_rule(file_driver):
+    driver, request, _ = file_driver("delete", b"", exit_code=1)
+    result = await driver.delete(request)
+    assert result.error.details["reason"] == "exit_nonzero"
+    assert result.error.details["file_path"] == {
+        "original_path": "/mnt/media_rw/ssd/DCIM/106HASBL/a.JPG",
+        "delete_path": "/mnt/media_rw/ssd/DCIM/100HASBL/a.JPG",
+        "comparison_key": "/SSD/100HASBL/a.JPG",
+        "firmware_rule": "cfv100c_ssd_directory_alias_v1"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ack", [
+    b"deleted /mnt/media_rw/ssd/DCIM/106HASBL/a.JPG\n",
+    b"deleted /mnt/media_rw/ssd/DCIM/100HASBL/b.JPG\n",
+])
+async def test_delete_requires_confirmation_of_exact_dispatched_target(file_driver, ack):
+    driver, request, _ = file_driver("delete", ack)
+    result = await driver.delete(request)
+    assert result.error.details["reason"] == "response_unconfirmed"
+    assert result.observations == ()
+
+
+@pytest.mark.asyncio
+async def test_query_uses_same_firmware_rule_without_dispatching_delete(file_driver):
+    driver, request, transport = file_driver("images", b"JPEG 10 /SSD/100HASBL/a.JPG\n")
+    result = await driver.query_file(request)
+    assert result.error is None and result.observations[0].data["present"] is True
+    assert [args[3] for args in transport.calls] == ["list", "info", "images"]
 
 
 @pytest.mark.parametrize("output", [
