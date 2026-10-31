@@ -2,6 +2,7 @@
 
 import asyncio
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,8 @@ async def test_real_session_applies_cancel_before_device_call_returns(tmp_path, 
         assert [kind for kind, _ in invocations] == ['delete', 'query']
         assert _rows(db, 'SELECT COUNT(*) FROM operation_attempts WHERE result_event_id IS NULL') == [(0,)]
     finally:
+        primary = sys.exception()
+        cleanup_errors = []
         release.set()
         if not task.done():
             task.cancel()
@@ -160,12 +163,27 @@ async def test_real_session_applies_cancel_before_device_call_returns(tmp_path, 
             outcome = await task
         except asyncio.CancelledError:
             pass
+        except BaseException as error:
+            cleanup_errors.append(error)
         else:
             if entry == 'default':
-                snapshots.append(runtime_database_facts(db, 'session_finished'))
-                save_runtime_evidence(tmp_path, outcome, snapshots)
-        finally:
+                try:
+                    snapshots.append(runtime_database_facts(db, 'session_finished'))
+                    save_runtime_evidence(tmp_path, outcome, snapshots)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+        try:
             close_runtime(deps)
+        except BaseException as error:
+            cleanup_errors.append(error)
+        if primary is not None:
+            for error in cleanup_errors:
+                primary.add_note(f'会话收场或证据保存异常: {type(error).__name__}: {error}')
+        elif cleanup_errors:
+            first, *later = cleanup_errors
+            for error in later:
+                first.add_note(f'后续收场异常: {type(error).__name__}: {error}')
+            raise first
 
 
 @pytest.mark.parametrize('operation', ['delete', 'query'])

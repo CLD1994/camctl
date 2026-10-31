@@ -529,7 +529,32 @@ def runtime_database_facts(path, stage):
 
 
 def save_runtime_evidence(directory, outcome, snapshots):
+    """保存机器结果、原诊断异常及快照；不复制原异常而丢失堆栈。"""
     import json
-    from dataclasses import asdict
-    Path(directory, 'session-evidence.json').write_text(json.dumps(
-        {'outcome': asdict(outcome), 'snapshots': snapshots}, ensure_ascii=False, indent=2))
+    from collections.abc import Mapping
+    from camctl.logging_runtime.diagnostics import DiagnosticState, diagnostic_record_for
+    from camctl.operations.error_diagnostics import exception_diagnostic
+
+    def encode(value, path):
+        if isinstance(value, BaseException):
+            return encode(exception_diagnostic(value, root_path=path), path)
+        if isinstance(value, DiagnosticState):
+            record = diagnostic_record_for(value)
+            return {"status": value.status.value, "diagnostic_id": value.diagnostic_id,
+                    "record": None if record is None else json.loads(record.rendered_message())}
+        if isinstance(value, Mapping):
+            return {key: encode(item, path + '/' + str(key).replace('~', '~0').replace('/', '~1'))
+                    for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [encode(item, path + '/' + str(index)) for index, item in enumerate(value)]
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        raise TypeError(f"不支持的会话证据类型: {type(value).__module__}.{type(value).__qualname__}")
+
+    document = {'outcome': {
+        'succeeded': outcome.succeeded, 'needs_run': outcome.needs_run,
+        'reason': outcome.reason, 'details': outcome.details,
+        '_diagnostic_sources': outcome._diagnostic_sources,
+    }, 'snapshots': snapshots}
+    Path(directory, 'session-evidence.json').write_text(
+        json.dumps(encode(document, '#'), ensure_ascii=False, indent=2), encoding='utf-8')
