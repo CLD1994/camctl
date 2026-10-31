@@ -11,6 +11,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -123,6 +124,9 @@ _RETURNED = EvidenceRegistry((
         identity_field="activity_id"),
     EvidenceContract("not_dispatched", 1, "control", frozenset()),
 ))
+_RETURNED = _RETURNED.with_contract(HASSELBLAD_EVIDENCE.contract("photo_taken", 2)).with_contract(
+    HASSELBLAD_EVIDENCE.contract("operation_returned", 1)).with_contract(
+    HASSELBLAD_EVIDENCE.contract("dispatch_prevented", 1))
 _LEGACY_RESULTS = _RETURNED.with_contract(
     EvidenceContract("results_returned", 1, "result", frozenset())
 ).with_contract(EvidenceContract(
@@ -174,6 +178,10 @@ class _PhotoDriver:
         self.response = response
         self.before_dispatch = before_dispatch
         self.requests: list[ControlRequest] = []
+        self.transport = _ManagedCaptureTransport()
+        self.transport.fake_names = True
+        self.device_driver = HasselbladDriver(_config(staging.parent).devices, self.roots,
+            monotonic_ns=lambda: 1, transport=self.transport)
 
     async def control(self, request: ControlRequest) -> DeviceCallResult:
         self.requests.append(request)
@@ -184,6 +192,12 @@ class _PhotoDriver:
             result = self.before_dispatch(request)
             if asyncio.iscoroutine(result):
                 await result
+        if request.output_storage == "device" and self.response not in ("unknown", "malformed_steps"):
+            self.transport.capture_format = request.params.get("capture_format", "raw")
+            self.transport.missing_camera_name = self.response == "missing_camera_name"
+            # 当前替身已记录原调用并进入 start_entry；正式驱动负责产生
+            # 实际 DEVICE v2 观察及同源工具双流，不重复进入原门闩。
+            return await self.device_driver.control(replace(request, start_entry=None))
         reason = await request.dispatch_check() if request.dispatch_check is not None else None
         if reason is not None:
             return DeviceCallResult.from_outcome(CallOutcome(
@@ -270,6 +284,8 @@ class _ManagedCaptureTransport:
         self.calls = []
         self.outcomes = []
         self.capture_format = capture_format
+        self.missing_camera_name = False
+        self.fake_names = False
 
     async def run(self, spec, _stop):
         self.calls.append(spec)
@@ -282,7 +298,10 @@ class _ManagedCaptureTransport:
             output = b""
         elif command == "capture":
             workspace = Path(spec.argv[-1])
-            original = workspace / ("capture_1.JPG" if self.capture_format == "jpeg" else "capture_1.3FR")
+            original_name = (("capture.jpg" if self.capture_format == "jpeg" else "capture.3fr")
+                             if self.fake_names else
+                             ("capture_1.JPG" if self.capture_format == "jpeg" else "capture_1.3FR"))
+            original = workspace / original_name
             preview = workspace / f"{original.name}.thumbnail.jpg"
             original_bytes = _JPEG_ORIGINAL if self.capture_format == "jpeg" else _ORIGINAL
             original.write_bytes(original_bytes)
@@ -290,7 +309,8 @@ class _ManagedCaptureTransport:
             output = (
                 f"capture: OK\nsaved {original} ({len(original_bytes)} bytes)\n"
                 f"saved {preview} ({len(_PREVIEW)} bytes)\n"
-                f"camera file: /mnt/media/DCIM/{'B9996039.JPG' if self.capture_format == 'jpeg' else 'B9996039.3FR'}\n"
+                + ("capture: camera filename was not reported\n" if self.missing_camera_name else
+                   f"camera file: /mnt/media/DCIM/{'B9996039.JPG' if self.capture_format == 'jpeg' else 'B9996039.3FR'}\n")
             ).encode()
         else:
             raise AssertionError(f"意外 Hasselblad 子命令: {command}")
@@ -501,6 +521,43 @@ async def test_start_without_fixed_hasselblad_identity_rejects_before_activity(t
         assert owned.connection.execute("SELECT COUNT(*) FROM device_activities").fetchone() == (0,)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (1,)
         assert driver.requests == []
+    finally:
+        owned.connection.close()
+
+
+async def test_device_photo_registers_deferred_sources_from_real_driver_result(tmp_path):
+    _cfg, owned, driver, runtime, _clock = await _world(tmp_path, storage="device")
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1
+        assert [call.argv[3] for call in driver.transport.calls].count("capture") == 1
+        result_json, = owned.connection.execute(
+            "SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id "
+            "WHERE r.responsibility_key='start/1'").fetchone()
+        result = json.loads(result_json)
+        photo, = (item for item in result["observations"] if item["type"] == "photo_taken")
+        assert photo["version"] == 2
+        assert photo["data"]["camera_identity"] == {
+            "serial": _CAMERA_IDENTITY.serial, "product_id": _CAMERA_IDENTITY.product_id}
+        assert [call["step_name"] for call in result["diagnostics"]["calls"]] == [
+            step["name"] for step in photo["data"]["steps"]]
+        assert all(call["stdout"]["state"] == call["stderr"]["state"] == "complete"
+                   for call in result["diagnostics"]["calls"])
+        files = owned.connection.execute(
+            "SELECT id,role,original_device_file_id,size_bytes,sha256,locator_json "
+            "FROM device_files ORDER BY id").fetchall()
+        assert len(files) == 2
+        assert [row[1] for row in files] == [2, 3]
+        assert files[1][2] == files[0][0]
+        assert all(row[3] is None and row[4] is None for row in files)
+        assert [json.loads(row[5])["variant"] for row in files] == ["original", "thumbnail"]
+        assert all(json.loads(row[5])["camera_path"] == "/mnt/media/DCIM/B9996039.3FR" for row in files)
+        outputs = owned.connection.execute(
+            "SELECT id,device_file_id FROM outputs ORDER BY kind").fetchall()
+        assert [row[1] for row in outputs] == [row[0] for row in files]
+        assert owned.connection.execute("SELECT output_id,original_output_id FROM output_origins").fetchall() == [
+            (outputs[1][0], outputs[0][0])]
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
     finally:
         owned.connection.close()
 
@@ -1154,10 +1211,20 @@ async def test_explicit_missing_camera_name_only_allows_host_source(tmp_path, ca
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (expected_status,)
         assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (0,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == ((2 if storage == "host" else 0),)
-        result_json, = owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone()
-        assert json.loads(result_json)["observations"][0]["data"]["steps"][-1]["camera_locator"]["status"] == "explicit_missing"
+        result_json, error_json = owned.connection.execute(
+            "SELECT result_json,error_json FROM operation_attempts").fetchone()
+        result = json.loads(result_json)
+        if storage == "host":
+            assert result["observations"][0]["data"]["steps"][-1]["camera_locator"]["status"] == "explicit_missing"
+        else:
+            assert json.loads(error_json)["details"]["reason"] == "capture_response_unconfirmed"
+            capture = result["diagnostics"]["calls"][-1]
+            assert capture["step_name"] == "capture"
+            assert capture["stdout"]["state"] == capture["stderr"]["state"] == "complete"
+            assert b"capture: camera filename was not reported\n" in bytes.fromhex(capture["stdout"]["hex"])
+            assert not any(item["type"] == "photo_taken" for item in result["observations"])
         if storage == "device":
-            assert json.loads(owned.connection.execute("SELECT error_details_json FROM actions WHERE id=1").fetchone()[0]) == {"activity_id": "1", "reason": "invalid_outputs"}
+            assert json.loads(owned.connection.execute("SELECT error_details_json FROM actions WHERE id=1").fetchone()[0]) == {"activity_id": "1", "reason": "outputs_unknown"}
             original_name = "capture.jpg" if capture_format == "jpeg" else "capture.3fr"
             workspace = workspace_path(runtime.roots, "1")
             assert (workspace / original_name).is_file()
