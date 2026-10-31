@@ -31,6 +31,8 @@ class Locks:
         self.fds = []
     def acquire(self, path):
         raise AssertionError('未隔离的锁获取')
+    def acquire_directory(self, path):
+        raise AssertionError('未隔离的目录锁获取')
     def database(self, path):
         raise AssertionError('未隔离的数据库锁获取')
     def close(self):
@@ -217,11 +219,14 @@ class UpdateTests(unittest.TestCase):
         with patch.object(sys, 'argv', argv), patch.object(sys, 'executable', '/usr/bin/python3.11'), \
                 patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
                 patch.object(sys, 'path', list(sys.path)), patch.object(Path, 'exists', return_value=False), \
-                patch.object(update.transaction, 'sync_dir'), patch.object(update.transaction.Locks, 'acquire'), \
+                patch.object(update.transaction, 'sync_dir'), patch.object(update.transaction.Locks, 'acquire_directory'), \
                 patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
+                patch.object(Path, 'lstat', side_effect=FileNotFoundError), \
                 patch.object(Path, 'resolve', autospec=True, side_effect=lambda path: path), \
                 patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
                 patch.object(update.shutil, 'which', return_value='/usr/bin/uv'), \
+                patch.object(update.UpdateOperations, 'preflight', return_value={'state_db': '/state.db'}), \
+                patch.object(update.UpdateOperations, 'check_paths'), \
                 patch.object(update, 'perform_update', return_value={'status': 'updated_stopped'}) as perform, \
                 patch('builtins.print'):
             self.assertEqual(update.main(), 0)
@@ -241,15 +246,30 @@ class UpdateTests(unittest.TestCase):
                 patch.object(sys, 'stderr', stderr), patch.object(Path, 'is_dir', return_value=True), \
                 patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
                 patch.object(update.transaction, 'sync_dir'), \
-                patch.object(update.transaction.Locks, 'acquire', side_effect=OSError(5, 'lock failure')), \
+                patch.object(update.transaction.Locks, 'acquire_directory', side_effect=OSError(5, 'lock failure')), \
                 patch.object(update.UpdateOperations, 'record_diagnostics'), \
                 patch.object(update.UpdateOperations, 'save') as save:
             self.assertEqual(update.main(), 1)
-        message = stderr.write.call_args.args[0]
-        self.assertIn('update_lock', message)
-        self.assertIn('lock failure', message)
-        self.assertIn('/target/updates/update-id', message)
-        self.assertEqual(save.call_args.args[0]['diagnostics'][0]['errno'], 5)
+        message = json.loads(stderr.write.call_args.args[0])
+        self.assertEqual(message['stage'], 'update_lock')
+        self.assertEqual(message['diagnostics'][0]['errno'], 5)
+        self.assertIsNone(message['evidence'])
+        save.assert_not_called()
+
+    def test_path_conflict_is_rejected_before_control_directory_or_log_creation(self):
+        with patch.object(sys, 'argv', ['update-camctl.py', '--target', '/target']), \
+                patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                patch.object(sys, 'stderr', io.StringIO()), patch.object(sys, 'path', list(sys.path)), \
+                patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
+                patch.object(Path, 'lstat', side_effect=FileNotFoundError), \
+                patch.object(Path, 'mkdir') as mkdir, patch.object(Path, 'touch') as touch, \
+                patch.object(update.shutil, 'which', return_value='/tools/uv'), \
+                patch.object(transaction.Locks, 'acquire_directory'), \
+                patch.object(update.UpdateOperations, 'preflight', return_value={'state_db': '/db/state'}), \
+                patch.object(update.UpdateOperations, 'check_paths', side_effect=ValueError('path overlap')):
+            self.assertEqual(update.main(), 1)
+        mkdir.assert_not_called()
+        touch.assert_not_called()
 
     def test_main_stderr_failure_preserves_original_and_output_error(self):
         for method in ('write', 'flush'):
@@ -261,22 +281,23 @@ class UpdateTests(unittest.TestCase):
                         patch.object(sys, 'stderr', stderr), patch.object(Path, 'is_dir', return_value=True), \
                         patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
                         patch.object(update.transaction, 'sync_dir'), \
-                        patch.object(update.transaction.Locks, 'acquire', side_effect=OSError(5, 'lock failure')), \
+                        patch.object(update.transaction.Locks, 'acquire_directory', side_effect=OSError(5, 'lock failure')), \
                         patch.object(update.UpdateOperations, 'record_diagnostics'), \
-                        patch.object(update.UpdateOperations, 'save') as save:
+                        patch.object(update.UpdateOperations, 'save') as save, \
+                        patch.object(update, 'freeze_exception', wraps=update.freeze_exception) as freeze:
                     self.assertEqual(update.main(), 1)
-                receipt = save.call_args.args[0]
-                self.assertEqual(receipt['diagnostics'][0]['errno'], 5)
-                self.assertEqual(receipt['outer_stderr_error']['stage'], 'outer_stderr')
+                self.assertEqual([call.args[1] for call in freeze.call_args_list], ['update_lock', 'outer_stderr'])
+                save.assert_not_called()
 
     def test_invalid_pending_record_blocks_new_update_at_entry(self):
         with patch.object(sys, 'argv', ['update-camctl.py', '--target', '/target']), \
                 patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
                 patch.object(sys, 'stderr', io.StringIO()), patch.object(Path, 'is_dir', return_value=True), \
-                patch.object(Path, 'exists', return_value=True), patch.object(Path, 'read_text', return_value='{}'), \
+                patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=0o100600)), \
+                patch.object(Path, 'read_text', return_value='{}'), \
                 patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
                 patch.object(update.transaction, 'sync_dir'), \
-                patch.object(update.transaction.Locks, 'acquire'), \
+                patch.object(update.transaction.Locks, 'acquire_directory'), \
                 patch.object(update.transaction, 'classify_record', create=True,
                              side_effect=ValueError('invalid journal')), \
                 patch.object(update.UpdateOperations, 'record_diagnostics'), \
@@ -285,30 +306,97 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(update.main(), 1)
         perform.assert_not_called()
 
+    def test_recovery_uses_recorded_bindings_before_current_update_arguments(self):
+        order = []
+        metadata = {'staging_path': '/old/stage', 'ready_path': '/old/ready',
+                    'processing_path': '/old/processing'}
+        record = {'output': '/target/updates/old', 'output_identity': {'ino': 1},
+                  'original': {'deployment': {'metadata': metadata}},
+                  'client': {'configured_path': '/old-client/device-capabilities.json'},
+                  'temporary': {}, 'lock_paths': ['/db/session', '/db/admission']}
+        states = SimpleNamespace(UPDATING=object(), COMMITTED=object(),
+                                 ROLLED_BACK=SimpleNamespace(value='rolled_back'))
+        old_ops, new_ops = Mock(), Mock()
+        new_ops.preflight.side_effect = lambda: (order.append('preflight'),
+                                                 (_ for _ in ()).throw(ValueError('stop')))[1]
+        def lstat(path):
+            if str(path) == '/target/updates/pending.json':
+                return SimpleNamespace(st_mode=0o100600)
+            raise FileNotFoundError(str(path))
+        with patch.object(sys, 'argv', ['update-camctl.py', '--target', '/target', '--client-data', '/new-client']), \
+                patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                patch.object(sys, 'stderr', io.StringIO()), patch.object(sys, 'path', list(sys.path)), \
+                patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
+                patch.object(Path, 'lstat', autospec=True, side_effect=lstat), \
+                patch.object(Path, 'read_text', return_value=json.dumps(record)), \
+                patch.object(update.shutil, 'which', return_value='/tools/uv'), \
+                patch.object(transaction.Locks, 'acquire_directory'), \
+                patch.object(transaction, 'classify_record', return_value=states.UPDATING, create=True), \
+                patch.object(transaction, 'JournalState', states, create=True), \
+                patch.object(transaction, 'validate_record_target', create=True), \
+                patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
+                patch.object(transaction, 'validate_paths', create=True) as validate, \
+                patch.object(transaction, 'recover', side_effect=lambda *args: order.append('recover'), create=True), \
+                patch.object(transaction, 'atomic_json', create=True), \
+                patch.object(update, 'UpdateOperations', side_effect=[old_ops, new_ops]):
+            self.assertEqual(update.main(), 1)
+        self.assertEqual(order, ['recover', 'preflight'])
+        self.assertEqual(validate.call_args_list[0].args[2], Path('/old-client'))
+        self.assertEqual(validate.call_args_list[0].args[4], ['/old/stage', '/old/ready', '/old/processing'])
+
+    def test_recovery_failure_keeps_original_receipt(self):
+        metadata = {'staging_path': '/stage', 'ready_path': '/ready', 'processing_path': '/processing'}
+        record = {'output': '/target/updates/old', 'output_identity': {'ino': 1},
+                  'original': {'deployment': {'metadata': metadata}}, 'temporary': {},
+                  'lock_paths': ['/db/session', '/db/admission']}
+        states = SimpleNamespace(UPDATING=object(), COMMITTED=object(), ROLLED_BACK=object())
+        old_ops = Mock()
+        with patch.object(sys, 'argv', ['update-camctl.py', '--target', '/target']), \
+                patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                patch.object(sys, 'stderr', io.StringIO()), patch.object(Path, 'is_dir', return_value=True), \
+                patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=0o100600)), \
+                patch.object(Path, 'read_text', return_value=json.dumps(record)), \
+                patch.object(transaction.Locks, 'acquire_directory'), \
+                patch.object(transaction, 'classify_record', return_value=states.UPDATING, create=True), \
+                patch.object(transaction, 'JournalState', states, create=True), \
+                patch.object(transaction, 'validate_record_target', create=True), \
+                patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
+                patch.object(transaction, 'validate_paths', create=True), \
+                patch.object(transaction, 'recover', side_effect=ValueError('restore failed'), create=True), \
+                patch.object(update, 'UpdateOperations', return_value=old_ops):
+            self.assertEqual(update.main(), 1)
+        old_ops.save.assert_not_called()
+        self.assertEqual(old_ops.save_recovery_failure.call_args.args[0]['diagnostics'][0]['stage'], 'recover_pending')
+
     def test_rollback_uses_persisted_record_after_reacquiring_locks(self):
         ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
         ops.record = {'lock_paths': ['/db/session', '/db/admission']}
         ops.update_locks = Mock()
         ops.db_locks = Mock()
         actual_state = object()
-        formal = {'state': 'updating', 'other': 'persisted'}
+        formal = {'state': 'updating', 'other': 'persisted', 'temporary': {},
+                  'original': {'deployment': {'metadata': {'staging_path': '/stage',
+                               'ready_path': '/ready', 'processing_path': '/processing'}}}}
         ops.read_pending = Mock(return_value=(formal, actual_state))
         states = SimpleNamespace(UPDATING=actual_state, ROLLED_BACK=SimpleNamespace(value='rolled_back'))
         with patch.object(transaction, 'JournalState', states, create=True), \
+                patch.object(transaction, 'validate_paths', create=True), \
                 patch.object(transaction, 'recover', create=True) as recover, \
                 patch.object(transaction, 'atomic_json', create=True):
             ops.rollback()
         self.assertIs(recover.call_args.args[0], formal)
         self.assertEqual(formal['state'], 'rolled_back')
-        ops.update_locks.acquire.assert_called_once_with(Path('/target/updates/update.lock'))
+        ops.update_locks.acquire_directory.assert_called_once_with(Path('/target'))
 
     def test_persisted_record_from_another_update_cannot_be_consumed(self):
         ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
         ops.record = {'output': '/target/updates/id'}
         states = SimpleNamespace(PREPARING=object())
-        with patch.object(Path, 'read_text', return_value=json.dumps({'output': '/target/updates/other'})), \
+        with patch.object(Path, 'read_text', return_value=json.dumps(
+                {'output': '/target/updates/other', 'output_identity': {'ino': 1}})), \
                 patch.object(transaction, 'classify_record', return_value=object(), create=True), \
                 patch.object(transaction, 'validate_record_target', create=True), \
+                patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
                 patch.object(transaction, 'JournalState', states, create=True):
             with self.assertRaises(ValueError):
                 ops.read_pending()

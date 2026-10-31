@@ -83,7 +83,7 @@ def deliver_diagnostics(ops, receipt, diagnostics):
             receipt['stderr_error'] = freeze_exception(stderr_error, 'diagnostic_stderr')
 
 
-def perform_update(ops):
+def perform_update(ops, original=None):
     """冻结错误事实，先释放锁，再交付诊断和最终收据。"""
     receipt = {'status': 'checking', 'steps': [], 'environment_may_have_changed': False,
                'diagnostics': []}
@@ -93,16 +93,14 @@ def perform_update(ops):
     failures = []
     stage = 'preflight'
     try:
-        receipt['original'] = ops.preflight()
+        receipt['original'] = ops.preflight() if original is None else original
         stage = 'save_original'
         ops.save(receipt)
-        stage = 'check_paths_before_lock'
-        ops.check_paths(receipt['original'], before_lock=True)
         stage = 'lock'
         ops.lock(receipt['original'])
         locked = True
         stage = 'check_original'
-        ops.check_paths(receipt['original'])
+        ops.check_paths(receipt['original'], recovery=True)
         ops.check_original(receipt['original'])
         stage = 'save_original_check'
         ops.save(receipt)
@@ -198,6 +196,12 @@ class UpdateOperations:
     def save(self, receipt):
         (self.output / 'receipt.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n')
 
+    def save_recovery_failure(self, receipt):
+        path = self.output / ('recovery-' + uuid.uuid4().hex + '.json')
+        with path.open('x', encoding='utf-8') as stream:
+            json.dump(receipt, stream, ensure_ascii=False, indent=2)
+            stream.write('\n')
+
     def preflight(self):
         from camctl.bootstrap.application import ConfigAdapter
         from camctl.session.locks import lock_file_paths
@@ -270,39 +274,31 @@ class UpdateOperations:
         finally:
             owned.connection.close()
 
-    def check_paths(self, original, *, before_lock=False):
-        transaction.validate_paths(self.target, original, self.client_data, before_lock=before_lock)
+    def check_paths(self, original, *, before_lock=False, recovery=False):
+        temporary = None
+        if recovery and hasattr(self, 'record'):
+            metadata = self.record['original']['deployment']['metadata']
+            bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
+            temporary = self.record['temporary']
+        else:
+            bindings = [self.config.paths.staging, self.config.paths.ready, self.config.paths.processing]
+        return transaction.validate_paths(self.target, original, self.client_data, self.output, bindings,
+                                          before_lock=before_lock, recovery=recovery, temporary=temporary)
 
     def backup(self, receipt):
         original = receipt['original']
         env_backup = self.output / 'venv.backup'
         db_backup = self.output / 'state.backup.db'
+        client_path = ((self.client_data / 'device-capabilities.json').resolve()
+                       if self.client_data is not None else None)
+        temporary = transaction.temporary_paths(self.target, self.output, self.state_db, client_path)
         self.record = {'state': 'preparing', 'mutation_intent': False,
                        'env': str(self.target / 'venv'), 'env_backup': str(env_backup),
                        'state_db': str(self.state_db), 'db_backup': str(db_backup),
                        'lock_paths': original['lock_paths'],
                        'original': original, 'controller': sys.executable,
-                       'output': str(self.output)}
-        transaction.atomic_json(self.pending, self.record)
-        self.record['env_manifest'] = transaction.backup_environment(self.target / 'venv', env_backup)
-        self.record['db_meta'] = transaction.file_metadata(self.state_db)
-        transaction.backup_database(self.state_db, db_backup)
-        self.record['db_sha256'] = transaction.digest(db_backup)
-        transaction.assert_file(db_backup, self.record['db_sha256'], self.record['db_meta'])
-        transaction.verify_database_snapshot(db_backup, original['deployment']['metadata'],
-                                             verify_maintenance_integrity)
-        transaction.assert_file(db_backup, self.record['db_sha256'], self.record['db_meta'])
-        probe = (self.target / 'venv').with_name('venv.' + self.output.name + '.probe')
-        transaction.copy_environment(env_backup, probe)
-        if transaction.manifest(probe, sync=True) != self.record['env_manifest']:
-            raise ValueError('无法保留恢复环境的元信息')
-        shutil.rmtree(probe)
-        transaction.sync_dir(probe.parent)
-        probe_db = self.state_db.with_name(self.state_db.name + '.' + self.output.name + '.probe')
-        transaction.replace_file(db_backup, probe_db)
-        transaction.assert_file(probe_db, self.record['db_sha256'], self.record['db_meta'])
-        probe_db.unlink()
-        transaction.sync_dir(probe_db.parent)
+                       'output': str(self.output), 'output_identity': transaction.directory_identity(self.output),
+                       'temporary': temporary}
         if self.client_data is not None:
             configured_path = self.client_data / 'device-capabilities.json'
             if configured_path.is_symlink() and not configured_path.exists():
@@ -311,6 +307,32 @@ class UpdateOperations:
             item = {'path': str(path), 'configured_path': str(configured_path), 'present': path.is_file()}
             if path.exists() and not item['present']:
                 raise ValueError('原能力文件不是普通文件: ' + str(path))
+            self.record['client'] = item
+        transaction.atomic_json(self.pending, self.record)
+        namespace = Path(temporary['env_namespace'])
+        transaction.owned_namespace(namespace)
+        self.record['env_manifest'] = transaction.backup_environment(self.target / 'venv', env_backup)
+        self.record['db_meta'] = transaction.file_metadata(self.state_db)
+        transaction.backup_database(self.state_db, db_backup)
+        self.record['db_sha256'] = transaction.digest(db_backup)
+        transaction.assert_file(db_backup, self.record['db_sha256'], self.record['db_meta'])
+        transaction.verify_database_snapshot(db_backup, original['deployment']['metadata'],
+                                             verify_maintenance_integrity)
+        transaction.assert_file(db_backup, self.record['db_sha256'], self.record['db_meta'])
+        probe = namespace / 'staging'
+        transaction.copy_environment(env_backup, probe)
+        if transaction.manifest(probe, sync=True) != self.record['env_manifest']:
+            raise ValueError('无法保留恢复环境的元信息')
+        shutil.rmtree(probe)
+        transaction.sync_dir(probe.parent)
+        probe_db = Path(temporary['db_probe'])
+        transaction.replace_file(db_backup, probe_db, Path(temporary['db_temp']))
+        transaction.assert_file(probe_db, self.record['db_sha256'], self.record['db_meta'])
+        probe_db.unlink()
+        transaction.sync_dir(probe_db.parent)
+        if self.client_data is not None:
+            item = self.record['client']
+            path = Path(item['path'])
             if item['present']:
                 backup = self.output / 'client-capabilities.backup'
                 shutil.copy2(path, backup)
@@ -322,12 +344,11 @@ class UpdateOperations:
                 transaction.sync_dir(backup.parent)
                 item.update(backup=str(backup), sha256=transaction.digest(backup))
                 transaction.assert_file(backup, item['sha256'], item['meta'])
-                probe_client = path.with_name(path.name + '.' + self.output.name + '.probe')
-                transaction.replace_file(backup, probe_client)
+                probe_client = Path(temporary['client_probe'])
+                transaction.replace_file(backup, probe_client, Path(temporary['client_temp']))
                 transaction.assert_file(probe_client, item['sha256'], item['meta'])
                 probe_client.unlink()
                 transaction.sync_dir(probe_client.parent)
-            self.record['client'] = item
 
     def mark_intent(self):
         self.record.update(state='updating', mutation_intent=True)
@@ -337,11 +358,17 @@ class UpdateOperations:
         # 重取资格才能证明继承锁的写入者已全部结束。
         self.db_locks.close()
         self.update_locks.close()
-        self.update_locks.acquire(self.target / 'updates/update.lock')
+        self.update_locks.acquire_directory(self.target)
         self.db_locks.database(self.record['lock_paths'])
         current, state = self.read_pending()
         if state is not transaction.JournalState.UPDATING:
             raise ValueError('更新记录已经变化，不能按旧记录回滚')
+        metadata = current['original']['deployment']['metadata']
+        bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
+        client = current.get('client')
+        client_data = Path(client['configured_path']).parent if client is not None else None
+        transaction.validate_paths(self.target, current['original'], client_data, self.output, bindings,
+                                   recovery=True, temporary=current['temporary'])
         transaction.recover(current, verify_maintenance_integrity)
         current['state'] = transaction.JournalState.ROLLED_BACK.value
         try:
@@ -357,8 +384,10 @@ class UpdateOperations:
         record = json.loads(self.pending.read_text(encoding='utf-8'))
         state = transaction.classify_record(record)
         transaction.validate_record_target(record, self.target)
-        for key in ('output', 'env', 'env_backup', 'state_db', 'db_backup', 'lock_paths',
-                    'controller', 'original'):
+        if transaction.directory_identity(Path(record['output'])) != record['output_identity']:
+            raise ValueError('更新输出目录身份已变化')
+        for key in ('output', 'output_identity', 'env', 'env_backup', 'state_db', 'db_backup', 'lock_paths',
+                    'controller', 'original', 'temporary'):
             if record[key] != self.record[key]:
                 raise ValueError('持久更新记录身份不一致: ' + key)
         if state is not transaction.JournalState.PREPARING:
@@ -404,14 +433,14 @@ class UpdateOperations:
             if sidecar.exists():
                 sidecar.unlink()
         transaction.sync_dir(self.state_db.parent)
-        transaction.replace_file(copy, self.state_db)
+        transaction.replace_file(copy, self.state_db, Path(self.record['temporary']['db_temp']))
         if transaction.file_metadata(self.state_db) != self.record['db_meta']:
             raise ValueError('发布后的数据库元信息发生变化')
         receipt['new_deployment'] = {'state_db': str(self.state_db), 'metadata': metadata}
 
     def check_final(self, receipt):
         original = receipt['original']
-        self.check_paths(original)
+        self.check_paths(original, recovery=True)
         version = self.run(receipt, '最终检查发行版本', [self.target / 'venv/bin/camctl', '--version'])
         if version != self.expected_version + '\n':
             raise ValueError('最终发行版本不符')
@@ -503,74 +532,124 @@ def main():
         parser.error('--target 必须是已存在的绝对目录')
     if args.client_data is not None and not args.client_data.is_absolute():
         parser.error('--client-data 必须是绝对路径')
-    args.target = Path(os.path.abspath(args.target))
+    args.target = Path(os.path.abspath(args.target)).resolve()
     if (sys.version_info[:2] != (3, 11) or sys.implementation.name != 'cpython'
             or sys.prefix != sys.base_prefix):
         parser.error('更新入口必须由虚拟环境外的 CPython 3.11 启动')
     updates = args.target / 'updates'
-    updates.mkdir(parents=True, exist_ok=True)
-    transaction.sync_dir(args.target)
-    output = args.target / 'updates' / uuid.uuid4().hex
-    output.mkdir(parents=True)
-    (output / 'update.log').touch()
-    operations = UpdateOperations(Path(__file__).resolve().parent, args.target, args.client_data, output,
-                                  config_path=args.config)
+    pending = updates / 'pending.json'
+    target_locks = transaction.Locks()
+    operations = None
+    evidence = None
     stage = 'update_lock'
     try:
-        operations.update_locks.acquire(updates / 'update.lock')
-        if operations.pending.exists():
+        target_locks.acquire_directory(args.target)
+        try:
+            pending_info = pending.lstat()
+        except FileNotFoundError:
+            pending_info = None
+        if pending_info is not None:
+            import stat
+            if not stat.S_ISREG(pending_info.st_mode):
+                raise ValueError('更新记录不是普通文件')
             stage = 'recover_pending'
-            record = json.loads(operations.pending.read_text(encoding='utf-8'))
+            record = json.loads(pending.read_text(encoding='utf-8'))
             state = transaction.classify_record(record)
             transaction.validate_record_target(record, args.target)
+            if transaction.directory_identity(Path(record['output'])) != record['output_identity']:
+                raise ValueError('更新输出目录身份已变化')
+            original = record['original']
+            metadata = original['deployment']['metadata']
+            bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
+            client = record.get('client')
+            client_data = Path(client['configured_path']).parent if client is not None else None
+            transaction.validate_paths(args.target, original, client_data, Path(record['output']), bindings,
+                                       before_lock=True, recovery=True, temporary=record['temporary'])
+            evidence = Path(record['output'])
+            operations = UpdateOperations(Path(__file__).resolve().parent, args.target, None, evidence)
+            operations.update_locks = target_locks
             if state in (transaction.JournalState.COMMITTED, transaction.JournalState.ROLLED_BACK):
-                transaction.sync_file(operations.pending)
-                transaction.sync_dir(operations.pending.parent)
-            if state in (transaction.JournalState.PREPARING, transaction.JournalState.UPDATING):
+                transaction.sync_file(pending)
+                transaction.sync_dir(pending.parent)
+            else:
                 operations.db_locks.database(record['lock_paths'])
                 recovery_error = None
                 try:
+                    transaction.validate_paths(args.target, original, client_data, evidence, bindings,
+                                               recovery=True, temporary=record['temporary'])
                     transaction.recover(record, verify_maintenance_integrity)
-                    record['state'] = 'rolled_back'
-                    transaction.atomic_json(operations.pending, record)
+                    record['state'] = transaction.JournalState.ROLLED_BACK.value
+                    transaction.atomic_json(pending, record)
                 except Exception as error:
                     recovery_error = error
                 try:
                     operations.db_locks.close()
                 except Exception as close_error:
                     if recovery_error is not None:
-                        raise ExceptionGroup('恢复与释放数据库锁均失败',
-                                             [recovery_error, close_error])
+                        raise ExceptionGroup('恢复与释放数据库锁均失败', [recovery_error, close_error])
                     raise
                 if recovery_error is not None:
                     raise recovery_error
-            transaction.atomic_json(Path(record['output']) / 'journal.json', record)
+            archive = evidence / 'journal.json'
+            try:
+                archive_info = archive.lstat()
+            except FileNotFoundError:
+                archive_info = None
+            if archive_info is not None:
+                import stat
+                if not stat.S_ISREG(archive_info.st_mode) or json.loads(archive.read_text(encoding='utf-8')) != record:
+                    raise ValueError('既有更新记录归档无法核实')
+            else:
+                transaction.atomic_json(archive, record)
         stage = 'environment'
         python = args.target / 'venv/bin/python'
         if not python.is_file() or shutil.which('uv') is None:
             raise ValueError('原 Python 环境或 uv 缺失')
         sys.path.insert(0, str(args.target / 'venv/lib/python3.11/site-packages'))
-        receipt = perform_update(operations)
+        output = updates / uuid.uuid4().hex
+        evidence = None
+        operations = UpdateOperations(Path(__file__).resolve().parent, args.target, args.client_data, output,
+                                      config_path=args.config)
+        operations.update_locks = target_locks
+        stage = 'preflight'
+        original = operations.preflight()
+        stage = 'check_paths_before_effects'
+        operations.check_paths(original, before_lock=True)
+        updates.mkdir(parents=True, exist_ok=True)
+        transaction.sync_dir(args.target)
+        output.mkdir()
+        transaction.sync_dir(updates)
+        (output / 'update.log').touch(exist_ok=False)
+        evidence = output
+        receipt = perform_update(operations, original)
     except Exception as error:
         errors = [(error, stage)]
         try:
-            operations.unlock()
+            if operations is not None:
+                operations.unlock()
+            else:
+                target_locks.close()
         except Exception as unlock_error:
             errors.append((unlock_error, 'unlock'))
         receipt = {'status': 'failed', 'diagnostics': [freeze_exception(item, label)
                                                         for item, label in errors]}
-        deliver_diagnostics(operations, receipt, receipt['diagnostics'])
+        if evidence is not None and operations is not None:
+            deliver_diagnostics(operations, receipt, receipt['diagnostics'])
         try:
-            sys.stderr.write(f'更新失败（{stage}）：{type(error).__name__}: {error}；证据目录：{output}\n')
+            message = {'stage': stage, 'diagnostics': receipt['diagnostics'],
+                       'evidence': str(evidence) if evidence is not None else None}
+            sys.stderr.write(json.dumps(message, ensure_ascii=False, default=repr) + '\n')
             sys.stderr.flush()
         except Exception as stderr_error:
             receipt['outer_stderr_error'] = freeze_exception(stderr_error, 'outer_stderr')
-            deliver_diagnostics(operations, receipt, [receipt['outer_stderr_error']])
-        try:
-            operations.save(receipt)
-        except Exception as save_error:
-            failure = freeze_exception(save_error, 'save_final_receipt')
-            deliver_diagnostics(operations, receipt, [failure])
+            if evidence is not None and operations is not None:
+                deliver_diagnostics(operations, receipt, [receipt['outer_stderr_error']])
+        if evidence is not None and operations is not None:
+            try:
+                operations.save_recovery_failure(receipt)
+            except Exception as save_error:
+                failure = freeze_exception(save_error, 'save_final_receipt')
+                deliver_diagnostics(operations, receipt, [failure])
         return 1
     print('更新收据和日志目录：' + str(output))
     if receipt['status'] != 'updated_stopped':
@@ -582,8 +661,7 @@ def main():
             consequence = ('Python 环境可能已改变' if receipt['environment_may_have_changed']
                            else '尚未开始修改 Python 环境')
         reason = receipt.get('error') or receipt.get('unlock_error') or receipt.get('receipt_error')
-        print('更新失败：' + str(reason) +
-              '；' + consequence + '，请查看收据。', file=sys.stderr)
+        print('更新失败：' + str(reason) + '；' + consequence + '，请查看收据。', file=sys.stderr)
         return 1
     print('更新完成，host 保持停止；请按原入口恢复。')
     return 0
