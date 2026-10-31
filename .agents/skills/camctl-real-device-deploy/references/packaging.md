@@ -29,6 +29,7 @@ camctl-deploy/
   update-camctl.py
   update-worker.py
   update_transaction.py
+  maintenance_integrity.py
   bundle_support.py
   deploy_support.py
   camera_discovery.py
