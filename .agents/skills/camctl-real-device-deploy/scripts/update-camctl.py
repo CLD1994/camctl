@@ -25,6 +25,18 @@ import zipfile
 
 from bundle_support import current_target, verify_checksums, wheel_target_manifest
 from deploy_support import absolute_path
+try:
+    from maintenance_integrity import verify_maintenance_integrity
+except ModuleNotFoundError as error:
+    if error.name != 'maintenance_integrity':
+        raise
+    import importlib.util
+    source = (Path(__file__).resolve().parents[4] /
+              'apps/camctl/src/camctl/persistence/maintenance_integrity.py')
+    spec = importlib.util.spec_from_file_location('maintenance_integrity', source)
+    integrity_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(integrity_module)
+    verify_maintenance_integrity = integrity_module.verify_maintenance_integrity
 import update_transaction as transaction
 
 
@@ -84,10 +96,13 @@ def perform_update(ops):
         receipt['original'] = ops.preflight()
         stage = 'save_original'
         ops.save(receipt)
+        stage = 'check_paths_before_lock'
+        ops.check_paths(receipt['original'], before_lock=True)
         stage = 'lock'
         ops.lock(receipt['original'])
         locked = True
         stage = 'check_original'
+        ops.check_paths(receipt['original'])
         ops.check_original(receipt['original'])
         stage = 'save_original_check'
         ops.save(receipt)
@@ -103,6 +118,8 @@ def perform_update(ops):
         ops.migrate(receipt)
         stage = 'check_new'
         ops.check_new(receipt)
+        stage = 'check_final'
+        ops.check_final(receipt)
         stage = 'sync_new'
         ops.sync_new()
         stage = 'commit'
@@ -112,15 +129,31 @@ def perform_update(ops):
     except Exception as error:
         receipt.update(status='failed', error=f'{type(error).__name__}: {error}')
         failures.append((error, stage))
-        if intent and not committed and stage != 'commit':
+        if stage in ('commit', 'save_install_intent'):
             try:
-                ops.rollback()
+                actual = ops.confirm_pending()
+                if stage == 'commit' and actual == 'committed':
+                    committed = True
+                    receipt['status'] = 'updated_stopped'
+                elif actual == 'updating':
+                    intent = True
+                elif stage == 'save_install_intent' and actual == 'preparing':
+                    intent = False
+                else:
+                    raise ValueError('持久更新记录与操作阶段不一致')
+            except Exception as confirm_error:
+                receipt['rollback'] = 'commit_unknown'
+                failures.append((confirm_error, 'confirm_pending'))
+                intent = False
+        if intent and not committed:
+            try:
+                warning = ops.rollback()
                 receipt['rollback'] = 'verified'
+                if isinstance(warning, BaseException):
+                    failures.append((warning, 'save_rollback'))
             except Exception as rollback_error:
                 receipt['rollback'] = 'failed'
                 failures.append((rollback_error, 'rollback'))
-        elif stage == 'commit':
-            receipt['rollback'] = 'commit_unknown'
     finally:
         if locked:
             try:
@@ -184,8 +217,12 @@ class UpdateOperations:
         with zipfile.ZipFile(wheels[0]) as archive:
             names = archive.namelist()
             metadata = [name for name in names if name.endswith('.dist-info/METADATA')]
-            if len(metadata) != 1 or 'camctl/deployment.py' not in names:
+            integrity_name = 'camctl/persistence/maintenance_integrity.py'
+            if (len(metadata) != 1 or 'camctl/deployment.py' not in names
+                    or integrity_name not in names):
                 raise ValueError('camctl wheel 缺少发行元信息或只读检查入口')
+            if archive.read(integrity_name) != (self.bundle / 'maintenance_integrity.py').read_bytes():
+                raise ValueError('部署检查入口与 wheel 内的维护检查不一致')
             wheel_info = BytesParser().parsebytes(archive.read(metadata[0]))
             if (wheel_info['Name'] != 'camctl'
                     or wheel_info['Version'] != release['components']['camctl']):
@@ -224,6 +261,7 @@ class UpdateOperations:
         owned = open_existing(self.state_db, DbOpenMode.EXISTING_RO,
                               DbConfig(busy_timeout_ms=self.config.database.busy_timeout_ms))
         try:
+            verify_maintenance_integrity(owned.connection)
             verify_directory_binding(owned.metadata, self.config.paths.staging, self.config.paths.ready,
                                      self.config.paths.processing)
             if not int(_FORMAT_VERSIONS.V9) <= owned.metadata.format_version <= CURRENT_FORMAT_VERSION:
@@ -231,6 +269,9 @@ class UpdateOperations:
             original['deployment'] = {'state_db': str(self.state_db), 'metadata': asdict(owned.metadata)}
         finally:
             owned.connection.close()
+
+    def check_paths(self, original, *, before_lock=False):
+        transaction.validate_paths(self.target, original, self.client_data, before_lock=before_lock)
 
     def backup(self, receipt):
         original = receipt['original']
@@ -244,8 +285,13 @@ class UpdateOperations:
                        'output': str(self.output)}
         transaction.atomic_json(self.pending, self.record)
         self.record['env_manifest'] = transaction.backup_environment(self.target / 'venv', env_backup)
+        self.record['db_meta'] = transaction.file_metadata(self.state_db)
         transaction.backup_database(self.state_db, db_backup)
         self.record['db_sha256'] = transaction.digest(db_backup)
+        transaction.assert_file(db_backup, self.record['db_sha256'], self.record['db_meta'])
+        transaction.verify_database_snapshot(db_backup, original['deployment']['metadata'],
+                                             verify_maintenance_integrity)
+        transaction.assert_file(db_backup, self.record['db_sha256'], self.record['db_meta'])
         probe = (self.target / 'venv').with_name('venv.' + self.output.name + '.probe')
         transaction.copy_environment(env_backup, probe)
         if transaction.manifest(probe, sync=True) != self.record['env_manifest']:
@@ -254,6 +300,7 @@ class UpdateOperations:
         transaction.sync_dir(probe.parent)
         probe_db = self.state_db.with_name(self.state_db.name + '.' + self.output.name + '.probe')
         transaction.replace_file(db_backup, probe_db)
+        transaction.assert_file(probe_db, self.record['db_sha256'], self.record['db_meta'])
         probe_db.unlink()
         transaction.sync_dir(probe_db.parent)
         if self.client_data is not None:
@@ -268,13 +315,16 @@ class UpdateOperations:
                 backup = self.output / 'client-capabilities.backup'
                 shutil.copy2(path, backup)
                 info = path.stat()
+                item['meta'] = transaction.file_metadata(path)
                 os.chown(backup, info.st_uid, info.st_gid)
                 shutil.copystat(path, backup)
                 transaction.sync_file(backup)
                 transaction.sync_dir(backup.parent)
                 item.update(backup=str(backup), sha256=transaction.digest(backup))
+                transaction.assert_file(backup, item['sha256'], item['meta'])
                 probe_client = path.with_name(path.name + '.' + self.output.name + '.probe')
                 transaction.replace_file(backup, probe_client)
+                transaction.assert_file(probe_client, item['sha256'], item['meta'])
                 probe_client.unlink()
                 transaction.sync_dir(probe_client.parent)
             self.record['client'] = item
@@ -289,16 +339,44 @@ class UpdateOperations:
         self.update_locks.close()
         self.update_locks.acquire(self.target / 'updates/update.lock')
         self.db_locks.database(self.record['lock_paths'])
-        current = json.loads(self.pending.read_text(encoding='utf-8'))
-        if current.get('output') != str(self.output) or current.get('state') != 'updating':
+        current, state = self.read_pending()
+        if state is not transaction.JournalState.UPDATING:
             raise ValueError('更新记录已经变化，不能按旧记录回滚')
-        transaction.recover(self.record)
-        self.record['state'] = 'rolled_back'
-        transaction.atomic_json(self.pending, self.record)
+        transaction.recover(current, verify_maintenance_integrity)
+        current['state'] = transaction.JournalState.ROLLED_BACK.value
+        try:
+            transaction.atomic_json(self.pending, current)
+        except Exception as error:
+            if self.confirm_pending() != transaction.JournalState.ROLLED_BACK.value:
+                raise
+            self.record = current
+            return error
+        self.record = current
+
+    def read_pending(self):
+        record = json.loads(self.pending.read_text(encoding='utf-8'))
+        state = transaction.classify_record(record)
+        transaction.validate_record_target(record, self.target)
+        for key in ('output', 'env', 'env_backup', 'state_db', 'db_backup', 'lock_paths',
+                    'controller', 'original'):
+            if record[key] != self.record[key]:
+                raise ValueError('持久更新记录身份不一致: ' + key)
+        if state is not transaction.JournalState.PREPARING:
+            if {k: v for k, v in record.items() if k != 'state'} != {
+                    k: v for k, v in self.record.items() if k != 'state'}:
+                raise ValueError('持久更新记录材料不一致')
+        return record, state
+
+    def confirm_pending(self):
+        _, state = self.read_pending()
+        transaction.sync_file(self.pending)
+        transaction.sync_dir(self.pending.parent)
+        return state.value
 
     def commit(self):
-        self.record['state'] = 'committed'
-        transaction.atomic_json(self.pending, self.record)
+        committed = dict(self.record, state=transaction.JournalState.COMMITTED.value)
+        transaction.atomic_json(self.pending, committed)
+        self.record = committed
 
     def migrate(self, receipt):
         copy = self.output / 'state.migrate.db'
@@ -327,7 +405,33 @@ class UpdateOperations:
                 sidecar.unlink()
         transaction.sync_dir(self.state_db.parent)
         transaction.replace_file(copy, self.state_db)
+        if transaction.file_metadata(self.state_db) != self.record['db_meta']:
+            raise ValueError('发布后的数据库元信息发生变化')
         receipt['new_deployment'] = {'state_db': str(self.state_db), 'metadata': metadata}
+
+    def check_final(self, receipt):
+        original = receipt['original']
+        self.check_paths(original)
+        version = self.run(receipt, '最终检查发行版本', [self.target / 'venv/bin/camctl', '--version'])
+        if version != self.expected_version + '\n':
+            raise ValueError('最终发行版本不符')
+        result = self.run(receipt, '最终检查状态库', [self.python, '-m', 'camctl.deployment',
+                          '--config', self.config_path])
+        if json.loads(result) != receipt['new_deployment']:
+            raise ValueError('最终数据库身份不一致')
+        if transaction.digest(self.config_path) != original['config_sha256']:
+            raise ValueError('最终配置与原配置不一致')
+        if transaction.file_metadata(self.state_db) != self.record['db_meta']:
+            raise ValueError('最终数据库元信息不一致')
+        if self.client_data is not None:
+            client = self.record['client']
+            path = Path(client['configured_path'])
+            if path.resolve() != Path(client['path']):
+                raise ValueError('能力文件路径已变化')
+            if transaction.digest(path) != transaction.digest(self.output / 'device-capabilities.json'):
+                raise ValueError('能力文件内容不一致')
+            if client['present'] and transaction.file_metadata(path) != client['meta']:
+                raise ValueError('能力文件元信息不一致')
 
     def sync_new(self):
         transaction.manifest(self.target / 'venv', sync=True)
@@ -417,14 +521,16 @@ def main():
         if operations.pending.exists():
             stage = 'recover_pending'
             record = json.loads(operations.pending.read_text(encoding='utf-8'))
-            if record['state'] in ('committed', 'rolled_back'):
+            state = transaction.classify_record(record)
+            transaction.validate_record_target(record, args.target)
+            if state in (transaction.JournalState.COMMITTED, transaction.JournalState.ROLLED_BACK):
                 transaction.sync_file(operations.pending)
                 transaction.sync_dir(operations.pending.parent)
-            if record['state'] not in ('committed', 'rolled_back'):
+            if state in (transaction.JournalState.PREPARING, transaction.JournalState.UPDATING):
                 operations.db_locks.database(record['lock_paths'])
                 recovery_error = None
                 try:
-                    transaction.recover(record)
+                    transaction.recover(record, verify_maintenance_integrity)
                     record['state'] = 'rolled_back'
                     transaction.atomic_json(operations.pending, record)
                 except Exception as error:
@@ -454,6 +560,12 @@ def main():
         receipt = {'status': 'failed', 'diagnostics': [freeze_exception(item, label)
                                                         for item, label in errors]}
         deliver_diagnostics(operations, receipt, receipt['diagnostics'])
+        try:
+            sys.stderr.write(f'更新失败（{stage}）：{type(error).__name__}: {error}；证据目录：{output}\n')
+            sys.stderr.flush()
+        except Exception as stderr_error:
+            receipt['outer_stderr_error'] = freeze_exception(stderr_error, 'outer_stderr')
+            deliver_diagnostics(operations, receipt, [receipt['outer_stderr_error']])
         try:
             operations.save(receipt)
         except Exception as save_error:

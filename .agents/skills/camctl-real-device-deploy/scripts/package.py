@@ -139,6 +139,8 @@ def main():
         for name in ('install-host.py', 'update-camctl.py', 'update-worker.py', 'update_transaction.py',
                      'bundle_support.py', 'deploy_support.py', 'camera_discovery.py'):
             shutil.copyfile(skill / 'scripts' / name, bundle / name)
+        shutil.copyfile(source / 'apps/camctl/src/camctl/persistence/maintenance_integrity.py',
+                        bundle / 'maintenance_integrity.py')
         dist = bundle / 'camctl'
         dist.mkdir()
         project = source / 'apps/camctl'

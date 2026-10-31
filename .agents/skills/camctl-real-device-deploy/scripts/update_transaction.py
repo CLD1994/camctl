@@ -1,12 +1,101 @@
 """停机更新的持久备份、锁和可重复恢复。"""
 import fcntl
+from enum import Enum
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import stat
+
+
+class JournalState(Enum):
+    PREPARING = 'preparing'
+    UPDATING = 'updating'
+    COMMITTED = 'committed'
+    ROLLED_BACK = 'rolled_back'
+
+
+def valid_file_metadata(value):
+    return (isinstance(value, dict) and set(value) == {'uid', 'gid', 'mode', 'xattrs'}
+            and all(type(value[key]) is int and value[key] >= 0 for key in ('uid', 'gid', 'mode'))
+            and isinstance(value['xattrs'], dict)
+            and all(isinstance(key, str) and isinstance(data, str)
+                    and len(data) % 2 == 0 and re.fullmatch('[0-9a-f]*', data)
+                    for key, data in value['xattrs'].items()))
+
+
+def classify_record(record):
+    """拒绝未知或不完整记录，不能把它当作尚未修改。"""
+    if not isinstance(record, dict) or type(record.get('mutation_intent')) is not bool:
+        raise ValueError('更新记录缺少合法修改意图')
+    try:
+        state = JournalState(record['state'])
+    except (KeyError, ValueError, TypeError) as error:
+        raise ValueError('更新记录状态无效') from error
+    intent = record['mutation_intent']
+    if ((state is JournalState.PREPARING and intent)
+            or (state in (JournalState.UPDATING, JournalState.COMMITTED) and not intent)):
+        raise ValueError('更新记录状态与修改意图冲突')
+    for key in ('env', 'env_backup', 'state_db', 'db_backup', 'output', 'controller'):
+        value = record.get(key)
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            raise ValueError('更新记录路径无效: ' + key)
+    locks = record.get('lock_paths')
+    if (not isinstance(locks, list) or len(locks) != 2
+            or any(not isinstance(path, str) or not Path(path).is_absolute() for path in locks)
+            or len(set(locks)) != 2):
+        raise ValueError('更新记录锁路径无效')
+    original = record.get('original')
+    if (not isinstance(original, dict) or not isinstance(original.get('config'), str)
+            or not Path(original['config']).is_absolute()):
+        raise ValueError('更新记录原配置无效')
+    if (not isinstance(original.get('config_sha256'), str)
+            or not re.fullmatch('[0-9a-f]{64}', original['config_sha256'])
+            or not isinstance(original.get('deployment'), dict)
+            or original['deployment'].get('state_db') != record['state_db']
+            or not isinstance(original['deployment'].get('metadata'), dict)):
+        raise ValueError('更新记录原部署身份无效')
+    if (original.get('state_db') != record['state_db']
+            or original.get('lock_paths') != locks):
+        raise ValueError('更新记录数据库或锁身份不一致')
+    if intent:
+        if (not isinstance(record.get('env_manifest'), dict) or not record['env_manifest']
+                or not isinstance(record.get('db_sha256'), str)
+                or not re.fullmatch('[0-9a-f]{64}', record['db_sha256'])
+                or not valid_file_metadata(record.get('db_meta'))
+                or not isinstance(record['env_manifest'].get(''), dict)
+                or record['env_manifest'].get('', {}).get('kind') != 'dir'):
+            raise ValueError('更新记录恢复材料不完整')
+    client = record.get('client')
+    if 'client' in record:
+        if (not isinstance(client, dict) or type(client.get('present')) is not bool
+                or not isinstance(client.get('path'), str)
+                or not Path(client['path']).is_absolute()
+                or not isinstance(client.get('configured_path'), str)
+                or not Path(client['configured_path']).is_absolute()):
+            raise ValueError('更新记录能力文件材料无效')
+        if client['present'] and (not isinstance(client.get('backup'), str)
+                                  or not Path(client['backup']).is_absolute()
+                                  or not isinstance(client.get('sha256'), str)
+                                  or not re.fullmatch('[0-9a-f]{64}', client['sha256'])
+                                  or not valid_file_metadata(client.get('meta'))):
+            raise ValueError('更新记录能力文件备份不完整')
+    return state
+
+
+def validate_record_target(record, target):
+    output = Path(record['output'])
+    updates = target / 'updates'
+    if (Path(record['env']) != target / 'venv' or output.parent != updates
+            or Path(record['env_backup']) != output / 'venv.backup'
+            or Path(record['db_backup']) != output / 'state.backup.db'):
+        raise ValueError('更新记录与目标目录不一致')
+    client = record.get('client')
+    if client is not None and client['present'] and Path(client['backup']) != output / 'client-capabilities.backup':
+        raise ValueError('能力文件备份与更新记录目录不一致')
 
 
 def sync_dir(path):
@@ -39,6 +128,111 @@ def digest(path):
         for chunk in iter(lambda: stream.read(1024 * 1024), b''):
             result.update(chunk)
     return result.hexdigest()
+
+
+def file_metadata(path):
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError('需要普通文件: ' + str(path))
+    return {'uid': info.st_uid, 'gid': info.st_gid, 'mode': stat.S_IMODE(info.st_mode),
+            'xattrs': {key: os.getxattr(path, key).hex() for key in os.listxattr(path)}}
+
+
+def assert_file(path, sha256, metadata):
+    if digest(path) != sha256 or file_metadata(path) != metadata:
+        raise ValueError('文件内容或元信息无法核实: ' + str(path))
+
+
+def verify_database_snapshot(path, expected, verify_integrity):
+    """读取独立数据库并核对保存在更新记录中的原实例身份。"""
+    keys = ('application_id', 'instance_id', 'format_version', 'staging_path',
+            'ready_path', 'processing_path')
+    connection = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)
+    try:
+        verify_integrity(connection)
+        row = connection.execute(
+            'SELECT application_id, instance_id, format_version, staging_path, '
+            'ready_path, processing_path FROM database_metadata WHERE id = 1').fetchone()
+        if row is None or dict(zip(keys, row)) != expected:
+            raise ValueError('数据库备份身份或目录绑定不一致')
+    finally:
+        connection.close()
+
+
+def validate_paths(target, original, client_data, *, before_lock=False):
+    """在任何安装前隔离保留对象、能力目标与更新控制文件。"""
+    env_path = target / 'venv'
+    env = env_path.resolve()
+    updates = (target / 'updates').resolve()
+    config = Path(original['config']).resolve()
+    db = Path(original['state_db']).resolve()
+    locks = [Path(path).resolve() for path in original['lock_paths']]
+    locks.append((target / 'updates/update.lock').resolve())
+    protected = [config, db, *locks]
+    raw_protected = [Path(original['config']), Path(original['state_db']),
+                     *(Path(path) for path in original['lock_paths']), target / 'updates/update.lock']
+    for path, raw in zip(protected, raw_protected):
+        if path == env or path.is_relative_to(env):
+            raise ValueError('保留对象位于更新中的虚拟环境: ' + str(path))
+        if raw == env_path or raw.is_relative_to(env_path):
+            raise ValueError('保留对象路径位于更新中的虚拟环境: ' + str(raw))
+    candidate = ((client_data / 'device-capabilities.json').resolve()
+                 if client_data is not None else None)
+    raw_candidate = client_data / 'device-capabilities.json' if client_data is not None else None
+    excluded = [env, updates, env.with_name(env.name + '.camctl-restore'),
+                env.with_name(env.name + '.camctl-displaced')]
+    if candidate is not None and any(candidate == path or candidate.is_relative_to(path) for path in excluded):
+        raise ValueError('能力文件位于更新环境或控制材料内')
+    raw_excluded = [env_path, target / 'updates',
+                    env_path.with_name(env_path.name + '.camctl-restore'),
+                    env_path.with_name(env_path.name + '.camctl-displaced')]
+    if raw_candidate is not None and any(raw_candidate == path or raw_candidate.is_relative_to(path)
+                                         for path in raw_excluded):
+        raise ValueError('能力文件路径位于更新环境或控制材料内')
+    reserved = [*protected, Path(str(db) + '-wal'), Path(str(db) + '-shm'),
+                db.with_name(db.name + '.camctl-restore')]
+    if candidate is not None and candidate in reserved:
+        raise ValueError('能力文件与保留对象路径冲突')
+
+    def identity(path):
+        try:
+            info = path.stat()
+        except FileNotFoundError:
+            return None
+        return info.st_dev, info.st_ino
+    protected_ids = [identity(path) for path in protected]
+    required_ids = [protected_ids[0], protected_ids[1], protected_ids[4]]
+    if not before_lock:
+        required_ids.extend(protected_ids[2:4])
+    existing_ids = [value for value in protected_ids if value is not None]
+    if any(value is None for value in required_ids) or len(set(existing_ids)) != len(existing_ids):
+        raise ValueError('保留对象不存在或共享文件身份')
+    candidate_id = identity(candidate) if candidate is not None else None
+    for path in reserved:
+        other = identity(path)
+        if candidate_id is not None and candidate_id == other:
+            raise ValueError('能力文件与保留对象为同一文件')
+    # 硬链接可使目录外文件仍与 venv 内对象共享内容。
+    outside_ids = {value for value in [candidate_id, *protected_ids]
+                   if value is not None}
+    for directory, names, files in os.walk(env, followlinks=False, onerror=lambda error: (_ for _ in ()).throw(error)):
+        for name in (*names, *files):
+            path = Path(directory) / name
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                info = path.stat()
+            if (info.st_dev, info.st_ino) in outside_ids:
+                raise ValueError('保留对象与虚拟环境内文件为同一对象')
+    if candidate_id is not None:
+        for directory, names, files in os.walk(updates, followlinks=False,
+                                                onerror=lambda error: (_ for _ in ()).throw(error)):
+            for name in (*names, *files):
+                path = Path(directory) / name
+                info = path.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    info = path.stat()
+                if (info.st_dev, info.st_ino) == candidate_id:
+                    raise ValueError('能力文件与更新控制材料为同一对象')
 
 
 def manifest(root, *, sync=False):
@@ -179,10 +373,13 @@ def make_directories(path):
         sync_dir(directory.parent)
 
 
-def recover(record):
+def recover(record, verify_integrity):
     """使用保留的完整备份幂等恢复；无修改意图时不覆盖原环境。"""
-    if not record.get('mutation_intent'):
+    state = classify_record(record)
+    if state is JournalState.PREPARING:
         return
+    if state is not JournalState.UPDATING:
+        raise ValueError('终态更新记录不能再次恢复')
     original = record['original']
     if digest(Path(original['config'])) != original['config_sha256']:
         raise ValueError('原配置与更新记录不一致')
@@ -191,8 +388,11 @@ def recover(record):
     db = Path(record['state_db'])
     db_backup = Path(record['db_backup'])
     expected_env = record['env_manifest']
-    if manifest(env_backup) != expected_env or digest(db_backup) != record['db_sha256']:
+    if manifest(env_backup) != expected_env:
         raise ValueError('更新备份无法核实')
+    assert_file(db_backup, record['db_sha256'], record['db_meta'])
+    metadata = original['deployment']['metadata']
+    verify_database_snapshot(db_backup, metadata, verify_integrity)
     staging = env.with_name(env.name + '.camctl-restore')
     displaced = env.with_name(env.name + '.camctl-displaced')
     if staging.exists():
@@ -218,8 +418,8 @@ def recover(record):
             sidecar.unlink()
     sync_dir(db.parent)
     replace_file(db_backup, db)
-    if digest(db) != record['db_sha256']:
-        raise ValueError('恢复的数据库无法核实')
+    assert_file(db, record['db_sha256'], record['db_meta'])
+    verify_database_snapshot(db, metadata, verify_integrity)
     client = record.get('client')
     if client:
         path = Path(client['path'])
@@ -227,11 +427,11 @@ def recover(record):
             raise ValueError('能力文件路径与更新记录不一致')
         if client['present']:
             backup = Path(client['backup'])
-            if digest(backup) != client['sha256']:
-                raise ValueError('能力文件备份无法核实')
+            assert_file(backup, client['sha256'], client['meta'])
             replace_file(backup, path)
-            if digest(path) != client['sha256']:
-                raise ValueError('恢复的能力文件无法核实')
+            assert_file(path, client['sha256'], client['meta'])
         elif path.exists():
             path.unlink()
             sync_dir(path.parent)
+        if not client['present'] and path.exists():
+            raise ValueError('原本不存在的能力文件仍然存在')
