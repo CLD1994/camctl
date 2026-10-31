@@ -600,7 +600,8 @@ async def _apply_read_business_cancel(owned, target, *, occurred_at=_NOW, databa
         "scheduled_at": "2026-01-15 09:00:00", "params": {
             "target": {"action_instance_id": str(target)}}}])
     database = await capture_database(owned) if database is None else database
-    await cancel_flow(ready=canonical_to_path(database.metadata.ready_path),
+    await cancel_flow(staging=canonical_to_path(database.metadata.staging_path),
+        ready=canonical_to_path(database.metadata.ready_path),
         processing=canonical_to_path(database.metadata.processing_path))(
             SimpleNamespace(database=database,
                 clock=SimpleNamespace(utc_micros=lambda: occurred_at)))

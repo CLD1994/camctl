@@ -1,6 +1,7 @@
 """原真实 End 与完整 READ 结束申请分别形成，重送保持原申请时刻。"""
 
 import asyncio
+import sys
 
 import pytest
 
@@ -84,7 +85,12 @@ async def _assert_complete_finish_time(owned, runtime, reader, target, advance, 
         assert len(reader.requests) == 1
     finally:
         allowed.set()
-        if not task.done():
+        primary = sys.exception()
+        if primary is not None:
+            result, = await asyncio.gather(task, return_exceptions=True)
+            if isinstance(result, BaseException) and result is not primary:
+                primary.add_note(f"后台读取任务收场异常: {type(result).__name__}: {result}")
+        elif not task.done():
             await task
 
 

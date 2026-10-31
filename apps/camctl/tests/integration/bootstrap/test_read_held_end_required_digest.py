@@ -113,20 +113,18 @@ def _held_without_digest(owned, runtime, reader):
 
 def _finish_fault(monkeypatch, after_commit):
     saved = []
-    original = OperationRepository.finish_attempt
+    original = OperationRepository.finish_binding_read
 
-    def finish(repository, request, key, owned):
-        if request.ticket.operation != "read":
-            return original(repository, request, key, owned)
-        saved.append((request, key))
+    def finish(repository, request, key, owned, *, current_identity=None):
+        saved.append((request, key, current_identity))
         if len(saved) == 1:
             faulty = _fault_owned(owned, "COMMIT", after_commit=after_commit)
-            result = original(repository, request, key, faulty)
+            result = original(repository, request, key, faulty, current_identity=current_identity)
             assert faulty.connection.failed and result.kind is DbOutcomeKind.UNKNOWN
             return result
-        return original(repository, request, key, owned)
+        return original(repository, request, key, owned, current_identity=current_identity)
 
-    monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
+    monkeypatch.setattr(OperationRepository, "finish_binding_read", finish)
     return saved
 
 
