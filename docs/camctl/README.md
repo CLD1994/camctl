@@ -42,6 +42,8 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 | 文档 | 用途 |
 | --- | --- |
+| [自动迁移与失败回滚](../superpowers/plans/2026-10-31-transactional-camctl-update.md) | V9 维护基线、离线更新、环境与数据库恢复，以及更新中断后的恢复入口。 |
+| [组件版本与启动记录](../superpowers/plans/2026-10-31-component-versioning-and-offline-update.md) | 三组件独立版本来源、启动日志及部署包的离线交付基础。 |
 | [错误日志内容与诊断责任修复](../superpowers/plans/2026-10-28-error-log-projection-and-ownership.md) | ERROR 内容投影、同记录和跨记录引用、会话收场诊断及隔离验证。 |
 | [拍摄结果保存与交付恢复修复](../superpowers/plans/2026-10-28-capture-result-and-publication-recovery.md) | 首次配对事务边界、调用结果消费者处置、普通交付发现及取消收场的修复与隔离单元验证。 |
 | [空业务会话的后台收场与退出](../superpowers/plans/2026-10-26-idle-session-exit.md) | 数据库空闲后的原后台任务消费、关闭事务重查、错误及取消交付。 |

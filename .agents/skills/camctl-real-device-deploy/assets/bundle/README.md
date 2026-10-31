@@ -93,22 +93,26 @@ python3 install-host.py \
 更新前保留旧部署包及其配套依赖，停止 host 和全部 camctl CLI，确认它们已经退出。目标 Linux 主机须已有 Python 3.11、uv 和原实例；支持 x86_64、ARM64 及 glibc 2.17 或以上。将完整新包解压到新的空目录，进入解压后的 `camctl-deploy` 目录执行更新；更新用的包目录须未安装客户端依赖、未运行客户端。原客户端数据和旧部署包保留在原位置：
 
 ```sh
-"$deploy_root/venv/bin/python" update-camctl.py --target "$deploy_root"
+python3.11 update-camctl.py --target "$deploy_root"
 ```
 
 默认使用 `<target>/config.toml`。原部署使用外置配置时，通过 `--config /absolute/path/to/config.toml` 指定原配置文件的绝对路径；更新使用该配置中的状态库和目录绑定。
 
-入口核对交付文件摘要、原配置与状态库，在原库的稳定会话锁和接纳锁下更新原 `venv`。依赖从包内安装并检查锁定哈希，随后核对新发行版本、原配置、数据库身份及目录绑定。更新不会启动 host、连接相机、修改配置或自动升级数据库。旧数据库格式不受新版本支持时，保留原库并报告失败；需要升级时按数据库的显式升级流程另行处理。
+使用原虚拟环境之外的 Python 3.11 执行更新入口，使原环境部分更新或恢复目录时，控制进程仍能运行。入口先处理上次未完成更新；取得更新资格后，才核对本次交付文件摘要、原配置与状态库。原库的稳定会话锁和接纳锁在更新及恢复期间保持；上次安装子进程仍可能写入时，不能开始恢复或新更新。
 
-每次更新在 `<target>/updates/<标识>/` 保留 `receipt.json`、`update.log` 和成功导出的 `device-capabilities.json`。更新失败后 Python 环境可能已改变；收据保留原安装版本、配置摘要、执行步骤和错误。使用旧包重新安装软件需要运维自行操作，重新安装不会撤销数据库升级。检查收据状态为 `updated_stopped` 后，按原入口恢复 host。
+完整 Python 环境和 SQLite 一致备份可靠保存后，更新器才安装包内依赖及 wheel。数据库自动维护从 V9 开始：当前 V9 只验证，后续格式变化由发行物登记迁移路径。迁移在独立副本上进行，验证历史、实例身份、目录绑定及当前结构后才发布。基线范围外、格式无效或没有迁移路径时明确失败。原配置和媒体保留，更新期间不启动 host 或连接相机。
+
+安装、迁移、发布或最终核验在可靠完成前失败时，更新器自动恢复更新前的 Python 环境和数据库。断电或强制终止后，保持停机并重新运行同一更新命令；入口先按保存的记录恢复原状态，核验后才开始本次更新。恢复过程中再次中断也沿原记录继续；不能核实恢复结果时，保留未完成责任并拒绝新更新。不要删除更新记录、备份或临时恢复目录。
+
+每次更新在 `<target>/updates/<标识>/` 保留 `receipt.json`、`update.log`、恢复材料和成功导出的 `device-capabilities.json`。收据保存原安装信息、配置摘要、步骤、原失败及回滚结果。只有全部检查通过且完成记录可靠保存后才报告 `updated_stopped`；此后输出或日志故障只追加诊断。检查实际结果后由操作者按原入口恢复 host，更新器不会自动启动服务。回滚失败时继续保持停机，处理收据指出的存储或权限问题，再运行更新器继续恢复。
 
 只有明确指定客户端数据目录时，更新才同步设备能力说明，并覆盖该目录的 `device-capabilities.json`：
 
 ```sh
-"$deploy_root/venv/bin/python" update-camctl.py --target "$deploy_root" --client-data /absolute/path/to/client-data
+python3.11 update-camctl.py --target "$deploy_root" --client-data /absolute/path/to/client-data
 ```
 
-同步不更改客户端数据库或媒体；未指定时能力说明仅保存在更新产物目录。
+指定同步时，原能力文件的内容或不存在状态一并备份，并随失败更新恢复。客户端数据库和媒体保留；未指定时能力说明仅保存在更新产物目录。
 
 ## camctl 的配置与日志
 
