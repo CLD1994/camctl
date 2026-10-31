@@ -7,6 +7,7 @@ import pytest
 
 from support.repository_ports import repository_port
 
+from camctl.capture.files import file_identity_key
 from camctl.capture.media_flow import run_recording_media
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.drivers.hasselblad.driver import CameraReadError, EVIDENCE
@@ -39,6 +40,11 @@ def prepare_diagnostic_read_case(request, consumer, *, known_digest=False):
     else:
         owned = request.getfixturevalue("read_targets")
         command = _command(internal=consumer == "internal")
+        # 录像来源须保留与动作绑定一致的固定身份，供正式读取与清理资格识别。
+        owned.connection.execute(
+            "UPDATE device_files SET identity_key=? WHERE id=501",
+            (file_identity_key("cam-1", "camctl-adb", "file-0501"),),
+        )
     if consumer == "internal":
         owned.connection.execute("DELETE FROM obtain_items")
         owned.connection.execute("DELETE FROM outputs")
