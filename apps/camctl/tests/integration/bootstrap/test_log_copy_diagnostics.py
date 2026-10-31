@@ -34,6 +34,27 @@ from ..support.bootstrap_log_cases import (
 )
 
 
+def _session_failures(text):
+    """读取实际通道中的会话失败事实；stderr 也可能含非 JSON 诊断。"""
+    records = []
+    for line in text.splitlines():
+        if not line.startswith("{"):
+            continue
+        record = json.loads(line)
+        if isinstance(record, dict) and record.get("event") == "session_failed":
+            records.append(record)
+    return records
+
+
+def _assert_report_failure(text):
+    failures = _session_failures(text)
+    assert len(failures) == 1
+    assert failures[0]["level"] == "ERROR"
+    assert failures[0]["command"] == "run"
+    assert failures[0]["reason"] == "report_error"
+    assert isinstance(failures[0]["details"], dict)
+
+
 async def test_report_copy_sync_failure_keeps_original_receipt_and_consumes_failure(
         tmp_path: Path, monkeypatch) -> None:
     from camctl.logging_runtime import diagnostics
@@ -88,7 +109,9 @@ async def test_report_copy_sync_failure_keeps_original_receipt_and_consumes_fail
     assert probe.events.count(("file", "started")) == 1
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert records[:len(before)] == before
-    assert records[len(before):] == [json.loads(requests[0].trigger.rendered_message())]
+    trigger = json.loads(requests[0].trigger.rendered_message())
+    assert [record for record in records[len(before):]
+            if record.get("stage") == "report_generate"] == [trigger]
     assert "controlled report generation failure" in json.dumps(records[-1])
     assert deps.log_path_unsafe is True and deps.log_runtime.path_unsafe is True
     assert deps.log_runtime.channel.disabled is True
@@ -99,7 +122,7 @@ async def test_report_copy_sync_failure_keeps_original_receipt_and_consumes_fail
     assert "controlled report generation failure" in diagnostic
     assert "controlled original file sync failure" in diagnostic
     assert "appended=True" in diagnostic and "durable=False" in diagnostic
-    assert "run 会话失败: report_error" in diagnostic
+    _assert_report_failure(diagnostic)
     assert stdout.getvalue() == ""
 
 
@@ -551,14 +574,14 @@ async def test_default_lock_failure_disables_file_logging(
         assert "coordination_lock_failed" in stderr.getvalue()
         if close_fails:
             assert "coordination_close_failed" in stderr.getvalue()
-        assert "run 会话失败: report_error" in stderr.getvalue()
+        _assert_report_failure(stderr.getvalue())
         assert stdout.getvalue() == ""
         assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
         log_path = Path(deps.config.paths.log_file)
         if log_path.exists():
             log = log_path.read_text(encoding="utf-8")
             assert "报告失败的日志副本诊断" not in log
-            assert "run 会话失败: report_error" not in log
+            assert not _session_failures(log)
     finally:
         close_runtime(deps)
 
@@ -682,14 +705,14 @@ async def test_default_current_log_io_failure_disables_file_logging(
         assert f"controlled current log {failure_step} failure" in stderr.getvalue()
         if close_fails:
             assert "file_handler_close_failed" in stderr.getvalue()
-        assert "run 会话失败: report_error" in stderr.getvalue()
+        _assert_report_failure(stderr.getvalue())
         assert stdout.getvalue() == ""
         assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
         log_path = Path(deps.config.paths.log_file)
         if log_path.exists():
             log = log_path.read_text(encoding="utf-8")
             assert "报告失败的日志副本诊断" not in log
-            assert "run 会话失败: report_error" not in log
+            assert not _session_failures(log)
     finally:
         close_runtime(deps)
 
@@ -737,7 +760,7 @@ async def test_default_format_failure_keeps_file_logging_available(
         log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
         assert "copy_write_stage=format" in log
         assert "permission denied while formatting" in log
-        assert "run 会话失败: report_error" in log
+        _assert_report_failure(log)
         assert stderr.getvalue() == ""
     finally:
         close_runtime(deps)
@@ -785,7 +808,7 @@ async def test_default_replica_io_failure_keeps_ordinary_log_available(
         log = log_path.read_bytes()
         assert b"controlled report generation failure" in log
         assert b"controlled replica write denied" in log
-        assert "run 会话失败: report_error".encode("utf-8") in log
+        _assert_report_failure(log.decode("utf-8"))
         assert stdout.getvalue() == ""
         assert stderr.getvalue() == ""
     finally:
@@ -883,7 +906,10 @@ async def test_default_file_io_failure_stops_listener_and_uses_stderr(
             LogRecord(level=LogLevel.ERROR, message="later ordinary record"))
         assert later.decision.kind.value == "channel_failed"
         assert attempts["open"] == 1
-        assert "later ordinary record" not in stderr.getvalue()
+        fallback = [json.loads(line) for line in stderr.getvalue().splitlines()
+                    if line.startswith("{")]
+        later_records = [item for item in fallback if item.get("message") == "later ordinary record"]
+        assert len(later_records) == 1 and later_records[0]["level"] == "ERROR"
     finally:
         close_runtime(deps)
 
@@ -988,7 +1014,7 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
                 if item.get("stage") == "report_generate"} == {
                     first_report.report_id, second_report.report_id}
         assert f"report {first_report.report_id} actual error" in stderr.getvalue()
-        assert "run 会话失败: report_error" in stderr.getvalue()
+        _assert_report_failure(stderr.getvalue())
         assert stdout.getvalue() == ""
     finally:
         close_runtime(deps)
@@ -1270,11 +1296,11 @@ async def test_unknown_copy_close_disables_later_file_logging(
     assert outcome.reason == "report_error"
     assert report_called["count"] == 1
     assert "coordination_close_failed" in stderr.getvalue()
-    assert "run 会话失败: report_error" in stderr.getvalue()
+    _assert_report_failure(stderr.getvalue())
     assert stdout.getvalue() == ""
     log_path = Path(deps.config.paths.log_file)
-    assert not log_path.exists() or "run 会话失败: report_error" not in log_path.read_text(
-        encoding="utf-8")
+    assert not log_path.exists() or not _session_failures(log_path.read_text(
+        encoding="utf-8"))
     assert deps.log_runtime.path_unsafe is True
     assert deps.log_runtime.channel.disabled is True
 
@@ -1391,14 +1417,14 @@ async def test_default_copy_program_error_keeps_original_channel_failure_facts(
         assert "controlled snapshot program exception" in stderr.getvalue()
         assert "controlled copy unlock failure" in stderr.getvalue()
         assert "controlled copy handler close failure" in stderr.getvalue()
-        assert "run 会话失败: report_error" in stderr.getvalue()
+        _assert_report_failure(stderr.getvalue())
         assert stdout.getvalue() == ""
         assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
         log_path = Path(deps.config.paths.log_file)
         if log_path.exists():
             log = log_path.read_text(encoding="utf-8")
             assert "报告失败的日志副本诊断" not in log
-            assert "run 会话失败: report_error" not in log
+            assert not _session_failures(log)
     finally:
         close_runtime(deps)
 
@@ -1716,7 +1742,8 @@ async def test_write_result_disables_log_before_followup_wait(
         helper_channels.append(channel)
 
     def fail_copy_stream_check(handler):
-        if Path(handler.baseFilename) == primary_path:
+        if any(handler is channel._handler for channel in helper_channels):
+            assert Path(handler.baseFilename) == primary_path
             raise OSError("controlled copy channel stream failure")
         return original_check_stream(handler)
 
