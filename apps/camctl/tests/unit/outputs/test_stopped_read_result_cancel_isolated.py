@@ -184,25 +184,27 @@ def subject(monkeypatch):
 
 
 class Database:
-    def __init__(self, outcomes): self.outcomes, self.saved = list(outcomes), []
+    def __init__(self, outcomes, *, run_was_terminal=False):
+        self.outcomes, self.saved = list(outcomes), []
+        self.run_was_terminal = run_was_terminal
     async def write(self, callback, *, key):
         finish, actual_key = callback(object())
         self.saved.append((finish, key, actual_key))
         kind = self.outcomes.pop(0)
-        result = NS(run_was_terminal=False, disposition=FinishDisposition.SAVED)
+        result = NS(run_was_terminal=self.run_was_terminal, disposition=FinishDisposition.SAVED)
         return NS(kind=kind, value=result if kind is DbOutcomeKind.COMPLETED else None, error=None)
 
 
-def setup(subject, monkeypatch, canceled, outcomes=(DbOutcomeKind.COMPLETED,)):
+def setup(subject, monkeypatch, canceled, outcomes=(DbOutcomeKind.COMPLETED,), *, run_status=2):
     ticket = NS(target_id='9', run_id=4, attempt_id=1)
-    database = Database(outcomes)
+    database = Database(outcomes, run_was_terminal=run_status not in (1, 2))
     runtime = NS(database=database, pending_read_results={}, continuing_read_tickets={},
         pending_read_ends={}, operations=NS(finish_attempt=lambda finish, key, owned: (finish, key)),
         occurred_at=lambda: 999)
     async def read_one(database, sql, params):
         assert runtime.pending_read_results[(4, 1)].ticket is ticket
         assert params == (4, 9)
-        return canceled, 10
+        return canceled, 10, run_status
     monkeypatch.setattr(subject, 'read_one', read_one)
     return runtime, ticket
 
@@ -509,3 +511,25 @@ def test_device_binding_without_read_registry_retains_recovery_diagnostic(subjec
     assert diagnostics == [RecoveryDiagnostic(RecoveryBlockedReason.EVIDENCE_UNAVAILABLE,
                                                ticket.run_id, ticket.attempt_id)]
     assert not calls and not runtime.database.saved
+
+
+@pytest.mark.parametrize('canceled', [0, 1])
+@pytest.mark.parametrize('complete,end_error,status,code', [
+    (True, None, AttemptStatus.SUCCEEDED, None),
+    (False, 'stopped', AttemptStatus.UNKNOWN, 'read_stopped'),
+])
+def test_terminal_run_saves_actual_attempt_without_changing_run(
+        subject, monkeypatch, canceled, complete, end_error, status, code):
+    runtime, ticket = setup(subject, monkeypatch, canceled, run_status=3)
+    original = step(complete=complete, error=end_error,
+                    phase=InputPhase.OWNER_SKIPPED if complete else InputPhase.SEGMENT_FAILED)
+    pending = subject.stopped_read_result(runtime, ticket, original, object(), 42)
+    prepared = asyncio.run(subject.save_read_result(runtime, pending))
+    finish = prepared.finish
+    outcome = finish.outcome.outcome
+    assert finish.ticket is ticket and finish.occurred_at == 42
+    assert finish.run_finish is None and finish.retry_wait is False
+    assert (outcome.status, None if outcome.error is None else outcome.error.code) == (status, code)
+    assert outcome.settlement.basis is SettlementBasis.OBSERVED
+    assert prepared.preserved_run_terminal and runtime.continuing_read_tickets == {}
+    assert runtime.database.saved == [(finish, 'original-key', 'original-key')]
