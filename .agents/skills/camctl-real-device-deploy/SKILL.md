@@ -1,6 +1,6 @@
 ---
 name: camctl-real-device-deploy
-description: 为 camctl 创建独立的真机验证环境，或构建包含主机和客户端的 ZIP 测试部署包。构建并安装组件、初始化数据并生成设备能力说明；不用于迁移或覆盖已有环境。
+description: 为 camctl 创建独立的真机验证环境，或构建包含主机和客户端的 ZIP 测试部署包，或使用包内入口停机更新已有 camctl。首次部署建立独立环境；更新不迁移数据库。
 ---
 
 # 准备真机验证部署
@@ -108,3 +108,7 @@ python3 install-host.py \
 /path/to/deployment/venv/bin/python -m unittest discover \
   -s .agents/skills/camctl-real-device-deploy/tests/integration -v
 ```
+
+## 停机更新已有 camctl
+
+完整部署包中的 `update-camctl.py --target /absolute/path` 在原虚拟环境执行离线更新。先停止 host 和全部 CLI，保留旧部署包；目标机须已有 Python 3.11 和 uv。更新过程校验交付内容、保持原状态库的会话锁和接纳锁，并用新发行物只读核验原配置与数据库绑定。失败保留日志与收据，原环境可能已改变，不自动回滚或迁移数据库。能力说明保存在更新产物；仅显式传入 `--client-data` 才同步。具体操作与恢复边界见随包 README 和[打包契约](references/packaging.md)。

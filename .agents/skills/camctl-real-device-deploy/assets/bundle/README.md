@@ -19,7 +19,7 @@
 
 在目标 Linux 主机解压整个包，准备 uv、CMake 3.10.2 或以上、C11 编译器和 pthread。相机工具和媒体工具另外准备：ADB 相机需要 `adb`，Hasselblad 需要 `hb_cli`，相应视频核验和处理需要 `ffprobe`、`ffmpeg`。本包不附带这些工具、Python 或 Node.js。
 
-`install-host.py` 是**首次安装入口**。它接受 Python 3.6 或以上；当前解释器不是 3.11 时，通过 uv 查找或下载 Python 3.11，再继续安装。camctl 始终使用 Python 3.11。首次获取解释器或锁定依赖时需要联网；不会修改系统 Python。
+`install-host.py` 是**首次安装入口**。它接受 Python 3.6 或以上；当前解释器不是 3.11 时，通过 uv 查找或下载 Python 3.11，再继续安装。camctl 始终使用 Python 3.11。首次获取解释器时需要联网；锁定依赖从包内离线安装，不会修改系统 Python。
 
 在解压后的 `camctl-deploy` 目录执行。默认安装和后面的自定义安装示例按需选择一种；每个目标目录只安装一次。以下示例在同一个终端使用变量 `deploy_root` 表示新实例目录：
 
@@ -85,6 +85,26 @@ python3 install-host.py \
 | `install.log`、`install-receipt.json` | 安装各步骤的输出、退出码和最终状态 |
 
 检查安装器退出码为 0，且收据的 `status` 为 `installed_stopped`。失败时先查看终端指出的步骤，再查 `install.log`、收据和发现报告；保留失败目录，修正原因后使用新目标目录重试。该入口不用于更新或覆盖已有部署。
+
+## 停机更新 camctl
+
+更新前保留旧部署包及其配套依赖，停止 host 和全部 camctl CLI，确认它们已经退出。目标 Linux 主机须已有 Python 3.11、uv 和原实例；支持 x86_64、ARM64 及 glibc 2.17 或以上。解压完整新包后执行：
+
+```sh
+"$deploy_root/venv/bin/python" update-camctl.py --target "$deploy_root"
+```
+
+入口核对交付文件摘要、原配置与状态库，在原库的稳定会话锁和接纳锁下更新原 `venv`。依赖从包内安装并检查锁定哈希，随后核对新发行版本、原配置、数据库身份及目录绑定。更新不会启动 host、连接相机、修改配置或自动升级数据库。旧数据库格式不受新版本支持时，保留原库并报告失败；需要升级时按数据库的显式升级流程另行处理。
+
+每次更新在 `<target>/updates/<标识>/` 保留 `receipt.json`、`update.log` 和成功导出的 `device-capabilities.json`。更新失败后 Python 环境可能已改变；收据保留原安装版本、配置摘要、执行步骤和错误。使用旧包重新安装软件需要运维自行操作，重新安装不会撤销数据库升级。检查收据状态为 `updated_stopped` 后，按原入口恢复 host。
+
+只有明确指定客户端数据目录时，更新才同步设备能力说明，并覆盖该目录的 `device-capabilities.json`：
+
+```sh
+"$deploy_root/venv/bin/python" update-camctl.py --target "$deploy_root" --client-data /absolute/path/to/client-data
+```
+
+同步不更改客户端数据库或媒体；未指定时能力说明仅保存在更新产物目录。
 
 ## camctl 的配置与日志
 

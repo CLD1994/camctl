@@ -26,6 +26,8 @@ camctl-deploy/
   source-manifest.json
   SHA256SUMS
   install-host.py
+  update-camctl.py
+  bundle_support.py
   deploy_support.py
   camera_discovery.py
   docs/
@@ -35,6 +37,8 @@ camctl-deploy/
   camctl/
     camctl-<version>-py3-none-any.whl
     requirements.txt
+    wheelhouse/x86_64/*.whl
+    wheelhouse/aarch64/*.whl
   host/
     camctl_host-<version>-Source.tar.gz
   client/
@@ -59,7 +63,7 @@ README 说明安装参数与产物、客户端默认及自定义数据目录、c
 ## 构建与验收步骤
 
 1. 核对前提，冻结源码并计算逐文件摘要。后续构建只读取快照，避免构建钩子修改原工作树。
-2. 导出锁定依赖并构建 wheel，在独立 Python 3.11 环境安装后执行依赖检查。用这个 wheel 按所选配置导出客户端声明。
+2. 导出带哈希的锁定依赖，下载 Linux x86_64 和 ARM64 的 Python 3.11 兼容 wheel，最低目标为 manylinux2014 / glibc 2.17；下载失败停止交付。构建 camctl wheel，在独立 Python 3.11 环境安装并检查依赖，用这个 wheel 按所选配置导出客户端声明。
 3. 在独立构建目录调用 CMake 配置，再调用 CPack 生成 host 源码包。版本读取组件构建配置，不另写固定版本。
 4. 用 npm ci 安装锁定构建依赖，构建客户端网页，收集运行源码、网页、协议与声明，复制说明及启动模板。
 5. 写出源码、版本与校验信息，形成候选 ZIP。在仓库外解压，精确核对文件集合与摘要；使用身份查询替身实际运行安装器，检查状态库完整性、最终配置、启动路径和声明同步。
@@ -69,3 +73,9 @@ README 说明安装参数与产物、客户端默认及自定义数据目录、c
 主机安装器支持 `--client-data`，默认写到新实例的 `client-data`；只同步能力说明。该参数不自动推断个人电脑路径，也不覆盖客户端数据库或媒体。配置变更后的声明同步与网页加载继续遵守正式客户端部署契约。
 
 这些验收证明软件部署路径可执行。完整测试套件、最低 CMake 版本、Windows、ARM64 和真实相机操作分别保留证据，不能从当前构建机的安装成功推断。
+
+## 停机离线更新
+
+包内 `update-camctl.py` 更新已有实例的原虚拟环境。操作者先停止 host 和全部 CLI，准备 Python 3.11、uv 并保留旧包。更新器校验完整摘要与发行记录，取得原状态库稳定会话锁和接纳锁，以带哈希的锁定依赖及本包 wheel 离线安装。新发行物只读核对原配置、数据库身份、格式和路径绑定，并按原配置导出能力说明。每次执行保留日志、收据、原安装版本及配置摘要；失败时原环境可能已改变，不自动回滚或迁移数据库。只有明确指定 `--client-data` 时才同步能力说明，不改客户端数据库和媒体。
+
+现有发行验证不证明更新入口、跨架构依赖安装或旧数据库兼容性；这些真实组合须另行验证。

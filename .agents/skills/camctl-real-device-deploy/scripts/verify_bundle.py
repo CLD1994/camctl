@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,18 +22,7 @@ import urllib.request
 import zipfile
 
 
-def verify_checksums(bundle):
-    expected = {}
-    for line in (bundle / 'SHA256SUMS').read_text().splitlines():
-        digest, name = line.split('  ', 1)
-        path = Path(name)
-        if path.is_absolute() or '..' in path.parts or name in expected:
-            raise ValueError('校验清单路径无效：' + name)
-        expected[name] = digest
-    actual = {p.relative_to(bundle).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-              for p in bundle.rglob('*') if p.is_file() and p != bundle / 'SHA256SUMS'}
-    if expected != actual:
-        raise ValueError('交付文件集合或摘要与 SHA256SUMS 不一致')
+from bundle_support import verify_checksums, wheel_target_manifest
 
 
 def main():
@@ -44,7 +32,7 @@ def main():
     args = parser.parse_args()
     workspace = Path(tempfile.mkdtemp(prefix='camctl-bundle-check-', dir='/tmp'))
     report = {'status': 'running', 'platform': platform.system(), 'architecture': platform.machine(),
-              'checks': [], 'not_run': ['完整组件测试', '最低 CMake 兼容性', 'Windows', 'ARM64', '真实设备操作']}
+              'checks': [], 'not_run': ['完整组件测试', '最低 CMake 兼容性', 'Windows', 'ARM64', '真实设备操作', '离线更新流程']}
     environment = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'CAMCTL_DATA_DIR', 'ADB_SERVER_SOCKET')}
 
     def run(argv, cwd, env=environment):
@@ -64,6 +52,13 @@ def main():
         bundle = workspace / 'camctl-deploy'
         verify_checksums(bundle)
         report['checks'].append('ZIP 与完整文件校验清单')
+        release = json.loads((bundle / 'RELEASE.json').read_text(encoding='utf-8'))
+        expected_targets = wheel_target_manifest(bundle)
+        if (release.get('wheel_targets') != expected_targets
+                or any(not target['files'] for target in expected_targets.values())
+                or not (bundle / 'update-camctl.py').is_file()):
+            raise ValueError('离线更新入口或目标依赖清单不完整')
+        report['checks'].append('离线更新入口与目标依赖清单')
         readme = (bundle / 'README.md').read_text(encoding='utf-8')
         for target_link in re.findall(r'\[[^\]]+\]\(([^)]+)\)', readme):
             if not target_link.startswith(('http://', 'https://', '#')):

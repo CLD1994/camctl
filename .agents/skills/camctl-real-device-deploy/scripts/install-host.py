@@ -36,6 +36,7 @@ def main():
 
     # 仅在 Python 3.11 中导入依赖新语法和 tomllib 的安装实现。
     from deploy_support import configure_paths, install_host, require_new_state_db, write_config
+    from bundle_support import current_target
     from camera_discovery import format_report, resolve_hb_cli
 
     bundle = Path(__file__).resolve().parent
@@ -47,6 +48,7 @@ def main():
         configure_paths(configuration, target, overrides=path_overrides(args))
         require_new_state_db(configuration)
         hb_cli = resolve_hb_cli(args.hb_cli)
+        arch = current_target()
     except (OSError, ValueError) as error:
         parser.error(str(error))
     for command in ('uv', 'cmake'):
@@ -82,7 +84,7 @@ def main():
     try:
         save()
         run('创建 Python 环境', ['uv', 'venv', '--python', sys.executable, target / 'venv'])
-        run('安装锁定依赖', ['uv', 'pip', 'install', '--python', target / 'venv/bin/python', '--require-hashes', '-r', bundle / 'camctl/requirements.txt'])
+        run('安装锁定依赖', ['uv', 'pip', 'install', '--python', target / 'venv/bin/python', '--offline', '--no-index', '--find-links', bundle / 'camctl/wheelhouse' / arch, '--require-hashes', '-r', bundle / 'camctl/requirements.txt'])
         run('安装 camctl', ['uv', 'pip', 'install', '--python', target / 'venv/bin/python', '--no-deps', wheels[0]])
         run('检查依赖', ['uv', 'pip', 'check', '--python', target / 'venv/bin/python'])
         discovery_path = target / 'camera-discovery.json'

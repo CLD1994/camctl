@@ -14,6 +14,8 @@ import sys
 import tomllib
 import zipfile
 
+from bundle_support import WHEEL_TARGETS, wheel_target_manifest
+
 
 SKILL_PATH = Path('.agents/skills/camctl-real-device-deploy')
 BUNDLE_NAME = 'camctl-deploy'
@@ -134,7 +136,7 @@ def main():
         bundle = output / BUNDLE_NAME
         shutil.copytree(skill / 'assets/bundle', bundle)
         write_configuration_docs(source, bundle)
-        for name in ('install-host.py', 'deploy_support.py', 'camera_discovery.py'):
+        for name in ('install-host.py', 'update-camctl.py', 'bundle_support.py', 'deploy_support.py', 'camera_discovery.py'):
             shutil.copyfile(skill / 'scripts' / name, bundle / name)
         dist = bundle / 'camctl'
         dist.mkdir()
@@ -148,6 +150,18 @@ def main():
             raise ValueError('wheel 必须恰好有一个')
         venv = output / 'build-venv'
         run('创建构建验证环境', ['uv', 'venv', '--python', sys.executable, venv])
+        run('安装下载工具', ['uv', 'pip', 'install', '--python', venv / 'bin/python', 'pip'])
+        wheelhouse = dist / 'wheelhouse'
+        for arch, platforms in WHEEL_TARGETS.items():
+            destination = wheelhouse / arch
+            destination.mkdir(parents=True)
+            platform_args = [part for value in platforms for part in ('--platform', value)]
+            run('下载离线依赖 ' + arch, [venv / 'bin/python', '-m', 'pip', 'download',
+                '--dest', destination, '--only-binary=:all:', '--implementation', 'cp',
+                '--python-version', '311', '--abi', 'cp311', *platform_args,
+                '--require-hashes', '-r', dist / 'requirements.txt'])
+            if not list(destination.glob('*.whl')):
+                raise ValueError('目标平台离线依赖为空: ' + arch)
         run('安装锁定依赖', ['uv', 'pip', 'install', '--python', venv / 'bin/python', '--require-hashes', '-r', dist / 'requirements.txt'])
         run('安装本次 wheel', ['uv', 'pip', 'install', '--python', venv / 'bin/python', '--no-deps', wheels[0]])
         run('检查依赖', ['uv', 'pip', 'check', '--python', venv / 'bin/python'])
@@ -196,6 +210,7 @@ def main():
             'source_sha256': hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest(),
             'components': {'camctl': tomllib.loads((project / 'pyproject.toml').read_text())['project']['version'],
                            'host': host_version, 'client': client_meta['version']},
+            'wheel_targets': wheel_target_manifest(bundle),
             'locks': {name: sha(source / name) for name in ('apps/camctl/uv.lock', 'apps/client/package-lock.json')},
             'capabilities': {'mode': 'configured' if config_bytes is not None else 'placeholder', 'config_sha256': sha(config),
                              'sha256': sha(data / 'device-capabilities.json')},
