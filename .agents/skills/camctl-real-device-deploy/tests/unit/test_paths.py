@@ -21,7 +21,8 @@ SCRIPTS = Path(__file__).parents[2] / "scripts"
 def load(name, file):
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / file)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with patch('sys.dont_write_bytecode', True):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -90,6 +91,7 @@ class DeploymentPaths(unittest.TestCase):
             "--state-db", "/external/new.db", "--log-file", "/logs/camctl.log", "--staging", "/data/staging"]
         with patch.dict("sys.modules", {"deploy_support": support}), \
                 patch.dict(installer.os.environ, {"PATH": "/tools"}, clear=True), \
+                patch.object(installer.sys, "platform", "linux"), \
                 patch.object(installer.Path, "resolve", lambda path: path), \
                 patch.object(installer.sys, "version_info", (3, 6, 15)), \
                 patch.object(installer.sys, "argv", argv), \
@@ -112,6 +114,8 @@ class DeploymentPaths(unittest.TestCase):
         contents = {str(bundle / "RELEASE.json"): '{}'}
         consumers = []
         discovery = ModuleType("camera_discovery")
+        bundle_support = ModuleType("bundle_support")
+        bundle_support.current_target = lambda: "x86_64"
         discovery.resolve_hb_cli = lambda value: None
         discovery.format_report = lambda report: "设备身份查询完成"
         observed = {"devices": {}, "environment": {}, "placeholder_devices": []}
@@ -140,9 +144,11 @@ class DeploymentPaths(unittest.TestCase):
         archive = create_autospec(tarfile.TarFile, instance=True, spec_set=True)
         archive.__enter__.return_value = archive
         archive.getmembers.return_value = [tarfile.TarInfo("host/CMakeLists.txt")]
-        with patch.dict("sys.modules", {"deploy_support": support, "camera_discovery": discovery}), \
-                patch.object(installer.sys, "argv", argv), \
-                patch.object(installer.sys, "version_info", (3, 11, 17)), \
+        with patch.dict("sys.modules", {"deploy_support": support, "camera_discovery": discovery,
+                                         "bundle_support": bundle_support}), \
+                patch.dict(installer.os.environ, {"PATH": "/tools"}, clear=True), \
+                patch.multiple(installer.sys, argv=argv, platform="linux",
+                               executable="/python3.11", version_info=(3, 11, 17)), \
                 patch.object(installer.Path, "resolve", lambda path: path), \
                 patch.object(installer.Path, "exists", return_value=False), \
                 patch.object(installer.Path, "is_symlink", return_value=False), \

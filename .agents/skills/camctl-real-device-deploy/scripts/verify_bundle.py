@@ -56,7 +56,8 @@ def main():
         expected_targets = wheel_target_manifest(bundle)
         if (release.get('wheel_targets') != expected_targets
                 or any(not target['files'] for target in expected_targets.values())
-                or not (bundle / 'update-camctl.py').is_file()):
+                or any(not (bundle / name).is_file() for name in
+                       ('update-camctl.py', 'update-worker.py', 'update_transaction.py'))):
             raise ValueError('离线更新入口或目标依赖清单不完整')
         report['checks'].append('离线更新入口与目标依赖清单')
         readme = (bundle / 'README.md').read_text(encoding='utf-8')

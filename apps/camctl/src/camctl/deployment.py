@@ -1,4 +1,4 @@
-"""供部署更新使用的只读配置与既有状态库检查入口。"""
+"""供部署更新使用的状态库检查与副本迁移入口。"""
 from __future__ import annotations
 
 import argparse
@@ -22,6 +22,8 @@ def migrate_copy(config_path: Path, state_db: Path) -> dict:
     if not config_path.is_file() or not state_db.is_file():
         raise ValueError('配置或数据库副本不存在')
     config = ConfigAdapter(Path.home()).load(config_path)
+    if state_db.samefile(Path(config.paths.state_db)):
+        raise ValueError('迁移目标必须是独立数据库副本')
     options = DbConfig(busy_timeout_ms=config.database.busy_timeout_ms)
     owned = open_existing(state_db, DbOpenMode.EXISTING_RO, options)
     try:
