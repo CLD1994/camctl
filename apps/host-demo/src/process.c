@@ -181,7 +181,8 @@ int host_maintenance_spawn(host_child *c, const camctl_host_update_config *confi
     size_t n = 0;
     argv[n++] = (char *)config->updater_path;
     argv[n++] = request->action == CAMCTL_UPDATE_ACTION_CHECK ? "check" :
-                request->action == CAMCTL_UPDATE_ACTION_RECOVER ? "recover" : "apply";
+                request->action == CAMCTL_UPDATE_ACTION_RECOVER ? "recover" :
+                request->action == CAMCTL_UPDATE_ACTION_FINALIZE ? "finalize" : "apply";
     argv[n++] = "--camctl-path";
     argv[n++] = (char *)config->camctl_path;
     if (config->config_path) {

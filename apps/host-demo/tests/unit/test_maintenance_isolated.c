@@ -16,6 +16,8 @@ static const char *stderr_text;
 static bool stdout_overflow, stderr_overflow, stderr_error;
 static host_exit termination = HOST_EXIT_NORMAL;
 static int exit_code;
+static int stops, spawns;
+static atomic_bool *stop_during_collect;
 
 int host_path_validate(const char *path) { return path && path[0] == '/' ? 0 : EINVAL; }
 void host_child_init(host_child *c, char *out, size_t out_capacity, char *err, size_t err_capacity) {
@@ -26,9 +28,11 @@ void host_child_init(host_child *c, char *out, size_t out_capacity, char *err, s
 }
 int host_maintenance_spawn(host_child *c, const camctl_host_update_config *config,
                            const camctl_host_update_request *request) {
-    (void)config; (void)request; c->pid = 10; return 0;
+    (void)config; (void)request; spawns++; c->pid = 10; return 0;
 }
 void host_child_collect(host_child *c, host_child_log log, void *context) {
+    if (stop_during_collect && !atomic_exchange(stop_during_collect, true))
+        return;
     c->length = strlen(stdout_text);
     memcpy(c->output, stdout_text, c->length);
     c->output_bytes_seen = c->length + (stdout_overflow ? 5 : 0);
@@ -43,10 +47,13 @@ void host_child_collect(host_child *c, host_child_log log, void *context) {
     c->reaped = true;
     log(context, "child_problem", "detail", 6);
 }
+void host_child_request_stop(host_child *c, host_child_log log, void *context) {
+    (void)c; (void)log; (void)context; stops++;
+}
 bool host_child_done(const host_child *c) { return c->reaped; }
 void host_group_scan_reset(host_group_scan *scan) { (void)scan; }
 int poll(struct pollfd *fds, nfds_t n, int timeout) {
-    (void)fds; (void)n; (void)timeout; assert(!"不得调用真实等待"); return -1;
+    (void)fds; (void)n; (void)timeout; return 0;
 }
 
 int main(void) {
@@ -78,5 +85,17 @@ int main(void) {
     stdout_overflow = false; termination = HOST_EXIT_SIGNAL;
     assert(host_maintenance_run(&config, &request, &result) == EPROTO);
     assert(result.process_signaled && result.effect == CAMCTL_UPDATE_EFFECT_UNKNOWN);
+    request.action = CAMCTL_UPDATE_ACTION_FINALIZE;
+    stdout_text = "{\"version\":1,\"action\":\"finalize\",\"outcome\":\"unchanged\","
+        "\"effect\":\"unchanged\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"prior_evidence\":null,\"reason\":null,\"stage\":null,\"evidence\":null}\n";
+    termination = HOST_EXIT_NORMAL;
+    atomic_bool stop = ATOMIC_VAR_INIT(true);
+    int before = spawns;
+    assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == ECANCELED);
+    assert(spawns == before && result.outcome == CAMCTL_UPDATE_OUTCOME_NOT_STARTED);
+    atomic_store(&stop, false); stop_during_collect = &stop;
+    assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == 0);
+    assert(stops == 1 && result.outcome == CAMCTL_UPDATE_OUTCOME_UNCHANGED);
     return 0;
 }

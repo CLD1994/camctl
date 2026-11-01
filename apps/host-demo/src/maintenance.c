@@ -50,7 +50,8 @@ int host_maintenance_validate(const camctl_host_update_config *config,
         return error;
     }
     if ((request->action == CAMCTL_UPDATE_ACTION_RECOVER ||
-         (allow_check && request->action == CAMCTL_UPDATE_ACTION_CHECK)) &&
+         (allow_check && (request->action == CAMCTL_UPDATE_ACTION_CHECK ||
+                          request->action == CAMCTL_UPDATE_ACTION_FINALIZE))) &&
         !request->bundle_path && !request->client_data_path)
         return 0;
     return EINVAL;
@@ -65,14 +66,17 @@ void host_maintenance_result_init(host_update_result *result, camctl_update_acti
     result->prior_recovery = CAMCTL_UPDATE_PRIOR_RECOVERY_NONE;
 }
 
-int host_maintenance_run(const camctl_host_update_config *config,
-                         const camctl_host_update_request *request, host_update_result *result) {
+int host_maintenance_run_interruptible(const camctl_host_update_config *config,
+                         const camctl_host_update_request *request, host_update_result *result,
+                         const atomic_bool *stop) {
     int error = host_maintenance_validate(config, request, true);
     if (!result)
         return EINVAL;
     host_maintenance_result_init(result, request ? request->action : CAMCTL_UPDATE_ACTION_INVALID);
     if (error)
         return error;
+    if (stop && atomic_load(stop))
+        return ECANCELED;
     char *output = malloc(CAMCTL_HOST_UPDATE_STDOUT_MAX);
     char *stderr_data = malloc(CAMCTL_HOST_UPDATE_STDERR_MAX);
     if (!output || !stderr_data) {
@@ -94,6 +98,8 @@ int host_maintenance_run(const camctl_host_update_config *config,
     }
     int poll_error = 0;
     while (!host_child_done(&child)) {
+        if (stop && atomic_load(stop))
+            host_child_request_stop(&child, process_log, &diagnostics);
         host_child_collect(&child, process_log, &diagnostics);
         if (host_child_done(&child))
             break;
@@ -149,4 +155,9 @@ int host_maintenance_run(const camctl_host_update_config *config,
     free(output);
     free(stderr_data);
     return valid ? 0 : parse_error ? parse_error : EPROTO;
+}
+
+int host_maintenance_run(const camctl_host_update_config *config,
+                         const camctl_host_update_request *request, host_update_result *result) {
+    return host_maintenance_run_interruptible(config, request, result, NULL);
 }

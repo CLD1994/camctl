@@ -29,6 +29,9 @@ static camctl_update_eligibility restart_eligibility;
 static int restart_check_error;
 static int maintenance_diagnostics;
 static int processing_diagnostics;
+static void *(*archive_entry)(void *);
+static void *archive_context;
+static bool archive_fail_create, archive_fail_run;
 static int captured_recovery_error, captured_run_error;
 static host_construction_report captured_construction;
 static bool update_stderr_error, update_poll_error, recovery_stderr_error, recovery_poll_error;
@@ -154,11 +157,29 @@ int __wrap_host_maintenance_spawn(host_child *child, const camctl_host_update_co
                                   const camctl_host_update_request *request) {
     (void)child; (void)config; (void)request; fail_msg("%s", "不得启动真实进程"); return EINVAL;
 }
+int __wrap_host_maintenance_run_interruptible(const camctl_host_update_config *config,
+        const camctl_host_update_request *request, host_update_result *result, const atomic_bool *stop) {
+    assert_non_null(config->updater_path);
+    assert_int_equal(request->action, CAMCTL_UPDATE_ACTION_FINALIZE);
+    assert_false(atomic_load(stop));
+    host_maintenance_result_init(result, request->action);
+    result->outcome = archive_fail_run ? CAMCTL_UPDATE_OUTCOME_FAILED : CAMCTL_UPDATE_OUTCOME_UNCHANGED;
+    result->effect = CAMCTL_UPDATE_EFFECT_UNCHANGED;
+    result->eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED;
+    if (archive_fail_run) { memcpy(result->stderr_data, "raw", 3); result->stderr_length = 3; }
+    return 0;
+}
 int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                           void *(*start)(void *), void *argument) {
     (void)attr; (void)start; (void)argument;
     if (!restart_test) { fail_msg("%s", "不得创建线程"); return EINVAL; }
     restart_creates++;
+    if (start == archive_main) {
+        assert_non_null(instance);
+        assert_int_equal(instance->lifecycle, HOST_RUNNING);
+        archive_entry = start; archive_context = argument;
+        if (archive_fail_create) return EAGAIN;
+    }
     if (fail_worker_create && restart_creates == 4)
         return EAGAIN;
     *thread = (pthread_t)(size_t)restart_creates;
@@ -283,6 +304,11 @@ int __wrap_pthread_join(pthread_t thread, void **p) {
     pthread_mutex_unlock(&owned.inputs_mutex);
     joins++;
     if (join_error) { int e = join_error; join_error = 0; return e; }
+    if (owned.archive_started && thread == owned.archive_thread) {
+        assert_true(atomic_load(&owned.archive_stop));
+        assert_int_equal(log_closes, 0);
+        return 0;
+    }
     if (thread == owned.worker) {
         worker_main(&owned); module_thread = false;
         if (maintenance_wait_mode == 3)
@@ -340,6 +366,8 @@ static int setup(void **state) {
     maintenance_wait_mode = maintenance_wait_step = maintenance_calls = 0;
     maintenance_stub_enabled = false;
     restart_test = fail_worker_create = false;
+    archive_entry = NULL; archive_context = NULL;
+    archive_fail_create = archive_fail_run = false;
     restart_creates = restart_join_error = restart_join_count = restart_close_error_fd = 0;
     restart_closed_fd_count = construction_messages = 0;
     restart_eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED; restart_check_error = 0;
@@ -374,6 +402,15 @@ static void terminal_idempotent(void **state) {
     assert_int_equal(camctl_host_init(NULL, NULL), -1); assert_int_equal(errno, EALREADY);
     assert_int_equal(camctl_host_submit("/later.json"), -1); assert_int_equal(errno, ECANCELED);
     camctl_host_claim(); assert_int_equal(errno, ECANCELED);
+}
+static void stop_joins_archive_before_closing_log(void **state) {
+    (void)state;
+    owned.archive_started = true; owned.archive_thread = (pthread_t)3;
+    atomic_init(&owned.archive_stop, false);
+    assert_int_equal(camctl_host_stop(), 0);
+    assert_true(owned.archive_joined);
+    assert_int_equal(joins, 2);
+    assert_int_equal(log_closes, 1);
 }
 static void stops_both_no_restart(void **state) {
     (void)state;
@@ -618,6 +655,28 @@ static void initialization_recovers_before_start(void **state) {
     restart_eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED; restart_check_error = 0;
     assert_int_equal(camctl_host_init(&config, NULL), 0);
     assert_int_equal(maintenance_calls, 2); assert_non_null(instance);
+    assert_non_null(archive_entry); assert_ptr_equal(archive_context, instance);
+    dispose_fake_fresh_instance();
+}
+static void archive_failure_does_not_change_start(void **state) {
+    (void)state; instance = NULL; restart_test = maintenance_stub_enabled = true;
+    camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
+    config.camctl_path = "/camctl"; config.updater_path = "/updater";
+    config.config_path = "/config"; config.ready_path = "/ready";
+    config.processing_path = "/processing"; config.log_path = "/log";
+    archive_fail_create = true;
+    assert_int_equal(camctl_host_init(&config, NULL), 0);
+    assert_int_equal(processing_diagnostics, 1);
+    assert_false(instance->archive_started);
+    dispose_fake_fresh_instance();
+    instance = NULL; archive_fail_create = false; archive_fail_run = true;
+    processing_diagnostics = 0;
+    assert_int_equal(camctl_host_init(&config, NULL), 0);
+    int previous; pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous);
+    archive_entry(archive_context); module_thread = false;
+    pthread_setcancelstate(previous, NULL);
+    assert_int_equal(processing_diagnostics, 1);
+    assert_int_equal(instance->lifecycle, HOST_RUNNING);
     dispose_fake_fresh_instance();
 }
 static void initialization_preserves_recovery_and_cleanup_facts(void **state) {
@@ -739,6 +798,8 @@ int main(void) {
         CASE(update_uninitialized), CASE(update_early_errors_are_delivered), CASE(update_stops_and_drains_borrower),
         CASE(update_gates_and_checks_active_configuration),
 #else
+        CASE(archive_failure_does_not_change_start),
+        CASE(stop_joins_archive_before_closing_log),
         CASE(initialization_preserves_recovery_and_cleanup_facts),
         CASE(committed_update_reports_collection_errors), CASE(initialization_reports_recovery_collection_error),
         CASE(update_honors_stop_before_restart), CASE(initialization_recovers_before_start),

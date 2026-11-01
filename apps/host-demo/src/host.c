@@ -40,6 +40,9 @@ typedef struct {
     host_diagnostic_writer diagnostics;
     pthread_mutex_t inputs_mutex, claim_mutex;
     pthread_t worker;
+    pthread_t archive_thread;
+    atomic_bool archive_stop;
+    bool archive_started, archive_joined;
     host_lifecycle lifecycle; /* instance_mutex 同时保护借用、受理和启动。 */
     size_t api_users;
     bool stop_joining;
@@ -621,6 +624,24 @@ static bool maintenance_needs_diagnostic(const host_update_result *result, int e
          result->prior_evidence_truncated));
 }
 
+static void *archive_main(void *context) {
+    host *h = context;
+    module_thread = true;
+    camctl_host_update_config config = {h->config.camctl_path, h->config.updater_path,
+                                        h->config.config_path};
+    camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_FINALIZE, NULL, NULL};
+    host_update_result *result = malloc(sizeof(*result));
+    int error = result ? host_maintenance_run_interruptible(&config, &request, result,
+                                                              &h->archive_stop) : ENOMEM;
+    if (error || maintenance_needs_diagnostic(result, error))
+        host_update_diagnostic(h->config.processing_path, NULL, h->config.config_path,
+                               result, error, NULL, 0, 0, NULL);
+    if (result)
+        host_update_result_deliver(result, request.action, error);
+    free(result);
+    return NULL;
+}
+
 static int host_start(const camctl_host_config *config, const char *initial, host *restarting,
                       construction_report *out_report) {
     int cancel_state;
@@ -633,6 +654,7 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
     char diagnostic_processing[CAMCTL_HOST_PATH_MAX + 1] = "";
     char diagnostic_config[CAMCTL_HOST_PATH_MAX + 1] = "";
     construction_report report = {0};
+    int archive_error = 0;
     pthread_mutex_lock(&instance_mutex);
     if (restarting && maintenance_owner && maintenance_stop_requested) {
         e = ECANCELED;
@@ -688,6 +710,7 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
         e = ENOMEM;
         goto unlock;
     }
+    atomic_init(&h->archive_stop, false);
     h->config = *config;
     h->wake[0] = h->wake[1] = -1;
     h->motor = registrations.motor;
@@ -794,10 +817,18 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
         goto construction_failed;
     report = candidate_report(h, 0, 0);
     instance = h;
+    if (h->config.updater_path) {
+        archive_error = pthread_create(&h->archive_thread, NULL, archive_main, h);
+        h->archive_started = archive_error == 0;
+    }
     if (restarting)
         free(restarting);
     registrations.initialized = true;
     pthread_mutex_unlock(&instance_mutex);
+    if (archive_error)
+        host_update_diagnostic(diagnostic_processing, NULL,
+                               diagnostic_config[0] ? diagnostic_config : NULL,
+                               NULL, archive_error, NULL, 0, 0, NULL);
     if (out_report) *out_report = report;
     deliver_construction_report(&report);
     if (check_performed && maintenance_needs_diagnostic(check_result, 0))
@@ -1026,8 +1057,16 @@ int camctl_host_stop(void) {
     }
     h->lifecycle = HOST_STOPPING;
     h->stop_joining = true;
+    atomic_store(&h->archive_stop, true);
     pthread_mutex_unlock(&instance_mutex);
     wake_worker(h);
+
+    if (h->archive_started && !h->archive_joined) {
+        error = pthread_join(h->archive_thread, NULL);
+        if (error)
+            goto failed;
+        h->archive_joined = true;
+    }
 
     if (!h->worker_joined) {
         error = pthread_join(h->worker, NULL);
