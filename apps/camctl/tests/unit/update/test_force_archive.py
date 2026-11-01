@@ -88,6 +88,31 @@ def test_prepare_copy_failure_never_registers_or_reduces_backup():
     cleanup.assert_not_called()
 
 
+def test_prepare_existing_job_reestablishes_durability_before_return():
+    world = World()
+    events = []
+    with patch.object(archive, '_identity', return_value=Path(world.original['output'])), \
+         patch.object(archive.force_record, 'classify', create=True, return_value='updating'), \
+         patch.object(Path, 'read_text', lambda path, **kw: world.read(path, **kw)), \
+         patch.object(archive.transaction, 'digest', create=True, side_effect=['b' * 64, 'c' * 64]), \
+         patch.object(archive.transaction, 'sync_file', create=True, side_effect=lambda p: events.append(('file', p.name))), \
+         patch.object(archive.transaction, 'sync_dir', create=True, side_effect=lambda p: events.append(('dir', p.name))):
+        archive.prepare(world.original)
+    assert events == [('file', 'update.log'), ('file', 'receipt.json'), ('dir', 'archive-input'),
+                      ('file', 'archive-job.json'), ('dir', 'a' * 32)]
+
+
+def test_prepare_existing_job_propagates_sync_failure():
+    world = World()
+    with patch.object(archive, '_identity', return_value=Path(world.original['output'])), \
+         patch.object(archive.force_record, 'classify', create=True, return_value='updating'), \
+         patch.object(Path, 'read_text', lambda path, **kw: world.read(path, **kw)), \
+         patch.object(archive.transaction, 'digest', create=True, return_value='b' * 64), \
+         patch.object(archive.transaction, 'sync_file', create=True, side_effect=OSError('sync')):
+        with pytest.raises(OSError, match='sync'):
+            archive.prepare(world.original)
+
+
 def test_committed_job_publishes_before_completion_and_cleanup():
     world = World()
     with world.setup(), world.collaborators(), patch.object(Path, 'read_text', lambda path, **kw: world.read(path, **kw)), \
