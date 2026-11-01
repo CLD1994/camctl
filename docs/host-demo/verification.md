@@ -4,6 +4,28 @@
 
 本记录对应 `apps/host-demo` 第一版源码、静态库和终端演示。组件不包含业务 CLI、设备驱动或文件传输实现。
 
+## 公开更新结果精简（2026-11-02）
+
+公开结果已收敛为 `outcome`、`effect`、`eligibility`、`reason` 和 `diagnostic_path`。简短原因用于阅读，诊断路径完整可用才交付；原始输出、退出、截断和解析事实保留在私有结果中，由模块在必要收场和互斥释放后统一交给 stderr。Python 维护协议保持原状态分类。C 组件的公开结构布局发生变化，版本按唯一来源递增为 `2.0.0`。
+
+生产提交 `ef674fa0` 经独立 `gpt-6.1-sol` 源码及测试隔离复核接受，在根工作区以 `16665508` 集成。Linux x86_64、GCC 13.3.0 环境中，在根工作区执行：
+
+```sh
+cmake -S apps/host-demo -B /tmp/camctl-root-compact-update-unit-20261102 \
+  -DCMAKE_BUILD_TYPE=Debug -DHOST_BUILD_TESTS=ON \
+  -DHOST_TEST_PYTHON=/workspaces/camctl/apps/camctl/.venv311/bin/python
+cmake --build /tmp/camctl-root-compact-update-unit-20261102 \
+  --target test_stop test_update_result_isolated test_maintenance_isolated test_demo_update_isolated -j2
+ctest --test-dir /tmp/camctl-root-compact-update-unit-20261102 --output-on-failure \
+  -R '^unit_(stop|update_result_isolated|maintenance_isolated|demo_update_isolated)$'
+```
+
+配置、构建与执行均退出 0，4/4 单元入口通过，其中完整停止入口为 31 项。覆盖公开投影、原因缩短、路径不可交付、原始输出中的 NUL 字节、可信业务失败、stderr 输出失败、参数及内存不足早退、取消保护和维护资格释放顺序。stdio、线程、进程及等待均使用替身，不访问真实业务文件或创建业务进程。
+
+实现工作区 `/tmp/camctl-compact-update-result-20261102` 同时完成 Release 生产库和演示构建，退出 0；构建选项中的 `HOST_BUILD_TESTS` 为关闭。首次配置误传的 `BUILD_TESTING` 未生效，项目默认关闭测试，随后缓存与实际目标已经核对。首次单元构建因测试的 calloc 宏影响标准声明而失败，补充标准头后通过，没有删除或放宽断言。
+
+公开五字段调用示例在实现与根工作区分别编译通过；生成协议的 `--check` 和 `git diff --check` 均退出 0。没有修改公共协议源，也没有运行集成测试套件、真实 stderr/线程/进程组合、更新、数据库、设备或断电验证。本次未重新打部署包；此前交付的包仍对应其自身的 `1.2.0` C 接口。
+
 ## 更新接入与同进程显式重启（2026-11-02）
 
 `camctl_host_update`、启动资格检查和 `camctl_host_restart` 已接通；维护结果与本次应用是否成功分别处理，更新后不自动恢复业务。同进程重启复用配置与回调、不重送首次计划，候选资源未确认收场时保留责任。独立源码复核与根工作区完整停止 30 项、写入器停止 5 项的隔离验证见[组件更新验证记录](../camctl/owned-update-verification-2026-11-02.md)。后续完整部署包的 Release 编译及独立安装也通过，取消清理参数的优化编译诊断修复后再次通过 30 项停止单元。没有执行真实线程、进程组、更新或设备组合，不能由这些结果推断目标部署已验收。
