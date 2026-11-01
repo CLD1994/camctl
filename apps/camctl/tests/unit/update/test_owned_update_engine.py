@@ -1,9 +1,11 @@
 """组件维护事务在受控边界下的提交、恢复和诊断责任。"""
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 root = Path(__file__).absolute().parents[5]
@@ -89,16 +91,19 @@ def test_durable_commit_is_not_reversed_by_late_receipt_failure():
 
 
 def test_diagnostic_output_failure_preserves_original_and_channel_failure():
-    ops = operations()
-    ops.install.side_effect = ValueError('original failure')
-    ops.record_diagnostics.side_effect = OSError('log unavailable')
-    stream = Mock(spec=['write', 'flush'])
-    stream.write.side_effect = BrokenPipeError('stderr unavailable')
-    with patch.object(sys, 'stderr', stream):
-        result = engine.perform_update(ops)
-    assert result['rollback'] == 'verified'
-    assert result['stderr_error']['stage'] == 'diagnostic_stderr'
-    assert result['diagnostics'][0]['message'] == 'original failure'
+    for method in ('write', 'flush'):
+        ops = operations()
+        ops.install.side_effect = ValueError('original failure')
+        ops.record_diagnostics.side_effect = OSError('log unavailable')
+        stream = Mock(spec=['write', 'flush'])
+        getattr(stream, method).side_effect = BrokenPipeError('stderr unavailable')
+        with patch.object(sys, 'stderr', stream):
+            result = engine.perform_update(ops)
+        assert result['rollback'] == 'verified'
+        assert result['stderr_error']['stage'] == 'diagnostic_stderr'
+        assert result['diagnostics'][0]['message'] == 'original failure'
+        ops.unlock.assert_called_once()
+        assert ops.mock_calls[-1][0] == 'save'
 
 
 def test_backup_failure_never_installs_or_attempts_rollback():
@@ -260,3 +265,104 @@ def test_lock_conflict_and_new_check_failure_keep_distinct_results():
     assert receipt['status'] == 'failed' and receipt['environment_may_have_changed']
     assert receipt['rollback'] == 'verified'
     ops.unlock.assert_called_once()
+
+
+def test_original_facts_and_distinct_unlock_error_survive_install_failure():
+    ops = operations()
+    ops.preflight.return_value = {'state_db': '/state', 'old_version': '1.0'}
+    ops.install.side_effect = ValueError('install error')
+    ops.unlock.side_effect = OSError(5, 'unlock error')
+    result = engine.perform_update(ops)
+    assert result['original']['old_version'] == '1.0'
+    assert result['environment_may_have_changed']
+    assert [item['stage'] for item in result['diagnostics']] == ['install', 'unlock']
+    assert result['diagnostics'][1]['errno'] == 5
+    ops.check_new.assert_not_called()
+    assert ops.record_diagnostics.call_args.args[0] == result['diagnostics']
+
+
+def test_success_checks_new_deployment_before_unlock():
+    ops = operations()
+    result = engine.perform_update(ops)
+    calls = [item[0] for item in ops.mock_calls]
+    assert result['status'] == 'updated_stopped'
+    assert calls.index('lock') < calls.index('install') < calls.index('check_new') < calls.index('unlock')
+
+
+def test_log_failure_delivers_original_and_log_error_to_stderr():
+    ops = operations()
+    ops.preflight.side_effect = ValueError('original error')
+    ops.record_diagnostics.side_effect = OSError(28, 'disk full')
+    stream = io.StringIO()
+    with contextlib.redirect_stderr(stream):
+        result = engine.perform_update(ops)
+    delivered = json.loads(stream.getvalue())
+    assert delivered['diagnostics'][0]['message'] == 'original error'
+    assert delivered['log_error']['errno'] == result['log_error']['errno'] == 28
+
+
+def test_rollback_relocks_and_recovers_formal_record_with_original_bindings():
+    ops = create_operations()
+    ops.record = {'lock_paths': ['/db/session', '/db/admission']}
+    ops.update_locks, ops.db_locks = Mock(), Mock()
+    active = object()
+    formal = {'state': 'updating', 'temporary': {}, 'client': {'configured_path': '/client/cap.json'},
+              'original': {'deployment': {'metadata': {'staging_path': '/stage',
+                           'ready_path': '/ready', 'processing_path': '/processing'}}}}
+    ops.read_pending = Mock(return_value=(formal, active))
+    states = SimpleNamespace(UPDATING=active, ROLLED_BACK=SimpleNamespace(value='rolled_back'))
+    with patch.object(transaction, 'JournalState', states, create=True), \
+            patch.object(transaction, 'validate_active_record', create=True), \
+            patch.object(transaction, 'validate_paths', create=True) as validate, \
+            patch.object(transaction, 'recover', create=True) as recover, \
+            patch.object(transaction, 'atomic_json', create=True):
+        ops.rollback()
+    ops.update_locks.acquire_directory.assert_called_once_with(Path('/target'))
+    ops.db_locks.database.assert_called_once_with(['/db/session', '/db/admission'])
+    assert recover.call_args.args[0] is formal
+    assert validate.call_args.args[2] == Path('/client')
+    assert validate.call_args.args[4] == ['/stage', '/ready', '/processing']
+    assert formal['state'] == 'rolled_back'
+
+
+def test_creator_publication_failure_preserves_formal_record():
+    ops = create_operations()
+    ops.record = {'temporary_owners': {'staging': []}}
+    formal = {'temporary_owners': {'staging': [{'uid': 0, 'gid': 0}]}}
+    ops.read_pending = Mock(return_value=(formal, object()))
+    with patch.object(transaction, 'creation_identity', return_value={'uid': 0, 'gid': 0}, create=True), \
+            patch.object(transaction, 'atomic_json', side_effect=OSError('sync failed'), create=True), \
+            patch.object(transaction, 'sync_file', create=True), patch.object(transaction, 'sync_dir', create=True):
+        try:
+            ops.register_owner('staging', Path('/parent'))
+        except OSError as error:
+            assert str(error) == 'sync failed'
+        else:
+            raise AssertionError('发布错误必须交付')
+    assert ops.record == formal
+
+
+def test_pending_record_rejects_other_transaction_but_accepts_added_creator():
+    ops = create_operations()
+    base = {'output': '/output', 'output_identity': {'ino': 1}, 'env': '/target/venv',
+            'env_backup': '/output/venv.backup', 'state_db': '/db/state',
+            'db_backup': '/output/state.backup', 'lock_paths': ['/db/a', '/db/b'],
+            'controller': '/python', 'original': {}, 'temporary': {}, 'engine': '/engine',
+            'state': 'updating', 'temporary_owners': {'staging': [{'uid': 0, 'gid': 0}]}}
+    ops.record = base
+    formal = dict(base, temporary_owners={'staging': [{'uid': 0, 'gid': 0}, {'uid': 1, 'gid': 1}]})
+    states = SimpleNamespace(PREPARING=object())
+    with patch.object(Path, 'read_text', return_value=json.dumps(formal)) as read, \
+            patch.object(transaction, 'classify_record', return_value=object(), create=True), \
+            patch.object(transaction, 'validate_record_target', create=True), \
+            patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
+            patch.object(transaction, 'JournalState', states, create=True):
+        actual, _ = ops.read_pending()
+        assert actual['temporary_owners'] == formal['temporary_owners']
+        read.return_value = json.dumps(dict(formal, output='/other'))
+        try:
+            ops.read_pending()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('其他事务记录不能用于当前事务')
