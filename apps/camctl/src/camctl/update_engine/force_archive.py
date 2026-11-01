@@ -140,33 +140,39 @@ def _build(output, job, destination):
 
 def _publish(output, processing, name, digest):
     archive = output / 'archive.tar.gz'
-    temp = processing / ('.camctl-force-' + output.name + '.tmp')
-    temp.unlink(missing_ok=True)
+    preparation = processing / ('.camctl-force-' + output.name)
+    preparation.mkdir(mode=0o700, exist_ok=True)
+    if not stat.S_ISDIR(preparation.lstat().st_mode):
+        raise ValueError('归档准备位置不是目录')
     transaction.sync_dir(processing)
+    complete = preparation / 'archive.tar.gz'
+    temp = preparation / '.archive.tmp'
     try:
+        info = complete.lstat()
+    except FileNotFoundError:
+        temp.unlink(missing_ok=True)
+        transaction.sync_dir(preparation)
         with temp.open('xb') as dst, archive.open('rb') as src:
             shutil.copyfileobj(src, dst, 1024 * 1024)
             dst.flush()
             os.fsync(dst.fileno())
         if transaction.digest(temp) != digest:
             raise ValueError('归档发布副本摘要不一致')
-        try:
-            os.link(temp, processing / name, follow_symlinks=False)
-        except FileExistsError:
-            target = processing / name
-            if not stat.S_ISREG(target.lstat().st_mode) or transaction.digest(target) != digest:
-                raise ValueError('归档目标已存在且内容不同')
-        transaction.sync_dir(processing)
-    except BaseException as error:
-        try:
-            temp.unlink(missing_ok=True)
-            transaction.sync_dir(processing)
-        except Exception as cleanup_error:
-            error.add_note('清理归档准备文件失败: ' + repr(cleanup_error))
-        raise
+        os.replace(temp, complete)
+        transaction.sync_dir(preparation)
     else:
-        temp.unlink(missing_ok=True)
-        transaction.sync_dir(processing)
+        if not stat.S_ISREG(info.st_mode) or transaction.digest(complete) != digest:
+            raise ValueError('已有归档准备文件内容不一致')
+        transaction.sync_file(complete)
+        transaction.sync_dir(preparation)
+    try:
+        os.link(complete, processing / name, follow_symlinks=False)
+    except FileExistsError:
+        target = processing / name
+        if not stat.S_ISREG(target.lstat().st_mode) or transaction.digest(target) != digest:
+            raise ValueError('归档目标已存在且内容不同')
+    transaction.sync_dir(processing)
+    transaction.sync_dir(preparation)
 
 
 def _cleanup(record, output):
@@ -188,6 +194,22 @@ def _cleanup(record, output):
             raise ValueError('归档临时清理路径无效')
         force_snapshot._remove_owned(temporary)
         transaction.sync_dir(output)
+    processing = Path(record['layout']['processing'])
+    if transaction.directory_identity(processing) != record['processing_identity']:
+        raise ValueError('归档交付目录身份已变化')
+    preparation = processing / ('.camctl-force-' + output.name)
+    try:
+        info = preparation.lstat()
+    except FileNotFoundError:
+        transaction.sync_dir(processing)
+    else:
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError('归档准备位置不是目录')
+        (preparation / 'archive.tar.gz').unlink(missing_ok=True)
+        (preparation / '.archive.tmp').unlink(missing_ok=True)
+        transaction.sync_dir(preparation)
+        preparation.rmdir()
+        transaction.sync_dir(processing)
 
 
 def finalize(record):

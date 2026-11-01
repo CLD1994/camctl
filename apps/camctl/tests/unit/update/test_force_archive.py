@@ -172,11 +172,35 @@ def test_existing_published_name_must_have_same_digest():
         def close(self): pass
     def opened(path, mode):
         return Output() if mode == 'xb' else io.BytesIO(b'archive')
-    with patch.object(Path, 'open', opened), patch.object(Path, 'unlink'), \
-         patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=0o100600)), \
+    def lstat(path):
+        if path == processing / ('.camctl-force-' + output.name):
+            return SimpleNamespace(st_mode=0o40700)
+        if path.name == 'archive.tar.gz' and path.parent != processing:
+            raise FileNotFoundError(path)
+        return SimpleNamespace(st_mode=0o100600)
+    with patch.object(Path, 'open', opened), patch.object(Path, 'unlink'), patch.object(Path, 'mkdir'), \
+         patch.object(Path, 'lstat', lstat), patch.object(archive.os, 'replace'), \
          patch.object(archive.os, 'link', side_effect=FileExistsError), \
          patch.object(archive.os, 'fsync'), \
          patch.object(archive.transaction, 'sync_dir', create=True), \
          patch.object(archive.transaction, 'digest', create=True, side_effect=['a' * 64, 'b' * 64]):
         with pytest.raises(ValueError, match='内容不同'):
             archive._publish(output, processing, 'archive.tar.gz', 'a' * 64)
+
+
+def test_publish_reuses_complete_private_copy_and_links_into_processing():
+    output = Path('/target/updates/' + 'a' * 32)
+    processing = Path('/processing')
+    preparation = processing / ('.camctl-force-' + output.name)
+    def lstat(path):
+        return SimpleNamespace(st_mode=0o40700 if path == preparation else 0o100600)
+    with patch.object(Path, 'mkdir'), patch.object(Path, 'lstat', lstat), \
+         patch.object(Path, 'open', side_effect=AssertionError('不得重建完整副本')), \
+         patch.object(archive.os, 'link') as link, \
+         patch.object(archive.transaction, 'sync_file', create=True) as sync_file, \
+         patch.object(archive.transaction, 'sync_dir', create=True), \
+         patch.object(archive.transaction, 'digest', create=True, return_value='a' * 64):
+        archive._publish(output, processing, 'archive.tar.gz', 'a' * 64)
+    sync_file.assert_called_once_with(preparation / 'archive.tar.gz')
+    link.assert_called_once_with(preparation / 'archive.tar.gz', processing / 'archive.tar.gz',
+                                 follow_symlinks=False)
