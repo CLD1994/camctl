@@ -39,7 +39,9 @@ def absolute_path(value):
     return path
 
 import update_transaction as transaction
-from config_paths import log_registration_id, rotated_log_names
+import force_record
+import force_snapshot
+from config_paths import default_config_path, lock_file_paths, log_registration_id, rotated_log_names
 
 
 def freeze_registered_logs(target, destination):
@@ -127,6 +129,9 @@ def perform_update(ops, original=None):
         ops.check_original(receipt['original'])
         stage = 'save_original_check'
         ops.save(receipt)
+        if isinstance(ops, ForceOperations):
+            stage = 'prepare_new'
+            ops.prepare_new(receipt)
         stage = 'backup'
         ops.backup(receipt)
         stage = 'save_install_intent'
@@ -281,7 +286,7 @@ class UpdateOperations:
                 'bundle_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest()}
 
     def preflight(self):
-        package = self.preflight_package()
+        package = getattr(self, 'package_preflight', None) or self.preflight_package()
         if self.update['force']:
             raise ValueError('强制更新事务尚未接入')
         config = self.probe('config')
@@ -423,8 +428,9 @@ class UpdateOperations:
                 transaction.sync_dir(probe_client.parent)
 
     def mark_intent(self):
-        self.record.update(state='updating', mutation_intent=True)
-        transaction.atomic_json(self.pending, self.record)
+        proposed = dict(self.record, state='updating', mutation_intent=True)
+        transaction.atomic_json(self.pending, proposed)
+        self.record = proposed
 
     def rollback(self):
         # 重取资格才能证明继承锁的写入者已全部结束。
@@ -601,12 +607,15 @@ class UpdateOperations:
             output.write_bytes(output_bytes)
         return output_bytes.decode('utf-8')
 
-    def install(self, receipt):
-        common = ['uv', 'pip', 'install', '--python', self.python, '--offline', '--no-index',
+    def install_environment(self, receipt, python):
+        common = ['uv', 'pip', 'install', '--python', python, '--offline', '--no-index',
                   '--find-links', self.wheelhouse]
         self.run(receipt, '离线安装锁定依赖', [*common, '--require-hashes', '-r', self.bundle / 'camctl/requirements.txt'])
         self.run(receipt, '离线安装 camctl', [*common, '--no-deps', '--reinstall-package', 'camctl', self.wheel])
-        self.run(receipt, '检查依赖', ['uv', 'pip', 'check', '--python', self.python])
+        self.run(receipt, '检查依赖', ['uv', 'pip', 'check', '--python', python])
+
+    def install(self, receipt):
+        self.install_environment(receipt, self.python)
 
     def check_new(self, receipt):
         original = receipt['original']
@@ -624,6 +633,205 @@ class UpdateOperations:
             shutil.copyfile(capability, self.client_data / 'device-capabilities.json')
             receipt['client_capabilities'] = str(self.client_data / 'device-capabilities.json')
         receipt['capabilities'] = str(capability)
+
+
+class ForceOperations(UpdateOperations):
+    """以冻结布局和完整原始快照重建一个全新实例。"""
+
+    def preflight(self):
+        package = getattr(self, 'package_preflight', None) or self.preflight_package()
+        if not self.update['force']:
+            raise ValueError('强制事务必须使用强制更新包')
+        layout_path = self.target / 'maintenance/layout.json'
+        layout = json.loads(layout_path.read_text(encoding='utf-8'))
+        fields = {'environment', 'state_db', 'staging', 'ready', 'processing'}
+        if (not isinstance(layout, dict) or set(layout) != fields or
+                any(not isinstance(layout[name], str) or not Path(layout[name]).is_absolute() for name in fields) or
+                Path(layout['environment']) != self.target / 'venv'):
+            raise ValueError('已登记维护布局无效')
+        config = Path(self.config_source) if self.config_source is not None else default_config_path(Path.home())
+        if not config.is_absolute():
+            raise ValueError('配置来源必须是绝对路径')
+        state = Path(layout['state_db'])
+        snapshot = transaction.snapshot_config(config, self.config_source)
+        objects = {'environment': layout['environment'], 'configuration': snapshot['resolved'],
+                   'database': str(state), 'wal': str(state) + '-wal', 'shm': str(state) + '-shm',
+                   'staging': str(Path(layout['staging']).resolve()),
+                   'ready': str(Path(layout['ready']).resolve())}
+        if self.client_data is not None:
+            objects['client'] = str((self.client_data / 'device-capabilities.json').resolve())
+        self.layout, self.config_path, self.state_db, self.objects = layout, config, state, objects
+        return {**package, 'layout': layout, 'config': str(config),
+                'configuration_source': str(self.config_source) if self.config_source is not None else None,
+                'config_snapshot': snapshot,
+                'lock_paths': list(map(str, lock_file_paths(state))), 'objects': objects}
+
+    def lock(self, original):
+        self.db_locks.database(original['lock_paths'])
+
+    def check_paths(self, original, *, before_lock=False, recovery=False, extra_control_files=()):
+        del before_lock, recovery
+        locks = [Path(path) for path in original['lock_paths']]
+        protected = [self.target / 'maintenance', self.target / 'updates', self.bundle_input,
+                     *locks, *extra_control_files]
+        self.processing_identity = force_snapshot.validate_paths(self.objects, self.layout['processing'], protected)
+
+    def check_original(self, original):
+        if json.loads((self.target / 'maintenance/layout.json').read_text(encoding='utf-8')) != original['layout']:
+            raise ValueError('维护布局发生变化')
+        transaction.verify_config(original)
+        from layout import environment_locator
+        self.environment_locator = environment_locator(self.target / 'venv')
+
+    def prepare_new(self, receipt):
+        candidate = self.output / 'prepare-venv'
+        self.run(receipt, '准备新版本配置校验环境', ['uv', 'venv', '--python', sys.executable, candidate])
+        python = candidate / 'bin/python'
+        self.install_environment(receipt, python)
+        config = self.output / 'candidate.toml'
+        config.write_text(self.update['config_toml'], encoding='utf-8')
+        transaction.sync_file(config)
+        transaction.sync_dir(config.parent)
+        value = json.loads(self.run(receipt, '修改前校验新配置', [python, '-m', 'camctl.deployment',
+                                    '--config', str(config), '--check-config']))
+        if value != {'state_db': self.layout['state_db'],
+                     'paths': {name: self.layout[name] for name in ('staging', 'ready', 'processing')}}:
+            raise ValueError('强制配置与已登记布局不一致')
+
+    def backup(self, receipt):
+        original = receipt['original']
+        self.record = {'mode': 'force', 'state': 'preparing', 'mutation_intent': False,
+                       'output': str(self.output), 'output_identity': transaction.directory_identity(self.output),
+                       'controller': sys.executable, 'layout_path': str(self.target / 'maintenance/layout.json'),
+                       'configuration_path': str(self.config_path),
+                       'configuration_source': original['configuration_source'], 'layout': self.layout,
+                       'config_snapshot': original['config_snapshot'],
+                       'bundle_path': str(self.bundle_input), 'objects': self.objects,
+                       'processing_identity': self.processing_identity, 'lock_paths': original['lock_paths'],
+                       'temporary_paths': [str(self.output / 'prepare-venv')],
+                       'engine': {'path': str(self.engine_path), 'sha256': transaction.digest(self.engine_path)}}
+        transaction.atomic_json(self.pending, self.record)
+        namespaces = force_snapshot.prepare_namespaces(self.objects, self.output.name)
+        self.record['namespaces'] = namespaces
+        transaction.atomic_json(self.pending, self.record)
+        transaction.verify_config(original)
+        manifest = force_snapshot.backup(self.objects, self.output / 'backup')
+        logs = freeze_registered_logs(self.target, self.output / 'old-logs')
+        self.record.update(namespaces=namespaces, manifest=manifest, logs=logs)
+        transaction.verify_config(original)
+        transaction.atomic_json(self.pending, self.record)
+
+    def read_pending(self):
+        current = json.loads(self.pending.read_text(encoding='utf-8'))
+        state = transaction.classify_record(current)
+        transaction.validate_record_target(current, self.target)
+        if transaction.directory_identity(self.output) != current['output_identity']:
+            raise ValueError('强制事务输出身份已变化')
+        if {k: v for k, v in current.items() if k not in ('state', 'mutation_intent')} != {
+                k: v for k, v in self.record.items() if k not in ('state', 'mutation_intent')}:
+            raise ValueError('强制事务持久记录不一致')
+        return current, state
+
+    def rollback(self):
+        self.db_locks.close()
+        self.update_locks.close()
+        self.update_locks.acquire_directory(self.target)
+        self.db_locks.database(self.record['lock_paths'])
+        current, state = self.read_pending()
+        if state is not transaction.JournalState.UPDATING:
+            raise ValueError('强制事务不处于更新中')
+        processing = {'path': current['layout']['processing'], **current['processing_identity']}
+        force_snapshot.restore(current['objects'], self.output / 'backup', current['manifest'],
+                               current['namespaces'], processing)
+        transaction.verify_config({'config': current['configuration_path'],
+                                   'config_snapshot': current['config_snapshot']})
+        current['state'] = transaction.JournalState.ROLLED_BACK.value
+        try:
+            transaction.atomic_json(self.pending, current)
+        except Exception as error:
+            self.record = current
+            if self.confirm_pending() != transaction.JournalState.ROLLED_BACK.value:
+                raise
+            return error
+        self.record = current
+
+    def install(self, receipt):
+        if transaction.directory_identity(Path(self.layout['processing'])) != self.processing_identity:
+            raise ValueError('processing 目录身份已变化')
+        force_snapshot.displace(self.objects, self.record['namespaces'])
+        force_snapshot.ensure_directories(self.objects)
+        for name in ('staging', 'ready'):
+            Path(self.objects[name]).mkdir(parents=True)
+            transaction.sync_dir(Path(self.objects[name]).parent)
+        transaction.make_directories(self.config_path.parent)
+        self.run(receipt, '创建干净 Python 环境', ['uv', 'venv', '--python', sys.executable, self.target / 'venv'])
+        self.install_environment(receipt, self.python)
+        if Path(self.config_path).resolve() != Path(self.objects['configuration']):
+            raise ValueError('配置来源目标已变化')
+        self.environment_locator.write_text(json.dumps(str(self.target / 'maintenance/layout.json')) + '\n',
+                                            encoding='utf-8')
+        transaction.sync_file(self.environment_locator)
+        transaction.sync_dir(self.environment_locator.parent)
+        with self.config_path.open('x', encoding='utf-8') as stream:
+            stream.write(self.update['config_toml'])
+            stream.flush()
+            os.fsync(stream.fileno())
+        transaction.sync_dir(Path(self.objects['configuration']).parent)
+        args = ['--config', str(self.config_path)]
+        value = json.loads(self.run(receipt, '校验新配置', [self.python, '-m', 'camctl.deployment', *args, '--check-config']))
+        if value != {'state_db': self.layout['state_db'],
+                     'paths': {name: self.layout[name] for name in ('staging', 'ready', 'processing')}}:
+            raise ValueError('强制配置与已登记布局不一致')
+
+    def migrate(self, receipt):
+        copy = self.output / 'new-state.db'
+        result = self.run(receipt, '创建全新状态库', [self.python, '-m', 'camctl.deployment',
+                          '--config', str(self.config_path), '--create-copy', copy])
+        receipt['new_deployment'] = json.loads(result)
+        for suffix in ('-wal', '-shm'):
+            sidecar = Path(str(copy) + suffix)
+            if sidecar.exists():
+                raise ValueError('新状态库仍有未检查点伴随文件: ' + str(sidecar))
+        transaction.make_directories(self.state_db.parent)
+        shutil.copy2(copy, self.state_db)
+        transaction.sync_file(self.state_db)
+        transaction.sync_dir(self.state_db.parent)
+
+    def check_new(self, receipt):
+        self.run(receipt, '初始化新工作目录', [self.python, '-m', 'camctl.deployment',
+                 '--config', str(self.config_path), '--prepare-directories'])
+        capability = self.output / 'device-capabilities.json'
+        self.run(receipt, '导出新配置能力说明', [self.target / 'venv/bin/camctl', 'describe',
+                 '--config', str(self.config_path)], output=capability)
+        if self.client_data is not None:
+            transaction.make_directories(self.client_data)
+            shutil.copyfile(capability, self.client_data / 'device-capabilities.json')
+
+    def check_final(self, receipt):
+        version = self.run(receipt, '核验新版本', [self.target / 'venv/bin/camctl', '--version'])
+        if version != self.expected_version + '\n':
+            raise ValueError('新版本不一致')
+        result = self.run(receipt, '核验新部署', [self.python, '-m', 'camctl.deployment',
+                          '--config', str(self.config_path)])
+        if json.loads(result) != receipt['new_deployment']:
+            raise ValueError('新状态库身份或目录绑定不一致')
+        if self.config_path.read_text(encoding='utf-8') != self.update['config_toml']:
+            raise ValueError('新配置正文不一致')
+        if self.client_data is not None and transaction.digest(self.client_data / 'device-capabilities.json') != \
+                transaction.digest(self.output / 'device-capabilities.json'):
+            raise ValueError('新能力说明不一致')
+
+    def sync_new(self):
+        transaction.manifest(self.target / 'venv', sync=True)
+        for path in (self.config_path, self.state_db):
+            transaction.sync_file(path)
+            transaction.sync_dir(path.parent)
+        for name in ('staging', 'ready'):
+            transaction.manifest(Path(self.objects[name]), sync=True)
+            transaction.sync_dir(Path(self.objects[name]).parent)
+        if self.client_data is not None:
+            transaction.sync_file(self.client_data / 'device-capabilities.json')
+            transaction.sync_dir(self.client_data)
 
 
 def main():
@@ -676,23 +884,33 @@ def main():
                 if not args.recover_only:
                     raise ValueError('必须先使用冻结引擎恢复未完成事务')
                 transaction.validate_active_record(record)
-                original = record['original']
-                metadata = original['deployment']['metadata']
-                bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
-                client = record.get('client')
-                client_data = Path(client['configured_path']).parent if client is not None else None
-                transaction.validate_paths(args.target, original, client_data, Path(record['output']), bindings,
-                                           before_lock=True, recovery=True, temporary=record['temporary'])
                 evidence = Path(record['output'])
-                operations = UpdateOperations(None, args.target, None, evidence)
+                forced = record.get('mode') == 'force'
+                if not forced:
+                    original = record['original']
+                    metadata = original['deployment']['metadata']
+                    bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
+                    client = record.get('client')
+                    client_data = Path(client['configured_path']).parent if client is not None else None
+                    transaction.validate_paths(args.target, original, client_data, evidence, bindings,
+                                               before_lock=True, recovery=True, temporary=record['temporary'])
+                operations = (ForceOperations if forced else UpdateOperations)(None, args.target, None, evidence)
                 operations.update_locks = target_locks
                 operations.record = record
                 operations.db_locks.database(record['lock_paths'])
                 recovery_error = None
                 try:
-                    transaction.validate_paths(args.target, original, client_data, evidence, bindings,
-                                               recovery=True, temporary=record['temporary'])
-                    transaction.recover(record, verify_maintenance_integrity, operations.register_owner)
+                    if forced and record['mutation_intent']:
+                        force_snapshot.validate_namespace_identities(record['namespaces'])
+                        processing = {'path': record['layout']['processing'], **record['processing_identity']}
+                        force_snapshot.restore(record['objects'], evidence / 'backup', record['manifest'],
+                                               record['namespaces'], processing)
+                        transaction.verify_config({'config': record['configuration_path'],
+                                                   'config_snapshot': record['config_snapshot']})
+                    elif not forced:
+                        transaction.validate_paths(args.target, original, client_data, evidence, bindings,
+                                                   recovery=True, temporary=record['temporary'])
+                        transaction.recover(record, verify_maintenance_integrity, operations.register_owner)
                     record['state'] = transaction.JournalState.ROLLED_BACK.value
                     transaction.atomic_json(pending, record)
                 except Exception as error:
@@ -726,14 +944,27 @@ def main():
             raise ValueError('事务目录与部署不一致')
         stage = 'environment'
         python = args.target / 'venv/bin/python'
-        if not python.is_file() or shutil.which('uv') is None:
-            raise ValueError('原 Python 环境或 uv 缺失')
+        if shutil.which('uv') is None:
+            raise ValueError('uv 缺失')
         output = args.output
         evidence = None
         operations = UpdateOperations(args.bundle, args.target, args.client_data, output,
                                       config_path=args.config)
         operations.update_locks = target_locks
         stage = 'preflight'
+        package = operations.preflight_package()
+        if operations.update['force']:
+            update, wheelhouse, wheel = operations.update, operations.wheelhouse, operations.wheel
+            operations = ForceOperations(args.bundle, args.target, args.client_data, output,
+                                         config_path=args.config)
+            operations.update_locks = target_locks
+            operations.package_preflight = package
+            operations.update, operations.wheelhouse, operations.wheel = update, wheelhouse, wheel
+            operations.expected_version = package['new_version']
+        elif not python.is_file():
+            raise ValueError('原 Python 环境缺失')
+        else:
+            operations.package_preflight = package
         original = operations.preflight()
         stage = 'check_paths_before_effects'
         archive_files = (archive_record[1],) if archive_record is not None else ()

@@ -139,9 +139,16 @@ def _copy_object(source, destination, copied):
 def backup(paths, destination):
     """完整复制并同步全部原始对象，核对源与备份后返回冻结清单。"""
     destination = Path(destination)
-    original = inventory(paths)
     destination.mkdir(mode=0o700)
     _sync_directory(destination.parent)
+    return backup_into(paths, destination)
+
+
+def backup_into(paths, destination):
+    destination = Path(destination)
+    original = inventory(paths)
+    if any(destination.iterdir()):
+        raise ValueError('快照目标必须为空')
     copied = {}
     for name, source in sorted(paths.items()):
         if original[name] is not None:
@@ -210,6 +217,11 @@ def _namespace(item):
     return namespace
 
 
+def validate_namespace_identities(namespaces):
+    for item in namespaces.values():
+        _namespace(item)
+
+
 def displace(paths, namespaces):
     """在已有修改意图下将旧对象移入事务命名空间。"""
     if set(paths) != set(namespaces):
@@ -228,7 +240,31 @@ def displace(paths, namespaces):
         _sync_directory(displaced)
 
 
-def restore(paths, backup_directory, expected, namespaces):
+def ensure_directories(paths):
+    """按快照对象路径补齐原本不存在的父目录。"""
+    for value in paths.values():
+        parent = Path(value).parent
+        missing = []
+        while not parent.exists():
+            missing.append(parent)
+            parent = parent.parent
+        for directory in reversed(missing):
+            directory.mkdir()
+            _sync_directory(directory.parent)
+
+
+def restore_parent_directories(namespaces):
+    missing = {Path(path) for item in namespaces.values() for path in item['missing_parents']}
+    for path in sorted(missing, key=lambda item: len(item.parts)):
+        try:
+            path.mkdir()
+        except FileExistsError:
+            if not path.is_dir():
+                raise ValueError('恢复父路径不是目录: ' + str(path))
+        _sync_directory(path.parent)
+
+
+def restore(paths, backup_directory, expected, namespaces, processing=None):
     """从完整备份重新准备并发布所有原对象，允许恢复再次中断。"""
     if set(paths) != set(namespaces):
         raise ValueError('恢复命名空间与对象不一致')
@@ -238,6 +274,17 @@ def restore(paths, backup_directory, expected, namespaces):
         raise ValueError('原始对象备份无法核实')
     stages = {}
     copied = {}
+    entries_by_root = {name: [] for name in paths}
+    for key, entry in expected.items():
+        if entry is not None and entry.get('kind') == 'file':
+            entries_by_root[key.split('/')[0]].append((key, entry['hardlink']))
+    group_devices = {}
+    for name, entries in entries_by_root.items():
+        for _, group in entries:
+            device = namespaces[name]['dev']
+            if group in group_devices and group_devices[group] != device:
+                raise ValueError('原有硬链接恢复位置不在同一文件系统')
+            group_devices[group] = device
     for name, target in sorted(paths.items()):
         item = namespaces[name]
         namespace = _namespace(item)
@@ -250,9 +297,15 @@ def restore(paths, backup_directory, expected, namespaces):
     if inventory({name: stages.get(name, Path(namespaces[name]['path']) / 'stage') for name in paths},
                  sync=True) != expected:
         raise ValueError('准备的恢复对象无法核实')
+    restore_parent_directories(namespaces)
     for name, value in sorted(paths.items()):
         target = Path(value)
         namespace = Path(namespaces[name]['path'])
+        if processing is not None:
+            current = Path(processing['path']).stat()
+            if (current.st_dev, current.st_ino, current.st_uid, current.st_gid) != (
+                    processing['dev'], processing['ino'], processing['uid'], processing['gid']):
+                raise ValueError('processing 目录身份已变化')
         try:
             target.lstat()
         except FileNotFoundError:

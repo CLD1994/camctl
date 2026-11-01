@@ -25,7 +25,9 @@ def force_record(state='preparing'):
     record = {'mode': 'force', 'state': state, 'mutation_intent': state != 'preparing',
               'output': '/target/updates/' + token, 'controller': '/python',
               'layout_path': '/target/maintenance/layout.json', 'configuration_path': '/config',
+              'bundle_path': '/bundle', 'processing_identity': {'dev': 1, 'ino': 2, 'uid': 3, 'gid': 4},
               'configuration_source': None, 'layout': layout, 'objects': objects,
+              'config_snapshot': {'source': None, 'resolved': '/config', 'present': False, 'sha256': None},
               'lock_paths': ['/state/db.session.lock', '/state/db.admission.lock'],
               'output_identity': {'dev': 1, 'ino': 2, 'uid': 3, 'gid': 4}}
     if state != 'preparing':

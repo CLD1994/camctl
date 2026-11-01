@@ -52,6 +52,16 @@ def create_database_copy(config_path: Path | None, destination: Path) -> dict:
         owned.connection.close()
 
 
+def prepare_new_directories(config_path: Path | None) -> None:
+    """由已持有原库锁的维护事务调用正式目录准备能力。"""
+    from camctl.bootstrap.application import ConfigAdapter
+    from camctl.persistence.initialization import _prepare_directories
+
+    config = ConfigAdapter(Path.home()).load(config_path)
+    _prepare_directories(Path(config.paths.state_db).resolve(), Path(config.paths.staging),
+                         Path(config.paths.ready), Path(config.paths.processing))
+
+
 def migrate_copy(config_path: Path | None, state_db: Path) -> dict:
     """在独立副本上应用已登记迁移，返回核验后的数据库身份。"""
     from camctl.bootstrap.application import ConfigAdapter
@@ -134,11 +144,13 @@ def main() -> int:
     parser.add_argument('--config', type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--check-config', action='store_true', help='加载配置并输出更新路径')
+    mode.add_argument('--prepare-directories', action='store_true', help='准备新实例目录')
     mode.add_argument('--migrate-copy', type=Path, help='在独立状态库副本上执行已登记迁移')
     mode.add_argument('--create-copy', type=Path, help='在独立事务位置准备新的空状态库')
     args = parser.parse_args()
     try:
-        result = (inspect_configuration(args.config) if args.check_config
+        result = (prepare_new_directories(args.config) if args.prepare_directories
+                  else inspect_configuration(args.config) if args.check_config
                   else migrate_copy(args.config, args.migrate_copy) if args.migrate_copy is not None
                   else create_database_copy(args.config, args.create_copy) if args.create_copy is not None
                   else inspect_deployment(args.config))

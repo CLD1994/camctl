@@ -67,12 +67,20 @@ def classify(record):
     intent = record['mutation_intent']
     if (state == 'preparing' and intent) or (state in ('updating', 'committed') and not intent):
         raise ValueError('强制更新状态与修改意图冲突')
-    for key in ('output', 'controller', 'layout_path', 'configuration_path'):
+    for key in ('output', 'controller', 'layout_path', 'configuration_path', 'bundle_path'):
         if not _absolute(record.get(key)):
             raise ValueError('强制更新路径无效: ' + key)
     source = record.get('configuration_source')
     if source is not None and not _absolute(source):
         raise ValueError('强制更新配置来源无效')
+    snapshot = record.get('config_snapshot')
+    if (not isinstance(snapshot, dict) or set(snapshot) != {'source', 'resolved', 'present', 'sha256'} or
+            snapshot['source'] != source or not _absolute(snapshot['resolved']) or
+            type(snapshot['present']) is not bool or
+            (snapshot['present'] and (not isinstance(snapshot['sha256'], str) or
+                                      not re.fullmatch('[0-9a-f]{64}', snapshot['sha256']))) or
+            (not snapshot['present'] and snapshot['sha256'] is not None)):
+        raise ValueError('强制更新配置快照无效')
     layout = record.get('layout')
     fields = {'environment', 'state_db', 'staging', 'ready', 'processing'}
     if (not isinstance(layout, dict) or set(layout) != fields or
@@ -81,15 +89,22 @@ def classify(record):
     expected_locks = list(map(str, lock_file_paths(layout['state_db'])))
     if record.get('lock_paths') != expected_locks:
         raise ValueError('强制更新锁与布局不一致')
+    for field in ('processing_identity',):
+        item = record.get(field)
+        if (not isinstance(item, dict) or set(item) != {'dev', 'ino', 'uid', 'gid'} or
+                any(type(value) is not int or value < 0 for value in item.values())):
+            raise ValueError('强制更新目录身份无效: ' + field)
     objects = record.get('objects')
     if not isinstance(objects, dict) or set(objects) not in (_REQUIRED_OBJECTS, _REQUIRED_OBJECTS | {'client'}):
         raise ValueError('强制更新对象集合无效')
-    expected = {'environment': layout['environment'], 'configuration': record['configuration_path'],
+    expected = {'environment': layout['environment'],
                 'database': layout['state_db'], 'wal': layout['state_db'] + '-wal',
                 'shm': layout['state_db'] + '-shm', 'staging': str(Path(layout['staging']).resolve()),
                 'ready': str(Path(layout['ready']).resolve())}
     if any(objects.get(name) != value for name, value in expected.items()):
         raise ValueError('强制更新对象与布局不一致')
+    if objects['configuration'] != snapshot['resolved']:
+        raise ValueError('强制更新配置目标与来源不一致')
     if any(not _absolute(value) for value in objects.values()):
         raise ValueError('强制更新对象路径无效')
     identity = record.get('output_identity')
