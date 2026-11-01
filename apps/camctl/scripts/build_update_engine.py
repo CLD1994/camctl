@@ -12,6 +12,7 @@ def build(project: Path, output: Path) -> None:
            ('engine.py', 'update_transaction.py', 'bundle_support.py', 'worker.py', 'probe.py', 'diagnostic_fallback.py', 'archive_support.py', 'layout.py')},
         'maintenance_integrity.py': (source / 'persistence/maintenance_integrity.py').read_bytes(),
         'error_diagnostics.py': (source / 'operations/error_diagnostics.py').read_bytes(),
+        'config_paths.py': (source / 'config_paths.py').read_bytes(),
     }
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for name, data in sorted(members.items()):
