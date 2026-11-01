@@ -67,8 +67,14 @@ def classify_record(record):
     if (not isinstance(original, dict) or not isinstance(original.get('config'), str)
             or not Path(original['config']).is_absolute()):
         raise ValueError('更新记录原配置无效')
-    if (not isinstance(original.get('config_sha256'), str)
-            or not re.fullmatch('[0-9a-f]{64}', original['config_sha256'])
+    config = original.get('config_snapshot')
+    if (not isinstance(config, dict) or set(config) != {'source', 'resolved', 'present', 'sha256'}
+            or (config['source'] is not None and config['source'] != original['config'])
+            or not isinstance(config['resolved'], str) or not Path(config['resolved']).is_absolute()
+            or type(config['present']) is not bool
+            or (config['present'] and (not isinstance(config['sha256'], str)
+                                      or not re.fullmatch('[0-9a-f]{64}', config['sha256'])))
+            or (not config['present'] and config['sha256'] is not None)
             or not isinstance(original.get('deployment'), dict)
             or original['deployment'].get('state_db') != record['state_db']
             or not isinstance(original['deployment'].get('metadata'), dict)):
@@ -187,6 +193,25 @@ def digest(path):
     return result.hexdigest()
 
 
+def snapshot_config(path, source):
+    """冻结普通入口配置来源及文件内容；仅明确不存在视为缺失。"""
+    resolved = str(path.resolve())
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        present, sha256 = False, None
+    else:
+        present, sha256 = True, hashlib.sha256(data).hexdigest()
+    return {'source': str(source) if source is not None else None, 'resolved': resolved,
+            'present': present, 'sha256': sha256}
+
+
+def verify_config(original):
+    snapshot = original['config_snapshot']
+    if snapshot_config(Path(original['config']), snapshot['source']) != snapshot:
+        raise ValueError('原配置来源或文件内容与更新记录不一致')
+
+
 def file_metadata(path):
     info = path.stat()
     if not stat.S_ISREG(info.st_mode):
@@ -280,9 +305,11 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
         return info.st_dev, info.st_ino
 
     protected = [config, db, *locks] + ([client] if client is not None else [])
-    ids = [identity(path, required=(index == 0 or (index == 1 and not recovery)
+    ids = [identity(path, required=((index == 0 and original['config_snapshot']['present']) or (index == 1 and not recovery)
                                     or (2 <= index < 4 and not before_lock)))
            for index, path in enumerate(protected)]
+    if not original['config_snapshot']['present'] and ids[0] is not None:
+        raise ValueError('原本不存在的配置文件已经出现')
     present = [value for value in ids if value is not None]
     if len(present) != len(set(present)):
         raise ValueError('保留对象共享文件身份')
@@ -543,14 +570,13 @@ def make_directories(path):
 def recover(record, verify_integrity, register_owner):
     """使用保留的完整备份幂等恢复；无修改意图时不覆盖原环境。"""
     state = classify_record(record)
+    original = record['original']
+    verify_config(original)
     if state is JournalState.PREPARING:
         return
     if state is not JournalState.UPDATING:
         raise ValueError('终态更新记录不能再次恢复')
     validate_active_record(record)
-    original = record['original']
-    if digest(Path(original['config'])) != original['config_sha256']:
-        raise ValueError('原配置与更新记录不一致')
     env = Path(record['env'])
     env_backup = Path(record['env_backup'])
     db = Path(record['state_db'])
@@ -618,5 +644,4 @@ def recover(record, verify_integrity, register_owner):
             sync_dir(path.parent)
         if not client['present'] and path.exists():
             raise ValueError('原本不存在的能力文件仍然存在')
-    if digest(Path(original['config'])) != original['config_sha256']:
-        raise ValueError('恢复后原配置无法核实')
+    verify_config(original)

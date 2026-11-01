@@ -212,17 +212,14 @@ class UpdateOperations:
                 raise ValueError('camctl wheel 版本与发行记录不一致')
         config = self.probe('config')
         self.config_path = Path(config['config'])
-        if not self.config_path.is_file():
-            raise ValueError('原配置不存在: ' + str(self.config_path))
         state_db = Path(config['state_db'])
         if not state_db.is_file():
             raise ValueError('原状态库不存在或不是普通文件: ' + str(state_db))
         self.config, self.state_db, self.wheelhouse, self.wheel = config, state_db, wheelhouse, wheels[0]
         self.expected_version = release['components']['camctl']
         return {'state_db': str(state_db), 'config': str(self.config_path),
-                'config_source': str(self.config_source) if self.config_source is not None else None,
+                'config_snapshot': transaction.snapshot_config(self.config_path, self.config_source),
                 'lock_paths': config['lock_paths'],
-                'config_sha256': hashlib.sha256(self.config_path.read_bytes()).hexdigest(),
                 'old_version': config['old_version'], 'new_version': self.expected_version,
                 'release_source_sha256': release['source_sha256'],
                 'bundle_manifest_sha256': hashlib.sha256((self.bundle / 'SHA256SUMS').read_bytes()).hexdigest()}
@@ -255,9 +252,11 @@ class UpdateOperations:
         if (result['config'] != original['config'] or result['state_db'] != original['state_db'] or result['lock_paths'] != original['lock_paths']
                 or result['old_version'] != original['old_version']):
             raise ValueError('原环境检查身份发生变化')
+        transaction.verify_config(original)
         original['deployment'] = result['deployment']
 
     def check_paths(self, original, *, before_lock=False, recovery=False, extra_control_files=()):
+        transaction.verify_config(original)
         temporary = None
         if recovery and hasattr(self, 'record'):
             metadata = self.record['original']['deployment']['metadata']
@@ -426,6 +425,9 @@ class UpdateOperations:
         transaction.atomic_json(self.pending, committed)
         self.record = committed
 
+    def config_args(self):
+        return ['--config', self.config_source] if self.config_source is not None else []
+
     def migrate(self, receipt):
         copy = self.output / 'state.migrate.db'
         shutil.copy2(self.record['db_backup'], copy)
@@ -433,7 +435,7 @@ class UpdateOperations:
         os.chown(copy, info.st_uid, info.st_gid)
         shutil.copystat(self.record['db_backup'], copy)
         output = self.run(receipt, '迁移数据库副本', [self.python, '-m', 'camctl.deployment',
-                          '--config', self.config_path, '--migrate-copy', copy])
+                          *self.config_args(), '--migrate-copy', copy])
         metadata = json.loads(output)
         original = receipt['original']['deployment']['metadata']
         if {k: v for k, v in metadata.items() if k != 'format_version'} != {
@@ -465,11 +467,10 @@ class UpdateOperations:
         if version != self.expected_version + '\n':
             raise ValueError('最终发行版本不符')
         result = self.run(receipt, '最终检查状态库', [self.python, '-m', 'camctl.deployment',
-                          '--config', self.config_path])
+                          *self.config_args()])
         if json.loads(result) != receipt['new_deployment']:
             raise ValueError('最终数据库身份不一致')
-        if transaction.digest(self.config_path) != original['config_sha256']:
-            raise ValueError('最终配置与原配置不一致')
+        transaction.verify_config(original)
         if transaction.file_metadata(self.state_db) != self.record['db_meta']:
             raise ValueError('最终数据库元信息不一致')
         if self.client_data is not None:
@@ -528,13 +529,12 @@ class UpdateOperations:
         version = self.run(receipt, '检查发行版本', [self.target / 'venv/bin/camctl', '--version'])
         if version != self.expected_version + '\n':
             raise ValueError('发行版本不符: ' + repr(version))
-        text = self.run(receipt, '只读检查原部署', [self.python, '-m', 'camctl.deployment', '--config', self.config_path])
+        text = self.run(receipt, '只读检查原部署', [self.python, '-m', 'camctl.deployment', *self.config_args()])
         if json.loads(text) != receipt['new_deployment']:
             raise ValueError('状态库身份、格式或路径绑定与更新前不一致')
-        if hashlib.sha256(self.config_path.read_bytes()).hexdigest() != original['config_sha256']:
-            raise ValueError('原配置内容已变化')
+        transaction.verify_config(original)
         capability = self.output / 'device-capabilities.json'
-        self.run(receipt, '导出原配置能力说明', [self.target / 'venv/bin/camctl', 'describe', '--config', self.config_path], output=capability)
+        self.run(receipt, '导出原配置能力说明', [self.target / 'venv/bin/camctl', 'describe', *self.config_args()], output=capability)
         if self.client_data is not None:
             transaction.make_directories(self.client_data)
             shutil.copyfile(capability, self.client_data / 'device-capabilities.json')

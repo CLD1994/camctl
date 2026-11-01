@@ -11,7 +11,7 @@ from pathlib import Path
 MIGRATIONS = {}
 
 
-def migrate_copy(config_path: Path, state_db: Path) -> dict:
+def migrate_copy(config_path: Path | None, state_db: Path) -> dict:
     """在独立副本上应用已登记迁移，返回核验后的数据库身份。"""
     from camctl.bootstrap.application import ConfigAdapter
     from camctl.persistence.maintenance_integrity import verify_maintenance_integrity
@@ -20,8 +20,8 @@ def migrate_copy(config_path: Path, state_db: Path) -> dict:
         open_existing, verify_directory_binding,
     )
 
-    if not config_path.is_file() or not state_db.is_file():
-        raise ValueError('配置或数据库副本不存在')
+    if not state_db.is_file():
+        raise ValueError('数据库副本不存在')
     config = ConfigAdapter(Path.home()).load(config_path)
     if state_db.samefile(Path(config.paths.state_db)):
         raise ValueError('迁移目标必须是独立数据库副本')
@@ -68,13 +68,11 @@ def migrate_copy(config_path: Path, state_db: Path) -> dict:
     return identity
 
 
-def inspect_deployment(config_path: Path) -> dict:
+def inspect_deployment(config_path: Path | None) -> dict:
     from camctl.bootstrap.application import ConfigAdapter
     from camctl.persistence.maintenance_integrity import verify_maintenance_integrity
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing, verify_directory_binding
 
-    if not config_path.is_file():
-        raise ValueError(f'配置文件不存在或不是普通文件: {config_path}')
     config = ConfigAdapter(Path.home()).load(config_path)
     state_db = Path(config.paths.state_db).resolve()
     if not state_db.is_file():
@@ -92,7 +90,7 @@ def inspect_deployment(config_path: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--config', type=Path)
     parser.add_argument('--migrate-copy', type=Path, help='在独立状态库副本上执行已登记迁移')
     args = parser.parse_args()
     try:

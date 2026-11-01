@@ -1,7 +1,6 @@
 """从 wheel 在虚拟环境外发布与部署绑定的稳定维护入口。"""
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -101,7 +100,7 @@ def _publish_locked(wheel, target, base_python, camctl_path, config):
     if check.returncode:
         raise ValueError('原环境配置检查失败: ' + check.stderr.decode('utf-8', errors='replace'))
     original = json.loads(check.stdout)
-    original['config_sha256'] = hashlib.sha256(Path(original['config']).read_bytes()).hexdigest()
+    original['config_snapshot'] = transaction.snapshot_config(Path(original['config']), config)
     output = target / 'updates' / ('publish-' + os.urandom(16).hex())
     binding = {'target': str(target), 'python': str(base_python), 'camctl_path': str(camctl_path)}
     binding_bytes = (json.dumps(binding, ensure_ascii=False, sort_keys=True) + '\n').encode()
