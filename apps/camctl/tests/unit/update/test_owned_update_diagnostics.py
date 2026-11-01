@@ -24,3 +24,19 @@ def test_encoder_failure_keeps_error_graph_and_actual_system_facts():
     assert result['context'] == {'$ref': '#/cause'}
     assert result['traceback']
     assert result['encoder_error']['message'] == 'encoder failed'
+
+
+def test_missing_encoder_preserves_exception_group_and_cause():
+    try:
+        try:
+            raise ValueError('inner')
+        except ValueError as cause:
+            raise ExceptionGroup('group', [RuntimeError('child')]) from cause
+    except ExceptionGroup as error:
+        def missing_encoder(item):
+            raise ModuleNotFoundError('missing encoder')
+        result = diagnostics.freeze(error, 'preflight', missing_encoder)
+    assert result['cause']['message'] == 'inner'
+    assert result['exceptions'][0]['message'] == 'child'
+    assert result['encoder_error']['message'] == 'missing encoder'
+    assert result['stage'] == 'preflight'

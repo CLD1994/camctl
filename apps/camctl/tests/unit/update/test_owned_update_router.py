@@ -136,6 +136,45 @@ def test_check_blocks_active_record_for_any_configuration():
         assert (result['outcome'], result['eligibility']) == ('recovery_required', 'blocked')
 
 
+def test_invalid_pending_blocks_apply_before_reading_new_bundle():
+    with patch.object(router, '_lock', return_value=11), \
+            patch.object(router, '_pending', side_effect=ValueError('invalid journal')), \
+            patch.object(router, '_engine_memfd') as engine, \
+            patch.object(router, '_invoke') as invoke, patch.object(router.os, 'close'):
+        result = call()
+    assert result['outcome'] == 'unknown' and result['effect'] == 'unknown'
+    assert result['eligibility'] == 'unknown'
+    assert result['stage'] == 'pending'
+    engine.assert_not_called()
+    invoke.assert_not_called()
+
+
+def test_lock_failure_delivers_original_error_without_starting():
+    stream = io.StringIO()
+    with patch.object(router, '_lock', side_effect=OSError(5, 'lock failure')), \
+            patch.object(router, '_pending') as pending, patch.object(sys, 'stderr', stream):
+        result = router.execute(binding, 'apply', binding['camctl_path'], '/config', '/bundle', None)
+    assert result['outcome'] == 'unknown' and result['eligibility'] == 'unknown'
+    assert result['stage'] == 'lock'
+    assert json.loads(stream.getvalue())['message'] == '[Errno 5] lock failure'
+    pending.assert_not_called()
+
+
+def test_terminal_record_does_not_consult_old_bindings_before_new_apply():
+    for state in (JournalState.COMMITTED, JournalState.ROLLED_BACK):
+        obsolete = {'original': {'config_source': '/obsolete'},
+                    'client': {'configured_path': '/obsolete/client'}}
+        with patch.object(router, '_lock', return_value=11), \
+                patch.object(router, '_pending', return_value=(obsolete, state)), \
+                patch.object(router, '_frozen') as frozen, \
+                patch.object(router, '_engine_memfd', side_effect=ValueError('new package invalid')) as engine, \
+                patch.object(router.os, 'close'):
+            result = call()
+        frozen.assert_not_called()
+        engine.assert_called_once_with(Path('/bundle'))
+        assert result['outcome'] == 'failed' and result['eligibility'] == 'allowed'
+
+
 def test_error_diagnostic_is_delivered_after_closing_qualification():
     events = []
     class Stream(io.StringIO):

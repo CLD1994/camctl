@@ -197,6 +197,38 @@ def test_default_configuration_is_not_rewritten_as_explicit_argument():
     assert ops.config_args() == []
 
 
+def test_default_configuration_uses_absolute_path_from_original_probe():
+    config = {'config': '/home/user/.config/camctl/config.toml', 'state_db': '/old/state',
+              'lock_paths': ['/old/session', '/old/admission'], 'old_version': '0.2.0'}
+    release = {'components': {'camctl': '0.3.0'}, 'source_sha256': 'source',
+               'wheel_targets': {'x86_64': {'files': ['dependency.whl']}}}
+    wheel = Mock()
+    wheel.namelist.return_value = ['camctl/deployment.py', 'camctl-0.3.0.dist-info/METADATA',
+                                   'camctl/persistence/maintenance_integrity.py', 'camctl/update_engine.pyz']
+    wheel.read.side_effect = lambda name: (b'Name: camctl\nVersion: 0.3.0\n\n' if name.endswith('METADATA')
+                                           else b'engine' if name.endswith('.pyz') else b'integrity')
+    inner = Mock(); inner.read.return_value = b'integrity'
+    outer_context, inner_context = Mock(), Mock()
+    outer_context.__enter__ = Mock(return_value=wheel); outer_context.__exit__ = Mock(return_value=False)
+    inner_context.__enter__ = Mock(return_value=inner); inner_context.__exit__ = Mock(return_value=False)
+    with patch.dict(engine.os.environ, {}, clear=True), \
+            patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
+            patch.object(Path, 'read_text', return_value=json.dumps(release)), \
+            patch.object(Path, 'read_bytes', side_effect=[b'manifest', b'engine']), \
+            patch.object(Path, 'glob', return_value=iter([Path('/bundle/camctl/camctl.whl')])), \
+            patch.object(engine, 'verify_checksums'), patch.object(engine, 'current_target', return_value='x86_64'), \
+            patch.object(engine, 'wheel_target_manifest', return_value=release['wheel_targets']), \
+            patch.object(engine.zipfile, 'ZipFile', side_effect=[outer_context, inner_context]), \
+            patch.object(engine.UpdateOperations, 'probe', return_value=config), \
+            patch.object(transaction, 'snapshot_config', return_value={'present': False}) as snapshot:
+        ops = engine.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/output'))
+        original = ops.preflight()
+    assert original['config'] == config['config']
+    assert Path(original['config']).is_absolute()
+    snapshot.assert_called_once_with(Path(config['config']), None)
+    assert ops.config_args() == []
+
+
 def create_operations(config_path=None):
     with patch.dict(engine.os.environ, {}, clear=True), patch.object(Path, 'is_dir', return_value=True):
         return engine.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/output'),
@@ -366,3 +398,116 @@ def test_pending_record_rejects_other_transaction_but_accepts_added_creator():
             pass
         else:
             raise AssertionError('其他事务记录不能用于当前事务')
+
+
+def test_preflight_failure_reaches_actual_log_consumer():
+    ops = create_operations()
+    ops.preflight = Mock(side_effect=ValueError('delivery invalid'))
+    ops.save = Mock()
+    stream = io.StringIO()
+    with patch.object(Path, 'open', return_value=contextlib.nullcontext(stream)):
+        result = engine.perform_update(ops)
+    assert json.loads(stream.getvalue()) == result['diagnostics'][0]
+    assert result['diagnostics'][0]['message'] == 'delivery invalid'
+
+
+def test_final_receipt_failure_delivers_both_original_and_receipt_error():
+    ops = operations()
+    ops.install.side_effect = ValueError('install failed')
+    ops.save.side_effect = [None, None, OSError(28, 'receipt full')]
+    result = engine.perform_update(ops)
+    assert [item['stage'] for item in result['diagnostics']] == ['install', 'save_final_receipt']
+    assert ops.record_diagnostics.call_count == 2
+    assert ops.record_diagnostics.call_args_list[0].args[0][0]['message'] == 'install failed'
+    assert ops.record_diagnostics.call_args_list[1].args[0][0]['errno'] == 28
+
+
+def test_cause_and_attached_facts_reach_consumer_after_unlock():
+    ops = operations()
+    try:
+        try:
+            raise OSError(13, 'denied')
+        except OSError as cause:
+            error = RuntimeError('lock failed')
+            encoder.attach_diagnostic_facts(error, {'lock': {'operation': 'unlock', 'path': '/state.lock'}})
+            raise error from cause
+    except RuntimeError as error:
+        ops.install.side_effect = error
+    result = engine.perform_update(ops)
+    diagnostic = result['diagnostics'][0]
+    assert diagnostic['cause']['errno'] == 13
+    assert diagnostic['diagnostic_facts']['lock']['path'] == '/state.lock'
+    calls = [item[0] for item in ops.mock_calls]
+    assert calls.index('unlock') < calls.index('record_diagnostics')
+    assert ops.record_diagnostics.call_args.args[0] == result['diagnostics']
+
+
+def test_entry_recovery_failure_saves_diagnostic_without_overwriting_receipt():
+    args = SimpleNamespace(target=Path('/target'), client_data=None, bundle=None, output=None,
+                           recover_only=True, lock_fd=7, config=None)
+    parser = Mock(); parser.parse_args.return_value = args
+    active = object()
+    states = SimpleNamespace(COMMITTED=object(), ROLLED_BACK=object())
+    metadata = {'staging_path': '/stage', 'ready_path': '/ready', 'processing_path': '/processing'}
+    record = {'output': '/target/updates/old', 'output_identity': {'ino': 1},
+              'original': {'deployment': {'metadata': metadata}}, 'temporary': {},
+              'lock_paths': ['/db/session', '/db/admission']}
+    ops = Mock(); ops.db_locks = Mock()
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with patch.object(engine.argparse, 'ArgumentParser', return_value=parser), \
+            patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'resolve', lambda p: p), \
+            patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=0o100600)), \
+            patch.object(Path, 'read_text', return_value=json.dumps(record)), \
+            patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+            patch.object(sys, 'stdout', stdout), patch.object(sys, 'stderr', stderr), \
+            patch.object(transaction, 'JournalState', states, create=True), \
+            patch.object(transaction, 'classify_record', return_value=active, create=True), \
+            patch.object(transaction, 'validate_record_target', create=True), \
+            patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
+            patch.object(transaction, 'validate_active_record', create=True), \
+            patch.object(transaction, 'validate_paths', create=True), \
+            patch.object(transaction, 'recover', side_effect=ValueError('restore failed'), create=True), \
+            patch.object(engine, 'UpdateOperations', return_value=ops):
+        assert engine.main() == 1
+    ops.save.assert_not_called()
+    receipt = ops.save_recovery_failure.call_args.args[0]
+    assert receipt['diagnostics'][0]['stage'] == 'recover_pending'
+    assert receipt['diagnostics'][0]['message'] == 'restore failed'
+    assert json.loads(stdout.getvalue())['effect'] == 'recovery_required'
+
+
+def test_entry_path_conflict_precedes_output_creation():
+    args = SimpleNamespace(target=Path('/target'), client_data=None, bundle=Path('/bundle'),
+                           output=Path('/target/updates/id'), recover_only=False, lock_fd=7, config=None)
+    parser = Mock(); parser.parse_args.return_value = args
+    ops = Mock(); ops.preflight.return_value = {'state_db': '/db/state'}
+    ops.check_paths.side_effect = ValueError('path overlap')
+    with patch.object(engine.argparse, 'ArgumentParser', return_value=parser), \
+            patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
+            patch.object(Path, 'resolve', lambda p: p), patch.object(Path, 'lstat', side_effect=FileNotFoundError), \
+            patch.object(Path, 'mkdir') as mkdir, patch.object(Path, 'touch') as touch, \
+            patch.object(engine.shutil, 'which', return_value='/tools/uv'), \
+            patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+            patch.object(sys, 'stdout', io.StringIO()), patch.object(sys, 'stderr', io.StringIO()), \
+            patch.object(engine, 'UpdateOperations', return_value=ops):
+        assert engine.main() == 1
+    mkdir.assert_not_called()
+    touch.assert_not_called()
+    ops.check_paths.assert_called_once()
+
+
+def test_entry_stderr_write_and_flush_failure_preserve_both_errors():
+    for method in ('write', 'flush'):
+        args = SimpleNamespace(target=Path('/target'), client_data=None, bundle=None, output=None,
+                               recover_only=True, lock_fd=-1, config=None)
+        parser = Mock(); parser.parse_args.return_value = args
+        stderr = Mock(spec=['write', 'flush'])
+        getattr(stderr, method).side_effect = BrokenPipeError('stderr failed')
+        with patch.object(engine.argparse, 'ArgumentParser', return_value=parser), \
+                patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'resolve', lambda p: p), \
+                patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                patch.object(sys, 'stdout', io.StringIO()), patch.object(sys, 'stderr', stderr), \
+                patch.object(engine, 'freeze_exception', wraps=engine.freeze_exception) as freeze:
+            assert engine.main() == 1
+        assert [item.args[1] for item in freeze.call_args_list] == ['update_lock', 'outer_stderr']
+        assert '维护资格描述符无效' in str(freeze.call_args_list[0].args[0])

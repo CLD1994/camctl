@@ -52,6 +52,10 @@ int main(void) {
     camctl_host_update_config config = {"/camctl", "/updater", NULL};
     camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_CHECK, NULL, NULL};
     camctl_host_update_result result;
+    config.config_path = "relative.toml";
+    assert(host_maintenance_validate(&config, &request, true) == EINVAL);
+    config.config_path = "/config.toml";
+    assert(host_maintenance_validate(&config, &request, true) == 0);
     stdout_text = valid; stderr_text = "diagnostic"; stderr_overflow = true; stderr_error = true;
     assert(host_maintenance_run(&config, &request, &result) == 0);
     assert(result.eligibility == CAMCTL_UPDATE_ELIGIBILITY_ALLOWED);

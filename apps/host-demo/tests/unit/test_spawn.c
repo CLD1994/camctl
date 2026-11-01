@@ -12,6 +12,7 @@
 static struct sigaction disposition;
 static int group_error, executions, pipe_calls;
 static bool notifications;
+static bool maintenance;
 static host_command command;
 static int pipe_failure, fcntl_failure, spawn_error, closed;
 int __real_posix_spawnattr_setpgroup(posix_spawnattr_t *, pid_t);
@@ -59,7 +60,15 @@ int __wrap_posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_acti
     (void)path;
     (void)actions;
     (void)env;
-    if (notifications && command == HOST_RUN) {
+    if (maintenance) {
+        assert_string_equal(path, "/updater");
+        const char *expected[] = {"/updater", "apply", "--camctl-path", "/camctl",
+                                  "--config", "/config", "--bundle", "/bundle.zip",
+                                  "--client-data", "/client", NULL};
+        for (size_t i = 0; expected[i]; ++i)
+            assert_string_equal(argv[i], expected[i]);
+        assert_null(argv[10]);
+    } else if (notifications && command == HOST_RUN) {
         assert_string_equal(argv[2], "--host-notification-fd");
         assert_string_equal(argv[3], "11");
         assert_null(argv[4]);
@@ -83,6 +92,7 @@ static void prepare(void) {
     disposition.sa_handler = SIG_DFL;
     group_error = executions = pipe_calls = 0;
     notifications = false;
+    maintenance = false;
     command = HOST_RUN;
     pipe_failure = fcntl_failure = spawn_error = closed = 0;
 }
@@ -149,6 +159,17 @@ static void submit_without_notification_fd(void **state) {
     assert_int_equal(launch(), 0);
     assert_int_equal(pipe_calls, 2);
 }
+static void maintenance_forwards_explicit_paths(void **state) {
+    (void)state;
+    prepare(); maintenance = true;
+    camctl_host_update_config config = {"/camctl", "/updater", "/config"};
+    camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_APPLY, "/bundle.zip", "/client"};
+    host_child child;
+    char output[64], errors[64];
+    host_child_init(&child, output, sizeof(output), errors, sizeof(errors));
+    assert_int_equal(host_maintenance_spawn(&child, &config, &request), 0);
+    assert_int_equal(executions, 1);
+}
 static void notification_resource_failures(void **state) {
     (void)state;
     for (int i = 1; i <= 3; i++) {
@@ -174,7 +195,8 @@ static void notification_resource_failures(void **state) {
     assert_int_equal(closed, 6);
 }
 int main(void) {
-    const struct CMUnitTest tests[] = {cmocka_unit_test(notification_resource_failures),
+    const struct CMUnitTest tests[] = {cmocka_unit_test(maintenance_forwards_explicit_paths),
+                                       cmocka_unit_test(notification_resource_failures),
                                        cmocka_unit_test(run_notification_fd),
                                        cmocka_unit_test(submit_without_notification_fd),
                                        cmocka_unit_test(test_group_failure_never_executes_camctl),
