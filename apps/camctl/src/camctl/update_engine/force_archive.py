@@ -48,13 +48,6 @@ def prepare(record):
     if existing is not None:
         if existing['record'] != record:
             raise ValueError('归档任务与事务不一致')
-        frozen = output / 'archive-input'
-        for name, digest in existing['inputs'].items():
-            if digest is not None:
-                if transaction.digest(frozen / name) != digest:
-                    raise ValueError('冻结材料内容无法核实: ' + name)
-                transaction.sync_file(frozen / name)
-        transaction.sync_dir(frozen)
         transaction.sync_file(job_path)
         transaction.sync_dir(output)
         return
