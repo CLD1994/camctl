@@ -30,6 +30,9 @@ def valid_file_metadata(value):
 
 def classify_record(record):
     """拒绝未知或不完整记录，不能把它当作尚未修改。"""
+    if isinstance(record, dict) and record.get('mode') == 'force':
+        from force_record import classify
+        return JournalState(classify(record))
     if not isinstance(record, dict) or type(record.get('mutation_intent')) is not bool:
         raise ValueError('更新记录缺少合法修改意图')
     try:
@@ -110,6 +113,9 @@ def classify_record(record):
 
 
 def validate_record_target(record, target):
+    if record.get('mode') == 'force':
+        from force_record import validate_target
+        return validate_target(record, target)
     output = Path(record['output'])
     updates = target / 'updates'
     if (Path(record['env']) != target / 'venv' or output.parent != updates
@@ -126,6 +132,8 @@ def validate_record_target(record, target):
 
 
 def validate_active_record(record):
+    if record.get('mode') == 'force':
+        return
     client = record.get('client')
     if client is not None and Path(client['configured_path']).resolve() != Path(client['path']):
         raise ValueError('能力文件路径与更新记录不一致')
@@ -177,7 +185,7 @@ def atomic_json(path, value):
     fd, name = tempfile.mkstemp(prefix='.journal-', dir=path.parent)
     temp = Path(name)
     with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-        json.dump(value, stream, ensure_ascii=False, sort_keys=True)
+        json.dump(value, stream, ensure_ascii=True, sort_keys=True)
         stream.write('\n')
         stream.flush()
         os.fsync(stream.fileno())

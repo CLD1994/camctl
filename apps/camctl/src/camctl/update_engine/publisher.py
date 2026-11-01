@@ -133,6 +133,8 @@ def _publish_locked(wheel, target, base_python, camctl_path, config):
         fallback_source = archive.read('camctl/update_engine/diagnostic_fallback.py')
         archive_source = archive.read('camctl/update_engine/archive_support.py')
         bundle_source = archive.read('camctl/update_engine/bundle_support.py')
+        force_record_source = archive.read('camctl/update_engine/force_record.py')
+        config_paths_source = archive.read('camctl/config_paths.py')
         transaction_source = archive.read('camctl/update_engine/update_transaction.py')
         pending = target / 'updates/pending.json'
         try:
@@ -172,7 +174,8 @@ def _publish_locked(wheel, target, base_python, camctl_path, config):
     files = {'router.py': (router, 0o644), 'result-schema.json': (result_schema, 0o644),
              'update_transaction.py': (transaction_source, 0o644), 'error_diagnostics.py': (diagnostic_source, 0o644),
              'diagnostic_fallback.py': (fallback_source, 0o644), 'archive_support.py': (archive_source, 0o644),
-             'bundle_support.py': (bundle_source, 0o644),
+             'bundle_support.py': (bundle_source, 0o644), 'force_record.py': (force_record_source, 0o644),
+             'config_paths.py': (config_paths_source, 0o644),
              'binding.json': (binding_bytes, 0o600)}
     version_hash = hashlib.sha256()
     for name, (content, mode) in sorted(files.items()):

@@ -183,7 +183,7 @@ class UpdateOperations:
             json.dump(receipt, stream, ensure_ascii=False, indent=2)
             stream.write('\n')
 
-    def preflight(self):
+    def preflight_package(self):
         arch = current_target()
         if self.archive_input:
             with UpdateArchive(self.bundle_input) as bundle:
@@ -205,9 +205,7 @@ class UpdateOperations:
                 raise ValueError('camctl wheel 或锁定依赖文件缺失')
             wheel_source = wheel = wheels[0]
             manifest_bytes = (self.bundle / 'SHA256SUMS').read_bytes()
-        update = update_metadata(release)
-        if update['force']:
-            raise ValueError('强制更新事务尚未接入')
+        self.update = update_metadata(release)
         if (release.get('wheel_targets') != expected_targets
                 or any(not target['files'] for target in expected_targets.values())
                 or not expected_targets[arch]['files']):
@@ -231,19 +229,25 @@ class UpdateOperations:
             if (wheel_info['Name'] != 'camctl'
                     or wheel_info['Version'] != release['components']['camctl']):
                 raise ValueError('camctl wheel 版本与发行记录不一致')
+        self.wheelhouse, self.wheel = wheelhouse, wheel
+        self.expected_version = release['components']['camctl']
+        return {'new_version': self.expected_version, 'release_source_sha256': release['source_sha256'],
+                'bundle_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest()}
+
+    def preflight(self):
+        package = self.preflight_package()
+        if self.update['force']:
+            raise ValueError('强制更新事务尚未接入')
         config = self.probe('config')
         self.config_path = Path(config['config'])
         state_db = Path(config['state_db'])
         if not state_db.is_file():
             raise ValueError('原状态库不存在或不是普通文件: ' + str(state_db))
-        self.config, self.state_db, self.wheelhouse, self.wheel = config, state_db, wheelhouse, wheel
-        self.expected_version = release['components']['camctl']
+        self.config, self.state_db = config, state_db
         return {'state_db': str(state_db), 'config': str(self.config_path),
                 'config_snapshot': transaction.snapshot_config(self.config_path, self.config_source),
                 'lock_paths': config['lock_paths'],
-                'old_version': config['old_version'], 'new_version': self.expected_version,
-                'release_source_sha256': release['source_sha256'],
-                'bundle_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest()}
+                'old_version': config['old_version'], **package}
 
     def prepare_package(self, original):
         if not self.archive_input:

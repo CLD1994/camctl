@@ -30,6 +30,18 @@ class DeploymentInspectionTests(unittest.TestCase):
         patcher = patch.dict(sys.modules, {'camctl.persistence.maintenance_integrity': module})
         patcher.start()
         self.addCleanup(patcher.stop)
+    def test_configuration_inspection_uses_formal_loader(self):
+        config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db', staging='/stage',
+            ready='/ready', processing='/processing'))
+        application = ModuleType('camctl.bootstrap.application')
+        adapter = SimpleNamespace(load=Mock(return_value=config))
+        application.ConfigAdapter = Mock(return_value=adapter)
+        with patch.dict(sys.modules, {'camctl.bootstrap.application': application}), \
+                patch.object(Path, 'resolve', lambda path: path):
+            result = deployment.inspect_configuration(Path('/candidate.toml'))
+        self.assertEqual(result, {'state_db': '/state.db',
+                                  'paths': {'staging': '/stage', 'ready': '/ready', 'processing': '/processing'}})
+        adapter.load.assert_called_once_with(Path('/candidate.toml'))
     def test_reads_existing_database_and_checks_binding_then_closes(self):
         connection = Mock()
         metadata = Metadata('original', 9)

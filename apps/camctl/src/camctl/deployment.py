@@ -12,6 +12,15 @@ from pathlib import Path
 MIGRATIONS = {}
 
 
+def inspect_configuration(config_path: Path | None) -> dict:
+    """按普通入口加载配置，交付更新前核对所需的路径。"""
+    from camctl.bootstrap.application import ConfigAdapter
+
+    config = ConfigAdapter(Path.home()).load(config_path)
+    return {'state_db': str(Path(config.paths.state_db).resolve()),
+            'paths': {name: str(getattr(config.paths, name)) for name in ('staging', 'ready', 'processing')}}
+
+
 def create_database_copy(config_path: Path | None, destination: Path) -> dict:
     """在维护事务拥有的独立位置准备新实例数据库。"""
     from camctl.bootstrap.application import ConfigAdapter
@@ -124,11 +133,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path)
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--check-config', action='store_true', help='加载配置并输出更新路径')
     mode.add_argument('--migrate-copy', type=Path, help='在独立状态库副本上执行已登记迁移')
     mode.add_argument('--create-copy', type=Path, help='在独立事务位置准备新的空状态库')
     args = parser.parse_args()
     try:
-        result = (migrate_copy(args.config, args.migrate_copy) if args.migrate_copy is not None
+        result = (inspect_configuration(args.config) if args.check_config
+                  else migrate_copy(args.config, args.migrate_copy) if args.migrate_copy is not None
                   else create_database_copy(args.config, args.create_copy) if args.create_copy is not None
                   else inspect_deployment(args.config))
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))

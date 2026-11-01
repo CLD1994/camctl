@@ -9,7 +9,7 @@ def build(project: Path, output: Path) -> None:
     members = {
         '__main__.py': b"import sys\nsys.dont_write_bytecode = True\nif len(sys.argv) > 1 and sys.argv[1] == '--worker':\n    del sys.argv[1]\n    import worker\n    raise SystemExit(worker.main())\nimport engine\nraise SystemExit(engine.main())\n",
         **{name: (engine / name).read_bytes() for name in
-           ('engine.py', 'update_transaction.py', 'bundle_support.py', 'worker.py', 'probe.py', 'diagnostic_fallback.py', 'archive_support.py', 'layout.py')},
+           ('engine.py', 'update_transaction.py', 'bundle_support.py', 'worker.py', 'probe.py', 'diagnostic_fallback.py', 'archive_support.py', 'layout.py', 'force_snapshot.py', 'force_record.py')},
         'maintenance_integrity.py': (source / 'persistence/maintenance_integrity.py').read_bytes(),
         'error_diagnostics.py': (source / 'operations/error_diagnostics.py').read_bytes(),
         'config_paths.py': (source / 'config_paths.py').read_bytes(),
