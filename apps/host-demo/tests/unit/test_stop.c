@@ -703,6 +703,7 @@ static void archive_failure_does_not_change_start(void **state) {
     instance = NULL; archive_fail_run = false; archive_cancel = true;
     processing_diagnostics = 0; maintenance_diagnostics = 0;
     assert_int_equal(camctl_host_init(&config, NULL), 0);
+    maintenance_diagnostics = 0;
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous);
     archive_entry(archive_context); module_thread = false;
     pthread_setcancelstate(previous, NULL);
