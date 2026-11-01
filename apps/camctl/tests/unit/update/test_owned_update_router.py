@@ -42,6 +42,30 @@ def call(action='apply'):
         return router.execute(binding, action, binding['camctl_path'], '/config', '/bundle', None)
 
 
+def test_finalize_reports_failure_without_changing_deployment_qualification():
+    with patch.object(router, '_finalize', side_effect=OSError('archive failure')), \
+            patch.object(router, '_lock') as lock, patch.object(sys, 'stderr', io.StringIO()):
+        result = router.execute(binding, 'finalize', binding['camctl_path'], '/config', None, None)
+    assert (result['outcome'], result['effect'], result['eligibility']) == ('failed', 'unchanged', 'allowed')
+    assert result['stage'] == 'finalize'
+    lock.assert_not_called()
+
+
+def test_finalize_invokes_each_frozen_engine_and_reports_actual_failure():
+    output = Path('/target/updates/' + 'a' * 32)
+    record = {'output': str(output)}
+    child = Mock(); child.returncode = 0; child.communicate.return_value = (b'{"status":"unchanged"}', None)
+    with patch.object(Path, 'iterdir', return_value=iter([output])), \
+            patch.object(Path, 'read_text', return_value=json.dumps({'record': record})), \
+            patch.object(transaction, 'classify_record', create=True), \
+            patch.object(transaction, 'validate_record_target', create=True), \
+            patch.object(router, '_frozen', return_value=Path('/frozen')), \
+            patch.object(router.subprocess, 'Popen', return_value=child) as popen, \
+            patch.object(sys, 'stderr', io.StringIO()):
+        result = router.execute(binding, 'finalize', binding['camctl_path'], None, None, None)
+    assert (result['outcome'], result['effect'], result['eligibility']) == ('unchanged', 'unchanged', 'allowed')
+    assert popen.call_args.args[0][-3:] == ['--finalize-only', '--finalize-output', str(output)]
+
 def test_new_bundle_failure_preserves_confirmed_eligibility_without_old_transaction():
     with patch.object(router, '_lock', return_value=11), patch.object(router, '_pending', return_value=(None, None)), \
             patch.object(router, '_engine_memfd', side_effect=ValueError('wheel missing')), \
