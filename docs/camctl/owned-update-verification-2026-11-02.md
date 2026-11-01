@@ -1,6 +1,6 @@
 # camctl 自身更新与 C 接入验证（2026-11-02）
 
-本记录对应[更新接入规格](../architecture/software-update-interface.md)及[实施计划](../superpowers/plans/2026-10-31-camctl-owned-update-api.md)。验证使用 Linux x86_64 开发容器、CPython 3.11.17 和 GCC 13.3.0。更新组件归属、专用 ZIP、稳定维护入口、冻结恢复引擎及 C 消费链已经进行独立源码复核；同进程显式重启的后续结果另行补入。
+本记录对应[更新接入规格](../architecture/software-update-interface.md)及[实施计划](../superpowers/plans/2026-10-31-camctl-owned-update-api.md)。验证使用 Linux x86_64 开发容器、CPython 3.11.17 和 GCC 13.3.0。更新组件归属、专用 ZIP、稳定维护入口、冻结恢复引擎、C 消费链及同进程显式重启已经进行独立源码复核。
 
 ## 已执行的隔离验证
 
@@ -26,6 +26,14 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 测试先经独立静态隔离复核，文件、用户环境、数据库、ZIP/wheel、锁、内存文件描述符及子进程均由受接口约束的替身提供。这里只导入被测源码，没有读取真实发行物或执行实际升级。
 
 根工作区随后完成 13 个维护 Python 文件的 AST 语法检查、`apps/host-demo/scripts/generate_update_protocol.py --check` 及指定 CPython 3.11.17 的 `uv lock --locked --offline` 检查，均退出 0。包资源首次 `--check` 报告缺少新增更新 Schema；从权威来源执行 `apps/camctl/scripts/sync_resources.py` 生成后，再次 `--check` 退出 0。生成对象是被 Git 忽略的源码包资源，没有构建或安装发行物。
+
+## 同进程重启与共享收场
+
+独立复核接受 `e847a6c3` 的显式重启、停止参与者计数及共享构造收场；根工作区以 `306e7fb4` 集成。候选线程未确认结束时保留依赖并阻止重启或维护，后续停止调用继续收场；普通初始化与显式重启共用同一资源边界。新运行周期复用配置和回调，重新检查资格并初始化重试预算，不重送原首次计划。
+
+根工作区直接编译并执行完整 `test_stop.c` 与 `test_writer_stop.c`，编译和运行均退出 0，分别为 30 项和 5 项通过。完整停止入口包含 5 个重启分区，不能再将这 5 项重复累计。其进程、线程创建、等待、管道和文件调用均使用已独立审查的替身；真实同步对象只在当前测试线程中无竞争地使用。
+
+同一集成点核对 8 个 C 源文件的 `-fsyntax-only` 检查，均退出 0。独立复核也确认新增 C 单元已登记到常规 CMake/CTest 的 `unit` 类别，沿统一 `-UNDEBUG` 保留 Release 中的断言；本次没有执行 CMake 或 CTest。根工作区在 `b9d52a0c` 集成旧更新覆盖补充后，单独复跑 engine 文件为 23 项通过，其余七个 Python 文件沿用上表未受影响的证据。
 
 ## 失败与更正记录
 
