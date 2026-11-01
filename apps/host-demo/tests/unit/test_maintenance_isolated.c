@@ -1,12 +1,13 @@
 /* 用进程边界替身检验当前进程中的原始通道事实；不创建线程、管道或子进程。 */
 #include "maintenance.h"
 #include "process.h"
+#include "diagnostic.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <poll.h>
 #include <string.h>
-int host_diagnostic_publish_update(const char *path, int (*writer)(int, void *), void *context) {
+host_diagnostic_publication host_diagnostic_publish_update(const char *path, int (*writer)(int, void *), void *context) {
     (void)path; (void)writer; (void)context; abort();
 }
 

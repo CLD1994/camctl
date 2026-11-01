@@ -82,6 +82,7 @@ if(HOST_BUILD_TESTS)
   target_compile_definitions(test_stop PRIVATE _GNU_SOURCE)
   set_property(TARGET test_stop APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--wrap=host_log,--wrap=write,--wrap=read,--wrap=close,--wrap=clock_gettime,--wrap=getcwd,--wrap=host_group_scan_reset,--wrap=host_child_close_notifications,--wrap=host_child_collect,--wrap=host_child_done,--wrap=host_child_request_stop,--wrap=host_child_spawn,--wrap=host_result_parse,--wrap=host_diagnostic_busy,--wrap=host_diagnostic_request,--wrap=host_diagnostic_dispatch_pending,--wrap=host_diagnostic_close,--wrap=host_logger_close,--wrap=host_claim_posix,--wrap=poll,--wrap=pthread_join,--wrap=pthread_cond_wait,--wrap=pthread_cond_init,--wrap=host_maintenance_run,--wrap=host_maintenance_spawn,--wrap=host_update_result_deliver,--wrap=pthread_create,--wrap=pipe2,--wrap=fcntl,--wrap=host_pipe,--wrap=host_pipe_take_close_errors,--wrap=host_child_prepare_notifications,--wrap=host_check_reaping_contract")
   set_property(TARGET test_stop APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--wrap=host_update_diagnostic")
+  set_property(TARGET test_stop APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--wrap=pthread_mutex_unlock")
   foreach(name IN ITEMS update_result maintenance demo_update)
     add_executable(test_${name}_isolated tests/unit/test_${name}_isolated.c
       src/update_result.c vendor/yyjson/yyjson.c)

@@ -161,12 +161,7 @@ static int write_all(int fd, const void *data, size_t length) {
     return 0;
 }
 
-typedef struct {
-    int error;
-    const char *step;
-    bool published;
-    char file_name[256];
-} publish_result;
+typedef host_diagnostic_publication publish_result;
 
 static void fail_at(publish_result *result, const char *step, int error) {
     if (!result->error) {
@@ -210,6 +205,7 @@ static publish_result publish_diagnostic(host_diagnostic_writer *writer, host_ch
         goto cleanup;
     }
     strcpy(preparation_name, base + 1);
+    strcpy(result.preparation_name, preparation_name);
     preparation = openat(processing, preparation_name,
                          O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     preparation = above_stdio(preparation);
@@ -262,6 +258,7 @@ static publish_result publish_diagnostic(host_diagnostic_writer *writer, host_ch
         goto cleanup;
     }
     file = -1;
+    result.complete = true;
     if (fsync(preparation)) {
         fail_at(&result, "sync_preparation", errno);
         goto cleanup;
@@ -304,7 +301,7 @@ cleanup:
     return result;
 }
 
-int host_diagnostic_publish_update(const char *processing_path,
+host_diagnostic_publication host_diagnostic_publish_update(const char *processing_path,
                                    int (*write_payload)(int, void *), void *context) {
     static pthread_mutex_t publish_mutex = PTHREAD_MUTEX_INITIALIZER;
     camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
@@ -312,7 +309,7 @@ int host_diagnostic_publish_update(const char *processing_path,
     host_diagnostic_writer writer = {.config = &config, .publish_mutex = &publish_mutex};
     host_child child = {0};
     publish_result result = publish_diagnostic(&writer, &child, write_payload, context);
-    return result.error;
+    return result;
 }
 
 static void wake_worker(host_diagnostic_writer *writer) {

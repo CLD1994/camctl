@@ -32,10 +32,14 @@ static int write_payload(int fd, void *context) {
 
 static void update_publication_preserves_preparation_and_never_repeats_rename(void **state) {
     (void)state; sync_calls = renames = unlinks = 0; fail_sync = 2;
-    assert_int_equal(host_diagnostic_publish_update("/processing", write_payload, NULL), EIO);
+    host_diagnostic_publication result = host_diagnostic_publish_update("/processing", write_payload, NULL);
+    assert_int_equal(result.error, EIO); assert_true(result.complete); assert_false(result.published);
+    assert_non_null(strstr(result.preparation_name, "abcdef"));
     assert_int_equal(renames, 0); assert_int_equal(unlinks, 0);
     sync_calls = renames = unlinks = 0; fail_sync = 3;
-    assert_int_equal(host_diagnostic_publish_update("/processing", write_payload, NULL), EIO);
+    result = host_diagnostic_publish_update("/processing", write_payload, NULL);
+    assert_int_equal(result.error, EIO); assert_true(result.complete); assert_true(result.published);
+    assert_non_null(strstr(result.file_name, "abcdef"));
     assert_int_equal(renames, 1); assert_int_equal(unlinks, 1);
 }
 

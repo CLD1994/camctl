@@ -60,12 +60,20 @@ typedef struct host_update_result {
     char working_directory[CAMCTL_HOST_PATH_MAX + 1];
 } host_update_result;
 
+typedef struct {
+    bool attempted;
+    int original_error, cleanup_error;
+    int close_errors[32], close_fds[32];
+    const char *cleanup_operations[32];
+    size_t close_error_count;
+} host_construction_report;
+
 void host_update_result_project(const host_update_result *detail, int error, camctl_host_update_result *result);
 void host_update_result_deliver(const host_update_result *detail, camctl_update_action action, int error);
 void host_update_diagnostic(const char *processing, const char *bundle, const char *config,
                             const host_update_result *apply, int apply_error,
                             const host_update_result *recovery, int recovery_error,
-                            int run_error);
+                            int run_error, const host_construction_report *construction);
 
 /* 对不完整、非法、重复、信号退出或矛盾结果保留未知，不从退出码推断效果。 */
 bool host_update_result_parse(camctl_update_action expected, const char *data, size_t length,

@@ -64,6 +64,7 @@ typedef struct {
     const char *bundle, *config;
     const host_update_result *apply, *recovery;
     int apply_error, recovery_error, run_error;
+    const host_construction_report *construction;
 } update_diagnostic;
 
 static int write_update_diagnostic(int fd, void *context) {
@@ -78,6 +79,15 @@ static int write_update_diagnostic(int fd, void *context) {
     }
     fprintf(out, "CAMCTL-UPDATE-DIAGNOSTIC 1\nbundle=%s\nconfig=%s\nrun_error=%d\n",
             d->bundle ? d->bundle : "(none)", d->config ? d->config : "(default)", d->run_error);
+    fprintf(out, "construction_attempted=%d construction_error=%d cleanup_error=%d\n",
+            d->construction && d->construction->attempted,
+            d->construction ? d->construction->original_error : 0,
+            d->construction ? d->construction->cleanup_error : 0);
+    if (d->construction)
+        for (size_t i = 0; i < d->construction->close_error_count; ++i)
+            fprintf(out, "cleanup operation=%s fd=%d errno=%d\n",
+                    d->construction->cleanup_operations[i], d->construction->close_fds[i],
+                    d->construction->close_errors[i]);
     diagnostic_result(out, "apply", d->apply, d->apply_error);
     diagnostic_result(out, "recovery", d->recovery, d->recovery_error);
     int error = ferror(out) ? EIO : 0;
@@ -87,11 +97,15 @@ static int write_update_diagnostic(int fd, void *context) {
 
 void host_update_diagnostic(const char *processing, const char *bundle, const char *config,
                             const host_update_result *apply, int apply_error,
-                            const host_update_result *recovery, int recovery_error, int run_error) {
+                            const host_update_result *recovery, int recovery_error, int run_error,
+                            const host_construction_report *construction) {
     if (!processing) return;
-    update_diagnostic data = {bundle, config, apply, recovery, apply_error, recovery_error, run_error};
-    int error = host_diagnostic_publish_update(processing, write_update_diagnostic, &data);
-    if (error) fprintf(stderr, "camctl update diagnostic errno=%d\n", error);
+    update_diagnostic data = {bundle, config, apply, recovery, apply_error, recovery_error, run_error, construction};
+    host_diagnostic_publication result = host_diagnostic_publish_update(processing, write_update_diagnostic, &data);
+    if (result.error)
+        fprintf(stderr, "camctl update diagnostic step=%s errno=%d published=%d complete=%d processing=%s preparation=%s file=%s\n",
+                result.step, result.error, result.published, result.complete, processing,
+                result.preparation_name, result.file_name);
 }
 
 void host_update_result_project(const host_update_result *d, int error, camctl_host_update_result *r) {

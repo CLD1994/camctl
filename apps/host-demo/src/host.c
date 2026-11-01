@@ -471,12 +471,7 @@ enum {
     BUILD_LOGGER = 1u << 3, BUILD_DIAGNOSTIC = 1u << 4, BUILD_CALLBACK_MUTEX = 1u << 5,
     BUILD_CALLBACK_COND = 1u << 6, BUILD_CALLBACK_THREAD = 1u << 7
 };
-typedef struct {
-    int original_error, cleanup_error;
-    int close_errors[32], close_fds[32];
-    const char *cleanup_operations[32];
-    size_t close_error_count;
-} construction_report;
+typedef host_construction_report construction_report;
 
 static void candidate_fact(host *h, const char *operation, int fd, int error) {
     if (!error || h->close_error_count >= 32)
@@ -590,6 +585,7 @@ static int cleanup_candidate(host *h) {
 
 static construction_report candidate_report(host *h, int original, int cleanup) {
     construction_report report = {0};
+    report.attempted = true;
     report.original_error = original;
     report.cleanup_error = cleanup;
     report.close_error_count = h->close_error_count;
@@ -613,13 +609,27 @@ static void deliver_construction_report(const construction_report *report) {
         (void)fflush(stderr);
 }
 
-static int host_start(const camctl_host_config *config, const char *initial, host *restarting) {
+static bool maintenance_needs_diagnostic(const host_update_result *result, int error) {
+    return error || (result &&
+        (!camctl_update_outcome_succeeded(result->outcome) ||
+         result->eligibility != CAMCTL_UPDATE_ELIGIBILITY_ALLOWED ||
+         result->prior_recovery != CAMCTL_UPDATE_PRIOR_RECOVERY_NONE ||
+         result->poll_error || result->parse_error || result->stdout_io_error ||
+         result->stderr_io_error || result->stdout_truncated || result->stderr_truncated ||
+         result->process_diagnostics_length || result->process_diagnostics_truncated ||
+         result->reason_truncated || result->stage_truncated || result->evidence_truncated ||
+         result->prior_evidence_truncated));
+}
+
+static int host_start(const camctl_host_config *config, const char *initial, host *restarting,
+                      construction_report *out_report) {
     int cancel_state;
     int e = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
     if (e)
         return failure(e);
     host_update_result *check_result = NULL;
     bool check_performed = false;
+    int check_error = 0;
     char diagnostic_processing[CAMCTL_HOST_PATH_MAX + 1] = "";
     char diagnostic_config[CAMCTL_HOST_PATH_MAX + 1] = "";
     construction_report report = {0};
@@ -664,6 +674,7 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
             goto unlock;
         }
         e = host_maintenance_run(&maintenance_config, &request, check_result);
+        check_error = e;
         check_performed = true;
         if (e || check_result->eligibility != CAMCTL_UPDATE_ELIGIBILITY_ALLOWED) {
             if (!e)
@@ -671,6 +682,7 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
             goto unlock;
         }
     }
+    report.attempted = true;
     host *h = calloc(1, sizeof(*h));
     if (!h) {
         e = ENOMEM;
@@ -786,10 +798,11 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
         free(restarting);
     registrations.initialized = true;
     pthread_mutex_unlock(&instance_mutex);
+    if (out_report) *out_report = report;
     deliver_construction_report(&report);
-    if (check_performed && check_result->prior_recovery == CAMCTL_UPDATE_PRIOR_RECOVERY_RECOVERED)
+    if (check_performed && maintenance_needs_diagnostic(check_result, 0))
         host_update_diagnostic(diagnostic_processing, NULL, diagnostic_config[0] ? diagnostic_config : NULL,
-                               NULL, 0, check_result, 0, 0);
+                               NULL, 0, check_result, check_error, 0, &report);
     if (check_performed)
         host_update_result_deliver(check_result, CAMCTL_UPDATE_ACTION_RECOVER, 0);
     free(check_result);
@@ -806,19 +819,23 @@ construction_failed: {
     }
 }
 unlock:
+    if (report.attempted && !report.original_error)
+        report.original_error = e;
     pthread_mutex_unlock(&instance_mutex);
+    if (out_report) *out_report = report;
     deliver_construction_report(&report);
     if (check_performed)
         host_update_diagnostic(diagnostic_processing, NULL, diagnostic_config[0] ? diagnostic_config : NULL,
-                               NULL, 0, check_result, e, e);
+                               NULL, 0, check_result, check_error,
+                               report.attempted ? e : 0, &report);
     if (check_performed)
-        host_update_result_deliver(check_result, CAMCTL_UPDATE_ACTION_RECOVER, e);
+        host_update_result_deliver(check_result, CAMCTL_UPDATE_ACTION_RECOVER, check_error);
     free(check_result);
     pthread_setcancelstate(cancel_state, NULL);
     return failure(e);
 }
 int camctl_host_init(const camctl_host_config *config, const char *initial) {
-    return host_start(config, initial, NULL);
+    return host_start(config, initial, NULL, NULL);
 }
 int camctl_host_submit(const char *path) {
     host *h = borrow_instance();
@@ -1081,13 +1098,14 @@ int camctl_host_update(const char *bundle_path, const char *client_data_path) {
         pthread_mutex_unlock(&instance_mutex);
         if (processing[0])
             host_update_diagnostic(processing, bundle_path, config_path[0] ? config_path : NULL,
-                                   NULL, ENOMEM, NULL, 0, 0);
+                                   NULL, ENOMEM, NULL, 0, 0, NULL);
         return failure(ENOMEM);
     }
     host_maintenance_result_init(detail, request.action);
     char diagnostic_processing[CAMCTL_HOST_PATH_MAX + 1] = "";
     char diagnostic_config[CAMCTL_HOST_PATH_MAX + 1] = "";
     int apply_error = 0, recovery_error = 0, run_error = 0;
+    construction_report report = {0};
     bool recovery_performed = false, apply_performed = false;
     int cancel_state;
     int error = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
@@ -1112,6 +1130,8 @@ int camctl_host_update(const char *bundle_path, const char *client_data_path) {
         maintenance_active = true;
         maintenance_owner = true;
         maintenance_stop_requested = atomic_load(&stop_participants) != 0;
+        if (h->lifecycle == HOST_RUNNING)
+            h->lifecycle = HOST_STOPPING;
     }
     pthread_mutex_unlock(&instance_mutex);
     if (error) goto deliver;
@@ -1142,7 +1162,7 @@ int camctl_host_update(const char *bundle_path, const char *client_data_path) {
     }
     bool cancelled = maintenance_stop_requested;
     pthread_mutex_unlock(&instance_mutex);
-    if (!error && allowed && !cancelled && host_start(&h->config, NULL, h)) {
+    if (!error && allowed && !cancelled && host_start(&h->config, NULL, h, &report)) {
         run_error = errno;
         error = run_error;
     }
@@ -1158,12 +1178,12 @@ int camctl_host_update(const char *bundle_path, const char *client_data_path) {
     if (recovery_performed)
         host_update_result_deliver(recovery, CAMCTL_UPDATE_ACTION_RECOVER, recovery_error);
 deliver:
-    if (error || detail->prior_recovery == CAMCTL_UPDATE_PRIOR_RECOVERY_RECOVERED ||
-        (recovery_performed && recovery->prior_recovery == CAMCTL_UPDATE_PRIOR_RECOVERY_RECOVERED))
+    if (error || (apply_performed && maintenance_needs_diagnostic(detail, apply_error)) ||
+        (recovery_performed && maintenance_needs_diagnostic(recovery, recovery_error)))
         host_update_diagnostic(diagnostic_processing[0] ? diagnostic_processing : NULL,
                                bundle_path, diagnostic_config[0] ? diagnostic_config : NULL,
                                apply_performed ? detail : NULL, apply_performed ? apply_error : error,
-                               recovery_performed ? recovery : NULL, recovery_error, run_error);
+                               recovery_performed ? recovery : NULL, recovery_error, run_error, &report);
     host_update_result_deliver(detail, request.action, error);
     free(detail);
     free(recovery);

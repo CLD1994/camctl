@@ -28,7 +28,13 @@ int host_diagnostic_format_header(const host_child *child, const camctl_host_con
                                   char *buffer, size_t capacity, size_t *written);
 int host_diagnostic_rename_noreplace(int olddirfd, const char *oldpath, int newdirfd,
                                      const char *newpath);
-int host_diagnostic_publish_update(const char *processing_path,
+typedef struct {
+    int error;
+    const char *step;
+    bool published, complete;
+    char file_name[256], preparation_name[256];
+} host_diagnostic_publication;
+host_diagnostic_publication host_diagnostic_publish_update(const char *processing_path,
                                    int (*write_payload)(int fd, void *context), void *context);
 int host_diagnostic_init(host_diagnostic_writer *writer, const camctl_host_config *config,
                         host_logger *logger, pthread_mutex_t *publish_mutex, int wake_fd,

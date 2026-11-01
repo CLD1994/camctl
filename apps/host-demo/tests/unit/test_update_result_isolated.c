@@ -1,5 +1,6 @@
 /* 只在当前进程解析内存中的结果，禁止接触进程、管道、文件和线程。 */
 #include "update_result.h"
+#include "diagnostic.h"
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,8 +12,9 @@ static char captured[200000];
 static size_t captured_length;
 static int failed, writes, fail_at;
 static int cancel_state = PTHREAD_CANCEL_ENABLE, locked;
-int host_diagnostic_publish_update(const char *path, int (*writer)(int, void *), void *context) {
-    (void)path; (void)writer; (void)context; assert(0); return EIO;
+static host_diagnostic_publication publication;
+host_diagnostic_publication host_diagnostic_publish_update(const char *path, int (*writer)(int, void *), void *context) {
+    assert(!strcmp(path, "/processing")); assert(writer && context); return publication;
 }
 int __wrap_pthread_setcancelstate(int state, int *old) {
     assert(!locked);
@@ -129,6 +131,15 @@ int main(void) {
     assert(memmem(captured, captured_length, "E\0F", 3));
     assert(memmem(captured, captured_length, "exit_known=1 signaled=1 exit_code=9", strlen("exit_known=1 signaled=1 exit_code=9")));
     assert(memmem(captured, captured_length, "truncated=1", 11));
+    captured_length = 0; writes = 0;
+    publication = (host_diagnostic_publication){.error = EIO, .step = "sync_processing",
+                                                .published = true, .complete = true};
+    strcpy(publication.preparation_name, ".prepared");
+    strcpy(publication.file_name, "diagnostic.log");
+    host_update_diagnostic("/processing", "/bundle", NULL, &result, 0, NULL, 0, 0, NULL);
+    assert(memmem(captured, captured_length, "published=1 complete=1", 22));
+    assert(memmem(captured, captured_length, "preparation=.prepared", 21));
+    assert(memmem(captured, captured_length, "file=diagnostic.log", 19));
     captured_length = 0; writes = 0;
     memset(&result, 0, sizeof(result));
     result.outcome = CAMCTL_UPDATE_OUTCOME_APPLIED;
