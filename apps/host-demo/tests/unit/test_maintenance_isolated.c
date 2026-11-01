@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <poll.h>
+#include <signal.h>
 #include <string.h>
 host_diagnostic_publication host_diagnostic_publish_update(const char *path, int (*writer)(int, void *), void *context) {
     (void)path; (void)writer; (void)context; abort();
@@ -18,6 +19,8 @@ static host_exit termination = HOST_EXIT_NORMAL;
 static int exit_code;
 static int stops, spawns;
 static atomic_bool *stop_during_collect;
+static bool quiet_collect;
+static bool fail_poll;
 
 int host_path_validate(const char *path) { return path && path[0] == '/' ? 0 : EINVAL; }
 void host_child_init(host_child *c, char *out, size_t out_capacity, char *err, size_t err_capacity) {
@@ -45,15 +48,17 @@ void host_child_collect(host_child *c, host_child_log log, void *context) {
     c->termination = termination;
     c->exit_code = exit_code;
     c->reaped = true;
-    log(context, "child_problem", "detail", 6);
+    if (!quiet_collect) log(context, "child_problem", "detail", 6);
 }
 void host_child_request_stop(host_child *c, host_child_log log, void *context) {
-    (void)c; (void)log; (void)context; stops++;
+    (void)log; (void)context; c->stop_requested = true; stops++;
 }
 bool host_child_done(const host_child *c) { return c->reaped; }
 void host_group_scan_reset(host_group_scan *scan) { (void)scan; }
 int poll(struct pollfd *fds, nfds_t n, int timeout) {
-    (void)fds; (void)n; (void)timeout; return 0;
+    (void)fds; (void)n; (void)timeout;
+    if (fail_poll) { fail_poll = false; errno = EIO; return -1; }
+    return 0;
 }
 
 int main(void) {
@@ -93,9 +98,28 @@ int main(void) {
     atomic_bool stop = ATOMIC_VAR_INIT(true);
     int before = spawns;
     assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == ECANCELED);
-    assert(spawns == before && result.outcome == CAMCTL_UPDATE_OUTCOME_NOT_STARTED);
+    assert(spawns == before && result.outcome == CAMCTL_UPDATE_OUTCOME_NOT_STARTED && result.cancelled);
     atomic_store(&stop, false); stop_during_collect = &stop;
     assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == 0);
     assert(stops == 1 && result.outcome == CAMCTL_UPDATE_OUTCOME_UNCHANGED);
+    atomic_store(&stop, false); quiet_collect = true; stdout_text = "";
+    stderr_text = ""; termination = HOST_EXIT_SIGNAL; exit_code = SIGINT;
+    assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == ECANCELED);
+    assert(result.cancelled && result.process_signaled);
+    atomic_store(&stop, false); stderr_text = "failure";
+    assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == EPROTO);
+    assert(!result.cancelled && result.stderr_length == 7);
+    atomic_store(&stop, false); stderr_text = ""; stderr_error = true;
+    assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == EPROTO);
+    assert(!result.cancelled && result.stderr_io_error);
+    atomic_store(&stop, false); stderr_error = false; fail_poll = true;
+    assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == EPROTO);
+    assert(!result.cancelled && result.poll_error == EIO);
+    atomic_store(&stop, false); termination = HOST_EXIT_NORMAL; exit_code = 1;
+    stdout_text = "{\"version\":1,\"action\":\"finalize\",\"outcome\":\"failed\","
+        "\"effect\":\"unchanged\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"prior_evidence\":null,\"reason\":null,\"stage\":null,\"evidence\":null}\n";
+    assert(host_maintenance_run_interruptible(&config, &request, &result, &stop) == 0);
+    assert(!result.cancelled && result.outcome == CAMCTL_UPDATE_OUTCOME_FAILED);
     return 0;
 }

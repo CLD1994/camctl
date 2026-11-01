@@ -7,14 +7,17 @@
 static int test_host_fprintf(FILE *stream, const char *format, ...);
 static int test_host_fflush(FILE *stream);
 static void *test_host_calloc(size_t count, size_t size);
+static void *test_host_malloc(size_t size);
 #define fprintf test_host_fprintf
 #define fflush test_host_fflush
 #define calloc test_host_calloc
+#define malloc test_host_malloc
 /* 执行公开入口和生产 worker/callback；所有进程、等待和文件接口均为替身。 */
 #include "../../src/host.c"
 #undef fprintf
 #undef fflush
 #undef calloc
+#undef malloc
 
 static host owned;
 static int spawns, requests[2], collects, polls, joins, diag_closes, log_closes;
@@ -32,6 +35,10 @@ static int processing_diagnostics;
 static void *(*archive_entry)(void *);
 static void *archive_context;
 static bool archive_fail_create, archive_fail_run;
+static bool archive_cancel;
+static bool archive_allocation_failure;
+static char archive_stage[128];
+static camctl_update_action diagnostic_action;
 static int captured_recovery_error, captured_run_error;
 static host_construction_report captured_construction;
 static bool update_stderr_error, update_poll_error, recovery_stderr_error, recovery_poll_error;
@@ -56,6 +63,10 @@ int __wrap_pthread_mutex_unlock(pthread_mutex_t *mutex) {
     return result;
 }
 static bool fail_update_allocation;
+static void *test_host_malloc(size_t size) {
+    if (archive_allocation_failure && size == sizeof(host_update_result)) return NULL;
+    return malloc(size);
+}
 static void *test_host_calloc(size_t count, size_t size) {
     if (fail_update_allocation && size == sizeof(host_update_result)) return NULL;
     return calloc(count, size);
@@ -79,6 +90,11 @@ void __wrap_host_update_diagnostic(const char *processing, const char *bundle, c
     assert_int_equal(pthread_mutex_trylock(&instance_mutex), 0);
     pthread_mutex_unlock(&instance_mutex);
     processing_diagnostics++;
+    if (apply) {
+        diagnostic_action = apply->action;
+        snprintf(archive_stage, sizeof(archive_stage), "%.*s",
+                 (int)apply->process_diagnostics_length, apply->process_diagnostics);
+    }
     captured_recovery_error = recovery_error;
     captured_run_error = run_error;
     captured_construction = construction ? *construction : (host_construction_report){0};
@@ -163,6 +179,7 @@ int __wrap_host_maintenance_run_interruptible(const camctl_host_update_config *c
     assert_int_equal(request->action, CAMCTL_UPDATE_ACTION_FINALIZE);
     assert_false(atomic_load(stop));
     host_maintenance_result_init(result, request->action);
+    if (archive_cancel) { result->cancelled = true; return ECANCELED; }
     result->outcome = archive_fail_run ? CAMCTL_UPDATE_OUTCOME_FAILED : CAMCTL_UPDATE_OUTCOME_UNCHANGED;
     result->effect = CAMCTL_UPDATE_EFFECT_UNCHANGED;
     result->eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED;
@@ -368,6 +385,9 @@ static int setup(void **state) {
     restart_test = fail_worker_create = false;
     archive_entry = NULL; archive_context = NULL;
     archive_fail_create = archive_fail_run = false;
+    archive_cancel = false;
+    archive_allocation_failure = false; archive_stage[0] = 0;
+    diagnostic_action = CAMCTL_UPDATE_ACTION_INVALID;
     restart_creates = restart_join_error = restart_join_count = restart_close_error_fd = 0;
     restart_closed_fd_count = construction_messages = 0;
     restart_eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED; restart_check_error = 0;
@@ -667,6 +687,8 @@ static void archive_failure_does_not_change_start(void **state) {
     archive_fail_create = true;
     assert_int_equal(camctl_host_init(&config, NULL), 0);
     assert_int_equal(processing_diagnostics, 1);
+    assert_int_equal(diagnostic_action, CAMCTL_UPDATE_ACTION_FINALIZE);
+    assert_non_null(strstr(archive_stage, "thread_create"));
     assert_false(instance->archive_started);
     dispose_fake_fresh_instance();
     instance = NULL; archive_fail_create = false; archive_fail_run = true;
@@ -677,6 +699,26 @@ static void archive_failure_does_not_change_start(void **state) {
     pthread_setcancelstate(previous, NULL);
     assert_int_equal(processing_diagnostics, 1);
     assert_int_equal(instance->lifecycle, HOST_RUNNING);
+    dispose_fake_fresh_instance();
+    instance = NULL; archive_fail_run = false; archive_cancel = true;
+    processing_diagnostics = 0; maintenance_diagnostics = 0;
+    assert_int_equal(camctl_host_init(&config, NULL), 0);
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous);
+    archive_entry(archive_context); module_thread = false;
+    pthread_setcancelstate(previous, NULL);
+    assert_int_equal(processing_diagnostics, 0);
+    assert_int_equal(maintenance_diagnostics, 0);
+    dispose_fake_fresh_instance();
+    instance = NULL; archive_cancel = false;
+    processing_diagnostics = 0;
+    assert_int_equal(camctl_host_init(&config, NULL), 0);
+    archive_allocation_failure = true;
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous);
+    archive_entry(archive_context); module_thread = false;
+    pthread_setcancelstate(previous, NULL);
+    assert_int_equal(processing_diagnostics, 1);
+    assert_int_equal(diagnostic_action, CAMCTL_UPDATE_ACTION_FINALIZE);
+    assert_non_null(strstr(archive_stage, "result_allocation"));
     dispose_fake_fresh_instance();
 }
 static void initialization_preserves_recovery_and_cleanup_facts(void **state) {

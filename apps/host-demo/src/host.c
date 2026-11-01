@@ -624,6 +624,16 @@ static bool maintenance_needs_diagnostic(const host_update_result *result, int e
          result->prior_evidence_truncated));
 }
 
+static void archive_start_diagnostic(const char *processing, const char *config,
+                                     const char *stage, int error) {
+    host_update_result result;
+    host_maintenance_result_init(&result, CAMCTL_UPDATE_ACTION_FINALIZE);
+    result.process_diagnostics_length = (size_t)snprintf(result.process_diagnostics,
+        sizeof(result.process_diagnostics), "archive_start stage=%s errno=%d", stage, error);
+    host_update_diagnostic(processing, NULL, config, &result, error, NULL, 0, 0, NULL);
+    host_update_result_deliver(&result, CAMCTL_UPDATE_ACTION_FINALIZE, error);
+}
+
 static void *archive_main(void *context) {
     host *h = context;
     module_thread = true;
@@ -631,13 +641,20 @@ static void *archive_main(void *context) {
                                         h->config.config_path};
     camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_FINALIZE, NULL, NULL};
     host_update_result *result = malloc(sizeof(*result));
-    int error = result ? host_maintenance_run_interruptible(&config, &request, result,
-                                                              &h->archive_stop) : ENOMEM;
+    if (!result) {
+        archive_start_diagnostic(h->config.processing_path, h->config.config_path,
+                                 "result_allocation", ENOMEM);
+        return NULL;
+    }
+    int error = host_maintenance_run_interruptible(&config, &request, result, &h->archive_stop);
+    if (result->cancelled) {
+        free(result);
+        return NULL;
+    }
     if (error || maintenance_needs_diagnostic(result, error))
         host_update_diagnostic(h->config.processing_path, NULL, h->config.config_path,
                                result, error, NULL, 0, 0, NULL);
-    if (result)
-        host_update_result_deliver(result, request.action, error);
+    host_update_result_deliver(result, request.action, error);
     free(result);
     return NULL;
 }
@@ -826,9 +843,9 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
     registrations.initialized = true;
     pthread_mutex_unlock(&instance_mutex);
     if (archive_error)
-        host_update_diagnostic(diagnostic_processing, NULL,
-                               diagnostic_config[0] ? diagnostic_config : NULL,
-                               NULL, archive_error, NULL, 0, 0, NULL);
+        archive_start_diagnostic(diagnostic_processing,
+                                 diagnostic_config[0] ? diagnostic_config : NULL,
+                                 "thread_create", archive_error);
     if (out_report) *out_report = report;
     deliver_construction_report(&report);
     if (check_performed && maintenance_needs_diagnostic(check_result, 0))

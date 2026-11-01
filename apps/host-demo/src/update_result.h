@@ -55,6 +55,7 @@ typedef struct host_update_result {
     bool process_signaled, process_exit_known;
     int process_exit_code, poll_error, parse_error;
     bool process_started;
+    bool cancelled;
     int spawn_errno, working_directory_errno;
     long pid, pgid;
     char working_directory[CAMCTL_HOST_PATH_MAX + 1];

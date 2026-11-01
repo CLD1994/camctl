@@ -4,6 +4,7 @@
 #include "update_result.h"
 #include <errno.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,7 +18,7 @@ typedef struct {
 static void process_log(void *context, const char *stream, const char *data, size_t length) {
     process_diagnostics *out = context;
     if (!strcmp(stream, "stderr") || !strcmp(stream, "exit_observed") ||
-        !strcmp(stream, "group_reaped"))
+        !strcmp(stream, "group_reaped") || !strcmp(stream, "stop_requested"))
         return;
     const char *parts[] = {stream, ": ", data, "\n"};
     size_t lengths[] = {strlen(stream), 2, length, 1};
@@ -75,8 +76,10 @@ int host_maintenance_run_interruptible(const camctl_host_update_config *config,
     host_maintenance_result_init(result, request ? request->action : CAMCTL_UPDATE_ACTION_INVALID);
     if (error)
         return error;
-    if (stop && atomic_load(stop))
+    if (stop && atomic_load(stop)) {
+        result->cancelled = true;
         return ECANCELED;
+    }
     char *output = malloc(CAMCTL_HOST_UPDATE_STDOUT_MAX);
     char *stderr_data = malloc(CAMCTL_HOST_UPDATE_STDERR_MAX);
     if (!output || !stderr_data) {
@@ -151,10 +154,15 @@ int host_maintenance_run_interruptible(const camctl_host_update_config *config,
     result->working_directory_errno = child.working_directory_errno;
     memcpy(result->working_directory, child.working_directory, sizeof(result->working_directory));
     result->poll_error = poll_error;
+    bool cancelled = stop && child.stop_requested && child.termination == HOST_EXIT_SIGNAL &&
+        child.exit_code == SIGINT && !poll_error && !child.io_error && !child.stderr_io_error &&
+        !child.wait_fault && !child.overflow && !child.stderr_overflow && !child.length &&
+        !child.stderr_length && !diagnostics.length && !diagnostics.truncated;
+    result->cancelled = cancelled;
     host_group_scan_reset(&child.scan);
     free(output);
     free(stderr_data);
-    return valid ? 0 : parse_error ? parse_error : EPROTO;
+    return cancelled ? ECANCELED : valid ? 0 : parse_error ? parse_error : EPROTO;
 }
 
 int host_maintenance_run(const camctl_host_update_config *config,
