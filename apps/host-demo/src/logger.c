@@ -36,7 +36,10 @@ static int open_log(host_logger *l) {
     if (l->fd < 3) {
         int fd = fcntl(l->fd, F_DUPFD_CLOEXEC, 3);
         int e = errno;
-        close(l->fd);
+        if (close(l->fd) && !l->close_error) {
+            l->close_error = errno;
+            l->close_error_fd = l->fd;
+        }
         l->fd = fd;
         if (fd < 0)
             return file_failure(l, HOST_LOG_FILE_DUPLICATE_FD, e);
@@ -105,15 +108,23 @@ static void *logger_main(void *arg) {
         if (e) {
             host_log_queue_disable(&l->queue, e);
             if (l->fd >= 0) {
-                close(l->fd);
+                if (close(l->fd) && !l->close_error) {
+                    l->close_error = errno;
+                    l->close_error_fd = l->fd;
+                }
                 l->fd = -1;
             }
         }
     }
     host_log_queue_disable(&l->queue, ECANCELED);
     pthread_mutex_unlock(&l->mutex);
-    if (l->fd >= 0)
-        close(l->fd);
+    if (l->fd >= 0) {
+        if (close(l->fd) && !l->close_error) {
+            l->close_error = errno;
+            l->close_error_fd = l->fd;
+        }
+        l->fd = -1;
+    }
     return NULL;
 }
 int host_logger_init(host_logger *l, const camctl_host_config *config) {
@@ -124,42 +135,60 @@ int host_logger_init(host_logger *l, const camctl_host_config *config) {
     int e = pthread_mutex_init(&l->mutex, NULL);
     if (e)
         return e;
+    l->mutex_initialized = true;
     e = pthread_cond_init(&l->ready, NULL);
-    if (e) {
-        pthread_mutex_destroy(&l->mutex);
+    if (e)
         return e;
-    }
+    l->cond_initialized = true;
     e = pthread_create(&l->thread, NULL, logger_main, l);
-    if (e) {
-        pthread_cond_destroy(&l->ready);
-        pthread_mutex_destroy(&l->mutex);
-    }
+    if (!e)
+        l->thread_started = true;
     return e;
 }
-void host_logger_abort(host_logger *l) {
+
+int host_logger_join(host_logger *l, bool drain) {
+    if (!l->thread_started || l->joined)
+        return 0;
     pthread_mutex_lock(&l->mutex);
+    l->drain = drain;
     l->stop = true;
     pthread_cond_signal(&l->ready);
     pthread_mutex_unlock(&l->mutex);
-    pthread_join(l->thread, NULL);
-    pthread_cond_destroy(&l->ready);
-    pthread_mutex_destroy(&l->mutex);
+    int error = pthread_join(l->thread, NULL);
+    if (!error)
+        l->joined = true;
+    return error;
+}
+void host_logger_destroy(host_logger *l) {
+    if (l->cond_initialized && !l->cond_destroyed) {
+        l->cond_error = pthread_cond_destroy(&l->ready);
+        l->cond_destroyed = true;
+    }
+    if (l->mutex_initialized && !l->mutex_destroyed) {
+        l->mutex_error = pthread_mutex_destroy(&l->mutex);
+        l->mutex_destroyed = true;
+    }
+    l->closed = true;
 }
 int host_logger_close(host_logger *l) {
     if (l->closed)
         return 0;
-    pthread_mutex_lock(&l->mutex);
-    l->drain = l->stop = true;
-    pthread_cond_signal(&l->ready);
-    pthread_mutex_unlock(&l->mutex);
-    int error = pthread_join(l->thread, NULL);
+    int error = host_logger_join(l, true);
     if (error)
         return error;
-    pthread_cond_destroy(&l->ready);
-    pthread_mutex_destroy(&l->mutex);
-    l->closed = true;
+    host_logger_destroy(l);
     return 0;
 }
+int host_logger_abort(host_logger *l) {
+    if (l->closed)
+        return 0;
+    int error = host_logger_join(l, false);
+    if (error)
+        return error;
+    host_logger_destroy(l);
+    return 0;
+}
+
 void host_log(host_logger *l, const char *format, ...) {
     size_t cap = l->config->log_record_capacity;
     char *text = malloc(cap + 1);

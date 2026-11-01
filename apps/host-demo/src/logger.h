@@ -14,7 +14,9 @@ typedef struct {
     pthread_t thread;
     host_log_queue queue;
     const camctl_host_config *config;
-    bool stop, drain, closed;
+    bool stop, drain, closed, joined, cond_destroyed, mutex_destroyed;
+    bool mutex_initialized, cond_initialized, thread_started;
+    int close_error, close_error_fd, cond_error, mutex_error;
     int fd;
     size_t file_size;
     bool archives_checked;
@@ -22,7 +24,9 @@ typedef struct {
     uint32_t failed_archive;
 } host_logger;
 int host_logger_init(host_logger *l, const camctl_host_config *config);
-void host_logger_abort(host_logger *l);
+int host_logger_join(host_logger *l, bool drain);
+void host_logger_destroy(host_logger *l);
+int host_logger_abort(host_logger *l);
 int host_logger_close(host_logger *l);
 void host_log(host_logger *l, const char *format, ...) __attribute__((format(printf, 2, 3)));
 #endif

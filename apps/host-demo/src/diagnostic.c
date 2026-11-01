@@ -363,8 +363,8 @@ static void enqueue_if_room(host_diagnostic_writer *writer, host_child *child) {
 }
 
 int host_diagnostic_init(host_diagnostic_writer *writer, const camctl_host_config *config,
-                        host_logger *logger, pthread_mutex_t *publish_mutex, int wake_fd,
-                        host_child children[2]) {
+                         host_logger *logger, pthread_mutex_t *publish_mutex, int wake_fd,
+                         host_child children[2]) {
     memset(writer, 0, sizeof(*writer));
     writer->config = config;
     writer->logger = logger;
@@ -374,41 +374,57 @@ int host_diagnostic_init(host_diagnostic_writer *writer, const camctl_host_confi
     int e = pthread_mutex_init(&writer->mutex, NULL);
     if (e)
         return e;
+    writer->mutex_initialized = true;
     e = pthread_cond_init(&writer->ready, NULL);
-    if (e) {
-        pthread_mutex_destroy(&writer->mutex);
+    if (e)
         return e;
-    }
+    writer->cond_initialized = true;
     e = pthread_create(&writer->thread, NULL, diagnostic_main, writer);
-    if (e) {
-        pthread_cond_destroy(&writer->ready);
-        pthread_mutex_destroy(&writer->mutex);
-    }
+    if (!e)
+        writer->thread_started = true;
     return e;
 }
 
-void host_diagnostic_abort(host_diagnostic_writer *writer) {
+int host_diagnostic_join(host_diagnostic_writer *writer, bool drain) {
+    if (!writer->thread_started || writer->joined)
+        return 0;
     pthread_mutex_lock(&writer->mutex);
+    writer->drain = drain;
     writer->stop = true;
     pthread_cond_signal(&writer->ready);
     pthread_mutex_unlock(&writer->mutex);
-    pthread_join(writer->thread, NULL);
-    pthread_cond_destroy(&writer->ready);
-    pthread_mutex_destroy(&writer->mutex);
+    int error = pthread_join(writer->thread, NULL);
+    if (!error)
+        writer->joined = true;
+    return error;
+}
+void host_diagnostic_destroy(host_diagnostic_writer *writer) {
+    if (writer->cond_initialized && !writer->cond_destroyed) {
+        writer->cond_error = pthread_cond_destroy(&writer->ready);
+        writer->cond_destroyed = true;
+    }
+    if (writer->mutex_initialized && !writer->mutex_destroyed) {
+        writer->mutex_error = pthread_mutex_destroy(&writer->mutex);
+        writer->mutex_destroyed = true;
+    }
+    writer->closed = true;
 }
 int host_diagnostic_close(host_diagnostic_writer *writer) {
     if (writer->closed)
         return 0;
-    pthread_mutex_lock(&writer->mutex);
-    writer->drain = writer->stop = true;
-    pthread_cond_signal(&writer->ready);
-    pthread_mutex_unlock(&writer->mutex);
-    int error = pthread_join(writer->thread, NULL);
+    int error = host_diagnostic_join(writer, true);
     if (error)
         return error;
-    pthread_cond_destroy(&writer->ready);
-    pthread_mutex_destroy(&writer->mutex);
-    writer->closed = true;
+    host_diagnostic_destroy(writer);
+    return 0;
+}
+int host_diagnostic_abort(host_diagnostic_writer *writer) {
+    if (writer->closed)
+        return 0;
+    int error = host_diagnostic_join(writer, false);
+    if (error)
+        return error;
+    host_diagnostic_destroy(writer);
     return 0;
 }
 

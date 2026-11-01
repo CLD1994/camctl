@@ -15,7 +15,9 @@ typedef struct {
     host_child *items[HOST_DIAGNOSTIC_QUEUE_CAPACITY];
     size_t head, count, outstanding;
     host_child *children;
-    bool stop, drain, closed;
+    bool stop, drain, closed, joined, cond_destroyed, mutex_destroyed;
+    bool mutex_initialized, cond_initialized, thread_started;
+    int cond_error, mutex_error;
     const camctl_host_config *config;
     host_logger *logger;
     pthread_mutex_t *publish_mutex;
@@ -29,7 +31,9 @@ int host_diagnostic_rename_noreplace(int olddirfd, const char *oldpath, int newd
 int host_diagnostic_init(host_diagnostic_writer *writer, const camctl_host_config *config,
                         host_logger *logger, pthread_mutex_t *publish_mutex, int wake_fd,
                         host_child children[2]);
-void host_diagnostic_abort(host_diagnostic_writer *writer);
+int host_diagnostic_join(host_diagnostic_writer *writer, bool drain);
+void host_diagnostic_destroy(host_diagnostic_writer *writer);
+int host_diagnostic_abort(host_diagnostic_writer *writer);
 int host_diagnostic_close(host_diagnostic_writer *writer);
 void host_diagnostic_request(host_diagnostic_writer *writer, host_child *child);
 void host_diagnostic_dispatch_pending(host_diagnostic_writer *writer, host_child children[2]);

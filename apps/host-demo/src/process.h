@@ -52,6 +52,8 @@ int host_maintenance_spawn(host_child *c, const camctl_host_update_config *confi
 void host_child_collect(host_child *c, host_child_log log, void *context);
 void host_child_request_stop(host_child *c, host_child_log log, void *context);
 bool host_child_done(const host_child *c);
+typedef struct { int fd, error; } host_pipe_close_error;
+size_t host_pipe_take_close_errors(host_pipe_close_error *errors, size_t capacity);
 int host_pipe(int fds[2]);
 int host_child_prepare_notifications(host_child *c);
 void host_child_close_notifications(host_child *c);

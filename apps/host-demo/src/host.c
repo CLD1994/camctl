@@ -16,6 +16,7 @@
 #include <poll.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -57,12 +58,20 @@ typedef struct {
     size_t notification_offset, notification_length;
     int runtime_error; /* inputs_mutex 保护；无法继续启动时拒绝新路径。 */
     int submit_start_error; /* 工作线程保存当前提交最后一次明确的启动错误。 */
+    unsigned construction_resources;
+    int construction_error;
+    int close_errors[32], close_fds[32];
+    const char *cleanup_operations[32];
+    size_t close_error_count;
 } host;
 static pthread_mutex_t instance_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t instance_ready = PTHREAD_COND_INITIALIZER;
 static host *instance;
 static bool maintenance_active;
 static _Thread_local bool maintenance_owner;
+static _Atomic size_t stop_participants;
+static _Atomic bool restart_active;
+static host *construction_pending;
 static host_callbacks registrations;
 /* 身份在线程局部析构期间仍保留，且不比较已经 join 的线程标识。 */
 static _Thread_local bool module_thread;
@@ -129,13 +138,7 @@ static void *callback_main(void *p) {
     pthread_mutex_unlock(&h->callback_mutex);
     return NULL;
 }
-static void callback_abort(host *h) {
-    pthread_mutex_lock(&h->callback_mutex);
-    h->callback_stop = true;
-    pthread_cond_signal(&h->callback_ready);
-    pthread_mutex_unlock(&h->callback_mutex);
-    pthread_join(h->callback_thread, NULL);
-}
+
 static bool notification_room(host *h) {
     pthread_mutex_lock(&h->callback_mutex);
     bool room = h->callbacks.length < h->callbacks.capacity;
@@ -463,6 +466,153 @@ static void *worker_main(void *p) {
         }
     }
 }
+enum {
+    BUILD_INPUT_MUTEX = 1u << 0, BUILD_CLAIM_MUTEX = 1u << 1, BUILD_WAKE = 1u << 2,
+    BUILD_LOGGER = 1u << 3, BUILD_DIAGNOSTIC = 1u << 4, BUILD_CALLBACK_MUTEX = 1u << 5,
+    BUILD_CALLBACK_COND = 1u << 6, BUILD_CALLBACK_THREAD = 1u << 7
+};
+typedef struct {
+    int original_error, cleanup_error;
+    int close_errors[32], close_fds[32];
+    const char *cleanup_operations[32];
+    size_t close_error_count;
+} construction_report;
+
+static void candidate_fact(host *h, const char *operation, int fd, int error) {
+    if (!error || h->close_error_count >= 32)
+        return;
+    h->cleanup_operations[h->close_error_count] = operation;
+    h->close_fds[h->close_error_count] = fd;
+    h->close_errors[h->close_error_count++] = error;
+}
+static void candidate_close(host *h, int *descriptor) {
+    if (*descriptor < 0)
+        return;
+    int fd = *descriptor;
+    *descriptor = -1; /* Linux close 不得对可能已复用的编号重试。 */
+    if (close(fd))
+        candidate_fact(h, "close", fd, errno);
+}
+static void candidate_pipe_errors(host *h) {
+    host_pipe_close_error errors[4];
+    size_t count = host_pipe_take_close_errors(errors, 4);
+    for (size_t i = 0; i < count && h->close_error_count < 32; ++i) {
+        candidate_fact(h, "close", errors[i].fd, errors[i].error);
+    }
+}
+static int cleanup_candidate(host *h) {
+    int error, first_error = 0;
+    bool diagnostic_joined = true;
+    /* 尽量先结束独立线程；诊断线程未收场时保留其日志依赖。 */
+    if (h->construction_resources & BUILD_CALLBACK_THREAD) {
+        pthread_mutex_lock(&h->callback_mutex);
+        h->callback_stop = true;
+        pthread_cond_signal(&h->callback_ready);
+        pthread_mutex_unlock(&h->callback_mutex);
+        error = pthread_join(h->callback_thread, NULL);
+        if (error) {
+            candidate_fact(h, "callback_join", -1, error);
+            first_error = error;
+        } else
+            h->construction_resources &= ~BUILD_CALLBACK_THREAD;
+    }
+    if (h->construction_resources & BUILD_DIAGNOSTIC) {
+        error = host_diagnostic_join(&h->diagnostics, true);
+        if (error) {
+            candidate_fact(h, "diagnostic_join", -1, error);
+            diagnostic_joined = false;
+            if (!first_error)
+                first_error = error;
+        }
+    }
+    if ((h->construction_resources & BUILD_LOGGER) && diagnostic_joined &&
+        !(h->construction_resources & BUILD_CALLBACK_THREAD)) {
+        error = host_logger_join(&h->logger, true);
+        if (error) {
+            candidate_fact(h, "logger_join", -1, error);
+            if (!first_error)
+                first_error = error;
+        }
+    }
+    if (first_error)
+        return first_error;
+    if (h->construction_resources & BUILD_CALLBACK_COND) {
+        error = pthread_cond_destroy(&h->callback_ready);
+        candidate_fact(h, "callback_cond_destroy", -1, error);
+        h->construction_resources &= ~BUILD_CALLBACK_COND;
+    }
+    if (h->construction_resources & BUILD_CALLBACK_MUTEX) {
+        error = pthread_mutex_destroy(&h->callback_mutex);
+        candidate_fact(h, "callback_mutex_destroy", -1, error);
+        h->construction_resources &= ~BUILD_CALLBACK_MUTEX;
+    }
+    if (h->construction_resources & BUILD_DIAGNOSTIC) {
+        host_diagnostic_destroy(&h->diagnostics);
+        candidate_fact(h, "diagnostic_cond_destroy", -1, h->diagnostics.cond_error);
+        candidate_fact(h, "diagnostic_mutex_destroy", -1, h->diagnostics.mutex_error);
+        h->construction_resources &= ~BUILD_DIAGNOSTIC;
+    }
+    if (h->construction_resources & BUILD_LOGGER) {
+        host_logger_destroy(&h->logger);
+        candidate_fact(h, "close", h->logger.close_error_fd, h->logger.close_error);
+        candidate_fact(h, "logger_cond_destroy", -1, h->logger.cond_error);
+        candidate_fact(h, "logger_mutex_destroy", -1, h->logger.mutex_error);
+        h->construction_resources &= ~BUILD_LOGGER;
+    }
+    if (h->construction_resources & BUILD_WAKE) {
+        candidate_close(h, &h->wake[0]);
+        candidate_close(h, &h->wake[1]);
+        h->construction_resources &= ~BUILD_WAKE;
+    }
+    if (h->construction_resources & BUILD_CLAIM_MUTEX) {
+        error = pthread_mutex_destroy(&h->claim_mutex);
+        candidate_fact(h, "claim_mutex_destroy", -1, error);
+        h->construction_resources &= ~BUILD_CLAIM_MUTEX;
+    }
+    if (h->construction_resources & BUILD_INPUT_MUTEX) {
+        error = pthread_mutex_destroy(&h->inputs_mutex);
+        candidate_fact(h, "input_mutex_destroy", -1, error);
+        h->construction_resources &= ~BUILD_INPUT_MUTEX;
+    }
+    candidate_close(h, &h->children[HOST_RUN].notification_fd);
+    candidate_close(h, &h->children[HOST_RUN].notification_write_fd);
+    host_notification_destroy(&h->notification);
+    free(h->callbacks.items);
+    free(h->notification_bytes);
+    for (int i = 0; i < 2; ++i) {
+        free(h->children[i].output);
+        free(h->children[i].stderr_output);
+        host_group_scan_reset(&h->children[i].scan);
+    }
+    free(h->inputs.items);
+    return 0;
+}
+
+static construction_report candidate_report(host *h, int original, int cleanup) {
+    construction_report report = {0};
+    report.original_error = original;
+    report.cleanup_error = cleanup;
+    report.close_error_count = h->close_error_count;
+    for (size_t i = 0; i < h->close_error_count; ++i) {
+        report.close_fds[i] = h->close_fds[i];
+        report.close_errors[i] = h->close_errors[i];
+        report.cleanup_operations[i] = h->cleanup_operations[i];
+    }
+    h->close_error_count = 0;
+    return report;
+}
+static void deliver_construction_report(const construction_report *report) {
+    if (report->original_error)
+        fprintf(stderr, "camctl 构造失败 errno=%d\n", report->original_error);
+    if (report->cleanup_error && !report->close_error_count)
+        fprintf(stderr, "camctl 候选收场未完成 errno=%d\n", report->cleanup_error);
+    for (size_t i = 0; i < report->close_error_count; ++i)
+        fprintf(stderr, "camctl 候选收场 operation=%s fd=%d errno=%d\n",
+                report->cleanup_operations[i], report->close_fds[i], report->close_errors[i]);
+    if (report->original_error || report->cleanup_error || report->close_error_count)
+        (void)fflush(stderr);
+}
+
 static void deliver_maintenance_check(const camctl_host_update_result *result, int error) {
     if (!error && !result->stdout_truncated && !result->stdout_io_error && !result->stderr_length &&
         !result->stderr_truncated && !result->stderr_io_error && !result->process_diagnostics_length &&
@@ -496,20 +646,30 @@ static void deliver_maintenance_check(const camctl_host_update_result *result, i
     (void)fflush(stderr);
 }
 
-int camctl_host_init(const camctl_host_config *config, const char *initial) {
+static int host_start(const camctl_host_config *config, const char *initial, host *restarting) {
     int cancel_state;
     int e = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
     if (e)
         return failure(e);
     camctl_host_update_result *check_result = NULL;
     bool check_performed = false;
+    construction_report report = {0};
     pthread_mutex_lock(&instance_mutex);
     if (maintenance_active) {
         e = EBUSY;
         goto unlock;
     }
-    if (instance) {
+    if (restarting) {
+        if (instance != restarting || restarting->lifecycle != HOST_STOPPED || construction_pending ||
+            atomic_load(&stop_participants)) {
+            e = EBUSY;
+            goto unlock;
+        }
+    } else if (instance) {
         e = EALREADY;
+        goto unlock;
+    } else if (construction_pending) {
+        e = EBUSY;
         goto unlock;
     }
     e = host_config_validate(config, initial);
@@ -541,6 +701,7 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
         goto unlock;
     }
     h->config = *config;
+    h->wake[0] = h->wake[1] = -1;
     h->motor = registrations.motor;
     const char *paths[] = {config->camctl_path, config->ready_path,  config->processing_path,
                            config->log_path,    config->config_path, initial,
@@ -571,114 +732,111 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
     if (!h->inputs.items || !h->children[0].output || !h->children[1].output ||
         !h->children[0].stderr_output || !h->children[1].stderr_output) {
         e = ENOMEM;
-        goto memory;
+        goto construction_failed;
     }
     if (h->motor) {
         h->callbacks.capacity = config->notification_queue_capacity;
         h->callbacks.items = calloc(h->callbacks.capacity, sizeof(host_notification));
         if (!h->callbacks.items) {
             e = ENOMEM;
-            goto memory;
+            goto construction_failed;
         }
         h->notification_bytes = malloc(HOST_NOTIFICATION_READ_BLOCK);
         if (!h->notification_bytes) {
             e = ENOMEM;
-            goto memory;
+            goto construction_failed;
         }
         e = host_notification_init(&h->notification, config->notification_line_capacity);
         if (e)
-            goto memory;
+            goto construction_failed;
         h->children[HOST_RUN].notifications_enabled = true;
         e = host_child_prepare_notifications(&h->children[HOST_RUN]);
+        candidate_pipe_errors(h);
         if (e)
-            goto memory;
+            goto construction_failed;
     }
     e = pthread_mutex_init(&h->inputs_mutex, NULL);
     if (e)
-        goto memory;
+        goto construction_failed;
+    h->construction_resources |= BUILD_INPUT_MUTEX;
     e = pthread_mutex_init(&h->claim_mutex, NULL);
     if (e)
-        goto input_mutex;
-    if (host_pipe(h->wake)) {
-        e = errno;
-        goto claim_mutex;
+        goto construction_failed;
+    h->construction_resources |= BUILD_CLAIM_MUTEX;
+    int pipe_result = host_pipe(h->wake);
+    int pipe_error = errno;
+    candidate_pipe_errors(h);
+    if (pipe_result) {
+        e = pipe_error;
+        goto construction_failed;
     }
+    h->construction_resources |= BUILD_WAKE;
     if (fcntl(h->wake[1], F_SETFL, O_NONBLOCK)) {
         e = errno;
-        goto pipe;
+        goto construction_failed;
     }
     host_schedule_init(&h->schedule, initial != NULL, config->retry_limit, config->retry_delay_ms);
+    h->construction_resources |= BUILD_LOGGER;
     e = host_logger_init(&h->logger, &h->config);
     if (e)
-        goto pipe;
+        goto construction_failed;
     host_log(&h->logger, "camctl_host version=%s", CAMCTL_HOST_VERSION);
+    h->construction_resources |= BUILD_DIAGNOSTIC;
     e = host_diagnostic_init(&h->diagnostics, &h->config, &h->logger, &h->claim_mutex,
                              h->wake[1], h->children);
     if (e)
-        goto logger;
+        goto construction_failed;
     if (h->motor) {
         e = pthread_mutex_init(&h->callback_mutex, NULL);
         if (e)
-            goto diagnostics;
+            goto construction_failed;
+        h->construction_resources |= BUILD_CALLBACK_MUTEX;
         e = pthread_cond_init(&h->callback_ready, NULL);
         if (e)
-            goto callback_mutex;
+            goto construction_failed;
+        h->construction_resources |= BUILD_CALLBACK_COND;
         e = pthread_create(&h->callback_thread, NULL, callback_main, h);
         if (e)
-            goto callback_cond;
+            goto construction_failed;
     }
+    if (h->motor)
+        h->construction_resources |= BUILD_CALLBACK_THREAD;
     e = pthread_create(&h->worker, NULL, worker_main, h);
-    if (e) {
-        if (h->motor) {
-            callback_abort(h);
-            pthread_cond_destroy(&h->callback_ready);
-            pthread_mutex_destroy(&h->callback_mutex);
-        }
-        goto diagnostics;
-    }
+    if (e)
+        goto construction_failed;
+    report = candidate_report(h, 0, 0);
     instance = h;
+    if (restarting)
+        free(restarting);
     registrations.initialized = true;
     pthread_mutex_unlock(&instance_mutex);
+    deliver_construction_report(&report);
     if (check_performed)
         deliver_maintenance_check(check_result, 0);
     free(check_result);
     pthread_setcancelstate(cancel_state, NULL);
     return 0;
-callback_cond:
-    pthread_cond_destroy(&h->callback_ready);
-callback_mutex:
-    pthread_mutex_destroy(&h->callback_mutex);
-diagnostics:
-    host_diagnostic_abort(&h->diagnostics);
-logger:
-    host_logger_abort(&h->logger);
-pipe:
-    close(h->wake[0]);
-    close(h->wake[1]);
-claim_mutex:
-    pthread_mutex_destroy(&h->claim_mutex);
-input_mutex:
-    pthread_mutex_destroy(&h->inputs_mutex);
-memory:
-    if (h->motor) {
-        host_child_close_notifications(&h->children[HOST_RUN]);
-        host_notification_destroy(&h->notification);
-        free(h->callbacks.items);
-        free(h->notification_bytes);
+construction_failed: {
+    int cleanup_error = cleanup_candidate(h);
+    report = candidate_report(h, e, cleanup_error);
+    if (cleanup_error) {
+        h->construction_error = e;
+        construction_pending = h;
+    } else {
+        free(h);
     }
-    free(h->children[0].output);
-    free(h->children[1].output);
-    free(h->children[0].stderr_output);
-    free(h->children[1].stderr_output);
-    free(h->inputs.items);
-    free(h);
+}
 unlock:
     pthread_mutex_unlock(&instance_mutex);
+    deliver_construction_report(&report);
     if (check_performed)
         deliver_maintenance_check(check_result, e);
     free(check_result);
     pthread_setcancelstate(cancel_state, NULL);
     return failure(e);
+}
+int camctl_host_init(const camctl_host_config *config, const char *initial) {
+    return host_start(config, initial, NULL);
 }
 int camctl_host_submit(const char *path) {
     host *h = borrow_instance();
@@ -755,6 +913,17 @@ static int stop_result(int error, int cancel_state) {
     pthread_testcancel();
     return error ? failure(error) : 0;
 }
+static void stop_participant_leave(void *unused) {
+    (void)unused;
+    atomic_fetch_sub(&stop_participants, 1);
+}
+static int stop_participant_result(int error, int cancel_state) {
+    pthread_cleanup_push(stop_participant_leave, NULL);
+    pthread_setcancelstate(cancel_state, NULL);
+    pthread_testcancel();
+    pthread_cleanup_pop(1);
+    return error ? failure(error) : 0;
+}
 static void release_storage(host *h) {
     if (h->motor) {
         pthread_cond_destroy(&h->callback_ready);
@@ -783,25 +952,48 @@ static void release_storage(host *h) {
 }
 int camctl_host_stop(void) {
     int cancel_state;
+    construction_report report = {0};
     int error = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
     if (error)
         return failure(error);
+    atomic_fetch_add(&stop_participants, 1);
     pthread_mutex_lock(&instance_mutex);
-    if (maintenance_active && module_thread) {
+    if ((maintenance_active || construction_pending) && module_thread) {
         pthread_mutex_unlock(&instance_mutex);
-        return stop_result(EDEADLK, cancel_state);
+        return stop_participant_result(EDEADLK, cancel_state);
     }
     while (maintenance_active && !maintenance_owner) {
         error = pthread_cond_wait(&instance_ready, &instance_mutex);
         if (error) {
             pthread_mutex_unlock(&instance_mutex);
-            return stop_result(error, cancel_state);
+            return stop_participant_result(error, cancel_state);
+        }
+    }
+    if (construction_pending) {
+        host *candidate = construction_pending;
+        int cleanup_error = cleanup_candidate(candidate);
+        construction_report report = candidate_report(candidate, 0, cleanup_error);
+        if (!cleanup_error) {
+            construction_pending = NULL;
+            free(candidate);
+        }
+        pthread_mutex_unlock(&instance_mutex);
+        deliver_construction_report(&report);
+        if (cleanup_error)
+            return stop_participant_result(cleanup_error, cancel_state);
+        pthread_mutex_lock(&instance_mutex);
+        while (maintenance_active && !maintenance_owner) {
+            error = pthread_cond_wait(&instance_ready, &instance_mutex);
+            if (error) {
+                pthread_mutex_unlock(&instance_mutex);
+                return stop_participant_result(error, cancel_state);
+            }
         }
     }
     host *h = instance;
     if (!h) {
         pthread_mutex_unlock(&instance_mutex);
-        return stop_result(ENODEV, cancel_state);
+        return stop_participant_result(ENODEV, cancel_state);
     }
     for (;;) {
         if (h->lifecycle == HOST_STOPPED) {
@@ -809,22 +1001,22 @@ int camctl_host_stop(void) {
                 error = pthread_cond_wait(&instance_ready, &instance_mutex);
                 if (error) {
                     pthread_mutex_unlock(&instance_mutex);
-                    return stop_result(error, cancel_state);
+                    return stop_participant_result(error, cancel_state);
                 }
             }
             pthread_mutex_unlock(&instance_mutex);
-            return stop_result(0, cancel_state);
+            return stop_participant_result(0, cancel_state);
         }
         if (module_thread) {
             pthread_mutex_unlock(&instance_mutex);
-            return stop_result(EDEADLK, cancel_state);
+            return stop_participant_result(EDEADLK, cancel_state);
         }
         if (!h->stop_joining)
             break;
         error = pthread_cond_wait(&instance_ready, &instance_mutex);
         if (error) {
             pthread_mutex_unlock(&instance_mutex);
-            return stop_result(error, cancel_state);
+            return stop_participant_result(error, cancel_state);
         }
     }
     h->lifecycle = HOST_STOPPING;
@@ -860,6 +1052,12 @@ int camctl_host_stop(void) {
     error = host_logger_close(&h->logger);
     if (error)
         goto failed;
+    candidate_fact(h, "diagnostic_cond_destroy", -1, h->diagnostics.cond_error);
+    candidate_fact(h, "diagnostic_mutex_destroy", -1, h->diagnostics.mutex_error);
+    candidate_fact(h, "logger_cond_destroy", -1, h->logger.cond_error);
+    candidate_fact(h, "logger_mutex_destroy", -1, h->logger.mutex_error);
+    candidate_fact(h, "close", h->logger.close_error_fd, h->logger.close_error);
+    report = candidate_report(h, 0, 0);
     release_storage(h);
     pthread_mutex_lock(&instance_mutex);
     h->lifecycle = HOST_STOPPED;
@@ -871,14 +1069,15 @@ int camctl_host_stop(void) {
             break;
     }
     pthread_mutex_unlock(&instance_mutex);
-    return stop_result(error, cancel_state);
+    deliver_construction_report(&report);
+    return stop_participant_result(error, cancel_state);
 
 failed:
     pthread_mutex_lock(&instance_mutex);
     h->stop_joining = false;
     pthread_cond_broadcast(&instance_ready);
     pthread_mutex_unlock(&instance_mutex);
-    return stop_result(error, cancel_state);
+    return stop_participant_result(error, cancel_state);
 }
 
 static bool same_optional_path(const char *a, const char *b) {
@@ -900,7 +1099,7 @@ int camctl_host_update(const camctl_host_update_config *config,
     pthread_mutex_lock(&instance_mutex);
     if (module_thread)
         error = EDEADLK;
-    else if (maintenance_active)
+    else if (maintenance_active || atomic_load(&restart_active) || construction_pending)
         error = EBUSY;
     else if (instance && (!same_optional_path(instance->config.camctl_path, config->camctl_path) ||
                           !same_optional_path(instance->config.updater_path, config->updater_path) ||
@@ -923,5 +1122,32 @@ int camctl_host_update(const camctl_host_update_config *config,
     maintenance_active = false;
     pthread_cond_broadcast(&instance_ready);
     pthread_mutex_unlock(&instance_mutex);
+    return stop_result(error, cancel_state);
+}
+
+int camctl_host_restart(void) {
+    if (module_thread)
+        return failure(EDEADLK);
+    int cancel_state;
+    int error = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
+    if (error)
+        return failure(error);
+    if (atomic_exchange(&restart_active, true))
+        return stop_result(EBUSY, cancel_state);
+    pthread_mutex_lock(&instance_mutex);
+    host *previous = instance;
+    error = 0;
+    if (maintenance_active || construction_pending || atomic_load(&stop_participants))
+        error = EBUSY;
+    else if (!previous)
+        error = ENODEV;
+    else if (previous->lifecycle == HOST_RUNNING)
+        error = EALREADY;
+    else if (previous->lifecycle != HOST_STOPPED)
+        error = EBUSY;
+    pthread_mutex_unlock(&instance_mutex);
+    if (!error && host_start(&previous->config, NULL, previous))
+        error = errno;
+    atomic_store(&restart_active, false);
     return stop_result(error, cancel_state);
 }

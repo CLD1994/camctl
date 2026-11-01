@@ -2,8 +2,15 @@
 #include <stddef.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <stdio.h>
+static int test_host_fprintf(FILE *stream, const char *format, ...);
+static int test_host_fflush(FILE *stream);
+#define fprintf test_host_fprintf
+#define fflush test_host_fflush
 /* 执行公开入口和生产 worker/callback；所有进程、等待和文件接口均为替身。 */
 #include "../../src/host.c"
+#undef fprintf
+#undef fflush
 
 static host owned;
 static int spawns, requests[2], collects, polls, joins, diag_closes, log_closes;
@@ -11,6 +18,28 @@ static int callbacks, positions[4], waits, join_error;
 static int maintenance_wait_mode, maintenance_wait_step;
 static bool maintenance_stub_enabled;
 static int maintenance_calls;
+static bool restart_test, fail_worker_create;
+static int restart_creates, restart_join_error, restart_join_count, restart_close_error_fd;
+static int restart_closed_fd_count, construction_messages;
+static camctl_update_eligibility restart_eligibility;
+static int restart_check_error;
+static int test_host_fprintf(FILE *stream, const char *format, ...) {
+    (void)stream; (void)format; construction_messages++; return 0;
+}
+static int test_host_fflush(FILE *stream) { (void)stream; return 0; }
+int __wrap_host_check_reaping_contract(void) { return 0; }
+int __wrap_host_pipe(int fds[2]) {
+    if (!restart_test) { fail_msg("%s", "不得创建真实管道"); return -1; }
+    fds[0] = 30; fds[1] = 31; return 0;
+}
+size_t __wrap_host_pipe_take_close_errors(host_pipe_close_error *errors, size_t capacity) {
+    (void)errors; (void)capacity; return 0;
+}
+int __wrap_host_child_prepare_notifications(host_child *child) {
+    if (!restart_test) { fail_msg("%s", "不得创建真实通知管道"); return EINVAL; }
+    child->notification_fd = 20; child->notification_write_fd = 21; return 0;
+}
+int __wrap_fcntl(int fd, int operation, ...) { (void)fd; (void)operation; return 0; }
 static bool poll_error, callback_work, start_submit, borrower_done, other_stop_done;
 static bool notification_eof, clock_error, stop_before_admission;
 static host_result results[2];
@@ -20,6 +49,14 @@ int __wrap_host_maintenance_run(const camctl_host_update_config *config,
     if (!maintenance_stub_enabled) {
         fail_msg("%s", "不得启动真实维护");
         return EINVAL;
+    }
+    if (restart_test) {
+        assert_true(atomic_load(&restart_active));
+        assert_int_equal(request->action, CAMCTL_UPDATE_ACTION_CHECK);
+        memset(result, 0, sizeof(*result));
+        result->eligibility = restart_eligibility;
+        maintenance_calls++;
+        return restart_check_error;
     }
     assert_true(maintenance_active); assert_true(maintenance_owner);
     if (instance) {
@@ -38,7 +75,13 @@ int __wrap_host_maintenance_spawn(host_child *child, const camctl_host_update_co
 }
 int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                           void *(*start)(void *), void *argument) {
-    (void)thread; (void)attr; (void)start; (void)argument; fail_msg("%s", "不得创建线程"); return EINVAL;
+    (void)attr; (void)start; (void)argument;
+    if (!restart_test) { fail_msg("%s", "不得创建线程"); return EINVAL; }
+    restart_creates++;
+    if (fail_worker_create && restart_creates == 4)
+        return EAGAIN;
+    *thread = (pthread_t)(size_t)restart_creates;
+    return 0;
 }
 int __wrap_pipe2(int fds[2], int flags) {
     (void)fds; (void)flags; fail_msg("%s", "不得创建管道"); return -1;
@@ -51,7 +94,14 @@ ssize_t __wrap_read(int fd, void *p, size_t n) {
     if (notification_eof && fd == 20) return 0;
     (void)fd; (void)p; (void)n; errno = EAGAIN; return -1;
 }
-int __wrap_close(int fd) { assert_true(fd >= 0); return 0; }
+int __wrap_close(int fd) {
+    assert_true(fd >= 0);
+    if (restart_test && fd == 30) {
+        restart_closed_fd_count++;
+        if (restart_close_error_fd) { restart_close_error_fd = 0; errno = EIO; return -1; }
+    }
+    return 0;
+}
 int __wrap_clock_gettime(clockid_t id, struct timespec *t) {
     if (clock_error) { clock_error = false; errno = EIO; return -1; }
     assert_int_equal(id, CLOCK_MONOTONIC); *t = (struct timespec){1, 0}; return 0;
@@ -141,6 +191,11 @@ int __wrap_poll(struct pollfd *fds, nfds_t n, int timeout) {
 }
 int __wrap_pthread_join(pthread_t thread, void **p) {
     (void)p;
+    if (restart_test) {
+        (void)thread; restart_join_count++;
+        if (restart_join_error) { int error = restart_join_error; restart_join_error = 0; return error; }
+        return 0;
+    }
     assert_int_equal(pthread_mutex_trylock(&instance_mutex), 0);
     pthread_mutex_unlock(&instance_mutex);
     assert_int_equal(pthread_mutex_trylock(&owned.inputs_mutex), 0);
@@ -203,6 +258,12 @@ static int setup(void **state) {
     maintenance_active = maintenance_owner = false;
     maintenance_wait_mode = maintenance_wait_step = maintenance_calls = 0;
     maintenance_stub_enabled = false;
+    restart_test = fail_worker_create = false;
+    restart_creates = restart_join_error = restart_join_count = restart_close_error_fd = 0;
+    restart_closed_fd_count = construction_messages = 0;
+    restart_eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED; restart_check_error = 0;
+    atomic_store(&stop_participants, 0); atomic_store(&restart_active, false);
+    construction_pending = NULL;
     spawns = collects = polls = joins = diag_closes = log_closes = callbacks = waits = join_error = 0;
     requests[0] = requests[1] = 0;
     poll_error = callback_work = start_submit = borrower_done = other_stop_done = false;
@@ -345,6 +406,105 @@ static void update_gates_and_checks_active_configuration(void **state) {
     assert_int_equal(camctl_host_update(&config, &request, &result), -1); assert_int_equal(errno, EINVAL);
     assert_int_equal(maintenance_calls, 0); assert_int_equal(owned.lifecycle, HOST_RUNNING);
 }
+static host *stopped_heap_instance(void) {
+    host *previous = calloc(1, sizeof(*previous));
+    assert_non_null(previous);
+    previous->config = (camctl_host_config)CAMCTL_HOST_CONFIG_INIT;
+    previous->config.camctl_path = "/camctl"; previous->config.updater_path = "/updater";
+    previous->config.config_path = "/config"; previous->config.ready_path = "/ready";
+    previous->config.processing_path = "/processing"; previous->config.log_path = "/log";
+    previous->lifecycle = HOST_STOPPED;
+    instance = previous;
+    registrations.motor = motor;
+    restart_test = maintenance_stub_enabled = true;
+    return previous;
+}
+static void dispose_fake_fresh_instance(void) {
+    host *fresh = instance;
+    assert_non_null(fresh);
+    host_diagnostic_destroy(&fresh->diagnostics);
+    host_logger_destroy(&fresh->logger);
+    release_storage(fresh);
+    free(fresh);
+    instance = &owned;
+    registrations.motor = NULL;
+}
+static void restart_state_gates(void **state) {
+    (void)state;
+    instance = NULL; assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, ENODEV);
+    maintenance_active = true;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    maintenance_active = false; construction_pending = &owned;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    construction_pending = NULL;
+    instance = &owned; assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EALREADY);
+    owned.lifecycle = HOST_STOPPING;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    owned.lifecycle = HOST_STOPPED; maintenance_active = true;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    maintenance_active = false; atomic_store(&stop_participants, 1);
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    atomic_store(&stop_participants, 0); atomic_store(&restart_active, true);
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    atomic_store(&restart_active, false); module_thread = true;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EDEADLK);
+    module_thread = false;
+}
+static void restart_reuses_config_and_callback_without_first_plan(void **state) {
+    (void)state; host *previous = stopped_heap_instance();
+    assert_int_equal(camctl_host_restart(), 0);
+    assert_ptr_not_equal(instance, previous); assert_int_equal(instance->lifecycle, HOST_RUNNING);
+    assert_string_equal(instance->config.camctl_path, "/camctl");
+    assert_string_equal(instance->config.config_path, "/config");
+    assert_ptr_equal(instance->motor, motor); assert_false(instance->schedule.first_plan);
+    assert_int_equal(instance->schedule.retries_used, 0); assert_int_equal(maintenance_calls, 1);
+    assert_int_equal(camctl_host_init(NULL, NULL), -1); assert_int_equal(errno, EALREADY);
+    dispose_fake_fresh_instance();
+}
+static void restart_join_failure_keeps_candidate_until_stop_finishes(void **state) {
+    (void)state; host *previous = stopped_heap_instance();
+    fail_worker_create = true; restart_join_error = ESRCH;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EAGAIN);
+    assert_ptr_equal(instance, previous); assert_non_null(construction_pending);
+    assert_int_equal(restart_join_count, 2); /* 回调未确认结束时保留其日志依赖。 */
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    camctl_host_update_config config = {"/camctl", "/updater", "/config"};
+    camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_RECOVER, NULL, NULL};
+    camctl_host_update_result result;
+    assert_int_equal(camctl_host_update(&config, &request, &result), -1); assert_int_equal(errno, EBUSY);
+    restart_close_error_fd = 1;
+    assert_int_equal(camctl_host_stop(), 0); assert_null(construction_pending);
+    assert_int_equal(restart_join_count, 4); assert_int_equal(restart_closed_fd_count, 1);
+    assert_true(construction_messages >= 3); /* 原构造、join 和 close 错误均交付。 */
+    fail_worker_create = false; restart_creates = 0;
+    assert_int_equal(camctl_host_restart(), 0);
+    dispose_fake_fresh_instance();
+}
+static void restart_check_failure_preserves_stopped_instance(void **state) {
+    (void)state; host *previous = stopped_heap_instance();
+    restart_eligibility = CAMCTL_UPDATE_ELIGIBILITY_BLOCKED;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EBUSY);
+    assert_ptr_equal(instance, previous); assert_int_equal(restart_creates, 0);
+    restart_eligibility = CAMCTL_UPDATE_ELIGIBILITY_UNKNOWN;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EPROTO);
+    assert_ptr_equal(instance, previous); assert_int_equal(restart_creates, 0);
+    restart_check_error = EIO;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EIO);
+    assert_ptr_equal(instance, previous); assert_int_equal(restart_creates, 0);
+    restart_check_error = 0; restart_eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED;
+    assert_int_equal(camctl_host_restart(), 0);
+    dispose_fake_fresh_instance();
+}
+static void restart_creation_failure_can_retry_after_threads_join(void **state) {
+    (void)state; host *previous = stopped_heap_instance();
+    fail_worker_create = true;
+    assert_int_equal(camctl_host_restart(), -1); assert_int_equal(errno, EAGAIN);
+    assert_ptr_equal(instance, previous); assert_null(construction_pending);
+    assert_int_equal(restart_join_count, 3);
+    fail_worker_create = false; restart_creates = 0;
+    assert_int_equal(camctl_host_restart(), 0);
+    dispose_fake_fresh_instance();
+}
 static void self_stop(void **state) {
     (void)state; owned.lifecycle = HOST_STOPPING; owned.stop_joining = module_thread = true;
     assert_int_equal(camctl_host_stop(), -1); assert_int_equal(errno, EDEADLK); assert_int_equal(waits, 0);
@@ -400,7 +560,11 @@ static void diagnostics_delay_close(void **state) {
 #define CASE(name) cmocka_unit_test_setup_teardown(name, setup, teardown)
 int main(void) {
     const struct CMUnitTest tests[] = {
-#ifdef HOST_UPDATE_STOP_ONLY
+#ifdef HOST_RESTART_ONLY
+        CASE(restart_state_gates), CASE(restart_reuses_config_and_callback_without_first_plan),
+        CASE(restart_join_failure_keeps_candidate_until_stop_finishes),
+        CASE(restart_check_failure_preserves_stopped_instance), CASE(restart_creation_failure_can_retry_after_threads_join),
+#elif defined(HOST_UPDATE_STOP_ONLY)
         CASE(maintenance_before_stop), CASE(maintenance_while_waiting_for_other_stop),
         CASE(maintenance_accepted_during_stop), CASE(callback_cannot_wait_for_maintenance),
         CASE(update_uninitialized), CASE(update_stops_and_drains_borrower),
@@ -413,7 +577,11 @@ int main(void) {
         CASE(concurrent_stop), CASE(maintenance_before_stop), CASE(maintenance_while_waiting_for_other_stop),
         CASE(maintenance_accepted_during_stop), CASE(callback_cannot_wait_for_maintenance),
         CASE(update_uninitialized), CASE(update_stops_and_drains_borrower),
-        CASE(update_gates_and_checks_active_configuration), CASE(self_stop), CASE(retry_join_failure), CASE(callback_drain_reentry),
+        CASE(update_gates_and_checks_active_configuration),
+        CASE(restart_state_gates), CASE(restart_reuses_config_and_callback_without_first_plan),
+        CASE(restart_join_failure_keeps_candidate_until_stop_finishes),
+        CASE(restart_check_failure_preserves_stopped_instance), CASE(restart_creation_failure_can_retry_after_threads_join),
+        CASE(self_stop), CASE(retry_join_failure), CASE(callback_drain_reentry),
         CASE(notification_residue_and_active_callback_delay_stop), CASE(diagnostics_delay_close),
 #endif
     };

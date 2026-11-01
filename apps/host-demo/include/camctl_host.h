@@ -164,6 +164,11 @@ void camctl_host_claim(void);
  * 不能从信号处理函数调用；用户回调或工具不返回时，本调用可能持续等待。 */
 int camctl_host_stop(void);
 
+/* 同进程显式新建运行周期，复用已停止实例的配置和回调，不重送首次计划。
+ * 调用时仍有停止、维护、重启构造或未收场候选时返回 EBUSY；未初始化为 ENODEV，
+ * 正在运行返回 EALREADY，模块工作/回调线程调用为 EDEADLK。失败后保留原停止实例。 */
+int camctl_host_restart(void);
+
 #ifdef __cplusplus
 }
 #endif
