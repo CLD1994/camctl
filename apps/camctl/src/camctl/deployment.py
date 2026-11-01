@@ -4,11 +4,43 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 
 
 # 起点到下一格式的登记。每个迁移负责校验其历史和进度语义。
 MIGRATIONS = {}
+
+
+def create_database_copy(config_path: Path | None, destination: Path) -> dict:
+    """在维护事务拥有的独立位置准备新实例数据库。"""
+    from camctl.bootstrap.application import ConfigAdapter
+    from camctl.persistence.initialization import _build_initial_database, _fsync_directory
+    from camctl.persistence.maintenance_integrity import verify_maintenance_integrity
+    from camctl.persistence.runtime import (DbConfig, DbOpenMode, configured_directory_binding,
+                                            open_existing, verify_directory_binding)
+
+    if not destination.is_absolute():
+        raise ValueError('新数据库准备路径必须为绝对路径')
+    config = ConfigAdapter(Path.home()).load(config_path)
+    target = Path(config.paths.state_db).resolve()
+    if destination.resolve() == target:
+        raise ValueError('新数据库必须在独立事务路径准备')
+    roots = tuple(getattr(config.paths, name) for name in ('staging', 'ready', 'processing'))
+    bindings = tuple(configured_directory_binding(path, name)
+                     for name, path in zip(('staging', 'ready', 'processing'), roots))
+    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+    os.close(fd)
+    _build_initial_database(destination, *bindings)
+    _fsync_directory(destination.parent)
+    owned = open_existing(destination, DbOpenMode.EXISTING_RO,
+                          DbConfig(busy_timeout_ms=config.database.busy_timeout_ms))
+    try:
+        verify_maintenance_integrity(owned.connection)
+        verify_directory_binding(owned.metadata, *roots)
+        return {'state_db': str(target), 'metadata': asdict(owned.metadata)}
+    finally:
+        owned.connection.close()
 
 
 def migrate_copy(config_path: Path | None, state_db: Path) -> dict:
@@ -91,10 +123,13 @@ def inspect_deployment(config_path: Path | None) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('--migrate-copy', type=Path, help='在独立状态库副本上执行已登记迁移')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--migrate-copy', type=Path, help='在独立状态库副本上执行已登记迁移')
+    mode.add_argument('--create-copy', type=Path, help='在独立事务位置准备新的空状态库')
     args = parser.parse_args()
     try:
         result = (migrate_copy(args.config, args.migrate_copy) if args.migrate_copy is not None
+                  else create_database_copy(args.config, args.create_copy) if args.create_copy is not None
                   else inspect_deployment(args.config))
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     except Exception as error:

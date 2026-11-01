@@ -37,3 +37,8 @@ def test_invalid_mode_combinations_are_rejected(release):
 
 def test_default_configuration_path_uses_supplied_home():
     assert config_paths.default_config_path('/user/home') == Path('/user/home/.camctl/config.toml')
+
+
+def test_lock_paths_derive_from_database_path():
+    assert config_paths.lock_file_paths('/data/state.db') == (
+        Path('/data/state.db.session.lock'), Path('/data/state.db.admission.lock'))

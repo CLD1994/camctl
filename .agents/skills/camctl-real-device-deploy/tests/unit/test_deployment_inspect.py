@@ -1,4 +1,4 @@
-"""只读部署检查的公共协作者边界。"""
+"""部署检查与新数据库准备的协作者边界。"""
 import contextlib
 from dataclasses import dataclass
 import io
@@ -54,6 +54,57 @@ class DeploymentInspectionTests(unittest.TestCase):
         runtime.open_existing.assert_called_once_with(Path('/state.db'), readonly, {'busy_timeout_ms': 9000})
         runtime.verify_directory_binding.assert_called_once_with(metadata, '/stage', '/ready', '/processing')
         connection.close.assert_called_once()
+
+
+    def test_new_database_uses_initialization_authority_and_distinct_identity(self):
+        config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db', staging='/stage',
+            ready='/ready', processing='/processing'), database=SimpleNamespace(busy_timeout_ms=100))
+        application = ModuleType('camctl.bootstrap.application')
+        application.ConfigAdapter = Mock(return_value=SimpleNamespace(load=Mock(return_value=config)))
+        initialization = ModuleType('camctl.persistence.initialization')
+        initialization._build_initial_database = Mock()
+        initialization._fsync_directory = Mock()
+        integrity = ModuleType('camctl.persistence.maintenance_integrity')
+        integrity.verify_maintenance_integrity = Mock()
+        runtime = ModuleType('camctl.persistence.runtime')
+        runtime.DbConfig = Mock()
+        runtime.DbOpenMode = SimpleNamespace(EXISTING_RO=object())
+        runtime.configured_directory_binding = Mock(side_effect=lambda path, name: path)
+        runtime.verify_directory_binding = Mock()
+        connection = Mock()
+        runtime.open_existing = Mock(return_value=SimpleNamespace(connection=connection, metadata=Metadata('new', 9)))
+        modules = {'camctl.bootstrap.application': application, 'camctl.persistence.initialization': initialization,
+                   'camctl.persistence.maintenance_integrity': integrity, 'camctl.persistence.runtime': runtime}
+        with patch.dict(sys.modules, modules), patch.object(Path, 'resolve', lambda path: path), \
+                patch.object(deployment.os, 'open', return_value=41) as open_file, \
+                patch.object(deployment.os, 'close') as close_file:
+            result = deployment.create_database_copy(Path('/new.toml'), Path('/transaction/new.db'))
+        self.assertEqual(result, {'state_db': '/state.db', 'metadata': {'instance_id': 'new', 'format_version': 9}})
+        self.assertTrue(open_file.call_args.args[1] & deployment.os.O_EXCL)
+        close_file.assert_called_once_with(41)
+        initialization._build_initial_database.assert_called_once_with(
+            Path('/transaction/new.db'), '/stage', '/ready', '/processing')
+        integrity.verify_maintenance_integrity.assert_called_once_with(connection)
+        runtime.verify_directory_binding.assert_called_once()
+        connection.close.assert_called_once()
+
+    def test_new_database_cannot_overwrite_configured_database(self):
+        config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db'))
+        application = ModuleType('camctl.bootstrap.application')
+        application.ConfigAdapter = Mock(return_value=SimpleNamespace(load=Mock(return_value=config)))
+        initialization = ModuleType('camctl.persistence.initialization')
+        initialization._build_initial_database = Mock()
+        initialization._fsync_directory = Mock()
+        runtime = ModuleType('camctl.persistence.runtime')
+        for name in ('DbConfig', 'DbOpenMode', 'configured_directory_binding', 'open_existing', 'verify_directory_binding'):
+            setattr(runtime, name, Mock())
+        with patch.dict(sys.modules, {'camctl.bootstrap.application': application,
+                                     'camctl.persistence.initialization': initialization,
+                                     'camctl.persistence.runtime': runtime}), \
+                patch.object(Path, 'resolve', lambda path: path), patch.object(deployment.os, 'open') as open_file:
+            with self.assertRaises(ValueError):
+                deployment.create_database_copy(Path('/new.toml'), Path('/state.db'))
+        open_file.assert_not_called()
 
     def test_main_sends_full_cause_to_stderr_without_stdout(self):
         encoder_spec = importlib.util.spec_from_file_location('error_diagnostics_for_deployment',

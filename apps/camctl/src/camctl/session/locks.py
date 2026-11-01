@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Protocol, cast
+from camctl.config_paths import lock_file_paths
 from camctl.operations.error_diagnostics import attach_diagnostic_facts
 
 
@@ -356,14 +357,6 @@ class _WindowsLockBackend:
 
 def default_backend() -> LockBackend:
     return _WindowsLockBackend() if sys.platform == "win32" else _PosixLockBackend()
-
-
-def lock_file_paths(database_path: Path) -> tuple[Path, Path]:
-    """状态库对应的稳定锁文件对：会话锁与接纳锁。"""
-    return (
-        database_path.with_name(f"{database_path.name}.session.lock"),
-        database_path.with_name(f"{database_path.name}.admission.lock"),
-    )
 
 
 class AdmissionProbeStatus(Enum):
