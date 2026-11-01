@@ -36,6 +36,12 @@ int __wrap_fprintf(FILE *f, const char *format, ...) {
     assert(n >= 0 && (size_t)n < sizeof(buf));
     return capture(buf, (size_t)n) == (size_t)n ? n : -1;
 }
+int __wrap___fprintf_chk(FILE *f, int flag, const char *format, ...) {
+    (void)f; (void)flag; char buf[1024]; va_list ap; va_start(ap, format);
+    int n = vsnprintf(buf, sizeof(buf), format, ap); va_end(ap);
+    assert(n >= 0 && (size_t)n < sizeof(buf));
+    return capture(buf, (size_t)n) == (size_t)n ? n : -1;
+}
 size_t __wrap_fwrite(const void *p, size_t size, size_t n, FILE *f) {
     (void)f; return size ? capture(p, size * n) / size : 0;
 }

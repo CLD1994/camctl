@@ -114,7 +114,8 @@ def test_old_recovery_uses_recorded_configuration_before_new_config():
 
 
 def test_old_recovery_precedes_new_apply_configuration():
-    old_default = {'original': {'config_source': None}, 'mutation_intent': True}
+    old_default = {'original': {'config_source': None}, 'mutation_intent': True,
+                   'output': '/target/updates/previous'}
     with patch.object(router, '_lock', side_effect=[11, 12, 13]), \
             patch.object(router, '_pending', side_effect=[(old_default, JournalState.UPDATING),
                 ({}, JournalState.ROLLED_BACK), ({'output': '/target/updates/id'}, JournalState.COMMITTED)]), \
