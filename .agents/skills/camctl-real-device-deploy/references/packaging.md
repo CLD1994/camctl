@@ -33,7 +33,6 @@ camctl-deploy/
     camctl-configuration.md
     host-configuration.md
     camctl_host.h
-    camctl_update_protocol.h
   camctl/
     camctl-<version>-py3-none-any.whl
     requirements.txt
@@ -80,8 +79,8 @@ README 说明安装参数与产物、客户端默认及自定义数据目录、c
 
 完整部署包用于初次安装。安装器初始化 camctl 后，调用新 wheel 的发布器建立 `<target>/maintenance/camctl-updater`，将路径记录到收据并传给生成的 host-demo 启动入口。维护实现由组件提供，不在完整部署包顶层维护另一份更新程序。
 
-已有实例使用 `apps/camctl/scripts/build_update.py` 构建的 Python 专用更新包。它与完整包共用 Python 构建和依赖收集能力，交付 `camctl-update.zip`、包外摘要及同结构目录。ZIP 只有 `camctl-update/` 顶层目录，包含 `RELEASE.json`、`source-manifest.json`、`SHA256SUMS` 和 `camctl/` 下的单个 wheel、锁定依赖与双架构离线 wheel；不携带 host 或客户端。
+已有实例使用 `apps/camctl/scripts/build_update.py` 构建的 Python 专用更新包。它与完整包共用 Python 构建和依赖收集能力，交付 `camctl-update.zip`、包外摘要及同结构目录。ZIP 只有 `camctl-update/` 顶层目录，包含 `RELEASE.json`、`source-manifest.json`、`SHA256SUMS` 和 `camctl/` 下的单个 wheel、锁定依赖与双架构离线 wheel；不携带 host 或客户端。`RELEASE.json.update` 包含更新模式；强制包还提供完整新配置，构建时使用 `--force --config`，普通包不接受配置替换。元数据及重建范围以组件更新规格为准。
 
-主程序通过 `camctl_host_update` 直接传入更新 ZIP 的绝对路径。组件先恢复旧事务，再核对当前交付物，停止本模块业务后完成备份、迁移、更新与失败恢复，返回后保持停机。输入也可为已解压的包目录。C 接口返回可信结果不代表应用成功，调用方须检查请求结果、部署效果和启动资格。首次接入旧环境须先从新 wheel 准备稳定入口，并升级主程序所链接的 C 接入模块；Python 更新包不替换静态库。
+主程序通过 `camctl_host_update` 直接传入更新 ZIP 的绝对路径及可选能力同步目标。接口使用已初始化实例的配置，组件停止本模块普通业务，先恢复旧事务，再核对当前包并完成备份、迁移或强制重建，失败时恢复原环境。核实允许后自动建立普通运行周期。返回值只表示本次更新成功或失败；诊断直接作为独立文件进入 processing。输入也可为已解压包目录。普通主程序启动自动恢复未完成更新。首次接入旧环境须先从新 wheel 准备稳定入口，并升级主程序所链接的 C 接入模块；Python 更新包不替换静态库。
 
 V9 起点、备份、可靠完成点和故障边界由[更新规格](../../../../docs/architecture/versioning-and-updates.md)定义；稳定入口、部署绑定和公共结果由[更新接入规格](../../../../docs/architecture/software-update-interface.md)定义。随包 README 提供接收方操作说明。现有发行验证不证明真实数据库迁移、中断恢复或目标架构更新；这些真实组合须另行验证。

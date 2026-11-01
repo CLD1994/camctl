@@ -8,9 +8,9 @@
 
 `camctl --version` 输出当前安装的发行版本。`run`、`submit`、`init` 和 `describe` 在日志通道建立后各记录一次启动版本；日志文件或队列不可用时尝试通过 stderr 交付。
 
-软件更新、数据库迁移、回滚和中断恢复由本组件的维护引擎负责。Python 专用更新包只交付 wheel、离线依赖和元数据；构建入口为 `scripts/build_update.py`。部署时由 wheel 中的发布器准备虚拟环境外的维护入口，C 主程序通过 `camctl_host_update` 调用。入口与冻结引擎、启动资格及配置来源的契约见[更新接入规格](../../docs/architecture/software-update-interface.md)，进度见[实施计划](../../docs/superpowers/plans/2026-10-31-camctl-owned-update-api.md)。
+软件更新、数据库迁移、回滚和中断恢复由本组件的维护引擎负责。Python 专用更新包只交付 wheel、离线依赖和元数据；构建入口为 `scripts/build_update.py`。部署时由 wheel 中的发布器准备虚拟环境外的维护入口，C 主程序通过 `camctl_host_update` 调用。入口与冻结引擎、启动资格及配置来源的契约见[更新接入规格](../../docs/architecture/software-update-interface.md)，进度见[实施计划](../../docs/superpowers/plans/2026-11-02-unattended-updates.md)。
 
-发布人员和现场操作者按[版本发布与现场更新操作](../../docs/camctl/software-updates.md)完成版本递增、包构建、首次引导、更新、恢复及重启。
+发布人员和现场操作者按[版本发布与现场更新操作](../../docs/camctl/software-updates.md)完成版本递增、包构建、首次引导、普通更新、强制重建及自动中断恢复。
 
 技术选型、模块边界和接口契约见[实现规格](../../docs/camctl/implementation.md)。实施前须完成其中列明的设计事项。
 

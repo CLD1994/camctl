@@ -6,12 +6,12 @@
 
 | 目标 | 交付物与更新方式 |
 | --- | --- |
-| 更新已有主机的 Python camctl 及运行依赖 | 构建 `camctl-update.zip`，通过 `camctl_host_update` 或 host-demo 的维护模式应用。 |
+| 更新已有主机的 Python camctl 及运行依赖 | 构建 `camctl-update.zip`，通过 `camctl_host_update` 或 host-demo 应用。 |
 | 首次安装主机及准备客户端 | 构建 `camctl-deploy.zip`，按包内 README 安装到新目录。 |
 | 更新编入第三方主程序的 C 接入模块 | 在匹配目标架构的环境编译新模块，重新编译、链接并部署第三方主程序。 |
 | 更新个人电脑上的客户端 | 停止客户端服务，保留整个数据目录，部署新客户端程序并重新启动。 |
 
-Python 专用包不替换 C 静态库或客户端。完整包的 `install-host.py` 要求目标目录不存在，用于首次安装；已有实例通过维护入口保留原环境路径、状态库和媒体。软件版本号、数据库格式及协议格式分别管理，不能通过修改数据库格式号来配合软件版本。
+Python 专用包不替换 C 静态库或客户端。完整包的 `install-host.py` 要求目标目录不存在，用于首次安装；已有实例通过维护入口原地更新。普通包保留配置、状态库和媒体；强制包按下文约定完整备份后重建。软件版本号、数据库格式及协议格式分别管理，不能通过修改数据库格式号来配合软件版本。
 
 ## 2. 发布人员调整版本号
 
@@ -58,6 +58,19 @@ python3.11 apps/camctl/scripts/build_update.py \
 
 ZIP 内只有 `camctl-update/` 顶层目录，包含 `RELEASE.json`、源码摘要清单、`SHA256SUMS`，以及 `camctl/` 下的 wheel、锁定依赖和双架构离线 wheel。`RELEASE.json.components.camctl` 是该交付物的 Python 版本；现场以收到的发行记录为准。
 
+普通包的 `RELEASE.json.update.force` 为 `false`。需要丢弃原业务状态并重新部署时，提供完整新配置构建强制包：
+
+```sh
+python3.11 apps/camctl/scripts/build_update.py \
+  --repo "$(pwd)" \
+  --output "$(pwd)/tmp/camctl-force-update-new" \
+  --force --config /absolute/path/to/new-config.toml
+```
+
+构建器将新 TOML 正文和强制标志一起写入经过摘要校验的 `RELEASE.json`。配置面向该部署，状态库及 `staging`、`ready`、`processing` 必须继续使用原部署路径；设备和其他业务配置可以整体替换。普通包不能传 `--config`，避免把普通更新误当成配置替换。
+
+强制包清空重建 Python 环境、配置、状态库及其伴随文件、staging 和 ready，先完整备份，失败自动恢复原内容。processing 中的待传文件保留；回滚不重新放回已被主程序传输并删除的文件。日志、恢复材料、host、客户端数据库及相机存储继续保留。强制模式可以处理旧库无法解析、旧环境不能导入或旧配置正文损坏的情况，定位依据是首次接入时保存的部署绑定。详见[强制重建](../architecture/versioning-and-updates.md#强制重建)。
+
 构建失败时保留输出及日志，修正原因后换一个新目录重试。构建成功说明交付物已经生成和完成构建入口的检查，不代表真实升级、回滚及断电恢复已经验收。
 
 若要交付首次安装的完整包，使用[完整部署包入口](../../.agents/skills/camctl-real-device-deploy/references/packaging.md)：
@@ -89,11 +102,11 @@ update_zip=/absolute/path/to/releases/camctl-update.zip
 
 C 更新接口会停止本模块接收新工作，并等待其进程、通知、回调和在途调用收场。其他独立 host、CLI 及操作相同实例的进程仍由操作者停止。用 host-demo 维护时先停止原主程序并确认退出；仅关闭终端界面或停止提交新计划不足以证明写入已经结束。
 
-正常实例可在停机后记录其 `venv/bin/camctl --version` 和当前配置、路径及部署收据。已经存在中断更新或普通入口损坏时，先使用下文的恢复入口，不要求原 CLI 能正常运行。更新不改写配置、不切换交接目录，也不连接相机执行业务。
+正常实例可在停机后记录其 `venv/bin/camctl --version` 和当前配置、路径及部署收据。已经存在中断更新或普通入口损坏时，使用带稳定维护入口的普通主程序启动，组件先自动恢复，不要求原 CLI 先能运行。更新器不连接相机执行业务；内部恢复普通运行后，camctl 继续正常业务。
 
 ## 5. 准备稳定维护入口
 
-完整包首次安装成功后，安装器已建立 `<target>/maintenance/camctl-updater`，安装收据记录 `updater_path`，生成的普通启动命令带 `--updater`。已有此入口的实例直接进入应用或恢复流程；存在未完成记录时不要重新发布入口。
+完整包首次安装成功后，安装器已建立 `<target>/maintenance/camctl-updater`，安装收据记录 `updater_path`，生成的普通启动命令带 `--updater`。已有当前维护入口的实例直接正常启动并调用更新；存在未完成记录时由启动流程自动恢复，不重新发布入口。
 
 旧实例首次接入时，主程序须先链接支持当前维护接口的 C 模块。操作者保持停机，从新 wheel 发布维护入口，再执行 Python 更新；发布入口不会应用新版本。
 
@@ -113,114 +126,95 @@ new_wheel=/absolute/path/to/unpacked/camctl-update/camctl/camctl-1.0.1-py3-none-
 
 上述例子使用显式配置。原普通入口使用其他配置时填写其实际路径；原普通入口使用默认来源时省略 `--config`。两种来源不能混用。普通 CLI 允许配置文件缺失时采用默认值，维护也保存这个缺失事实；因此操作者必须确认路径，不能以没有报文件缺失来证明选对了配置。
 
-## 6. 使用 host-demo 应用一次更新
+## 6. 使用 host-demo 更新并继续运行
 
-在原主程序已停止的情况下执行：
+先停止原主程序，避免两个主程序同时管理同一部署。使用支持当前接口的 host-demo：
 
 ```sh
 "$deploy_root/host/bin/host-demo" \
   --camctl "$deploy_root/venv/bin/camctl" \
   --updater "$deploy_root/maintenance/camctl-updater" \
-  --config "$deploy_root/config.toml" \
+  --ready "$deploy_root/ready" --processing "$deploy_root/processing" \
+  --log "$deploy_root/host.log" --config "$deploy_root/config.toml" \
   --apply-update "$update_zip"
 ```
 
-host-demo 必须是支持当前接口的版本。参数均使用绝对路径；默认配置来源时省略 `--config`。维护模式只调用更新接口，结束后退出，不启动普通业务。
+例子采用部署根目录内的数据路径；若首次部署指定了外部 ready、processing 或日志路径，填写实际值。默认配置来源时省略 `--config`。演示程序正常初始化后调用更新接口，完成后继续运行，可继续提交计划、领取文件或接收下一次更新。
 
-需要同步客户端能力说明时，在应用命令中附加：
+运行中的终端也可输入：
 
-```sh
---client-data /absolute/path/to/client-data
+```text
+update /absolute/path/to/releases/camctl-update.zip
 ```
 
-该目录须是本次要同步的实际目标。更新只覆盖其中的 `device-capabilities.json`，把原内容或原本不存在的事实纳入恢复；客户端数据库与媒体保留。不传该参数时，新能力说明仅留在更新产物目录，再由部署人员交给客户端。
+终端命令中包路径不加引号、不展开环境变量，整段剩余文本作为路径。调用失败时查看 processing 内的新 diagnostic；组件根据实际恢复结果自动继续原部署。演示不会要求操作者解释维护状态或选择恢复动作。
 
-host-demo 退出 0 表示本次维护请求成功且更新责任允许启动；非零须结合终端结论、原因及诊断位置处理。应用失败但回滚已成功时，演示仍以失败退出，不能把它当成新版本安装成功。
+需要同步客户端能力说明时，启动命令加 `--client-data /absolute/path/to/client-data`。本次更新只覆盖其中的 `device-capabilities.json`，原文件或原本不存在的事实纳入恢复，客户端数据库和媒体保留。省略时新能力说明只留在更新证据目录，随后可交给客户端。
 
-## 7. C 主程序调用与结果处理
+## 7. C 主程序的最小调用
 
-正常初始化时设置 `camctl_host_config.updater_path`，让模块在启动原虚拟环境程序前检查维护资格。更新时提供同一实例的 `camctl_path`、`updater_path` 和配置来源；模块不从程序路径猜部署根目录，也不解析 TOML 为主程序补路径。
+正常初始化时设置 `camctl_host_config.updater_path`。该路径由部署入口提供，并与普通入口及配置来源对应；初始化在启动原虚拟环境程序前先自动恢复未完成更新。
 
-以下示例只申请更新并确认新版本提交，完成后仍保持停机。实际路径由主程序部署参数提供：
+成功初始化后的普通线程只需调用：
 
 ```c
 #include "camctl_host.h"
 #include <errno.h>
 #include <stdio.h>
 
-int update_camctl(const char *camctl_path, const char *updater_path,
-                  const char *config_path, const char *update_zip) {
-    camctl_host_update_config config = {camctl_path, updater_path, config_path};
-    camctl_host_update_request request = {
-        .action = CAMCTL_UPDATE_ACTION_APPLY,
-        .bundle_path = update_zip
-    };
-    camctl_host_update_result result;
-    int received = camctl_host_update(&config, &request, &result);
-    int saved_errno = errno;
-
-    printf("%s；%s\n", camctl_update_effect_description(result.effect),
-           camctl_update_eligibility_description(result.eligibility));
-    if (result.reason[0])
-        fprintf(stderr, "原因：%s\n", result.reason);
-    if (result.diagnostic_path[0])
-        printf("诊断位置：%s\n", result.diagnostic_path);
-    if (received != 0) {
+int update_camctl(const char *update_zip) {
+    int result = camctl_host_update(update_zip, NULL);
+    if (result != 0) {
+        int saved_errno = errno;
+        fprintf(stderr, "更新未成功：errno=%d；详情见 processing 诊断。\n",
+                saved_errno);
         errno = saved_errno;
-        return -1;
     }
-    return result.outcome == CAMCTL_UPDATE_OUTCOME_APPLIED &&
-           result.effect == CAMCTL_UPDATE_EFFECT_COMMITTED &&
-           result.eligibility == CAMCTL_UPDATE_ELIGIBILITY_ALLOWED ? 0 : 1;
+    return result;
 }
 ```
 
-`camctl_host_update` 自身返回 `0` 只表示收到可信结果，本示例再检查三项结论，才把新版本提交认定为成功。公开结果另外提供简短原因和实际诊断位置；不按原因文案进行机器分支。底层原始输出和进程错误由模块统一记录到 stderr，主程序无须重建这些诊断。
+返回 `0` 表示新包可靠提交、普通资源重建且首次 `run` 已安排；返回 `-1` 表示本次更新流程失败。停止、安装失败回滚、结果未知时的内部恢复、普通工作重新运行均由组件完成。失败后恢复原版本仍返回失败，主程序不用解析 JSON、结果结构或另行启动 camctl。能力同步时以实际客户端 data 绝对路径替换第二个参数的 `NULL`。
 
-| 收到的事实示例 | 主程序下一步 |
-| --- | --- |
-| `applied`、`committed`、`allowed` | 新版本已可靠提交，主程序可以决定恢复业务。 |
-| `failed`、`rolled_back`、`allowed` | 本次更新失败，原部署已核实恢复；按原版本恢复业务的决定由主程序作出。 |
-| `failed`、`unchanged`、`allowed` | 本次没有修改部署，检查包或配置错误后决定恢复原业务或另行更新。 |
-| 资格为 `blocked` 或 `unknown`，或结果不可信 | 保持停机，依据原因和日志处理占用或恢复责任。 |
+原进程的首次计划和未完成内存提交不会被重送；已保存任务由数据库恢复。主程序继续处理 processing 的传输，更新诊断直接位于该目录，无须先调用 claim。
 
-完整状态与返回规则见[更新接口规格](../architecture/software-update-interface.md#机器结果与诊断)。所有调用从普通线程发起，不能在信号处理函数或会等待自身结束的模块线程中维护。
+调用须从普通线程发起，不能在信号处理函数、模块工作线程或回调线程中同步等待更新。并发更新会被拒绝。主程序在更新期间明确要求退出时调用正常停止入口；该停止意图优先于更新的自动运行，新包已提交的事实不被撤销。完整返回和并发规则见[主程序接口](../architecture/software-update-interface.md#主程序接口)。
 
-## 8. 显式恢复普通业务
+## 8. 更新失败或主机重启后怎样恢复
 
-主程序核对结果并决定继续业务后，在同一进程显式调用 `camctl_host_restart()`。它复用已经停止实例保存的配置与回调，先检查维护资格，再建立新运行周期；不重送旧首次计划。
+安装、迁移、发布或最终核验在可靠提交前失败时，组件自动恢复原环境和相应数据，核实完成后重新建立普通运行周期。本次调用仍返回失败，原失败和恢复结果一起进入 diagnostic。
 
-只有曾成功初始化并已可靠停止的普通实例才能重启。在从未初始化的独立维护进程中调用会返回 `ENODEV`；这种场景应退出维护程序，再按原启动入口启动主程序。host-demo 维护模式属于后一种场景。
-
-重启返回 0 只表示本地资源和首次 `run` 已安排，仍须观察普通启动日志、设备检查和业务报告。不能用停止后再次调用 `camctl_host_init` 替代显式重启。更新器也不会自动启动主程序。
-
-## 9. 失败、断电和强制终止后的恢复
-
-安装、迁移、发布或最终核验在可靠完成前失败时，组件按正式事务记录自动尝试恢复原环境、数据库及适用能力文件，并核实恢复结果。不能核实时保留责任和停机状态。断电或进程被强制结束后，下一次维护先处理旧事务，使用其冻结引擎；当前新包只有在旧恢复完成后才会处理。
-
-只恢复未完成事务时，不需要提供新更新包：
+进程强杀或断电后，按正常方式启动主程序即可。例如：
 
 ```sh
 "$deploy_root/host/bin/host-demo" \
   --camctl "$deploy_root/venv/bin/camctl" \
   --updater "$deploy_root/maintenance/camctl-updater" \
-  --config "$deploy_root/config.toml" \
-  --recover
+  --ready "$deploy_root/ready" --processing "$deploy_root/processing" \
+  --log "$deploy_root/host.log" --config "$deploy_root/config.toml"
 ```
 
-C 主程序使用 `CAMCTL_UPDATE_ACTION_RECOVER`，并将 `bundle_path`、`client_data_path` 设为 `NULL`。恢复采用旧事务冻结的配置和能力文件绑定，不能通过本次参数改成另一套恢复目标。只恢复成功后仍保持停机。
+主程序调用普通 `camctl_host_init`，组件在任何目标环境命令之前恢复未完成事务。回滚途中再次中断时，下次启动继续使用同一冻结引擎和完整备份恢复。已可靠提交的新部署保持，不因旧调用没有收到结果而回滚。
 
-资格占用表示仍有维护者或残留写入者，不能直接推断必须回滚。等待原写入者结束并核实原因，再调用维护；不要并发重试整次更新。恢复失败或结果未知时保留目录、存储及权限错误事实，修正原因后再次 `--recover`。不要删除 `updates/pending.json`、备份、冻结引擎或临时恢复材料来绕过资格检查。
+仍有真实写入者持锁或恢复操作尚未完成时，组件保留恢复责任，禁止执行部分安装环境。应保留 `updates/pending.json`、冻结引擎、备份及已有诊断，处理实际占用、空间或权限问题后再正常启动。不要删除记录来绕过启动核验，也不要同时发起另一份更新。
 
-自动恢复覆盖本次未完成事务。更新已经可靠提交并产生新业务后，安装旧 wheel 不等于合法撤销；数据库没有登记降级路径时，不能只切回旧软件。
+故障范围覆盖更新与回滚的进程中断及主机断电，不包含介质损坏和备份丢失。原部署本来已经存在的数据或配置错误会被回滚保留；需要丢弃这些状态时使用具有完整新配置的强制包。已经可靠更新并产生新业务后，安装旧 wheel 属于另外一次更新，不等于撤销本次更新。
 
-## 10. 查看日志、收据及数据库处理结果
+## 9. 查看诊断、日志和数据库处理结果
 
-`result.diagnostic_path` 或 host-demo 显示的位置通常位于 `<target>/updates/<标识>/`，其中保留 `receipt.json`、`update.log`、备份和导出的 `device-capabilities.json`。入口在生成该目录前失败时，诊断位置可以为空，应查看主程序 stderr。C 的简短原因可能缩短，完整已捕获事实仍由模块诊断交付。
+更新或恢复产生的独立诊断文件直接出现在实际 processing 根目录，包含原调用、错误阶段、原始输出及截断事实、部署结果、后续恢复及普通重建结果。主程序按普通待传文件传输即可。详情包含实际错误内容，不能把本地证据目录路径当成全部诊断。
 
-状态库自动维护以 V9 为起点。当前格式只验证，后续格式按发行物登记的迁移路径在副本上迁移，核验后才发布。原环境、数据库和适用能力文件一起恢复；普通 `run`、`submit` 或重新初始化空库不能替代更新恢复。
+部署本地 `<target>/updates/<标识>/` 保留 `receipt.json`、`update.log`、冻结引擎、备份和导出能力说明。调用在准备目录创建之前失败时，仍以 C 模块的 processing 诊断或本地错误为依据。诊断发布遇到错误时，组件保留已完成的准备材料或已发布文件，继续必要恢复及业务安排；传输后的删除由主程序负责。
 
-成功后，在允许普通启动的前提下查询原路径的 `venv/bin/camctl --version`，与本次 `RELEASE.json.components.camctl` 比较，并检查普通启动及业务恢复。版本字符串单独不能证明迁移、回滚或设备恢复成功。
+普通自动迁移以 V9 为起点。当前格式核验，后续格式按登记迁移在副本执行并验证后发布；配置和媒体保留。强制重建使用新空库，无需旧库到新库的迁移路径；失败时恢复原文件，即使旧文件原本无法作为合法库打开，也不能把字节恢复称为业务修复。
+
+可以在维护完成并允许普通运行后查询原路径的 `venv/bin/camctl --version`，与包内 `RELEASE.json.components.camctl` 比较。还须检查自动运行日志和业务恢复；版本字符串本身不能证明完整事务或相机恢复成功。
+
+## 10. 部署绑定与验证证据
+
+维护入口记录的是同一部署的数据库及交接目录。强制包整体替换配置内容，但保留这些路径。已登记维护的实例执行同路径重复初始化正常；改变数据库或交接目录的初始化会在写入前被拒绝。该约束使旧配置或旧库损坏时仍能可靠定位待备份和重建对象。
+
+验证分别保留隔离单元、容器实际更新、目标主机和真实设备证据。容器内通过强制终止进程验证恢复，不等同物理断电。当前实施和真实容器验收状态见[无人值守更新计划](../superpowers/plans/2026-11-02-unattended-updates.md)，实际结果进入组件验证记录。
 
 ## 11. 更新 C 模块与客户端
 
@@ -261,4 +255,4 @@ sh "$client_release/start-client.sh"
 
 `client_release` 对应复制后的整个 `client/` 目录；生产依赖安装在新程序目录。更新时不创建新的业务数据目录，也不在网页重新初始化已有数据库。普通启动不自动切换原数据位置，必须核对 `CAMCTL_DATA_DIR`。
 
-客户端没有由 Python 更新器提供的自动迁移或回滚保障，C 主程序二进制也不在该保障范围内；分别按其数据格式、部署及备份契约处理。真实更新和故障恢复的实际验收范围见[组件更新验证记录](owned-update-verification-2026-11-02.md)及[精简 C 结果验证](../host-demo/verification.md#公开更新结果精简2026-11-02)。
+客户端没有由 Python 更新器提供的自动迁移或回滚保障，C 主程序二进制也不在该保障范围内；分别按其数据格式、部署及备份契约处理。真实更新和故障恢复的实际验收范围见[无人值守更新计划](../superpowers/plans/2026-11-02-unattended-updates.md)及其引用的验证记录。
