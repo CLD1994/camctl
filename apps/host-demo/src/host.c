@@ -917,7 +917,7 @@ static void stop_participant_leave(void *unused) {
     (void)unused;
     atomic_fetch_sub(&stop_participants, 1);
 }
-static int stop_participant_result(int error, int cancel_state) {
+static int stop_participant_result(volatile int error, int cancel_state) {
     pthread_cleanup_push(stop_participant_leave, NULL);
     pthread_setcancelstate(cancel_state, NULL);
     pthread_testcancel();
