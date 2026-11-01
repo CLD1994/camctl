@@ -1,0 +1,32 @@
+{
+  "scenario": "reliable-commit-then-result-channel-lost",
+  "status": "passed",
+  "checks": {
+    "new_commit_preserved": true,
+    "new_version_not_rolled_back": true,
+    "application_still_reported_failure": true,
+    "private_recover_invoked": true,
+    "new_run_auto_started": true,
+    "database_unchanged": true,
+    "all_original_objects_retained": true,
+    "lost_result_diagnostic_delivered": true
+  },
+  "version": "1.0.0",
+  "gate": [
+    {
+      "pid": 24013,
+      "argv": [
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-committed-lost-result/venv/bin/camctl",
+        "run",
+        "--config",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-committed-lost-result/config.toml",
+        "--host-notification-fd",
+        "4"
+      ],
+      "time_ns": 1793575380417892539
+    }
+  ],
+  "diagnostic": [
+    "camctl-host-diagnostic-23744-0-l5JswW.log"
+  ]
+}

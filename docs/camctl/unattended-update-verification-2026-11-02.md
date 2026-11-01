@@ -42,6 +42,12 @@
 
 见[第一次中断](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-interruption.json)、[恢复再次中断](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-recovery-interruption.json)、[恢复数据比对](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-recovery-before-run.json)及[最终结果](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-scenario-result.json)。该结果验证真实软件恢复和普通入口接线，不证明物理断电时目标存储的同步行为。
 
+## 提交后丢失结果与包校验失败
+
+在独立场景中，外部维护入口包装程序先真实执行新包应用，确认维护退出成功且持久记录 committed 后，保留原结果证据，再仅将交给 C 的 stdout 替换为非法结果。C 返回协议失败并自动调用内部恢复；组件根据可靠提交事实保留 1.0.0，没有回滚新部署。数据库及原文件仍相同，新 run 自动启动并正常退出 0，同一 host 随后提交成功并 quit 退出 0。丢失结果的实际文本进入 processing 诊断。见[场景结果](verification-data/2026-11-02-unattended-updates/ordinary-committed-result-loss-scenario-result.json)及[运行前比对](verification-data/2026-11-02-unattended-updates/ordinary-committed-result-loss-commit-loss-before-run.json)。
+
+另一个新环境接收格式无效的更新 ZIP。组件报告包解析错误，没有发布事务修改意图，原版本仍为 0.9.0，逻辑数据库及比对对象均未改变。原版本自动运行，后续提交及正常退出成功，BadZipFile 原始诊断事实直接进入 processing。见[包拒绝结果](verification-data/2026-11-02-unattended-updates/ordinary-invalid-bundle-scenario-result.json)及[原部署比对](verification-data/2026-11-02-unattended-updates/ordinary-invalid-bundle-invalid-before-run.json)。
+
 ## 局部验证与评审边界
 
 普通生命周期和诊断的固定源码已由独立评审接受。批准范围内的五个 C 文件分别运行通过，其中停止入口 36 项、诊断格式与发布边界 2 项；其余三个入口退出 0。Python 的元数据、普通更新控制、路由、布局、发布及初始化局部入口采用逐文件或逐节点独立进程，并在导入前隔离真实协作者；实际数目以各阶段收据及最终汇总为准。
@@ -52,4 +58,4 @@
 
 ## 尚未取得的证据
 
-包校验拒绝、提交后丢失结果、强制重建、旧环境归档与清理中断仍待实际执行。真实 ARM64、第三方主程序、真实设备和目标存储物理断电没有由此次容器结果证明。
+强制重建、旧环境归档与清理中断仍待实际执行。真实 ARM64、第三方主程序、真实设备和目标存储物理断电没有由此次容器结果证明。

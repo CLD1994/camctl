@@ -1,0 +1,15 @@
+{
+  "scenario": "reliable-commit-then-result-channel-lost",
+  "status": "passed",
+  "checks": {
+    "committed_deployment_retained": true,
+    "new_run_success": true,
+    "subsequent_submit_success": true,
+    "host_exit_zero": true
+  },
+  "exit": {
+    "pid": 23744,
+    "returncode": 0,
+    "exited_at_ns": 1793575419525473221
+  }
+}
