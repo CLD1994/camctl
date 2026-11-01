@@ -25,6 +25,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 
 测试先经独立静态隔离复核，文件、用户环境、数据库、ZIP/wheel、锁、内存文件描述符及子进程均由受接口约束的替身提供。这里只导入被测源码，没有读取真实发行物或执行实际升级。
 
+根工作区随后完成 13 个维护 Python 文件的 AST 语法检查、`apps/host-demo/scripts/generate_update_protocol.py --check` 及指定 CPython 3.11.17 的 `uv lock --locked --offline` 检查，均退出 0。包资源首次 `--check` 报告缺少新增更新 Schema；从权威来源执行 `apps/camctl/scripts/sync_resources.py` 生成后，再次 `--check` 退出 0。生成对象是被 Git 忽略的源码包资源，没有构建或安装发行物。
+
 ## 失败与更正记录
 
 一次 worker 单元的静态许可遗漏了 argparse 的终端尺寸及 gettext 环境读取。该次 `1 passed` 不计入符合隔离要求的结果；补齐终端和翻译替身后，经复核重新执行通过，根工作区也再次通过。没有操作业务文件、数据库、子进程或设备。
