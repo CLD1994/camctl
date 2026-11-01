@@ -12,6 +12,7 @@ from __future__ import annotations
 import enum
 import os
 import sqlite3
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,7 @@ from camctl.session.locks import (
     lock_error_facts,
     lock_file_paths,
 )
+from camctl.update_engine.layout import check_initialization
 
 #: 用途子目录从用途与路径的权威映射派生；另建日志目录和拍摄工作父目录。
 _STAGING_SUBDIRS = (*PURPOSE_DIRECTORIES.values(), "logs", "capture-work")
@@ -179,6 +181,11 @@ def initialize_state(
     ready = Path(os.path.abspath(config.paths.ready))
     processing = Path(os.path.abspath(config.paths.processing))
     state_db = Path(state_db).resolve()
+
+    try:
+        check_initialization(sys.prefix, state_db, staging, ready, processing)
+    except (OSError, ValueError) as error:
+        return InitResult(InitOutcome.FAILED, f"维护布局检查失败: {error}", error)
 
     alias = check_distinct_roots((staging, ready, processing))
     if alias is not None:

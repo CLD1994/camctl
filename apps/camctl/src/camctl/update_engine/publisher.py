@@ -1,6 +1,7 @@
 """从 wheel 在虚拟环境外发布与部署绑定的稳定维护入口。"""
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,11 +9,13 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 import types
 import zipfile
 
 from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.update_engine.diagnostic_fallback import freeze
+from camctl.update_engine.layout import database_locator, environment_locator
 
 
 def _module_from_wheel(archive, name):
@@ -42,6 +45,57 @@ def _publish_file(path, content, mode):
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def _launcher(base_python, router):
+    return ('#!/bin/sh\nexec ' + shlex.quote(str(base_python)) + ' -B -I ' +
+            shlex.quote(str(router)) + ' "$@"\n').encode()
+
+
+def _publish_launcher(path, content, base_python, directory, binding):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        info = None
+    if info is not None:
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o700):
+            raise ValueError('既有维护入口无法核实')
+        previous = path.read_bytes()
+        if previous == content:
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            return
+        try:
+            lines = previous.decode('utf-8').splitlines()
+            parts = shlex.split(lines[1])
+            router = Path(parts[4])
+            if (len(lines) != 2 or len(parts) != 6 or parts[:4] != ['exec', str(base_python), '-B', '-I']
+                    or parts[5] != '$@' or previous != _launcher(base_python, router)
+                    or (router != directory / 'router.py' and
+                        not (router.name == 'router.py' and router.parent.parent == directory / 'versions'))):
+                raise ValueError('既有维护入口不属于当前部署')
+            old_binding = json.loads((router.parent / 'binding.json').read_text(encoding='utf-8'))
+            if any(old_binding.get(key) != binding[key] for key in ('target', 'python', 'camctl_path')):
+                raise ValueError('既有维护入口绑定不一致')
+        except (IndexError, UnicodeError, ValueError, OSError) as error:
+            raise ValueError('既有维护入口无法核实') from error
+    fd, name = tempfile.mkstemp(prefix='.camctl-updater-', dir=directory)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o700)
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+    finally:
+        try:
+            os.unlink(name)
+        except FileNotFoundError:
+            pass
 
 
 def publish(wheel, target, base_python, camctl_path, config):
@@ -100,36 +154,57 @@ def _publish_locked(wheel, target, base_python, camctl_path, config):
             probe = engine.read('probe.py').decode('utf-8')
     environment = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV')}
     check = subprocess.run([str(target / 'venv/bin/python'), '-B', '-I', '-c', probe,
-                            config or '', 'config'], capture_output=True, env=environment, check=False)
+                            config or '', 'inspect'], capture_output=True, env=environment, check=False)
     if check.returncode:
         raise ValueError('原环境配置检查失败: ' + check.stderr.decode('utf-8', errors='replace'))
     original = json.loads(check.stdout)
     original['config_snapshot'] = transaction.snapshot_config(Path(original['config']), config)
     output = target / 'updates' / ('publish-' + os.urandom(16).hex())
-    binding = {'target': str(target), 'python': str(base_python), 'camctl_path': str(camctl_path)}
+    layout_path = directory / 'layout.json'
+    layout = {'environment': str((target / 'venv').resolve()), 'state_db': original['state_db'],
+              **{name: os.path.abspath(original['paths'][name]) for name in ('staging', 'ready', 'processing')}}
+    locator_content = (json.dumps(str(layout_path), ensure_ascii=False) + '\n').encode()
+    env_locator = environment_locator(target / 'venv')
+    db_locator = database_locator(original['state_db'])
+    binding = {'target': str(target), 'python': str(base_python), 'camctl_path': str(camctl_path),
+               'layout_path': str(layout_path)}
     binding_bytes = (json.dumps(binding, ensure_ascii=False, sort_keys=True) + '\n').encode()
-    launcher = ('#!/bin/sh\nexec ' + shlex.quote(str(base_python)) + ' -B -I ' +
-                shlex.quote(str(directory / 'router.py')) + ' "$@"\n').encode()
     files = {'router.py': (router, 0o644), 'result-schema.json': (result_schema, 0o644),
              'update_transaction.py': (transaction_source, 0o644), 'error_diagnostics.py': (diagnostic_source, 0o644),
              'diagnostic_fallback.py': (fallback_source, 0o644), 'archive_support.py': (archive_source, 0o644),
              'bundle_support.py': (bundle_source, 0o644),
-             'binding.json': (binding_bytes, 0o600), 'camctl-updater': (launcher, 0o700)}
+             'binding.json': (binding_bytes, 0o600)}
+    version_hash = hashlib.sha256()
+    for name, (content, mode) in sorted(files.items()):
+        version_hash.update(name.encode() + b'\0' + str(mode).encode() + b'\0')
+        version_hash.update(hashlib.sha256(content).digest())
+    versions = directory / 'versions'
+    version_dir = versions / version_hash.hexdigest()
+    launcher = _launcher(base_python, version_dir / 'router.py')
+    layout_bytes = (json.dumps(layout, ensure_ascii=False, sort_keys=True) + '\n').encode()
     transaction.validate_paths(target, original, None, output,
         [original['paths'][name] for name in ('staging', 'ready', 'processing')], before_lock=True,
-        extra_effect_dirs=(directory,), extra_control_files=tuple(directory / name for name in files))
-    try:
-        directory.mkdir(mode=0o700)
-        transaction.sync_dir(target)
-    except FileExistsError:
-        info = directory.lstat()
-        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
-                or stat.S_IMODE(info.st_mode) != 0o700
-                or any(path.name not in files for path in directory.iterdir())):
-            raise ValueError('已存在的维护目录无法核实')
+        extra_effect_dirs=(directory,), extra_control_files=(layout_path, directory / 'camctl-updater',
+            *tuple(version_dir / name for name in files), env_locator, db_locator))
+    for path in (directory, versions, version_dir):
+        try:
+            path.mkdir(mode=0o700)
+            transaction.sync_dir(path.parent)
+        except FileExistsError:
+            info = path.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                    or stat.S_IMODE(info.st_mode) != 0o700):
+                raise ValueError('已存在的维护目录无法核实: ' + str(path))
+    _publish_file(layout_path, layout_bytes, 0o600)
+    transaction.sync_dir(directory)
     for name, (content, mode) in files.items():
-        _publish_file(directory / name, content, mode)
-        transaction.sync_dir(directory)
+        _publish_file(version_dir / name, content, mode)
+        transaction.sync_dir(version_dir)
+    for locator in (env_locator, db_locator):
+        _publish_file(locator, locator_content, 0o600)
+        transaction.sync_dir(locator.parent)
+    _publish_launcher(directory / 'camctl-updater', launcher, base_python, directory, binding)
+    transaction.sync_dir(directory)
     return directory / 'camctl-updater'
 
 

@@ -68,6 +68,7 @@ def test_initialize_keeps_upgrade_inside_owned_lease_and_forwards_it(monkeypatch
     config = SimpleNamespace(paths=SimpleNamespace(staging="/staging", ready="/ready", processing="/processing"))
     lease = create_autospec(SessionLease, instance=True, spec_set=True)
     monkeypatch.setattr(initialization, "ensure_runtime_library", create_autospec(initialization.ensure_runtime_library))
+    monkeypatch.setattr(initialization, "check_initialization", create_autospec(initialization.check_initialization))
     monkeypatch.setattr(initialization, "check_distinct_roots", create_autospec(initialization.check_distinct_roots, return_value=None))
     monkeypatch.setattr(initialization, "check_atomic_move_support", create_autospec(initialization.check_atomic_move_support, return_value=None))
     monkeypatch.setattr(Path, "resolve", create_autospec(Path.resolve, side_effect=lambda path: path))
@@ -86,6 +87,23 @@ def test_initialize_keeps_upgrade_inside_owned_lease_and_forwards_it(monkeypatch
     result = initialization.initialize_state(config, Path("/state/state.db"), upgrade_capture_preparation=True)
     assert result.outcome is initialization.InitOutcome.VERIFIED_EXISTING
     lease.close.assert_called_once()
+
+
+def test_initialize_rejects_changed_maintenance_layout_before_writes(monkeypatch):
+    config = SimpleNamespace(paths=SimpleNamespace(staging="/staging", ready="/ready", processing="/processing"))
+    monkeypatch.setattr(initialization, "ensure_runtime_library", create_autospec(initialization.ensure_runtime_library))
+    monkeypatch.setattr(Path, "resolve", create_autospec(Path.resolve, side_effect=lambda path: path))
+    check = create_autospec(initialization.check_initialization, side_effect=ValueError("layout mismatch"))
+    monkeypatch.setattr(initialization, "check_initialization", check)
+    mkdir = create_autospec(Path.mkdir)
+    monkeypatch.setattr(Path, "mkdir", mkdir)
+    acquire = create_autospec(initialization.acquire_session)
+    monkeypatch.setattr(initialization, "acquire_session", acquire)
+    result = initialization.initialize_state(config, Path("/new/state.db"))
+    assert result.outcome is initialization.InitOutcome.FAILED
+    check.assert_called_once()
+    mkdir.assert_not_called()
+    acquire.assert_not_called()
 
 
 @pytest.fixture
