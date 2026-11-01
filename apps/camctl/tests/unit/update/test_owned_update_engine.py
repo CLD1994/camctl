@@ -145,6 +145,77 @@ def test_force_missing_lock_parent_fails_before_backup_or_mutation():
     ops.mark_intent.assert_not_called()
 
 
+def test_finalize_archives_derives_journal_only_after_confirmed_commit():
+    token = 'a' * 32
+    output = Path('/target/updates') / token
+    pending = {'state': 'committed', 'output': str(output), 'mode': 'force'}
+    frozen = dict(pending, state='updating')
+    job = {'record': frozen}
+    force_archive = ModuleType('force_archive')
+    force_archive.finalize = Mock()
+    import fcntl
+    def read(path, **kwargs):
+        del kwargs
+        if path == output / 'archive-job.json':
+            return json.dumps(job)
+        if path == output / 'journal.json':
+            raise FileNotFoundError(str(path))
+        if path == Path('/target/updates/pending.json'):
+            return json.dumps(pending)
+        raise AssertionError(str(path))
+    with patch.dict(sys.modules, {'force_archive': force_archive}), \
+            patch.object(Path, 'read_text', read), patch.object(engine.force_record, 'validate_target', create=True), \
+            patch.object(engine.force_record, 'classify', create=True), \
+            patch.object(engine.transaction, 'classify_record', return_value=JournalState.COMMITTED, create=True), \
+            patch.object(engine.transaction, 'validate_record_target', create=True), \
+            patch.object(engine.transaction, 'sync_file', create=True), \
+            patch.object(engine.transaction, 'sync_dir', create=True), \
+            patch.object(engine.transaction, 'atomic_json', create=True) as atomic, \
+            patch.object(engine.os, 'open', return_value=11), patch.object(engine.os, 'close'), \
+            patch.object(fcntl, 'flock'):
+        engine.finalize_archives(Path('/target'), output)
+    atomic.assert_called_once_with(output / 'journal.json', pending)
+    force_archive.finalize.assert_called_once_with(pending)
+
+
+def test_force_commit_publishes_only_pending_authority():
+    with patch.object(Path, 'is_dir', return_value=True):
+        ops = engine.ForceOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
+    ops.record = {'state': 'updating', 'mutation_intent': True}
+    with patch.object(engine.transaction, 'atomic_json', create=True) as atomic:
+        ops.commit()
+    atomic.assert_called_once_with(Path('/target/updates/pending.json'),
+                                   {'state': 'committed', 'mutation_intent': True})
+
+
+def test_finalize_never_treats_uncommitted_pending_as_success():
+    token = 'a' * 32
+    output = Path('/target/updates') / token
+    pending = {'state': 'updating', 'output': str(output), 'mode': 'force'}
+    job = {'record': dict(pending)}
+    archive_module = ModuleType('force_archive')
+    archive_module.finalize = Mock()
+    import fcntl
+    def read(path, **kwargs):
+        del kwargs
+        if path == output / 'archive-job.json': return json.dumps(job)
+        if path == output / 'journal.json': raise FileNotFoundError(str(path))
+        if path == Path('/target/updates/pending.json'): return json.dumps(pending)
+        raise AssertionError(str(path))
+    with patch.dict(sys.modules, {'force_archive': archive_module}), \
+            patch.object(Path, 'read_text', read), patch.object(engine.force_record, 'validate_target', create=True), \
+            patch.object(engine.force_record, 'classify', create=True), \
+            patch.object(engine.transaction, 'classify_record', return_value=JournalState.UPDATING, create=True), \
+            patch.object(engine.transaction, 'sync_file', create=True), \
+            patch.object(engine.transaction, 'sync_dir', create=True), \
+            patch.object(engine.transaction, 'atomic_json', create=True) as atomic, \
+            patch.object(engine.os, 'open', return_value=11), patch.object(engine.os, 'close'), \
+            patch.object(fcntl, 'flock'):
+        engine.finalize_archives(Path('/target'), output)
+    atomic.assert_not_called()
+    archive_module.finalize.assert_not_called()
+
+
 def test_force_installs_configuration_at_frozen_symlink_target():
     with patch.object(Path, 'is_dir', return_value=True):
         ops = engine.ForceOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'),

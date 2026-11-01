@@ -131,6 +131,9 @@ def finalize_archives(target, selected=None):
                 if (current.get('output') != str(output) or
                         transaction.classify_record(current) is not transaction.JournalState.COMMITTED):
                     continue
+                if {key: value for key, value in current.items() if key != 'state'} != {
+                        key: value for key, value in frozen.items() if key != 'state'}:
+                    raise ValueError('归档任务与提交记录不一致')
                 try:
                     pending_record = json.loads((updates / 'pending.json').read_text(encoding='utf-8'))
                 except FileNotFoundError:
@@ -141,6 +144,9 @@ def finalize_archives(target, selected=None):
                 transaction.validate_record_target(current, target)
                 transaction.sync_file(current_path)
                 transaction.sync_dir(current_path.parent)
+                journal = output / 'journal.json'
+                if current_path != journal:
+                    transaction.atomic_json(journal, current)
                 force_archive.finalize(current)
             finally:
                 os.close(fd)
@@ -906,13 +912,6 @@ class ForceOperations(UpdateOperations):
         if self.client_data is not None:
             transaction.sync_file(self.client_data / 'device-capabilities.json')
             transaction.sync_dir(self.client_data)
-
-    def commit(self):
-        committed = dict(self.record, state=transaction.JournalState.COMMITTED.value)
-        transaction.atomic_json(self.output / 'journal.json', committed)
-        transaction.atomic_json(self.pending, committed)
-        self.record = committed
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
