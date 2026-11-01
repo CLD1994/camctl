@@ -179,7 +179,7 @@ def test_finalize_archives_derives_journal_only_after_confirmed_commit():
 
 
 def test_force_commit_publishes_only_pending_authority():
-    with patch.object(Path, 'is_dir', return_value=True):
+    with patch.dict(engine.os.environ, {}, clear=True), patch.object(Path, 'is_dir', return_value=True):
         ops = engine.ForceOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
     ops.record = {'state': 'updating', 'mutation_intent': True}
     with patch.object(engine.transaction, 'atomic_json', create=True) as atomic:
@@ -217,7 +217,7 @@ def test_finalize_never_treats_uncommitted_pending_as_success():
 
 
 def test_force_installs_configuration_at_frozen_symlink_target():
-    with patch.object(Path, 'is_dir', return_value=True):
+    with patch.dict(engine.os.environ, {}, clear=True), patch.object(Path, 'is_dir', return_value=True):
         ops = engine.ForceOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'),
                                      config_path=Path('/link/config'))
     ops.objects = {'configuration': '/actual/config', 'staging': '/stage', 'ready': '/ready'}
@@ -266,7 +266,7 @@ def test_late_intent_sync_error_compares_exact_proposal_and_rolls_back():
     original = {key: key for key in keys}
     original.update(state='preparing', mutation_intent=False, temporary_owners={})
     pending = dict(original)
-    with patch.object(Path, 'is_dir', return_value=True):
+    with patch.dict(engine.os.environ, {}, clear=True), patch.object(Path, 'is_dir', return_value=True):
         ops = engine.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
     ops.record = original
     def publish(path, proposal):
@@ -613,7 +613,7 @@ def test_cause_and_attached_facts_reach_consumer_after_unlock():
 
 def test_entry_recovery_failure_saves_diagnostic_without_overwriting_receipt():
     args = SimpleNamespace(target=Path('/target'), client_data=None, bundle=None, output=None,
-                           recover_only=True, lock_fd=7, config=None)
+                           recover_only=True, finalize_only=False, finalize_output=None, lock_fd=7, config=None)
     parser = Mock(); parser.parse_args.return_value = args
     active = object()
     states = SimpleNamespace(COMMITTED=object(), ROLLED_BACK=object())
@@ -647,9 +647,10 @@ def test_entry_recovery_failure_saves_diagnostic_without_overwriting_receipt():
 
 def test_entry_path_conflict_precedes_output_creation():
     args = SimpleNamespace(target=Path('/target'), client_data=None, bundle=Path('/bundle'),
-                           output=Path('/target/updates/id'), recover_only=False, lock_fd=7, config=None)
+                           output=Path('/target/updates/id'), recover_only=False, finalize_only=False,
+                           finalize_output=None, lock_fd=7, config=None)
     parser = Mock(); parser.parse_args.return_value = args
-    ops = Mock(); ops.preflight.return_value = {'state_db': '/db/state'}
+    ops = Mock(); ops.preflight.return_value = {'state_db': '/db/state'}; ops.update = {'force': False}
     ops.check_paths.side_effect = ValueError('path overlap')
     with patch.object(engine.argparse, 'ArgumentParser', return_value=parser), \
             patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
@@ -668,7 +669,7 @@ def test_entry_path_conflict_precedes_output_creation():
 def test_entry_stderr_write_and_flush_failure_preserve_both_errors():
     for method in ('write', 'flush'):
         args = SimpleNamespace(target=Path('/target'), client_data=None, bundle=None, output=None,
-                               recover_only=True, lock_fd=-1, config=None)
+                               recover_only=True, finalize_only=False, finalize_output=None, lock_fd=-1, config=None)
         parser = Mock(); parser.parse_args.return_value = args
         stderr = Mock(spec=['write', 'flush'])
         getattr(stderr, method).side_effect = BrokenPipeError('stderr failed')
