@@ -69,8 +69,35 @@ env -i CMOCKA_MESSAGE_OUTPUT=STDOUT /tmp/camctl-root-writer-stop-unit
 
 首次 stop 单元编译因保护替身的可变参数宏不满足 `-Wpedantic` 失败，修正宏调用后编译及执行通过；首次失败未执行测试二进制。首次离线锁文件刷新因缺少 pytest 注册表缓存失败，未联网；依赖和摘要保持原样，从项目唯一版本来源同步项目元数据后，`uv lock --locked --offline` 检查退出 0。
 
-`node scripts/check-doc-links.mjs` 在根工作区退出 1，报告部署包 README 模板中三处 `docs/` 链接。它们指向打包时导出的配置参考和公开头文件，在基线 `f18bcac3` 中同样存在；本次未删除链接或放宽检查。接收方 README 的实际导出与包内链接仍需完整包验证。
+`node scripts/check-doc-links.mjs` 在根工作区退出 1，报告部署包 README 模板中三处 `docs/` 链接。它们指向打包时导出的配置参考和公开头文件，在基线 `f18bcac3` 中同样存在；没有删除链接或放宽检查。随后的完整部署包验证已确认三处包内链接有效，见下节。
+
+## 完整部署包及生成链接验证
+
+按用户后续要求实际执行完整部署包构建及仓库外安装验证。交付源码为干净提交 `a213ef40`，命令从仓库根目录执行：
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 apps/camctl/.venv311/bin/python \
+  .agents/skills/camctl-real-device-deploy/scripts/package.py \
+  --repo /workspaces/camctl \
+  --output /workspaces/camctl/tmp/deploy-package-20261102-links-02
+```
+
+入口退出 0，最终 `camctl-deploy.zip` 与同名 `.sha256` 已生成。`validation.json` 及包内 `RELEASE.json.validation` 均为 `passed`，两者内容相等。实际检查包括完整文件集合及摘要、wheel 维护资源、随包文档链接、Release host 编译安装、C 示例编译、TOML 示例正式加载、独立状态库初始化、默认与自定义安装路径、客户端声明同步，以及客户端默认和自定义数据目录的实际启动与 HTTP 检查。相机身份查询使用替身，没有访问真实设备或已有部署。
+
+最终 ZIP 中的 README 与冻结模板逐字一致。独立只读核对确认以下相对目标存在、非空；两份配置文档符合冻结权威来源的导出结果，公开头文件与冻结源相同。
+
+| README 相对链接 | 包内文件大小 | 核对结果 |
+| --- | --- | --- |
+| `docs/camctl-configuration.md` | 25310 字节 | 存在，内容符合配置参考导出 |
+| `docs/camctl_host.h` | 9210 字节 | 存在，与公开头文件一致 |
+| `docs/host-configuration.md` | 5874 字节 | 存在，内容符合 host 配置章节导出 |
+
+`camctl_host.h` 引用的 `camctl_update_protocol.h` 同时交付，与权威源一致。最终包外 SHA-256 为 `196de6c187be4a6eaa05b792b3cdcf1ccaa3ec9d174c41b9b2f9d829ef9e61d7`。补充审计重新校验最终 ZIP 的全部 83 个清单文件、2974 个冻结源码文件，以及 host 源码压缩包内的 `src/host.c`，全部匹配；结果保存在输出目录的 `artifact-audit.json`。
+
+首次使用输出目录 `tmp/deploy-package-20261102-links-01` 时，三处链接检查已经通过，但仓库外首次安装的 Release 编译被 GCC 13.3.0 拒绝：`stop_participant_result` 的 `error` 跨过 `pthread_cleanup_push` 展开的取消保存点，被报告为 `-Werror=clobbered`。以 `volatile` 保留该按值错误参数后，独立源码评审接受，实际优化编译和重新打包通过，没有关闭警告或降低门禁。原有停止单元 30 项也重新通过；它不证明真实线程取消行为。
+
+首次失败目录、收据及 `/tmp/camctl-bundle-check-f140zrt5` 安装日志保留。成功验证的安装与客户端日志位于 `/tmp/camctl-bundle-check-pjoj1gc_`。失败输出不作为交付物，完整流程使用新输出目录重跑。
 
 ## 证据边界
 
-没有新增或运行集成测试，没有实际构建 wheel、sdist、更新 ZIP 或完整部署包，没有安装或更新原 Python 环境，没有执行真实数据库迁移、文件恢复、进程组并发、设备或物理断电验证。源码复核及隔离单元不能替代这些真实组合。完整备份、可靠完成及 V9 起点继续沿用[前期事务验证](transactional-update-verification-2026-10-31.md)的契约与未验范围。
+隔离开发阶段没有构建或安装发行物；后续按要求完成了上一节限定的完整部署包构建、独立首次安装及客户端验证。没有新增或运行完整集成测试套件，没有实际应用 Python 更新 ZIP、升级原环境、执行真实迁移或回滚恢复，也没有验证 ARM64、Windows、最低 CMake、真实线程取消、设备及物理断电。完整备份、可靠完成及 V9 起点继续沿用[前期事务验证](transactional-update-verification-2026-10-31.md)的契约与未验范围。
