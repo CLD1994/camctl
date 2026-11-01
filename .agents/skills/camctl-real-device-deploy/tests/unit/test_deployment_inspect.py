@@ -93,7 +93,8 @@ class DeploymentInspectionTests(unittest.TestCase):
                 patch.object(deployment.os, 'close') as close_file, patch.object(deployment.os, 'fsync') as sync:
             result = deployment.create_database_copy(Path('/new.toml'), Path('/transaction/new.db'))
         self.assertEqual(result, {'state_db': '/state.db', 'metadata': {'instance_id': 'new', 'format_version': 9}})
-        self.assertTrue(open_file.call_args.args[1] & deployment.os.O_EXCL)
+        self.assertTrue(open_file.call_args_list[0].args[1] & deployment.os.O_EXCL)
+        self.assertEqual(open_file.call_count, 2)
         self.assertEqual(close_file.call_count, 2)
         sync.assert_called_once_with(41)
         initialization._build_initial_database.assert_called_once_with(
