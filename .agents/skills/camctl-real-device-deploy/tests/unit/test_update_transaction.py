@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-SOURCE = Path(__file__).absolute().parents[2] / 'scripts/update_transaction.py'
+SOURCE = Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/update_engine/update_transaction.py'
 spec = importlib.util.spec_from_file_location('update_transaction_under_test', SOURCE)
 transaction = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(transaction)
@@ -21,7 +21,8 @@ def record(state='preparing', intent=False):
               'controller': '/usr/bin/python3.11', 'lock_paths': ['/db/session', '/db/admission'],
               'original': {'config': '/etc/config', 'state_db': '/db/state',
                            'lock_paths': ['/db/session', '/db/admission'],
-                           'config_sha256': 'a' * 64,
+                           'config_snapshot': {'source': '/etc/config', 'resolved': '/etc/config',
+                                               'present': True, 'sha256': 'a' * 64},
                            'deployment': {'state_db': '/db/state', 'metadata': {}}}}
     result['temporary'] = transaction.temporary_paths(Path('/target'), Path('/target/updates/id'),
                                                        Path('/db/state'), None)
@@ -33,6 +34,11 @@ def record(state='preparing', intent=False):
 
 
 class JournalTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch.object(transaction, 'verify_config')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_creation_identity_uses_setgid_rule(self):
         for mode, expected_gid in ((0o40700, 0), (0o42700, 1000)):
             with self.subTest(mode=mode), patch.object(Path, 'stat', return_value=SimpleNamespace(
@@ -220,14 +226,15 @@ class JournalTests(unittest.TestCase):
 
 class PathIdentityTests(unittest.TestCase):
     def setUp(self):
-        self.original = {'config': '/etc/config', 'state_db': '/db/state',
+        self.original = {'config': '/etc/config', 'config_snapshot': {'present': True}, 'state_db': '/db/state',
                          'lock_paths': ['/db/session', '/db/admission']}
         self.ids = {'/etc/config': (1, 1), '/db/state': (1, 2), '/db/session': (1, 3),
                     '/db/admission': (1, 4), '/target/venv': (1, 5),
                     '/media/staging': (2, 1), '/media/ready': (2, 2), '/media/processing': (2, 3)}
         self.bindings = ['/media/staging', '/media/ready', '/media/processing']
 
-    def check(self, client, aliases=None, walk=None, before_lock=False, recovery=False, links=None, errors=None):
+    def check(self, client, aliases=None, walk=None, before_lock=False, recovery=False, links=None, errors=None,
+              extra_input_paths=()):
         aliases = aliases or {}
         walk = walk or {}
         links = links or {}
@@ -252,7 +259,8 @@ class PathIdentityTests(unittest.TestCase):
                 patch.object(transaction.os, 'walk', side_effect=lambda path, **kwargs: iter(walk.get(str(path), ()))):
             transaction.validate_paths(Path('/target'), self.original, client,
                                        Path('/target/updates/id'), self.bindings,
-                                       before_lock=before_lock, recovery=recovery)
+                                       before_lock=before_lock, recovery=recovery,
+                                       extra_input_paths=extra_input_paths)
 
     def test_independent_target_is_allowed_and_aliases_are_rejected(self):
         self.check(Path('/client'))
@@ -263,6 +271,17 @@ class PathIdentityTests(unittest.TestCase):
         self.ids['/client/device-capabilities.json'] = self.ids['/db/state']
         with self.assertRaises(ValueError):
             self.check(Path('/client'))
+
+    def test_update_zip_does_not_overlap_or_alias_written_objects(self):
+        archive = Path('/release/update.zip')
+        self.ids[str(archive)] = (4, 1)
+        self.check(None, extra_input_paths=(archive,))
+        with self.assertRaises(ValueError):
+            self.check(None, aliases={'/release/update.zip': '/target/venv/update.zip'},
+                       extra_input_paths=(archive,))
+        self.ids[str(archive)] = self.ids['/db/state']
+        with self.assertRaises(ValueError):
+            self.check(None, extra_input_paths=(archive,))
 
     def test_cannot_silently_ignore_missing_protected_identity(self):
         del self.ids['/db/state']

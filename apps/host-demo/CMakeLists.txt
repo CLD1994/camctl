@@ -37,7 +37,7 @@ foreach(entry IN LISTS HOST_VENDOR_FILES)
 endforeach()
 find_package(Threads REQUIRED)
 add_library(camctl_host STATIC src/callbacks.c src/notification.c src/callback_queue.c src/result.c src/scheduler.c src/log_queue.c src/process.c src/process_group.c src/claim.c
-  src/config.c src/input.c src/host.c src/logger.c src/diagnostic.c src/linux_rename.c
+  src/config.c src/input.c src/host.c src/logger.c src/diagnostic.c src/linux_rename.c src/update_result.c src/maintenance.c
   src/claim_posix.c
   vendor/yyjson/yyjson.c)
 target_include_directories(camctl_host PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -171,7 +171,7 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS camctl_host ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(TARGETS host-demo RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES include/camctl_host.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.h")
 file(RELATIVE_PATH host_header_doc_path "${CMAKE_INSTALL_FULL_DOCDIR}"
   "${CMAKE_INSTALL_FULL_INCLUDEDIR}/camctl_host.h")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/README.md" host_install_readme)

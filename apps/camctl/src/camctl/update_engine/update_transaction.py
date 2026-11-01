@@ -242,7 +242,8 @@ def verify_database_snapshot(path, expected, verify_integrity):
 
 
 def validate_paths(target, original, client_data, output, bindings, *, before_lock=False,
-                   recovery=False, temporary=None, extra_control_files=(), extra_effect_dirs=()):
+                   recovery=False, temporary=None, extra_control_files=(), extra_effect_dirs=(),
+                   extra_input_paths=()):
     """核对保留对象与整个事务的写入、搬移及清理范围。"""
     env = target / 'venv'
     updates = target / 'updates'
@@ -294,6 +295,9 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
     for path in media:
         if any(overlaps(path, effect) for effect in [*effect_dirs, *effect_files, *locks]):
             raise ValueError('绑定目录与更新操作路径冲突: ' + str(path))
+    for path in extra_input_paths:
+        if any(overlaps(path, effect) for effect in [*effect_dirs, *effect_files]):
+            raise ValueError('更新输入与操作路径冲突: ' + str(path))
 
     def identity(path, *, required=False):
         try:
@@ -364,6 +368,17 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
             value = identity(path)
             if value is not None:
                 effects.add(value)
+    for root in extra_input_paths:
+        value = identity(root, required=True)
+        if value in effects:
+            raise ValueError('更新输入与写入对象共享文件身份')
+        if stat.S_ISDIR(root.stat().st_mode):
+            for directory, names, files in os.walk(root, followlinks=False,
+                                                    onerror=lambda error: (_ for _ in ()).throw(error)):
+                for name in (*names, *files):
+                    value = tree_identity(Path(directory) / name)
+                    if value in effects:
+                        raise ValueError('更新输入内容与写入对象共享文件身份')
     if client is not None and identity(updates) is not None:
         client_id = identity(client)
         if client_id is not None:
@@ -570,12 +585,12 @@ def make_directories(path):
 def recover(record, verify_integrity, register_owner):
     """使用保留的完整备份幂等恢复；无修改意图时不覆盖原环境。"""
     state = classify_record(record)
+    if state not in (JournalState.PREPARING, JournalState.UPDATING):
+        raise ValueError('终态更新记录不能再次恢复')
     original = record['original']
     verify_config(original)
     if state is JournalState.PREPARING:
         return
-    if state is not JournalState.UPDATING:
-        raise ValueError('终态更新记录不能再次恢复')
     validate_active_record(record)
     env = Path(record['env'])
     env_backup = Path(record['env_backup'])

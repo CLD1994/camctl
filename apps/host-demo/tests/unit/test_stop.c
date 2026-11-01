@@ -8,9 +8,41 @@
 static host owned;
 static int spawns, requests[2], collects, polls, joins, diag_closes, log_closes;
 static int callbacks, positions[4], waits, join_error;
+static int maintenance_wait_mode, maintenance_wait_step;
+static bool maintenance_stub_enabled;
+static int maintenance_calls;
 static bool poll_error, callback_work, start_submit, borrower_done, other_stop_done;
 static bool notification_eof, clock_error, stop_before_admission;
 static host_result results[2];
+int __wrap_host_maintenance_run(const camctl_host_update_config *config,
+                                const camctl_host_update_request *request, camctl_host_update_result *result) {
+    (void)config; (void)request;
+    if (!maintenance_stub_enabled) {
+        fail_msg("%s", "不得启动真实维护");
+        return EINVAL;
+    }
+    assert_true(maintenance_active); assert_true(maintenance_owner);
+    if (instance) {
+        assert_int_equal(instance->lifecycle, HOST_STOPPED);
+        assert_int_equal(instance->api_users, 0);
+    }
+    maintenance_calls++;
+    result->outcome = CAMCTL_UPDATE_OUTCOME_APPLIED;
+    result->effect = CAMCTL_UPDATE_EFFECT_COMMITTED;
+    result->eligibility = CAMCTL_UPDATE_ELIGIBILITY_ALLOWED;
+    return 0;
+}
+int __wrap_host_maintenance_spawn(host_child *child, const camctl_host_update_config *config,
+                                  const camctl_host_update_request *request) {
+    (void)child; (void)config; (void)request; fail_msg("%s", "不得启动真实进程"); return EINVAL;
+}
+int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                          void *(*start)(void *), void *argument) {
+    (void)thread; (void)attr; (void)start; (void)argument; fail_msg("%s", "不得创建线程"); return EINVAL;
+}
+int __wrap_pipe2(int fds[2], int flags) {
+    (void)fds; (void)flags; fail_msg("%s", "不得创建管道"); return -1;
+}
 void __wrap_host_log(host_logger *l, const char *f, ...) { (void)l; (void)f; }
 ssize_t __wrap_write(int fd, const void *p, size_t n) {
     (void)p; assert_int_equal(fd, owned.wake[1]); return (ssize_t)n;
@@ -115,7 +147,11 @@ int __wrap_pthread_join(pthread_t thread, void **p) {
     pthread_mutex_unlock(&owned.inputs_mutex);
     joins++;
     if (join_error) { int e = join_error; join_error = 0; return e; }
-    if (thread == owned.worker) { worker_main(&owned); module_thread = false; }
+    if (thread == owned.worker) {
+        worker_main(&owned); module_thread = false;
+        if (maintenance_wait_mode == 3)
+            maintenance_active = true;
+    }
     else {
         assert_true(owned.motor && thread == owned.callback_thread);
         assert_true(owned.callback_stop); assert_false(owned.callback_active);
@@ -127,7 +163,17 @@ int __wrap_pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex) 
     assert_true(++waits < 8); pthread_mutex_unlock(mutex);
     if (condition == &owned.callback_ready) assert_true(stop_drained(&owned));
     else if (condition == &instance_ready) {
-        if (borrower_done) { borrower_done = false; release_instance(&owned); }
+        if (maintenance_wait_mode) {
+            maintenance_wait_step++;
+            if (maintenance_wait_mode == 2 && maintenance_wait_step == 1) {
+                owned.lifecycle = HOST_STOPPED;
+                owned.stop_joining = false;
+                maintenance_active = true;
+            } else {
+                assert_true(maintenance_active);
+                maintenance_active = false;
+            }
+        } else if (borrower_done) { borrower_done = false; release_instance(&owned); }
         else {
             assert_true(other_stop_done); other_stop_done = false;
             owned.lifecycle = HOST_STOPPED; owned.stop_joining = false;
@@ -154,6 +200,9 @@ static int setup(void **state) {
         results[i] = (host_result){HOST_RESULT_SUCCESS, true};
     }
     instance = &owned; module_thread = false; registrations.initialized = true;
+    maintenance_active = maintenance_owner = false;
+    maintenance_wait_mode = maintenance_wait_step = maintenance_calls = 0;
+    maintenance_stub_enabled = false;
     spawns = collects = polls = joins = diag_closes = log_closes = callbacks = waits = join_error = 0;
     requests[0] = requests[1] = 0;
     poll_error = callback_work = start_submit = borrower_done = other_stop_done = false;
@@ -162,7 +211,7 @@ static int setup(void **state) {
 }
 static int teardown(void **state) {
     (void)state; if (owned.inputs.items) release_storage(&owned);
-    instance = NULL; module_thread = false; return 0;
+    instance = NULL; module_thread = false; maintenance_active = maintenance_owner = false; return 0;
 }
 static void uninitialized(void **state) {
     (void)state; instance = NULL;
@@ -244,6 +293,58 @@ static void concurrent_stop(void **state) {
     (void)state; owned.lifecycle = HOST_STOPPING; owned.stop_joining = other_stop_done = true;
     assert_int_equal(camctl_host_stop(), 0); assert_int_equal(waits, 1); assert_int_equal(joins, 0);
 }
+static void maintenance_before_stop(void **state) {
+    (void)state; owned.lifecycle = HOST_STOPPED; maintenance_active = true; maintenance_wait_mode = 1;
+    assert_int_equal(camctl_host_stop(), 0);
+    assert_int_equal(maintenance_wait_step, 1); assert_false(maintenance_active);
+}
+static void maintenance_while_waiting_for_other_stop(void **state) {
+    (void)state; owned.lifecycle = HOST_STOPPING; owned.stop_joining = true; maintenance_wait_mode = 2;
+    assert_int_equal(camctl_host_stop(), 0);
+    assert_int_equal(maintenance_wait_step, 2); assert_false(maintenance_active);
+}
+static void maintenance_accepted_during_stop(void **state) {
+    (void)state; maintenance_wait_mode = 3;
+    assert_int_equal(camctl_host_stop(), 0);
+    assert_int_equal(maintenance_wait_step, 1); assert_false(maintenance_active);
+}
+static void callback_cannot_wait_for_maintenance(void **state) {
+    (void)state; module_thread = maintenance_active = true;
+    assert_int_equal(camctl_host_stop(), -1); assert_int_equal(errno, EDEADLK); assert_int_equal(waits, 0);
+}
+static void update_uninitialized(void **state) {
+    (void)state; instance = NULL; maintenance_stub_enabled = true;
+    camctl_host_update_config config = {"/camctl", "/updater", NULL};
+    camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_APPLY, "/package.zip", NULL};
+    camctl_host_update_result result;
+    assert_int_equal(camctl_host_update(&config, &request, &result), 0);
+    assert_int_equal(maintenance_calls, 1); assert_false(maintenance_active);
+    assert_int_equal(result.effect, CAMCTL_UPDATE_EFFECT_COMMITTED);
+}
+static void update_stops_and_drains_borrower(void **state) {
+    (void)state; maintenance_stub_enabled = true;
+    owned.config.camctl_path = "/camctl"; owned.config.updater_path = "/updater";
+    owned.config.config_path = "/config"; owned.api_users = 1; borrower_done = true;
+    camctl_host_update_config config = {"/camctl", "/updater", "/config"};
+    camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_APPLY, "/package.zip", NULL};
+    camctl_host_update_result result;
+    assert_int_equal(camctl_host_update(&config, &request, &result), 0);
+    assert_int_equal(maintenance_calls, 1); assert_int_equal(owned.lifecycle, HOST_STOPPED);
+    assert_false(maintenance_active); assert_false(maintenance_owner);
+}
+static void update_gates_and_checks_active_configuration(void **state) {
+    (void)state; camctl_host_update_config config = {"/camctl", "/updater", NULL};
+    camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_RECOVER, NULL, NULL};
+    camctl_host_update_result result;
+    maintenance_active = true;
+    assert_int_equal(camctl_host_update(&config, &request, &result), -1); assert_int_equal(errno, EBUSY);
+    assert_int_equal(camctl_host_init(NULL, NULL), -1); assert_int_equal(errno, EBUSY);
+    maintenance_active = false; module_thread = true;
+    assert_int_equal(camctl_host_update(&config, &request, &result), -1); assert_int_equal(errno, EDEADLK);
+    module_thread = false; owned.config.camctl_path = "/other"; owned.config.updater_path = "/updater";
+    assert_int_equal(camctl_host_update(&config, &request, &result), -1); assert_int_equal(errno, EINVAL);
+    assert_int_equal(maintenance_calls, 0); assert_int_equal(owned.lifecycle, HOST_RUNNING);
+}
 static void self_stop(void **state) {
     (void)state; owned.lifecycle = HOST_STOPPING; owned.stop_joining = module_thread = true;
     assert_int_equal(camctl_host_stop(), -1); assert_int_equal(errno, EDEADLK); assert_int_equal(waits, 0);
@@ -299,12 +400,22 @@ static void diagnostics_delay_close(void **state) {
 #define CASE(name) cmocka_unit_test_setup_teardown(name, setup, teardown)
 int main(void) {
     const struct CMUnitTest tests[] = {
+#ifdef HOST_UPDATE_STOP_ONLY
+        CASE(maintenance_before_stop), CASE(maintenance_while_waiting_for_other_stop),
+        CASE(maintenance_accepted_during_stop), CASE(callback_cannot_wait_for_maintenance),
+        CASE(update_uninitialized), CASE(update_stops_and_drains_borrower),
+        CASE(update_gates_and_checks_active_configuration),
+#else
         CASE(uninitialized), CASE(terminal_idempotent), CASE(stops_both_no_restart),
         CASE(stopped_launch), CASE(queued_submit), CASE(borrowed_submit_rechecks_stop_before_enqueue),
         CASE(active_submit_success), CASE(active_submit_error),
         CASE(infrastructure_error_preserves_active), CASE(clock_failure_preserves_active), CASE(waits_borrower), CASE(claim_reference),
-        CASE(concurrent_stop), CASE(self_stop), CASE(retry_join_failure), CASE(callback_drain_reentry),
+        CASE(concurrent_stop), CASE(maintenance_before_stop), CASE(maintenance_while_waiting_for_other_stop),
+        CASE(maintenance_accepted_during_stop), CASE(callback_cannot_wait_for_maintenance),
+        CASE(update_uninitialized), CASE(update_stops_and_drains_borrower),
+        CASE(update_gates_and_checks_active_configuration), CASE(self_stop), CASE(retry_join_failure), CASE(callback_drain_reentry),
         CASE(notification_residue_and_active_callback_delay_stop), CASE(diagnostics_delay_close),
+#endif
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

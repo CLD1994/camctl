@@ -129,6 +129,7 @@ def main():
             '--camctl-path', target / 'venv/bin/camctl', '--config', config_path])
         receipt['updater_path'] = str(target / 'maintenance/camctl-updater')
         command = [target / 'host/bin/host-demo', '--camctl', target / 'venv/bin/camctl', '--config', config_path,
+                   '--updater', target / 'maintenance/camctl-updater',
                    '--ready', configuration['paths']['ready'], '--processing', configuration['paths']['processing'],
                    '--log', target / 'host.log']
         launcher = target / 'start-host-demo.sh'

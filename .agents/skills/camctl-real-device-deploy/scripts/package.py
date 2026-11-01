@@ -55,7 +55,8 @@ def write_configuration_docs(source, bundle):
         raise ValueError('host 配置参考章节缺失，请同步打包入口')
     section = host.split(heading, 1)[1].split('\n## ', 1)[0]
     (docs / 'host-configuration.md').write_text('# camctl_host 配置与日志\n' + standalone(section), encoding='utf-8')
-    shutil.copyfile(source / 'apps/host-demo/include/camctl_host.h', docs / 'camctl_host.h')
+    for header in (source / 'apps/host-demo/include').glob('*.h'):
+        shutil.copyfile(header, docs / header.name)
 
 
 def write_zip(bundle, destination):

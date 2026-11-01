@@ -47,6 +47,8 @@ void host_child_init(host_child *c, char *output, size_t output_capacity, char *
                      size_t stderr_capacity);
 int host_child_spawn(host_child *c, const camctl_host_config *config, host_command command,
                      const char *plan);
+int host_maintenance_spawn(host_child *c, const camctl_host_update_config *config,
+                           const camctl_host_update_request *request);
 void host_child_collect(host_child *c, host_child_log log, void *context);
 void host_child_request_stop(host_child *c, host_child_log log, void *context);
 bool host_child_done(const host_child *c);

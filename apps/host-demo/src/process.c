@@ -61,37 +61,7 @@ void host_child_close_notifications(host_child *c) {
         close(c->notification_write_fd);
     c->notification_fd = c->notification_write_fd = -1;
 }
-int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command cmd,
-                     const char *plan) {
-    if (c->pid && !host_child_done(c))
-        return EBUSY;
-    reset_attempt(c);
-    int contract = host_check_reaping_contract();
-    if (contract)
-        return contract;
-    bool notify = cmd == HOST_RUN && c->notifications_enabled;
-    if (notify) {
-        int e = host_child_prepare_notifications(c);
-        if (e)
-            return e;
-    }
-    char notification_number[32];
-    char *argv[9];
-    size_t n = 0;
-    argv[n++] = (char *)cfg->camctl_path;
-    argv[n++] = cmd == HOST_RUN ? "run" : "submit";
-    if (plan)
-        argv[n++] = (char *)plan;
-    if (cfg->config_path) {
-        argv[n++] = "--config";
-        argv[n++] = (char *)cfg->config_path;
-    }
-    if (notify) {
-        snprintf(notification_number, sizeof(notification_number), "%d", c->notification_write_fd);
-        argv[n++] = "--host-notification-fd";
-        argv[n++] = notification_number;
-    }
-    argv[n] = NULL;
+static int spawn_prepared(host_child *c, const char *executable, char *const argv[], bool notify) {
     int out[2], err[2], rc;
     if (host_pipe(out)) {
         rc = errno;
@@ -138,7 +108,7 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
                    (rc = posix_spawn_file_actions_addclose(&actions, c->notification_fd))))
         goto attr;
     pid_t pid;
-    rc = posix_spawn(&pid, cfg->camctl_path, &actions, &attr, argv, environ);
+    rc = posix_spawn(&pid, executable, &actions, &attr, argv, environ);
     if (!rc) {
         c->pid = pid;
         c->pgid = pid;
@@ -165,6 +135,71 @@ pipes:
     }
     return rc;
 }
+int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command cmd,
+                     const char *plan) {
+    if (c->pid && !host_child_done(c))
+        return EBUSY;
+    reset_attempt(c);
+    int contract = host_check_reaping_contract();
+    if (contract)
+        return contract;
+    bool notify = cmd == HOST_RUN && c->notifications_enabled;
+    if (notify) {
+        int e = host_child_prepare_notifications(c);
+        if (e)
+            return e;
+    }
+    char notification_number[32];
+    char *argv[9];
+    size_t n = 0;
+    argv[n++] = (char *)cfg->camctl_path;
+    argv[n++] = cmd == HOST_RUN ? "run" : "submit";
+    if (plan)
+        argv[n++] = (char *)plan;
+    if (cfg->config_path) {
+        argv[n++] = "--config";
+        argv[n++] = (char *)cfg->config_path;
+    }
+    if (notify) {
+        snprintf(notification_number, sizeof(notification_number), "%d", c->notification_write_fd);
+        argv[n++] = "--host-notification-fd";
+        argv[n++] = notification_number;
+    }
+    argv[n] = NULL;
+    return spawn_prepared(c, cfg->camctl_path, argv, notify);
+}
+
+int host_maintenance_spawn(host_child *c, const camctl_host_update_config *config,
+                           const camctl_host_update_request *request) {
+    if (c->pid && !host_child_done(c))
+        return EBUSY;
+    reset_attempt(c);
+    int contract = host_check_reaping_contract();
+    if (contract)
+        return contract;
+    char *argv[12];
+    size_t n = 0;
+    argv[n++] = (char *)config->updater_path;
+    argv[n++] = request->action == CAMCTL_UPDATE_ACTION_CHECK ? "check" :
+                request->action == CAMCTL_UPDATE_ACTION_RECOVER ? "recover" : "apply";
+    argv[n++] = "--camctl-path";
+    argv[n++] = (char *)config->camctl_path;
+    if (config->config_path) {
+        argv[n++] = "--config";
+        argv[n++] = (char *)config->config_path;
+    }
+    if (request->bundle_path) {
+        argv[n++] = "--bundle";
+        argv[n++] = (char *)request->bundle_path;
+    }
+    if (request->client_data_path) {
+        argv[n++] = "--client-data";
+        argv[n++] = (char *)request->client_data_path;
+    }
+    argv[n] = NULL;
+    return spawn_prepared(c, config->updater_path, argv, false);
+}
+
 static void drain(host_child *c, int *fd, bool output, host_child_log log, void *p) {
     char data[4096];
     for (size_t quota = 0; *fd >= 0 && quota < 64 * 1024;) {

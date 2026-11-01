@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import update_transaction as transaction
 from error_diagnostics import exception_diagnostic
 from diagnostic_fallback import freeze
+from archive_support import UpdateArchive
 
 
 def _diagnose(error, stage):
@@ -107,12 +108,19 @@ def _frozen(record):
 
 
 def _engine_memfd(bundle):
+    import io
     import zipfile
-    wheels = list((bundle / 'camctl').glob('camctl-*.whl'))
-    if len(wheels) != 1:
-        raise ValueError('更新包必须包含唯一 camctl wheel')
-    with zipfile.ZipFile(wheels[0]) as wheel:
-        data = wheel.read('camctl/update_engine.pyz')
+    if bundle.is_dir():
+        wheels = list((bundle / 'camctl').glob('camctl-*.whl'))
+        if len(wheels) != 1:
+            raise ValueError('更新包必须包含唯一 camctl wheel')
+        with zipfile.ZipFile(wheels[0]) as wheel:
+            data = wheel.read('camctl/update_engine.pyz')
+    else:
+        with UpdateArchive(bundle) as archive:
+            archive.verify()
+            with zipfile.ZipFile(io.BytesIO(archive.read(archive.wheel_name()))) as wheel:
+                data = wheel.read('camctl/update_engine.pyz')
     fd = os.memfd_create('camctl-update-engine', os.MFD_CLOEXEC)
     try:
         with os.fdopen(os.dup(fd), 'wb') as stream:

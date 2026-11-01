@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 class JournalState(Enum):
@@ -24,10 +24,12 @@ fallback = ModuleType('diagnostic_fallback')
 def freeze(error, stage, encoder):
     return dict(encoder(error), stage=stage)
 fallback.freeze = freeze
+archive_support = ModuleType('archive_support')
+archive_support.UpdateArchive = Mock()
 source = Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/update_engine/router.py'
 spec = importlib.util.spec_from_file_location('owned_update_router_under_test', source)
 router = importlib.util.module_from_spec(spec)
-with patch.dict(sys.modules, {'update_transaction': transaction, 'error_diagnostics': diagnostics, 'diagnostic_fallback': fallback}), patch.object(sys, 'path', list(sys.path)):
+with patch.dict(sys.modules, {'update_transaction': transaction, 'error_diagnostics': diagnostics, 'diagnostic_fallback': fallback, 'archive_support': archive_support}), patch.object(sys, 'path', list(sys.path)):
     spec.loader.exec_module(router)
 
 
@@ -171,3 +173,38 @@ def test_invalid_recovery_result_does_not_claim_no_effect():
             patch.object(router.os, 'close'), patch.object(sys, 'stderr', io.StringIO()):
         result = router.execute(binding, 'recover', binding['camctl_path'], None, None, None)
     assert (result['outcome'], result['effect'], result['eligibility']) == ('unknown', 'unknown', 'unknown')
+
+
+def test_zip_engine_is_selected_after_archive_verification():
+    import zipfile
+    outer = Mock()
+    outer.wheel_name.return_value = 'camctl/camctl.whl'
+    outer.read.return_value = b'wheel'
+    outer_context = Mock()
+    outer_context.__enter__ = Mock(return_value=outer)
+    outer_context.__exit__ = Mock(return_value=False)
+    inner = Mock()
+    inner.read.return_value = b'engine'
+    inner_context = Mock()
+    inner_context.__enter__ = Mock(return_value=inner)
+    inner_context.__exit__ = Mock(return_value=False)
+    sink = Mock()
+    sink_context = Mock()
+    sink_context.__enter__ = Mock(return_value=sink)
+    sink_context.__exit__ = Mock(return_value=False)
+    with patch.object(Path, 'is_dir', return_value=False), \
+            patch.object(router, '_lock', side_effect=[11, 12]), \
+            patch.object(router, '_pending', return_value=(None, None)), \
+            patch.object(router, '_invoke', return_value={'status': 'failed', 'effect': 'unchanged'}), \
+            patch.object(router.uuid, 'uuid4', return_value=SimpleNamespace(hex='id')), \
+            patch.object(router, 'UpdateArchive', return_value=outer_context), \
+            patch.object(zipfile, 'ZipFile', return_value=inner_context), \
+            patch.object(router.os, 'memfd_create', return_value=14), \
+            patch.object(router.os, 'dup', return_value=15), \
+            patch.object(router.os, 'fdopen', return_value=sink_context), \
+            patch.object(router.os, 'lseek'), patch.object(router.os, 'close'):
+        result = call()
+    assert (result['outcome'], result['effect'], result['eligibility']) == ('failed', 'unchanged', 'allowed')
+    assert [call[0] for call in outer.mock_calls[:3]] == ['verify', 'wheel_name', 'read']
+    inner.read.assert_called_once_with('camctl/update_engine.pyz')
+    sink.write.assert_called_once_with(b'engine')

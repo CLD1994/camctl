@@ -15,8 +15,9 @@ static void motor(int position) { printf("收到电机位置通知：position=%d
 static void usage(FILE *stream) {
     fputs(
         "用法：host-demo [--camctl <绝对路径>] [--ready <目录>] [--processing <目录>] [--log <日志路径>]\n"
-        "                 [--config <camctl配置路径>] [--initial-plan <计划路径>]\n"
+        "                 [--config <camctl配置路径>] [--updater <维护入口>] [--initial-plan <计划路径>]\n"
         "                 [--retry-limit <次数>] [--retry-delay-ms <毫秒>]\n"
+        "                 [--recover | --apply-update <更新 ZIP 或已解压目录> [--client-data <目录>]]\n"
         "省略路径时使用运行账户 home 下的 .camctl；先安装 CLI 并执行 camctl init。\n"
         "终端命令：submit <绝对路径>、claim、logs、help、quit、exit。路径保留空格，不加引号。\n",
         stream);
@@ -66,14 +67,63 @@ static void show_logs(const char *path) {
     close(fd);
     puts("日志显示结束");
 }
+static int run_maintenance(const camctl_host_config *config, const char *bundle,
+                           const char *client_data) {
+    if (!config->updater_path) {
+        fputs("维护需要显式指定 --updater。\n", stderr);
+        return 1;
+    }
+    camctl_host_update_config update_config = {config->camctl_path, config->updater_path, config->config_path};
+    camctl_host_update_request request = {bundle ? CAMCTL_UPDATE_ACTION_APPLY : CAMCTL_UPDATE_ACTION_RECOVER,
+                                           bundle, client_data};
+    camctl_host_update_result *result = malloc(sizeof(*result));
+    if (!result) {
+        fputs("无法分配维护结果缓冲区。\n", stderr);
+        return 1;
+    }
+    int error = camctl_host_update(&update_config, &request, result);
+    int saved_errno = errno;
+    printf("%s；%s。\n", camctl_update_effect_description(result->effect),
+           camctl_update_eligibility_description(result->eligibility));
+    if (result->reason_present) {
+        size_t length = result->reason_length < CAMCTL_HOST_UPDATE_TEXT_MAX ?
+                        result->reason_length : CAMCTL_HOST_UPDATE_TEXT_MAX;
+        fputs("原因：", stderr);
+        (void)fwrite(result->reason, 1, length, stderr);
+        fputc('\n', stderr);
+    }
+    if (result->evidence_present)
+        printf("维护收据和日志：%s%s\n", result->evidence, result->evidence_truncated ? "（路径已截断）" : "");
+    if (result->stderr_length)
+        (void)fwrite(result->stderr_data, 1, result->stderr_length, stderr);
+    if (result->stderr_truncated || result->stderr_io_error)
+        fprintf(stderr, "维护 stderr：截断=%d，读取错误=%d。\n", result->stderr_truncated, result->stderr_io_error);
+    if (result->process_diagnostics_length)
+        (void)fwrite(result->process_diagnostics, 1, result->process_diagnostics_length, stderr);
+    if (error) {
+        fprintf(stderr, "维护调用未能确认：%s。\n", strerror(saved_errno));
+        if (result->stdout_length)
+            (void)fwrite(result->stdout_data, 1, result->stdout_length, stderr);
+    }
+    bool allowed = result->eligibility == CAMCTL_UPDATE_ELIGIBILITY_ALLOWED;
+    free(result);
+    return error || !allowed ? 1 : 0;
+}
+
 int main(int argc, char **argv) {
     camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
     const char *initial = NULL;
+    const char *update_bundle = NULL, *client_data = NULL;
+    bool recover = false;
     const struct option options[] = {{"camctl", required_argument, NULL, 'c'},
                                      {"ready", required_argument, NULL, 'r'},
                                      {"processing", required_argument, NULL, 'p'},
                                      {"log", required_argument, NULL, 'l'},
                                      {"config", required_argument, NULL, 'f'},
+                                     {"updater", required_argument, NULL, 'u'},
+                                     {"recover", no_argument, NULL, 'R'},
+                                     {"apply-update", required_argument, NULL, 'U'},
+                                     {"client-data", required_argument, NULL, 'D'},
                                      {"initial-plan", required_argument, NULL, 'i'},
                                      {"retry-limit", required_argument, NULL, 'n'},
                                      {"retry-delay-ms", required_argument, NULL, 'd'},
@@ -96,6 +146,18 @@ int main(int argc, char **argv) {
             break;
         case 'f':
             config.config_path = optarg;
+            break;
+        case 'u':
+            config.updater_path = optarg;
+            break;
+        case 'R':
+            recover = true;
+            break;
+        case 'U':
+            update_bundle = optarg;
+            break;
+        case 'D':
+            client_data = optarg;
             break;
         case 'i':
             initial = optarg;
@@ -138,7 +200,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "默认路径构造失败：%s；请提供绝对 HOME 或显式路径。\n", strerror(errno));
         return 1;
     }
+    if ((recover && update_bundle) || (client_data && !update_bundle) ||
+        ((recover || update_bundle) && initial)) {
+        usage(stderr);
+        return 1;
+    }
     setvbuf(stdout, NULL, _IOLBF, 0);
+    if (recover || update_bundle)
+        return run_maintenance(&config, update_bundle, client_data);
     static demo_stop stop;
     if (demo_stop_prepare(&stop)) {
         fprintf(stderr, "准备退出信号失败：%s\n", strerror(errno));

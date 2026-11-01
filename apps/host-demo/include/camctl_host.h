@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include "camctl_update_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,7 +47,58 @@ typedef struct camctl_host_config {
     size_t notification_line_capacity;
     /* 待调用记录；正值，不超过 CAMCTL_HOST_NOTIFICATION_QUEUE_MAX。 */
     size_t notification_queue_capacity;
+    const char *updater_path; /* NULL：不启用启动前维护资格检查。 */
 } camctl_host_config;
+
+#define CAMCTL_HOST_UPDATE_STDOUT_MAX (64 * 1024)
+#define CAMCTL_HOST_UPDATE_TEXT_MAX 4095
+#define CAMCTL_HOST_UPDATE_STDERR_MAX 8192
+#define CAMCTL_HOST_UPDATE_PROCESS_MAX 8192
+
+typedef struct camctl_host_update_config {
+    const char *camctl_path;
+    const char *updater_path;
+    const char *config_path; /* NULL：普通入口的默认来源。 */
+} camctl_host_update_config;
+
+typedef struct camctl_host_update_request {
+    camctl_update_action action; /* 允许 APPLY 或 RECOVER。 */
+    const char *bundle_path;     /* APPLY 必填：更新 ZIP 或已解压目录；RECOVER 为 NULL。 */
+    const char *client_data_path; /* 仅 APPLY 可指定。 */
+} camctl_host_update_request;
+
+typedef struct camctl_host_update_result {
+    camctl_update_action action;
+    camctl_update_outcome outcome;
+    camctl_update_effect effect;
+    camctl_update_eligibility eligibility;
+    camctl_update_prior_recovery prior_recovery;
+    char reason[CAMCTL_HOST_UPDATE_TEXT_MAX + 1];
+    char stage[CAMCTL_HOST_UPDATE_TEXT_MAX + 1];
+    char evidence[CAMCTL_HOST_UPDATE_TEXT_MAX + 1];
+    size_t reason_length, stage_length, evidence_length;
+    bool reason_present, stage_present, evidence_present;
+    bool reason_truncated, stage_truncated, evidence_truncated;
+    char stderr_data[CAMCTL_HOST_UPDATE_STDERR_MAX + 1];
+    size_t stderr_length;
+    uint64_t stderr_bytes_seen;
+    bool stderr_truncated, stderr_io_error;
+    char process_diagnostics[CAMCTL_HOST_UPDATE_PROCESS_MAX + 1];
+    size_t process_diagnostics_length;
+    bool process_diagnostics_truncated;
+    char stdout_data[CAMCTL_HOST_UPDATE_STDOUT_MAX + 1];
+    size_t stdout_length;
+    uint64_t stdout_bytes_seen;
+    bool stdout_truncated, stdout_io_error;
+    bool process_signaled, process_exit_known;
+    int process_exit_code;
+    int poll_error, parse_error;
+} camctl_host_update_result;
+
+/* 阻塞执行维护；返回 0 表示已接收可信结果，具体效果由 result 判断。
+ * 参数或通道失败返回 -1，结果保留未知和可用的诊断；调用期间不自动恢复业务。 */
+int camctl_host_update(const camctl_host_update_config *config,
+                       const camctl_host_update_request *request, camctl_host_update_result *result);
 
 /* 路径补齐函数使用的调用方缓冲区；保持有效直至 camctl_host_init 返回。
  * config 中生成的指针指向该对象，不能通过复制该对象来迁移指针。 */
@@ -74,7 +127,8 @@ typedef void (*camctl_host_motor_control_callback)(int position);
      CAMCTL_HOST_LOG_FILE_SIZE_DEFAULT,                                                           \
      CAMCTL_HOST_LOG_FILE_COUNT_DEFAULT,                                                          \
      CAMCTL_HOST_NOTIFICATION_LINE_DEFAULT,                                                       \
-     CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT}
+     CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT,                                                       \
+     NULL}
 
 /* 以绝对 home 补齐四个为 NULL 的必填路径；已指定路径及其他配置保持。
  * 不读取环境、不创建目录；config_path 保持 NULL 时由 CLI 选择默认配置。

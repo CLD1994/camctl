@@ -74,6 +74,10 @@ def main():
         for name in ('camctl-configuration.md', 'host-configuration.md', 'camctl_host.h'):
             if not (bundle / 'docs' / name).is_file():
                 raise ValueError('配置参考缺失：' + name)
+        for header in (bundle / 'docs').glob('*.h'):
+            for dependency in re.findall(r'#\s*include\s*"([^"\n]+)"', header.read_text(encoding='utf-8')):
+                if not (header.parent / dependency).is_file():
+                    raise ValueError('公共头文件依赖缺失：' + dependency)
         report['checks'].append('README 链接与随包配置参考')
         tools = workspace / 'tools'
         tools.mkdir()

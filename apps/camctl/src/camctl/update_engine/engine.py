@@ -11,6 +11,7 @@ import argparse
 from email.parser import BytesParser
 from dataclasses import asdict
 import hashlib
+import io
 import importlib.metadata
 import json
 import os
@@ -23,7 +24,8 @@ import traceback
 import uuid
 import zipfile
 
-from bundle_support import current_target, verify_checksums, wheel_target_manifest
+from bundle_support import WHEEL_TARGETS, current_target, verify_checksums, wheel_target_manifest
+from archive_support import UpdateArchive
 from maintenance_integrity import verify_maintenance_integrity
 from error_diagnostics import exception_diagnostic
 from diagnostic_fallback import freeze
@@ -154,7 +156,9 @@ def perform_update(ops, original=None):
 
 class UpdateOperations:
     def __init__(self, bundle, target, client_data, output, *, config_path=None):
-        self.bundle, self.target, self.client_data, self.output = bundle, target, client_data, output
+        self.bundle_input, self.target, self.client_data, self.output = bundle, target, client_data, output
+        self.archive_input = bundle is not None and not bundle.is_dir()
+        self.bundle = output / 'package' if self.archive_input else bundle
         self.python = target / 'venv/bin/python'
         self.config_path = config_path
         self.config_source = config_path
@@ -180,27 +184,43 @@ class UpdateOperations:
             stream.write('\n')
 
     def preflight(self):
-        verify_checksums(self.bundle)
         arch = current_target()
-        release = json.loads((self.bundle / 'RELEASE.json').read_text(encoding='utf-8'))
-        expected_targets = wheel_target_manifest(self.bundle)
+        if self.archive_input:
+            with UpdateArchive(self.bundle_input) as bundle:
+                bundle.verify()
+                release = json.loads(bundle.read('RELEASE.json'))
+                expected_targets = bundle.wheel_targets(WHEEL_TARGETS)
+                wheel_name = bundle.wheel_name()
+                if 'camctl/requirements.txt' not in bundle.members:
+                    raise ValueError('更新 ZIP 缺少锁定依赖文件')
+                wheel_source = io.BytesIO(bundle.read(wheel_name))
+                manifest_bytes = bundle.read('SHA256SUMS')
+            wheel = self.bundle.joinpath(*Path(wheel_name).parts)
+        else:
+            verify_checksums(self.bundle)
+            release = json.loads((self.bundle / 'RELEASE.json').read_text(encoding='utf-8'))
+            expected_targets = wheel_target_manifest(self.bundle)
+            wheels = list((self.bundle / 'camctl').glob('camctl-*.whl'))
+            if len(wheels) != 1 or not (self.bundle / 'camctl/requirements.txt').is_file():
+                raise ValueError('camctl wheel 或锁定依赖文件缺失')
+            wheel_source = wheel = wheels[0]
+            manifest_bytes = (self.bundle / 'SHA256SUMS').read_bytes()
         if (release.get('wheel_targets') != expected_targets
-                or any(not target['files'] for target in expected_targets.values())):
+                or any(not target['files'] for target in expected_targets.values())
+                or not expected_targets[arch]['files']):
             raise ValueError('发行记录与离线依赖文件不一致')
         wheelhouse = self.bundle / 'camctl/wheelhouse' / arch
-        if not wheelhouse.is_dir() or not list(wheelhouse.glob('*.whl')):
-            raise ValueError('目标平台的离线依赖缺失: ' + str(wheelhouse))
-        wheels = list((self.bundle / 'camctl').glob('camctl-*.whl'))
-        if len(wheels) != 1 or not (self.bundle / 'camctl/requirements.txt').is_file():
-            raise ValueError('camctl wheel 或锁定依赖文件缺失')
-        with zipfile.ZipFile(wheels[0]) as archive:
+        with zipfile.ZipFile(wheel_source) as archive:
             names = archive.namelist()
             metadata = [name for name in names if name.endswith('.dist-info/METADATA')]
             integrity_name = 'camctl/persistence/maintenance_integrity.py'
             if (len(metadata) != 1 or 'camctl/deployment.py' not in names
-                    or integrity_name not in names):
-                raise ValueError('camctl wheel 缺少发行元信息或只读检查入口')
-            with zipfile.ZipFile(Path(sys.argv[0])) as engine_archive:
+                    or integrity_name not in names or 'camctl/update_engine.pyz' not in names):
+                raise ValueError('camctl wheel 缺少发行元信息或维护入口')
+            engine_bytes = Path(sys.argv[0]).read_bytes()
+            if archive.read('camctl/update_engine.pyz') != engine_bytes:
+                raise ValueError('运行中的维护引擎与 wheel 不一致')
+            with zipfile.ZipFile(io.BytesIO(engine_bytes)) as engine_archive:
                 engine_integrity = engine_archive.read('maintenance_integrity.py')
             if archive.read(integrity_name) != engine_integrity:
                 raise ValueError('部署检查入口与 wheel 内的维护检查不一致')
@@ -213,14 +233,26 @@ class UpdateOperations:
         state_db = Path(config['state_db'])
         if not state_db.is_file():
             raise ValueError('原状态库不存在或不是普通文件: ' + str(state_db))
-        self.config, self.state_db, self.wheelhouse, self.wheel = config, state_db, wheelhouse, wheels[0]
+        self.config, self.state_db, self.wheelhouse, self.wheel = config, state_db, wheelhouse, wheel
         self.expected_version = release['components']['camctl']
         return {'state_db': str(state_db), 'config': str(self.config_path),
                 'config_snapshot': transaction.snapshot_config(self.config_path, self.config_source),
                 'lock_paths': config['lock_paths'],
                 'old_version': config['old_version'], 'new_version': self.expected_version,
                 'release_source_sha256': release['source_sha256'],
-                'bundle_manifest_sha256': hashlib.sha256((self.bundle / 'SHA256SUMS').read_bytes()).hexdigest()}
+                'bundle_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest()}
+
+    def prepare_package(self, original):
+        if not self.archive_input:
+            return
+        with UpdateArchive(self.bundle_input) as bundle:
+            bundle.verify()
+            if hashlib.sha256(bundle.read('SHA256SUMS')).hexdigest() != original['bundle_manifest_sha256']:
+                raise ValueError('更新 ZIP 在准备过程中发生变化')
+            bundle.extract(self.bundle)
+        verify_checksums(self.bundle)
+        if hashlib.sha256((self.bundle / 'SHA256SUMS').read_bytes()).hexdigest() != original['bundle_manifest_sha256']:
+            raise ValueError('事务目录内的更新包无法核实')
 
     def lock(self, original):
         self.db_locks.database(original['lock_paths'])
@@ -264,7 +296,8 @@ class UpdateOperations:
             bindings = [self.config['paths'][name] for name in ('staging', 'ready', 'processing')]
         return transaction.validate_paths(self.target, original, self.client_data, self.output, bindings,
                                           before_lock=before_lock, recovery=recovery, temporary=temporary,
-                                          extra_control_files=extra_control_files)
+                                          extra_control_files=extra_control_files,
+                                          extra_input_paths=(self.bundle_input,) if self.bundle_input else ())
 
     def backup(self, receipt):
         original = receipt['original']
@@ -668,6 +701,8 @@ def main():
         transaction.sync_dir(output)
         (output / 'update.log').touch(exist_ok=False)
         evidence = output
+        stage = 'prepare_package'
+        operations.prepare_package(original)
         receipt = perform_update(operations, original)
     except Exception as error:
         errors = [(error, stage)]

@@ -249,6 +249,111 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "check"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "not_started",
+              "unchanged",
+              "recovery_required",
+              "unknown"
+            ]
+          },
+          "prior_recovery": {
+            "const": "none"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "recover"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "not_started",
+              "unchanged",
+              "recovered",
+              "recovery_required",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "apply"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "not_started",
+              "applied",
+              "failed",
+              "recovery_required",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "check"
+          },
+          "outcome": {
+            "const": "not_started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "eligibility": {
+            "enum": [
+              "blocked",
+              "unknown"
+            ]
+          }
+        }
+      }
     }
-  ]
+  ],
+  "x-labels": {
+    "effect": {
+      "not_started": "本次请求未开始",
+      "unchanged": "本次请求没有修改原部署",
+      "committed": "新版本已可靠提交",
+      "rolled_back": "原部署已核实恢复",
+      "recovery_required": "仍有未完成恢复责任",
+      "unknown": "本次请求效果未知"
+    },
+    "eligibility": {
+      "allowed": "更新责任允许启动",
+      "blocked": "更新责任阻止启动",
+      "unknown": "启动资格未知"
+    }
+  }
 }
