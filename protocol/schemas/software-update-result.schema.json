@@ -24,7 +24,8 @@
       "enum": [
         "check",
         "recover",
-        "apply"
+        "apply",
+        "finalize"
       ]
     },
     "outcome": {
@@ -254,6 +255,58 @@
               "unknown"
             ]
           }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "finalize"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "not_started",
+              "unchanged",
+              "failed",
+              "unknown"
+            ]
+          },
+          "prior_recovery": {
+            "const": "none"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": { "const": "finalize" },
+          "outcome": { "const": "unchanged" }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": { "const": "unchanged" },
+          "eligibility": { "const": "allowed" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": { "const": "finalize" },
+          "outcome": { "const": "failed" }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": { "const": "unchanged" },
+          "eligibility": { "const": "allowed" }
         }
       }
     },

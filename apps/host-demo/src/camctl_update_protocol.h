@@ -8,6 +8,7 @@ typedef enum {
     CAMCTL_UPDATE_ACTION_CHECK,
     CAMCTL_UPDATE_ACTION_RECOVER,
     CAMCTL_UPDATE_ACTION_APPLY,
+    CAMCTL_UPDATE_ACTION_FINALIZE,
 } camctl_update_action;
 
 typedef enum {
