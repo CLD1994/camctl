@@ -12,6 +12,7 @@ import types
 import zipfile
 
 from camctl.operations.error_diagnostics import exception_diagnostic
+from camctl.update_engine.diagnostic_fallback import freeze
 
 
 def _module_from_wheel(archive, name):
@@ -75,6 +76,7 @@ def _publish_locked(wheel, target, base_python, camctl_path, config):
         router = archive.read('camctl/update_engine/router.py')
         result_schema = archive.read('camctl/_resources/protocol/software-update-result.schema.json')
         diagnostic_source = archive.read('camctl/operations/error_diagnostics.py')
+        fallback_source = archive.read('camctl/update_engine/diagnostic_fallback.py')
         transaction_source = archive.read('camctl/update_engine/update_transaction.py')
         pending = target / 'updates/pending.json'
         try:
@@ -108,6 +110,7 @@ def _publish_locked(wheel, target, base_python, camctl_path, config):
                 shlex.quote(str(directory / 'router.py')) + ' "$@"\n').encode()
     files = {'router.py': (router, 0o644), 'result-schema.json': (result_schema, 0o644),
              'update_transaction.py': (transaction_source, 0o644), 'error_diagnostics.py': (diagnostic_source, 0o644),
+             'diagnostic_fallback.py': (fallback_source, 0o644),
              'binding.json': (binding_bytes, 0o600), 'camctl-updater': (launcher, 0o700)}
     transaction.validate_paths(target, original, None, output,
         [original['paths'][name] for name in ('staging', 'ready', 'processing')], before_lock=True,
@@ -139,8 +142,7 @@ def main():
         print(publish(args.wheel, args.target, args.base_python, args.camctl_path, args.config))
     except Exception as error:
         try:
-            diagnostic = exception_diagnostic(error)
-            diagnostic['stage'] = 'publish'
+            diagnostic = freeze(error, 'publish', exception_diagnostic)
             print(json.dumps(diagnostic, ensure_ascii=False, default=repr), file=sys.stderr)
             sys.stderr.flush()
         except Exception:

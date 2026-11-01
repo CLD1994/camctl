@@ -13,12 +13,12 @@ import uuid
 sys.path.insert(0, str(Path(__file__).parent))
 import update_transaction as transaction
 from error_diagnostics import exception_diagnostic
+from diagnostic_fallback import freeze
 
 
 def _diagnose(error, stage):
     try:
-        diagnostic = exception_diagnostic(error)
-        diagnostic['stage'] = stage
+        diagnostic = freeze(error, stage, exception_diagnostic)
         sys.stderr.write(json.dumps(diagnostic, ensure_ascii=False, default=repr) + '\n')
         sys.stderr.flush()
     except Exception:
@@ -166,7 +166,7 @@ def _execute(binding, action, camctl_path, config, bundle, client_data, diagnost
             stage = 'recover'
             child = _invoke(python, frozen, inherited_fd, child_args)
             if child['status'] != 'recovered':
-                result.update(outcome='recovery_required', eligibility='blocked',
+                result.update(outcome='recovery_required', effect='recovery_required', eligibility='blocked',
                               reason='未完成事务未能核实恢复', stage=child.get('stage'),
                               evidence=child.get('evidence'), prior_recovery='unknown')
                 return result

@@ -26,6 +26,7 @@ import zipfile
 from bundle_support import current_target, verify_checksums, wheel_target_manifest
 from maintenance_integrity import verify_maintenance_integrity
 from error_diagnostics import exception_diagnostic
+from diagnostic_fallback import freeze
 
 
 def absolute_path(value):
@@ -38,10 +39,7 @@ import update_transaction as transaction
 
 
 def freeze_exception(error, stage):
-    """冻结异常；旧发行物不可导入时保留标准异常链和编码器故障。"""
-    diagnostic = exception_diagnostic(error)
-    diagnostic['stage'] = stage
-    return diagnostic
+    return freeze(error, stage, exception_diagnostic)
 
 
 def deliver_diagnostics(ops, receipt, diagnostics):
@@ -699,7 +697,9 @@ def main():
             except Exception as save_error:
                 failure = freeze_exception(save_error, 'save_final_receipt')
                 deliver_diagnostics(operations, receipt, [failure])
-        print(json.dumps({'status': 'failed', 'effect': 'unchanged', 'stage': stage, 'evidence': str(evidence) if evidence else None}))
+        print(json.dumps({'status': 'failed',
+                          'effect': 'recovery_required' if args.recover_only and stage == 'recover_pending' else 'unchanged',
+                          'stage': stage, 'evidence': str(evidence) if evidence else None}))
         return 1
 
     if receipt['status'] == 'updated_stopped':

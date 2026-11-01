@@ -20,10 +20,14 @@ transaction = ModuleType('update_transaction')
 transaction.JournalState = JournalState
 diagnostics = ModuleType('error_diagnostics')
 diagnostics.exception_diagnostic = lambda error: {'type': type(error).__name__, 'message': str(error)}
+fallback = ModuleType('diagnostic_fallback')
+def freeze(error, stage, encoder):
+    return dict(encoder(error), stage=stage)
+fallback.freeze = freeze
 source = Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/update_engine/router.py'
 spec = importlib.util.spec_from_file_location('owned_update_router_under_test', source)
 router = importlib.util.module_from_spec(spec)
-with patch.dict(sys.modules, {'update_transaction': transaction, 'error_diagnostics': diagnostics}), patch.object(sys, 'path', list(sys.path)):
+with patch.dict(sys.modules, {'update_transaction': transaction, 'error_diagnostics': diagnostics, 'diagnostic_fallback': fallback}), patch.object(sys, 'path', list(sys.path)):
     spec.loader.exec_module(router)
 
 
@@ -146,3 +150,24 @@ def test_error_diagnostic_is_delivered_after_closing_qualification():
     assert events == ['close', 'diagnostic']
     assert json.loads(stream.getvalue()) == {'type': 'ValueError', 'message': 'bad wheel', 'stage': 'read_new_engine'}
     assert result['eligibility'] == 'allowed'
+
+
+def test_failed_recovery_reports_unfinished_effect_after_invocation():
+    with patch.object(router, '_lock', return_value=11), \
+            patch.object(router, '_pending', return_value=(active, JournalState.UPDATING)), \
+            patch.object(router, '_frozen', return_value=Path('/frozen')), \
+            patch.object(router, '_invoke', return_value={'status': 'failed', 'effect': 'recovery_required'}), \
+            patch.object(router.os, 'close'), patch.object(sys, 'stderr', io.StringIO()):
+        result = router.execute(binding, 'recover', binding['camctl_path'], None, None, None)
+    assert (result['outcome'], result['effect'], result['eligibility'], result['prior_recovery']) == (
+        'recovery_required', 'recovery_required', 'blocked', 'unknown')
+
+
+def test_invalid_recovery_result_does_not_claim_no_effect():
+    with patch.object(router, '_lock', return_value=11), \
+            patch.object(router, '_pending', return_value=(active, JournalState.UPDATING)), \
+            patch.object(router, '_frozen', return_value=Path('/frozen')), \
+            patch.object(router, '_invoke', side_effect=ValueError('invalid result')), \
+            patch.object(router.os, 'close'), patch.object(sys, 'stderr', io.StringIO()):
+        result = router.execute(binding, 'recover', binding['camctl_path'], None, None, None)
+    assert (result['outcome'], result['effect'], result['eligibility']) == ('unknown', 'unknown', 'unknown')
