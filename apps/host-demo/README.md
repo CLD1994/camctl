@@ -118,7 +118,7 @@ CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI
 
 ## 停止模块
 
-主程序在普通线程调用 `camctl_host_stop()`，等待模块停止接收新工作、请求在管 camctl 停止，并确认原进程组及模块线程已经收场。成功返回 `0`；尚未初始化返回 `-1`、`errno=ENODEV`。停止期间的新递交和领取被拒绝，`errno=ECANCELED`。重复停止成功返回；同一进程再次启动使用显式 `camctl_host_restart()`，直接 `init` 仍返回 `EALREADY`。
+主程序在普通线程调用 `camctl_host_stop()`，等待模块停止接收新工作、请求在管 camctl 停止，并确认原进程组及模块线程已经收场。成功返回 `0`；尚未初始化返回 `-1`、`errno=ENODEV`。停止期间的新递交和领取被拒绝，`errno=ECANCELED`。重复停止成功返回。`stop` 用于主程序退出前收场；再次启动普通业务时由主程序进程重新初始化模块。
 
 停止期间，已启动的提交保留实际处理结果，未启动提交以 `ECANCELED` 返回。调用方不能把提交失败解释为计划已取消，也不能删除尚未确认完成的原计划文件。已保存计划在下次启动时仍按原恢复规则处理。
 
@@ -126,7 +126,7 @@ CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI
 
 ## 配置范围与日志
 
-所有路径必须是绝对路径，长度最多为 `CAMCTL_HOST_PATH_MAX` 字节，不含末尾 NUL。`config_path`、`updater_path` 和首次计划可以为 `NULL`；其他路径必填。`updater_path` 指向本实例虚拟环境外的稳定维护入口，提供时初始化先检查启动资格；路径补齐函数不推断该值。数值默认值由公开头文件的具名宏及 `CAMCTL_HOST_CONFIG_INIT` 提供，缺省路径由 `camctl_host_config_set_home_paths` 在运行时构造；不展开 C 字符串中的 `$HOME` 或 `~`。
+所有路径必须是绝对路径，长度最多为 `CAMCTL_HOST_PATH_MAX` 字节，不含末尾 NUL。`config_path` 和首次计划可以为 `NULL`；`updater_path` 用于自动恢复和软件更新，使用更新能力时必须配置。该路径指向本实例的稳定维护入口；初始化会先自动恢复未完成事务，再检查是否可以安排普通 `run`。路径补齐函数不推断该值。数值默认值由公开头文件的具名宏及 `CAMCTL_HOST_CONFIG_INIT` 提供，缺省路径由 `camctl_host_config_set_home_paths` 在运行时构造；不展开 C 字符串中的 `$HOME` 或 `~`。
 
 | 成员 | 可配置范围 |
 | --- | --- |
@@ -141,7 +141,7 @@ CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI
 | `notification_line_capacity` | 1 至 65536 字节，包含结束 LF；默认由 `CAMCTL_HOST_NOTIFICATION_LINE_DEFAULT` 提供 |
 | `notification_queue_capacity` | 1 至 4096 项待分发位置，执行中的一项另计；默认由 `CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT` 提供 |
 
-自动重试的次数在同一运行周期内由所有调用共用，成功后不清零；显式重启建立新的运行周期。日志和输出容量只影响模块本地处理，不代表业务受理或执行结果。stdout 超限后继续读取并丢弃超出部分，本次结果按异常处理；失败调用诊断最多保留 `stdout_capacity` 字节 stdout 和 `min(stdout_capacity, 256 KiB)` 字节 stderr，超限后继续读取并记录截断状态。JSON 解析临时内存由 stdout 上限推导，不随运行时间增长。
+自动重试的次数在同一运行周期内由所有调用共用，成功后不清零；重新启动主程序进程会建立新的运行周期。日志和输出容量只影响模块本地处理，不代表业务受理或执行结果。stdout 超限后继续读取并丢弃超出部分，本次结果按异常处理；失败调用诊断最多保留 `stdout_capacity` 字节 stdout 和 `min(stdout_capacity, 256 KiB)` 字节 stderr，超限后继续读取并记录截断状态。JSON 解析临时内存由 stdout 上限推导，不随运行时间增长。
 
 通知单行容量包含 LF；超长行丢弃到下一 LF 后恢复，EOF 残片拒绝。已接纳的位置不会因为 CLI 异常退出而丢弃。通知缓冲由行、固定读取块、yyjson 解析池、有界位置队列和一条执行中记录组成，容量不随运行时长增长。默认配置的数据存储上界为 61956 字节，最大合法配置为 938244 字节；此外还有固定管理结构、分配器及线程运行开销。模块在分配前检查乘法和相加溢出。
 
@@ -157,38 +157,32 @@ host 在 `processing` 内的隐藏准备目录写完文件并完成文件同步�
 
 ## 更新 camctl
 
-从版本发布、更新包构建到现场应用、失败恢复及主程序重启的完整步骤见[更新操作说明](../../docs/camctl/software-updates.md)。下面说明 C 调用方式和演示入口。
+从版本发布到更新包构建和现场应用的完整步骤见[更新操作说明](../../docs/camctl/software-updates.md)。更新接入契约见[更新接入规格](../../docs/architecture/software-update-interface.md)。
 
-部署时由 camctl wheel 的发布器建立 `<target>/maintenance/camctl-updater`。正常业务初始化时填写 `config.updater_path`，启用启动前资格检查；软件维护使用相同部署的普通程序、维护入口和配置来源。该路径必须显式传入，不能从任意 `camctl_path` 推断。
+普通初始化配置中的 `updater_path` 指向该部署的稳定维护入口。设置后，初始化会先自动恢复未完成的更新事务，再检查是否可以安排普通 `run`。调用更新时使用已初始化实例保存的配置、回调和维护入口。
 
 ```c
-camctl_host_update_config update_config = {
-    .camctl_path = "/home/user/.camctl/venv/bin/camctl",
-    .updater_path = "/home/user/.camctl/maintenance/camctl-updater",
-    .config_path = "/home/user/.camctl/config.toml"
-};
-camctl_host_update_request request = {
-    .action = CAMCTL_UPDATE_ACTION_APPLY,
-    .bundle_path = "/home/user/releases/camctl-update.zip"
-};
-camctl_host_update_result result;
-int received = camctl_host_update(&update_config, &request, &result);
+int camctl_host_update(const char *bundle_path,
+                      const char *client_data_path);
+
+int update_camctl(const char *bundle_path, const char *client_data_path) {
+    return camctl_host_update(bundle_path, client_data_path);
+}
 ```
 
-接口可在未初始化、运行中或已经停止时调用。运行中会先等待本模块普通工作收场；返回后保持停止。返回 `0` 只表示收到可信结果，还须检查 `result.outcome`、`result.effect` 和 `result.eligibility`；新版本可靠提交由 `CAMCTL_UPDATE_EFFECT_COMMITTED` 表达。应用失败后原环境已恢复与仍需恢复分别交付，不能只看进程退出码。公开结果只含 `outcome`、`effect`、`eligibility`、`reason` 和 `diagnostic_path`。`reason` 是以 NUL 结束的简短说明，不能作为机器分支依据；`diagnostic_path` 是实际收据或日志的完整绝对路径，没有可交付位置时为空。返回 `-1` 时检查 `errno` 和实际结果。原始输出、上次恢复、阶段、退出及解析等事实由模块在收场并释放维护互斥后统一交给 stderr，完整维护日志及收据继续保留；主程序不需要处理底层诊断字段。
+必须在 `camctl_host_init` 成功后调用。模块在调用期间停止本实例的普通工作，应用更新包，必要时自动恢复，并在结果允许启动时重建普通资源、安排 `run`。返回 `0` 表示新包已可靠提交且普通运行已安排；返回 `-1` 表示本次更新失败。失败后如原部署已恢复，模块会自动恢复普通运行；恢复尚未完成或结果未知时不会启动部分更新的环境。主程序只需按 `0` 或 `-1` 处理，不解析内部维护状态，也不手动恢复或重启。
 
-只恢复未完成更新时，将 `action` 设为 `CAMCTL_UPDATE_ACTION_RECOVER`，`bundle_path` 与 `client_data_path` 设为 `NULL`。应用时可指定 `client_data_path` 同步能力文件并纳入恢复。并发维护、实例配置不一致和会等待自身的线程调用会被拒绝；其他线程的停止须等待维护写入者结束。维护返回后，主程序可在同一进程调用 `camctl_host_restart()`。它仅接受已经可靠停止且无在途停止或维护的实例，复用配置和回调，重新检查资格并建立新资源，不重送旧首次计划；失败且资源已收场时保留停止实例可重试。未初始化时先使用 `init`。直接 `init` 的重复初始化规则保持不变。完整契约见[更新接入规格](../../docs/architecture/software-update-interface.md)。
+`bundle_path` 是 Python 专用更新 ZIP 或已解压目录的绝对路径。`client_data_path` 可为 `NULL`；指定时，更新会同步设备能力说明并将其纳入失败恢复。更新失败的独立诊断直接进入 `processing`，主程序可按普通文件流程传输。强制更新包包含完整 TOML 配置，并在同一部署位置重建 Python 环境、配置、状态库、`staging` 和 `ready`；`processing`、日志、维护恢复材料、host、客户端数据和相机存储保留。备份、恢复及故障范围见[版本与更新规格](../../docs/architecture/versioning-and-updates.md#强制重建)和[更新接入规格](../../docs/architecture/software-update-interface.md)。
 
-演示程序提供一次性维护模式，不先初始化普通业务，完成后退出：
+演示程序的 `--apply-update` 在正常初始化后调用同一更新接口。它完成更新后继续进入交互终端；启动参数 `--client-data` 指定能力同步目录：
 
 ```sh
-host-demo --camctl /absolute/target/venv/bin/camctl \
-  --updater /absolute/target/maintenance/camctl-updater \
-  --config /absolute/target/config.toml \
-  --apply-update /absolute/releases/camctl-update.zip
+"$HOME/.camctl/host/bin/host-demo" \
+  --apply-update /absolute/path/to/camctl-update.zip \
+  --client-data /absolute/path/to/client-data
 ```
 
-将 `--apply-update` 及其路径换为 `--recover` 可只执行恢复；应用时可选 `--client-data /absolute/client-data`。更新实现属于 camctl，C 模块仅调用其维护入口。更新包不更新已链接到主程序的静态库。
+运行期间也可输入 `update /absolute/path/to/camctl-update.zip`；该命令使用启动时指定的 `--client-data`。更新包不更新已链接到主程序的静态库。
 
 ## 运行终端演示
 
@@ -198,19 +192,20 @@ camctl 和部署目录准备好后：
 "$HOME/.camctl/host/bin/host-demo"
 ```
 
-演示程序从 `HOME` 取得主目录；未设置时读取当前用户记录中的主目录。路径无法补齐时明确报错。`--camctl`、`--updater`、`--ready`、`--processing`、`--log`、`--config`、`--initial-plan`、`--retry-limit`、`--retry-delay-ms` 均可选；显式值覆盖对应默认项。指定全部必填路径时不依赖 home。启动参数中的空格路径按 shell 规则加引号。
+演示程序从 `HOME` 取得主目录；未设置时读取当前用户记录中的主目录。路径无法补齐时明确报错。`--camctl`、`--updater`、`--ready`、`--processing`、`--log`、`--config`、`--initial-plan`、`--client-data`、`--apply-update`、`--retry-limit`、`--retry-delay-ms` 均可选；显式值覆盖对应默认项。指定全部必填路径时不依赖 home。启动参数中的空格路径按 shell 规则加引号。
 
 运行期间输入：
 
 ```text
 submit <计划文件的绝对路径>
+update <更新包的绝对路径>
 claim
 logs
 help
 quit
 ```
 
-将 `<计划文件的绝对路径>` 替换为实际路径。`submit` 后面的整段内容是路径，终端命令中不加引号，也不展开 `$HOME` 或 `~`；每条命令以换行结束。`claim` 返回后，由主程序处理 `processing`。`logs` 显示当前日志末尾最多 64 KiB。
+将尖括号中的路径替换为实际绝对路径。`submit` 和 `update` 后面的整段内容是路径，终端命令中不加引号，也不展开 `$HOME` 或 `~`；每条命令以换行结束。`update` 使用启动时指定的 `--client-data`，完成后演示继续运行。`claim` 返回后，由主程序处理 `processing`。`logs` 显示当前日志末尾最多 64 KiB。
 
 输入 `quit` 或 `exit`，按 Ctrl+C，或向 host-demo 发送 `SIGTERM`，演示程序会先停止它管理的 camctl，再退出。标准输入结束后模块继续运行，支持后台启动；此时使用 `SIGTERM` 停止。
 

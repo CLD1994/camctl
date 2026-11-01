@@ -31,7 +31,7 @@ yyjson 固定版本，源码随模块交付并参与编译。公开 C 接口使�
 | 参数 | 归属与使用方式 |
 | --- | --- |
 | camctl 程序位置 | 主程序传入；模块用它启动 camctl |
-| `updater_path` | 可选的稳定维护入口绝对路径；提供时，初始化先检查启动资格。维护调用必须显式提供该值 |
+| `updater_path` | 使用自动恢复和软件更新时必填；普通启动恢复和更新调用都使用该实例配置 |
 | `ready`、`processing` 绝对路径 | 主程序传入；模块按这些路径领取文件 |
 | `staging` 路径 | 第三方在 camctl 部署配置中确定，由 camctl 使用 |
 | camctl 配置文件路径 | 主程序可选传入；提供时，模块为各次 camctl 调用附带 `--config` |
@@ -77,25 +77,20 @@ camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
 
 初始化成功后，模块随主程序持续运行，主程序准备退出时调用 `camctl_host_stop()`，等待其管理的进程及线程收场。停止契约见[主程序主动停止](design.md#主程序主动停止)。第三方先完成初始化；随后普通线程可递交计划或领取文件。多个递交调用按入队顺序处理，各自等待本次结果。需要同时处理主程序其他工作的调用方，应在独立普通线程中调用递交入口。
 
-### 软件维护接口
+### 软件更新接口
 
-主程序使用与普通实例相同的 `camctl_path`、`config_path`，并显式提供虚拟环境外的 `updater_path`：
+公开更新入口只接收更新包路径和可选的客户端能力数据目录：
 
 ```c
-int camctl_host_update(
-    const camctl_host_update_config *config,
-    const camctl_host_update_request *request,
-    camctl_host_update_result *result
-);
+int camctl_host_update(const char *bundle_path,
+                       const char *client_data_path);
 ```
 
-请求的 `action` 取 `CAMCTL_UPDATE_ACTION_APPLY` 或 `CAMCTL_UPDATE_ACTION_RECOVER`。应用时 `bundle_path` 为 Python 专用更新 ZIP 或已解压目录的绝对路径；恢复时该成员为 `NULL`。`client_data_path` 仅在应用时按需提供，只同步能力说明。结构体及生成的枚举由[公开头文件](../../apps/host-demo/include/camctl_host.h)交付，公共机器状态以根 `protocol` 的 Schema 为唯一来源。
+更新必须由已成功初始化的实例调用。模块使用该实例保存的部署配置、回调和稳定维护入口；`bundle_path` 是更新 ZIP 或已解压目录的绝对路径，`client_data_path` 为 `NULL` 或实际客户端数据目录的绝对路径。指定目录时，更新产生的能力说明会同步到该目录，并纳入失败恢复。
 
-该阻塞调用可以在未初始化或已经停止时执行。运行期间调用会先核对当前实例配置，停止接收普通工作，并等待在管进程、线程和在途调用收场。它不进入普通在途调用计数后等待自身；并发维护拒绝，其他线程的停止须等待实际维护结束。工作线程和回调线程不能调用会等待自身的维护。维护有自己的进程组、输出捕获、退出记录和取消保护，不依赖普通业务资源仍可用。
+调用会等待本实例普通工作停止，完成包应用、必要恢复和适用的普通资源重建。返回 `0` 表示新包已可靠提交、普通资源已重建且首次 `run` 已安排；返回 `-1` 表示本次更新失败，`errno` 保留对应的本地错误或更新失败。恢复原部署成功后，模块自动重建并恢复普通运行；恢复尚未完成或结果未知时，不启动可能不完整的环境。主程序只判断 `0` 或 `-1`，无需读取内部维护结果、选择恢复动作或调用重启接口。
 
-返回 `0` 表示收到了可信结果，调用方检查 `outcome`、`effect` 和 `eligibility`，不能仅凭返回值认定新版本已提交。公开结果另外提供展示用的简短 `reason` 和完整 `diagnostic_path`，后者通常是收据及日志所在的诊断目录；均以 NUL 结束，无内容时为空，路径不能完整交付时为空并记录诊断。返回 `-1` 时检查 `errno` 和实际结果。原始输出、阶段、上次恢复、进程及解析事实保存在私有结果中，由模块在必要收场和互斥释放后、恢复调用线程取消前统一交给 stderr；调用方和演示不重复输出。仅 stderr 截断不撤销合法结果，stdout 缺失、截断、矛盾或非正常退出保留未知。所有维护返回均不自动恢复业务。主程序随后可调用 `int camctl_host_restart(void)`，复用可靠停止实例的配置及回调，重新核对资格并建立新的运行周期；不重送旧首次计划，重试预算及队列重新建立。准备失败后须确认新资源收场，才保留原停止实例供重试；仍有资源责任时继续阻止重启和维护。直接 `init` 仍拒绝重复初始化。完整状态表见更新接入规格。
-
-普通初始化配置的 `updater_path` 为非 `NULL` 时，模块在启动原虚拟环境程序前检查维护资格；未完成恢复、资格占用或未知结果阻止启动。入口绑定、可靠完成及失败恢复的完整契约见[更新接入规格](../architecture/software-update-interface.md)。
+更新失败的独立诊断由结果消费者直接发布到 `processing`。普通初始化配置包含 `updater_path` 时，初始化会先通过稳定入口自动恢复未完成事务，确认允许启动后才建立普通资源并安排 `run`。详细的包、备份、恢复及故障范围见[更新接入规格](../architecture/software-update-interface.md)和[组件版本与软件更新](../architecture/versioning-and-updates.md)。
 
 ### 用户目录与路径补齐
 

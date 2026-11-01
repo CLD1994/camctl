@@ -89,68 +89,21 @@ python3 install-host.py \
 
 检查安装器退出码为 0，且收据的 `status` 为 `installed_stopped`。失败时先查看终端指出的步骤，再查 `install.log`、收据和发现报告；保留失败目录，修正原因后使用新目标目录重试。该入口不用于更新或覆盖已有部署。
 
-## 停机更新 camctl
+## 更新已有主机
 
-已有实例使用单独交付的 Python 专用包 `camctl-update.zip`。本完整包用于初次安装；Python 更新包只更新 camctl 及离线依赖，不替换 C 静态库或客户端。目标机须已有与原虚拟环境匹配的基础 CPython 3.11 和 uv，支持 Linux x86_64、ARM64 及 glibc 2.17 或以上。保留原配置、客户端数据及媒体。
+已有实例使用单独交付的 Python 专用包 `camctl-update.zip`。本完整包用于初次安装；Python 更新包更新 camctl 及其离线依赖，不替换 C 静态库或客户端。目标机需要与现有部署匹配的 CPython 3.11 和 uv。完整更新包的构建、强制重建、恢复和保障范围由项目的更新规格维护。
 
-将更新 ZIP 和配套 `.sha256` 放到独立发布目录，在该目录先执行下面的检查。摘要匹配后保留两个文件；组件还会在应用时校验包内完整文件集合和摘要。
+将更新 ZIP 和配套 `.sha256` 放到独立发布目录，先核对包外摘要并保留两个文件：
 
 ```sh
 sha256sum -c camctl-update.zip.sha256
 ```
 
-更新包和解压材料放在原虚拟环境、状态库、媒体及交接目录之外。以下命令中的 `deploy_root` 指向已有实例，`update_zip` 指向接收并校验过的 ZIP；C 接口直接接收 ZIP，无须主程序自行解包。
+主程序在 `camctl_host_init` 成功后调用 `camctl_host_update(bundle_path, client_data_path)`。`bundle_path` 是更新 ZIP 或已解压目录的绝对路径；`client_data_path` 可为 `NULL`，指定时同步设备能力说明。模块会停止本实例普通工作、应用更新、处理必要恢复，并在允许启动时重建普通资源、安排 `run`。返回 `0` 表示新包已可靠提交且普通运行已安排；返回 `-1` 表示本次更新失败。失败诊断直接进入 `processing`，主程序无需解读内部状态或手动触发恢复、重启。
 
-```sh
-deploy_root=/absolute/path/to/existing-instance
-update_zip=/absolute/path/to/releases/camctl-update.zip
-```
+普通启动配置中的 `updater_path` 必须指向安装器为该实例准备的稳定维护入口。初始化会先自动恢复未完成事务，再安排普通运行。host-demo 的 `--apply-update` 会在正常初始化后调用更新接口并继续终端交互；运行期间也可输入 `update /absolute/path/to/camctl-update.zip`。能力同步目录由启动参数 `--client-data` 提供。
 
-首次安装已经建立 `<target>/maintenance/camctl-updater`，生成的普通启动脚本显式使用它检查启动资格。主程序通过本包 `camctl_host.h` 的 `camctl_host_update` 调用该组件入口；接口等待本模块的普通工作收场后执行维护。其他独立 host 和 CLI 须先停止。可在普通主程序已退出后，使用已安装演示程序执行一次性维护：
-
-```sh
-"$deploy_root/host/bin/host-demo" \
-  --camctl "$deploy_root/venv/bin/camctl" \
-  --updater "$deploy_root/maintenance/camctl-updater" \
-  --config "$deploy_root/config.toml" \
-  --apply-update "$update_zip"
-```
-
-原实例使用外置配置时，传入实际配置的绝对路径；普通入口使用默认配置来源时省略 `--config`。配置文件原本缺失时仍按普通 CLI 默认值加载，不创建替代配置。维护入口显式绑定部署和基础解释器，恢复时不要求原 `venv/bin/camctl` 仍然可执行。
-
-组件先按保存的冻结引擎恢复上次未完成事务，之后才处理当前包。可靠保存完整 Python 环境和 SQLite 一致备份后，才进行离线安装及数据库副本迁移。自动维护从 V9 起；没有迁移路径、结构无效或无法核实身份时明确失败。配置、媒体和客户端数据库保留。应用失败时自动恢复原环境、数据库及适用能力文件；断电或强制终止后，下次调用先恢复。只执行恢复时，将上述 `--apply-update` 及其路径换为 `--recover`。
-
-每次维护在 `<target>/updates/<标识>/` 保留日志、收据和恢复材料。不要删除未完成记录、备份或恢复目录。更新和回滚完成后均保持停机；检查本次请求结果、部署效果和启动资格，再由主程序显式调用 `camctl_host_restart()` 恢复业务。它复用原配置和回调，重新核对资格并建立新资源，不重送首次计划；未初始化的实例使用 `init`。不能核实恢复或结果未知时继续保持停机，修正日志指出的原因后再次恢复。演示程序不会自动启动普通业务。
-
-host-demo 的退出 0 表示本次请求成功且允许启动。更新失败后即使原部署已核实恢复，演示仍以非零状态退出。查看输出所列的原因及诊断目录，再决定恢复原业务或处理恢复责任。维护模式没有初始化普通实例；它退出后应重新运行原主程序启动入口。同进程的 `camctl_host_restart()` 用于已经初始化并停止的主程序实例。
-
-只恢复未完成更新时执行以下命令，不传新包或能力同步目录。入口按旧事务冻结的引擎、配置和绑定恢复，不要求原 `venv/bin/camctl` 仍能启动；若资格仍被原写入者占用，先核实其结束情况，再调用维护。
-
-```sh
-"$deploy_root/host/bin/host-demo" \
-  --camctl "$deploy_root/venv/bin/camctl" \
-  --updater "$deploy_root/maintenance/camctl-updater" \
-  --config "$deploy_root/config.toml" \
-  --recover
-```
-
-应用时可添加 `--client-data /absolute/path/to/client-data` 同步能力说明，原文件内容或不存在状态会纳入恢复；省略时仅在更新产物目录保存新声明。该选项不更改客户端数据库和媒体。
-
-较旧实例首次接入时，先部署支持该接口的 C 模块，再从新 wheel 准备维护入口；不能先覆盖原 Python 环境来取得更新器。把更新 ZIP 解压到新的独立目录，找到其中的实际 wheel。下面使用原环境之外的基础解释器，从该 wheel 加载组件发布器。`new_wheel`、`base_python` 和 `deploy_root` 均填写绝对路径：
-
-```sh
-base_python=/absolute/path/to/python3.11
-new_wheel=/absolute/path/to/camctl-new-version-py3-none-any.whl
-"$base_python" -B -I -c \
-  'import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); runpy.run_module("camctl.update_engine.publisher", run_name="__main__")' \
-  "$new_wheel" --wheel "$new_wheel" --target "$deploy_root" \
-  --base-python "$base_python" --camctl-path "$deploy_root/venv/bin/camctl" \
-  --config "$deploy_root/config.toml"
-```
-
-发布器只准备维护入口，不应用新版本；它核对原部署配置及目录归属，所有材料可靠保存后才发布可执行入口。随后使用新 C 模块或演示程序调用维护接口应用完整的 Python 更新 ZIP。普通 wheel 安装本身不会为任意部署准备入口。
-
-已有维护入口且存在中断更新时，直接使用恢复入口，不重新发布维护材料。更新已经可靠提交后，切换到旧软件不属于本次失败回滚；数据库没有受支持的降级路径时，不能只安装旧 wheel 或改写数据库格式号。
+强制更新包自带完整 TOML 配置，并在原部署位置重建 Python 环境、配置、状态库、`staging` 和 `ready`。更新前的完整备份用于失败恢复；`processing`、日志、维护恢复材料、host、客户端数据和相机存储保留。更新与回滚过程可在重复中断后继续恢复；介质损坏及备份丢失不在保障范围内。
 
 ## camctl 的配置与日志
 
@@ -258,7 +211,7 @@ cc -std=c11 main.c \
 | C 成员 | 应填写的值 | 与 camctl 的关系 |
 | --- | --- | --- |
 | `camctl_path` | `<target>/venv/bin/camctl` 的绝对路径 | 模块启动的独立程序 |
-| `updater_path` | `<target>/maintenance/camctl-updater` 的绝对路径 | 提供时普通初始化先检查启动资格；维护调用必填 |
+| `updater_path` | 安装器提供的稳定维护入口绝对路径 | 普通初始化先自动恢复未完成事务；更新调用使用同一实例配置 |
 | `config_path` | `<target>/config.toml` 的绝对路径 | Python 配置来源；为 `NULL` 时按 CLI 默认规则选文件 |
 | `ready_path` | 生效配置中的 `paths.ready` | 模块领取文件的来源，必须与 camctl 一致 |
 | `processing_path` | 生效配置中的 `paths.processing` | 模块领取后的目标，必须与 camctl 一致 |
@@ -266,9 +219,9 @@ cc -std=c11 main.c \
 
 C 路径最多为 `CAMCTL_HOST_PATH_MAX` 字节，不展开 `$HOME` 或 `~`。`camctl_host_config_set_home_paths` 可按用户 home 补齐尚为 `NULL` 的四个必填路径；自定义安装根目录时，应如上显式填写路径。模块复制初始化配置；初始化成功后修改调用方结构体不会改变运行实例。
 
-路径补齐函数不推断 `updater_path`，由主程序显式填写。数值参数分别控制模块的自动重试、计划队列、输出缓冲、日志队列及轮换、电机通知的行缓冲和队列容量。默认值和字段类型见[本包公开头文件](docs/camctl_host.h)，合法范围及日志行为见[camctl_host 配置参考](docs/host-configuration.md)。host-demo 只开放它的 `--help` 所列参数，其他成员由自有主程序在初始化前填写。
+路径补齐函数不推断 `updater_path`，由主程序从安装器提供的信息中填写。数值参数分别控制模块的自动重试、计划队列、输出缓冲、日志队列及轮换、电机通知的行缓冲和队列容量。默认值和字段类型见[本包公开头文件](docs/camctl_host.h)，合法范围及日志行为见[camctl_host 配置参考](docs/host-configuration.md)。host-demo 只开放它的 `--help` 所列参数，其他成员由自有主程序在初始化前填写。
 
-其中 `retry_limit` 是同一运行周期共享的自动重试次数，设为 0 关闭自动重试，调用成功不会清零已使用次数，显式重启建立新运行周期时重新初始化预算；它与 TOML 中设备控制的 `recording.max_start_attempts` 等次数分别管理。`plan_capacity` 包含排队、正在提交和等待重试的计划；`stdout_capacity` 限制调用结果缓冲，不决定业务计划是否受理。
+其中 `retry_limit` 是同一运行周期共享的自动重试次数，设为 0 关闭自动重试，调用成功不会清零已使用次数，主程序进程重新启动并初始化模块时重新建立预算；它与 TOML 中设备控制的 `recording.max_start_attempts` 等次数分别管理。`plan_capacity` 包含排队、正在提交和等待重试的计划；`stdout_capacity` 限制调用结果缓冲，不决定业务计划是否受理。
 
 ### 调用时机与返回含义
 
@@ -284,7 +237,7 @@ int start_camera_control(void) {
     camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
     config.camctl_path = "/home/user/.camctl/device-test/venv/bin/camctl";
     config.config_path = "/home/user/.camctl/device-test/config.toml";
-    config.updater_path = "/home/user/.camctl/device-test/maintenance/camctl-updater";
+    config.updater_path = "/absolute/path/to/installed-maintenance-entry";
     config.ready_path = "/home/user/.camctl/device-test/ready";
     config.processing_path = "/home/user/.camctl/device-test/processing";
     config.log_path = "/home/user/.camctl/device-test/host.log";
@@ -305,30 +258,17 @@ int stop_camera_control(void) {
     return camctl_host_stop();
 }
 
-int restart_camera_control(void) {
-    return camctl_host_restart();
-}
-
 int update_camera_control(const char *absolute_update_zip,
-                          camctl_host_update_result *result) {
-    camctl_host_update_config config = {
-        .camctl_path = "/home/user/.camctl/device-test/venv/bin/camctl",
-        .updater_path = "/home/user/.camctl/device-test/maintenance/camctl-updater",
-        .config_path = "/home/user/.camctl/device-test/config.toml"
-    };
-    camctl_host_update_request request = {
-        .action = CAMCTL_UPDATE_ACTION_APPLY,
-        .bundle_path = absolute_update_zip
-    };
-    return camctl_host_update(&config, &request, result);
+                          const char *client_data_path) {
+    return camctl_host_update(absolute_update_zip, client_data_path);
 }
 ```
 
 - 启动时先完成 `camctl init`，再在普通线程中注册所需回调并初始化模块。本包安装器已执行首次 `init`。`camctl_host_init` 返回 0 只说明模块本地资源和首次启动安排成功。第二个参数为 `NULL` 表示不携带首次计划；提供计划路径时首次处理仍是异步的，应保留原文件直到报告确认。无需电机通知时可省略注册，直接初始化；初始化失败后修正重试时保留已有注册，不重复注册。
 - 收到计划后先完整写入并关闭文件，再递交绝对路径；等待期间保持文件路径及内容不变。`submit` 返回 0 表示本次输入处理结果已保存，含已保存的拒绝或诊断；返回 -1 时检查 `errno` 和日志，保留原文件以核实或沿用原 `request_id` 重送。需要继续处理其他事务的主程序可用独立普通线程递交。
 - 主程序决定何时调用 `claim`，返回后处理 `processing` 的文件。该接口返回 `void`，逐项失败通过模块诊断记录；同名目标可以被原子覆盖，实际传输和文件处理由主程序负责。
-- 主程序准备退出时，在普通线程调用 `stop` 等待在管进程、通知、回调和诊断收场。停止不会取消已经保存的计划；同一进程再次启动调用 `camctl_host_restart()`，直接 `init` 仍拒绝重复初始化。信号处理函数只通知普通线程退出，不能直接调用这些接口；回调线程也不能调用 `stop`。
-- 更新接口可以在未初始化、运行中或已停止时调用。返回 `0` 只表示收到可信结果，必须继续检查 `outcome`、`effect` 和 `eligibility`；`CAMCTL_UPDATE_EFFECT_COMMITTED` 表示新版本可靠提交。公开结果另外提供简短 `reason` 和实际收据或日志的完整绝对路径 `diagnostic_path`；两者均以 NUL 结束，无可用内容时为空。主程序不按说明文案决定处理分支。返回 `-1` 时检查 `errno` 和实际结果。原始输出、上次恢复、阶段及进程错误由模块统一交给 stderr，调用方无需处理底层诊断字段。所有维护返回后均不自动恢复业务，结果未知或仍需恢复时继续停机。只恢复时使用 `CAMCTL_UPDATE_ACTION_RECOVER` 且不传更新包或能力同步目录。
+- 主程序准备退出时，在普通线程调用 `stop` 等待在管进程、通知、回调和诊断收场。停止不会取消已经保存的计划；再次启动普通业务时由主程序进程重新初始化模块。信号处理函数只通知普通线程退出，不能直接调用这些接口；回调线程也不能调用 `stop`。
+- 更新接口只在模块初始化成功后调用。它在内部停止普通工作、应用更新、必要时恢复，并在允许启动时重建普通资源和安排 `run`。返回 `0` 表示新包已可靠提交且普通运行已安排；返回 `-1` 表示本次更新失败。主程序无需检查内部结果或手动恢复、重启；失败诊断直接进入 `processing`。普通初始化配置中的 `updater_path` 启用启动前自动恢复。更新接口的完整函数签名见本包公开头文件。
 
 一个主程序进程内只有一个模块实例。主程序保留模块子进程的退出记录，不显式忽略 `SIGCHLD`、不设置 `SA_NOCLDWAIT`，也不通过通配 `waitpid` 抢先回收模块子进程。运行环境须提供可读的 Linux `/proc`。电机回调在专用线程中执行，主程序负责共享状态的线程安全；回调应及时返回。回调或工具长期不返回时，停止可能持续等待。
 
