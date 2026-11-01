@@ -1,0 +1,73 @@
+{
+  "scope": "shell syntax only, no commands in guide executed",
+  "source": "/workspaces/camctl/docs/camctl/software-updates.md",
+  "source_commit": "76b99f62bf55c87df26abee1f82f74a690e1e7d2",
+  "checks": [
+    {
+      "snippet": 0,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 1,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 2,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 3,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 4,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 5,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 6,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 7,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 8,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 9,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 10,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 11,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "snippet": 12,
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "status": "passed"
+}

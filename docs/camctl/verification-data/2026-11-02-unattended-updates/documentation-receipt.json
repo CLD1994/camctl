@@ -1,0 +1,32 @@
+{
+  "scope": "actual configuration-doc export and public example compile only; no complete deployment package build or installation",
+  "source_commit": "a5dba124d5b0eaa0c573d792ac65158eb22732bf",
+  "links": {
+    "docs/camctl-configuration.md": true,
+    "docs/camctl_host.h": true,
+    "docs/host-configuration.md": true
+  },
+  "compile": [
+    {
+      "argv": [
+        "cc",
+        "-std=c11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-c",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/documentation-artifact-check/example-0.c",
+        "-I",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/documentation-artifact-check/docs",
+        "-o",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/documentation-artifact-check/example-0.o"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "public_header_dependencies": {
+    "camctl_host.h": []
+  },
+  "status": "passed"
+}

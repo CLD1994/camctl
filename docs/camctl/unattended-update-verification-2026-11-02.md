@@ -56,6 +56,12 @@
 
 两个原 bootstrap 节点在审核时发现顶层导入读取真实 `_resources`，未获批准且没有执行。其维护布局契约已改用导入前隔离的独立文件验证。
 
+## 文档与交付模板
+
+实际调用打包入口的配置文档导出函数，导出了三处模板链接目标，三个目标均存在；公开头文件没有私有协议头依赖。随包 C 示例以 `-std=c11 -Wall -Wextra -Werror` 静态编译通过。更新教程的 13 段 shell 命令通过 `bash -n` 语法检查，没有因此执行教程中的部署或更新命令。见[导出及编译收据](verification-data/2026-11-02-unattended-updates/documentation-receipt.json)及[语法收据](verification-data/2026-11-02-unattended-updates/documentation-guide-shell-syntax.json)。
+
+通用仓库文档检查仍对源模板中尚未生成的三处 docs 链接报错；实际导出后的链接核对通过，未修改或放宽通用检查器。本项不是完整部署包构建、安装或客户端运行验收。
+
 ## 尚未取得的证据
 
 强制重建、旧环境归档与清理中断仍待实际执行。真实 ARM64、第三方主程序、真实设备和目标存储物理断电没有由此次容器结果证明。
