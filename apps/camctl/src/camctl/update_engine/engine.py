@@ -19,6 +19,7 @@ from pathlib import Path
 import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import traceback
 import uuid
@@ -38,6 +39,51 @@ def absolute_path(value):
     return path
 
 import update_transaction as transaction
+from config_paths import log_registration_id, rotated_log_names
+
+
+def freeze_registered_logs(target, destination):
+    registry = target / 'maintenance/logs'
+    destination.mkdir(mode=0o700)
+    transaction.sync_dir(destination.parent)
+    try:
+        entries = sorted(registry.iterdir())
+    except FileNotFoundError:
+        entries = []
+    manifest = []
+    for entry in entries:
+        info = entry.lstat()
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('日志位置登记不是普通文件: ' + str(entry))
+        item = json.loads(entry.read_text(encoding='utf-8'))
+        if (not isinstance(item, dict) or set(item) != {'path', 'config_source'} or
+                not isinstance(item['path'], str) or not Path(item['path']).is_absolute() or
+                entry.name != log_registration_id(item['path']) + '.json' or
+                (item['config_source'] is not None and
+                 (not isinstance(item['config_source'], str) or not Path(item['config_source']).is_absolute()))):
+            raise ValueError('日志位置登记无效: ' + str(entry))
+        path = Path(item['path'])
+        try:
+            rotations = [name for _, name in rotated_log_names(path)]
+        except FileNotFoundError:
+            rotations = []
+        files = []
+        for index, source in enumerate([path, *rotations]):
+            try:
+                source_info = source.lstat()
+            except FileNotFoundError:
+                files.append({'path': str(source), 'present': False})
+                continue
+            if not stat.S_ISREG(source_info.st_mode):
+                raise ValueError('日志来源不是普通文件: ' + str(source))
+            copy = destination / (entry.stem + '-' + str(index))
+            shutil.copy2(source, copy)
+            transaction.sync_file(copy)
+            files.append({'path': str(source), 'present': True, 'copy': copy.name,
+                          'sha256': transaction.digest(copy)})
+        manifest.append({'registration': item, 'files': files})
+    transaction.sync_dir(destination)
+    return manifest
 
 
 def freeze_exception(error, stage):

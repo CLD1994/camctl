@@ -16,6 +16,7 @@ import zipfile
 from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.update_engine.diagnostic_fallback import freeze
 from camctl.update_engine.layout import database_locator, environment_locator
+from camctl.update_engine.log_registry import register as register_log_location
 
 
 def _module_from_wheel(archive, name):
@@ -206,6 +207,7 @@ def _publish_locked(wheel, target, base_python, camctl_path, config):
     for locator in (env_locator, db_locator):
         _publish_file(locator, locator_content, 0o600)
         transaction.sync_dir(locator.parent)
+    register_log_location(original['log_file'], config, environment=target / 'venv')
     _publish_launcher(directory / 'camctl-updater', launcher, base_python, directory, binding)
     transaction.sync_dir(directory)
     return directory / 'camctl-updater'

@@ -17,6 +17,7 @@ result = {
     'lock_paths': list(map(str, lock_file_paths(state_db))),
     'old_version': importlib.metadata.version('camctl'),
     'paths': {name: str(getattr(config.paths, name)) for name in ('staging', 'ready', 'processing')},
+    'log_file': config.paths.log_file,
     'busy_timeout_ms': config.database.busy_timeout_ms,
 }
 if sys.argv[2] == 'inspect':

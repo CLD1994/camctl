@@ -18,14 +18,17 @@ fallback = ModuleType('camctl.update_engine.diagnostic_fallback'); fallback.free
 layout = ModuleType('camctl.update_engine.layout')
 layout.environment_locator = lambda environment: Path(environment) / '.camctl-maintenance-layout'
 layout.database_locator = lambda db: Path(str(db) + '.camctl-maintenance-layout')
+log_registry = ModuleType('camctl.update_engine.log_registry'); log_registry.register = Mock()
 with patch.dict(sys.modules, {'camctl': camctl, 'camctl.operations': operations, 'camctl.update_engine': engine,
                               'camctl.operations.error_diagnostics': diagnostics,
                               'camctl.update_engine.diagnostic_fallback': fallback,
-                              'camctl.update_engine.layout': layout}):
+                              'camctl.update_engine.layout': layout,
+                              'camctl.update_engine.log_registry': log_registry}):
     spec.loader.exec_module(publisher)
 
 
 def test_wheel_resources_are_published_before_executable_entry():
+    log_registry.register.reset_mock()
     wheel, embedded = MagicMock(), MagicMock()
     wheel.read.return_value = b'resource'
     embedded.read.return_value = b'probe'
@@ -34,7 +37,7 @@ def test_wheel_resources_are_published_before_executable_entry():
     engine_context.__enter__.return_value = embedded
     transaction = Mock()
     transaction.snapshot_config.return_value = {'present': False}
-    config = {'config': '/config', 'state_db': '/state', 'lock_paths': ['/lock/a', '/lock/b'],
+    config = {'config': '/config', 'state_db': '/state', 'log_file': '/log', 'lock_paths': ['/lock/a', '/lock/b'],
               'paths': {'staging': '/staging', 'ready': '/ready', 'processing': '/processing'}}
     calls = [SimpleNamespace(returncode=0, stderr=b''),
              SimpleNamespace(returncode=0, stdout=json.dumps(config).encode(), stderr=b'')]
@@ -63,6 +66,7 @@ def test_wheel_resources_are_published_before_executable_entry():
     assert 'state.camctl-maintenance-layout' in names
     launcher.assert_called_once()
     assert run.call_args_list[-1].args[0][-1] == 'inspect'
+    log_registry.register.assert_called_once_with('/log', '/config', environment=Path('/target/venv'))
     wheel.read.assert_any_call('camctl/update_engine/bundle_support.py')
     transaction.validate_paths.assert_called_once()
     flock.assert_called_once()

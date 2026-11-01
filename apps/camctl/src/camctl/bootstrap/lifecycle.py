@@ -68,6 +68,7 @@ class RuntimeDeps:
     session_lock: Path
     admission_lock: Path
     catalog: Any
+    configuration_source: Path | None = None
     notifier: Any = None
     #: 只在会话锁内打开；全部业务及快照共用其执行器。
     database: Any = None
@@ -252,6 +253,7 @@ def build_runtime(
     command_mode: CommandMode,
     config: ConfigSnapshot,
     *,
+    configuration_source: Path | None = None,
     catalog: Any = None,
     notifier: Any = None,
     host_notifications: Any = None,
@@ -362,6 +364,7 @@ def build_runtime(
         session_lock=session_lock,
         admission_lock=admission_lock,
         catalog=catalog if catalog is not None else _default_catalog(config),
+        configuration_source=configuration_source,
         notifier=notifier,
         host_notifications=host_notifications,
         startup_error=startup_error,
@@ -1114,7 +1117,7 @@ async def execute_command(
     """为本命令及原业务子任务装配共同诊断目标和第三方路由。"""
     from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
     from camctl.logging_runtime.standard_logging import install_standard_logging
-    from camctl.logging_runtime.startup import record_startup
+    from camctl.logging_runtime.startup import record_log_location, record_startup
 
     channel = None if deps.log_runtime is None else deps.log_runtime.channel
     fallback = lambda message: _write_stderr_diagnostic(deps, message)
@@ -1133,6 +1136,7 @@ async def execute_command(
             if channel is not None:
                 installation = install_standard_logging(channel, fallback)
             record_startup()
+            record_log_location(deps.config, deps.configuration_source)
             return await _execute_command(
                 deps, source, flows=flows, restricted_flows=restricted_flows,
                 wake=wake, poll_interval_s=poll_interval_s, finish_command=finish_command,
