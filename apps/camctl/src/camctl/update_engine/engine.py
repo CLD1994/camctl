@@ -16,6 +16,7 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import sqlite3
@@ -54,6 +55,8 @@ def freeze_registered_logs(target, destination):
         entries = []
     manifest = []
     for entry in entries:
+        if entry.name.startswith('.log-location-'):
+            continue
         info = entry.lstat()
         if not stat.S_ISREG(info.st_mode):
             raise ValueError('日志位置登记不是普通文件: ' + str(entry))
@@ -86,6 +89,65 @@ def freeze_registered_logs(target, destination):
         manifest.append({'registration': item, 'files': files})
     transaction.sync_dir(destination)
     return manifest
+
+
+def finalize_archives(target, selected=None):
+    """核验可靠提交，再独立取得该归档任务资格。"""
+    import fcntl
+    import force_archive
+
+    updates = target / 'updates'
+    try:
+        outputs = [selected] if selected is not None else sorted(updates.iterdir())
+    except FileNotFoundError:
+        return
+    failures = []
+    for output in outputs:
+        if not re.fullmatch('[0-9a-f]{32}', output.name):
+            continue
+        try:
+            job_path = output / 'archive-job.json'
+            try:
+                job = json.loads(job_path.read_text(encoding='utf-8'))
+            except FileNotFoundError:
+                continue
+            frozen = job['record']
+            if Path(frozen['output']) != output:
+                raise ValueError('归档任务输出不一致')
+            force_record.validate_target(frozen, target)
+            force_record.classify(frozen)
+            fd = os.open(output / 'archive.lock', os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+            current_path = output / 'journal.json'
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try:
+                    current = json.loads(current_path.read_text(encoding='utf-8'))
+                except FileNotFoundError:
+                    current_path = updates / 'pending.json'
+                    try:
+                        current = json.loads(current_path.read_text(encoding='utf-8'))
+                    except FileNotFoundError:
+                        continue
+                if (current.get('output') != str(output) or
+                        transaction.classify_record(current) is not transaction.JournalState.COMMITTED):
+                    continue
+                try:
+                    pending_record = json.loads((updates / 'pending.json').read_text(encoding='utf-8'))
+                except FileNotFoundError:
+                    pending_record = None
+                if (pending_record is not None and pending_record.get('output') == str(output) and
+                        transaction.classify_record(pending_record) is not transaction.JournalState.COMMITTED):
+                    continue
+                transaction.validate_record_target(current, target)
+                transaction.sync_file(current_path)
+                transaction.sync_dir(current_path.parent)
+                force_archive.finalize(current)
+            finally:
+                os.close(fd)
+        except Exception as error:
+            failures.append(error)
+    if failures:
+        raise ExceptionGroup('旧环境归档未完成', failures)
 
 
 def freeze_exception(error, stage):
@@ -148,6 +210,10 @@ def perform_update(ops, original=None):
         ops.check_final(receipt)
         stage = 'sync_new'
         ops.sync_new()
+        if isinstance(ops, ForceOperations):
+            stage = 'prepare_archive'
+            import force_archive
+            force_archive.prepare(ops.record)
         stage = 'commit'
         ops.commit()
         committed = True
@@ -217,6 +283,7 @@ class UpdateOperations:
                             ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV')}
         self.update_locks = transaction.Locks()
         self.db_locks = transaction.Locks()
+        self.intent_proposal = None
         self.pending = target / 'updates/pending.json'
         self.engine_path = output / 'engine.pyz'
 
@@ -429,8 +496,10 @@ class UpdateOperations:
 
     def mark_intent(self):
         proposed = dict(self.record, state='updating', mutation_intent=True)
+        self.intent_proposal = proposed
         transaction.atomic_json(self.pending, proposed)
         self.record = proposed
+        self.intent_proposal = None
 
     def rollback(self):
         # 重取资格才能证明继承锁的写入者已全部结束。
@@ -471,8 +540,10 @@ class UpdateOperations:
             if record[key] != self.record[key]:
                 raise ValueError('持久更新记录身份不一致: ' + key)
         if state is not transaction.JournalState.PREPARING:
+            expected = self.intent_proposal if (state is transaction.JournalState.UPDATING and
+                       self.intent_proposal is not None) else self.record
             if {k: v for k, v in record.items() if k not in ('state', 'temporary_owners')} != {
-                    k: v for k, v in self.record.items() if k not in ('state', 'temporary_owners')}:
+                    k: v for k, v in expected.items() if k not in ('state', 'temporary_owners')}:
                 raise ValueError('持久更新记录材料不一致')
         for kind, owners in self.record['temporary_owners'].items():
             if any(owner not in record['temporary_owners'][kind] for owner in owners):
@@ -485,6 +556,7 @@ class UpdateOperations:
         transaction.sync_dir(self.pending.parent)
         self.record.clear()
         self.record.update(record)
+        self.intent_proposal = None
         return state.value
 
     def register_owner(self, kind, parent):
@@ -727,8 +799,10 @@ class ForceOperations(UpdateOperations):
         transaction.validate_record_target(current, self.target)
         if transaction.directory_identity(self.output) != current['output_identity']:
             raise ValueError('强制事务输出身份已变化')
-        if {k: v for k, v in current.items() if k not in ('state', 'mutation_intent')} != {
-                k: v for k, v in self.record.items() if k not in ('state', 'mutation_intent')}:
+        expected = self.intent_proposal if (state is transaction.JournalState.UPDATING and
+                   self.intent_proposal is not None) else self.record
+        if {k: v for k, v in current.items() if k != 'state'} != {
+                k: v for k, v in expected.items() if k != 'state'}:
             raise ValueError('强制事务持久记录不一致')
         return current, state
 
@@ -772,7 +846,7 @@ class ForceOperations(UpdateOperations):
                                             encoding='utf-8')
         transaction.sync_file(self.environment_locator)
         transaction.sync_dir(self.environment_locator.parent)
-        with self.config_path.open('x', encoding='utf-8') as stream:
+        with Path(self.objects['configuration']).open('x', encoding='utf-8') as stream:
             stream.write(self.update['config_toml'])
             stream.flush()
             os.fsync(stream.fileno())
@@ -833,6 +907,12 @@ class ForceOperations(UpdateOperations):
             transaction.sync_file(self.client_data / 'device-capabilities.json')
             transaction.sync_dir(self.client_data)
 
+    def commit(self):
+        committed = dict(self.record, state=transaction.JournalState.COMMITTED.value)
+        transaction.atomic_json(self.output / 'journal.json', committed)
+        transaction.atomic_json(self.pending, committed)
+        self.record = committed
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -841,7 +921,9 @@ def main():
     parser.add_argument('--bundle', type=Path)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--recover-only', action='store_true')
-    parser.add_argument('--lock-fd', required=True, type=int)
+    parser.add_argument('--finalize-only', action='store_true')
+    parser.add_argument('--finalize-output', type=Path)
+    parser.add_argument('--lock-fd', type=int)
     parser.add_argument('--config', type=absolute_path, help='原配置文件的绝对路径；省略时使用普通入口的默认来源')
     args = parser.parse_args()
     if not args.target.is_absolute() or not args.target.is_dir():
@@ -852,6 +934,17 @@ def main():
     if (sys.version_info[:2] != (3, 11) or sys.implementation.name != 'cpython'
             or sys.prefix != sys.base_prefix):
         parser.error('更新入口必须由虚拟环境外的 CPython 3.11 启动')
+    if args.finalize_only:
+        try:
+            finalize_archives(args.target, args.finalize_output)
+        except Exception as error:
+            print(json.dumps(freeze_exception(error, 'finalize'), ensure_ascii=False), file=sys.stderr)
+            print(json.dumps({'status': 'failed'}))
+            return 1
+        print(json.dumps({'status': 'unchanged'}))
+        return 0
+    if args.lock_fd is None:
+        parser.error('更新和恢复必须提供维护资格')
     updates = args.target / 'updates'
     pending = updates / 'pending.json'
     target_locks = transaction.Locks()

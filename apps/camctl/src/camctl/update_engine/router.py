@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -141,6 +142,41 @@ def execute(binding, action, camctl_path, config, bundle, client_data):
     return result
 
 
+def _finalize(binding):
+    target = Path(binding['target'])
+    updates = target / 'updates'
+    failures = []
+    try:
+        outputs = sorted(updates.iterdir())
+    except FileNotFoundError:
+        return
+    for output in outputs:
+        if not re.fullmatch('[0-9a-f]{32}', output.name):
+            continue
+        try:
+            try:
+                job = json.loads((output / 'archive-job.json').read_text(encoding='utf-8'))
+            except FileNotFoundError:
+                continue
+            record = job['record']
+            transaction.classify_record(record)
+            transaction.validate_record_target(record, target)
+            if Path(record['output']) != output:
+                raise ValueError('归档任务输出身份不一致')
+            frozen = _frozen(record)
+            process = subprocess.Popen([binding['python'], '-B', '-I', str(frozen),
+                '--target', str(target), '--finalize-only', '--finalize-output', str(output)],
+                stdout=subprocess.PIPE)
+            data, _ = process.communicate()
+            result = _read_result(data)
+            if process.returncode != 0 or result['status'] != 'unchanged':
+                raise ValueError('归档任务未完成: ' + str(output))
+        except Exception as error:
+            failures.append(error)
+    if failures:
+        raise ExceptionGroup('旧环境归档未完成', failures)
+
+
 def _execute(binding, action, camctl_path, config, bundle, client_data, diagnostics):
     result = dict(version=1, action=action, outcome='not_started', effect='not_started', eligibility='unknown',
                   prior_recovery='none', prior_evidence=None, reason=None, stage=None, evidence=None)
@@ -149,6 +185,16 @@ def _execute(binding, action, camctl_path, config, bundle, client_data, diagnost
     if camctl_path != binding['camctl_path']:
         result['reason'] = '普通入口与维护入口绑定不一致'
         diagnostics.append((ValueError(result['reason']), 'binding'))
+        return result
+    if action == 'finalize':
+        try:
+            _finalize(binding)
+        except Exception as error:
+            diagnostics.append((error, 'finalize'))
+            result.update(outcome='failed', effect='unchanged', eligibility='allowed',
+                          reason=f'{type(error).__name__}: {error}', stage='finalize')
+        else:
+            result.update(outcome='unchanged', effect='unchanged', eligibility='allowed')
         return result
     lock_fd = None
     invoked = False

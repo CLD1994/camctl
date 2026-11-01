@@ -5,8 +5,9 @@ import io
 import json
 from pathlib import Path
 import sys
+from enum import Enum
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 root = Path(__file__).absolute().parents[5]
 engine_dir = root / 'apps/camctl/src/camctl/update_engine'
@@ -27,6 +28,10 @@ transaction = ModuleType('update_transaction')
 config_paths = ModuleType('config_paths')
 config_paths.log_registration_id = Mock()
 config_paths.rotated_log_names = Mock()
+config_paths.default_config_path = Mock()
+config_paths.lock_file_paths = Mock()
+force_record = ModuleType('force_record')
+force_snapshot = ModuleType('force_snapshot')
 class Locks:
     def __init__(self):
         self.fds = []
@@ -34,12 +39,19 @@ class Locks:
         self.close = Mock()
 transaction.Locks = Locks
 transaction.snapshot_config = Mock(return_value={'present': False})
+class JournalState(Enum):
+    PREPARING = 'preparing'
+    UPDATING = 'updating'
+    COMMITTED = 'committed'
+    ROLLED_BACK = 'rolled_back'
+transaction.JournalState = JournalState
 spec = importlib.util.spec_from_file_location('owned_update_engine_under_test', engine_dir / 'engine.py')
 engine = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, {'bundle_support': bundle, 'archive_support': archive,
                               'maintenance_integrity': integrity, 'update_transaction': transaction,
                               'error_diagnostics': encoder, 'diagnostic_fallback': fallback,
-                              'config_paths': config_paths}), \
+                              'config_paths': config_paths, 'force_record': force_record,
+                              'force_snapshot': force_snapshot}), \
         patch.object(sys, 'dont_write_bytecode', True):
     spec.loader.exec_module(engine)
 
@@ -121,6 +133,51 @@ def test_backup_failure_never_installs_or_attempts_rollback():
     ops.rollback.assert_not_called()
 
 
+def test_force_missing_lock_parent_fails_before_backup_or_mutation():
+    ops = Mock(spec=engine.ForceOperations)
+    ops.preflight.return_value = {'state_db': '/missing/state.db'}
+    ops.lock.side_effect = FileNotFoundError('/missing/state.db.session.lock')
+    result = engine.perform_update(ops)
+    assert result['status'] == 'failed'
+    assert result['diagnostics'][0]['stage'] == 'lock'
+    ops.prepare_new.assert_not_called()
+    ops.backup.assert_not_called()
+    ops.mark_intent.assert_not_called()
+
+
+def test_force_installs_configuration_at_frozen_symlink_target():
+    with patch.object(Path, 'is_dir', return_value=True):
+        ops = engine.ForceOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'),
+                                     config_path=Path('/link/config'))
+    ops.objects = {'configuration': '/actual/config', 'staging': '/stage', 'ready': '/ready'}
+    ops.layout = {'state_db': '/state/db', 'staging': '/stage', 'ready': '/ready', 'processing': '/processing'}
+    ops.processing_identity = {'dev': 1}
+    ops.record = {'namespaces': {}}
+    ops.environment_locator = Path('/target/venv/.locator')
+    ops.update = {'force': True, 'config_toml': '[paths]\n'}
+    ops.run = Mock(return_value=json.dumps({'state_db': '/state/db', 'paths': {
+        'staging': '/stage', 'ready': '/ready', 'processing': '/processing'}}))
+    ops.install_environment = Mock()
+    stream = MagicMock()
+    stream.__enter__.return_value = stream
+    stream.__exit__.return_value = False
+    stream.fileno.return_value = 9
+    opened = Mock(return_value=stream)
+    def open_path(path, *args, **kwargs):
+        return opened(path, *args, **kwargs)
+    with patch.object(Path, 'resolve', return_value=Path('/actual/config')), \
+            patch.object(Path, 'open', open_path), patch.object(Path, 'mkdir'), patch.object(Path, 'write_text'), \
+            patch.object(engine.force_snapshot, 'displace', create=True), \
+            patch.object(engine.force_snapshot, 'ensure_directories', create=True), \
+            patch.object(engine.transaction, 'directory_identity', return_value={'dev': 1}, create=True), \
+            patch.object(engine.transaction, 'make_directories', create=True), \
+            patch.object(engine.transaction, 'sync_file', create=True), \
+            patch.object(engine.transaction, 'sync_dir', create=True), patch.object(engine.os, 'fsync'):
+        ops.install({'steps': []})
+    assert opened.call_args.args[:2] == (Path('/actual/config'), 'x')
+    stream.write.assert_called_once_with('[paths]\n')
+
+
 def test_intent_write_failure_uses_confirmed_persistent_record():
     for state, should_restore in (('preparing', False), ('updating', True)):
         ops = operations()
@@ -130,6 +187,42 @@ def test_intent_write_failure_uses_confirmed_persistent_record():
         assert result['status'] == 'failed'
         assert ops.rollback.called is should_restore
         ops.install.assert_not_called()
+
+
+def test_late_intent_sync_error_compares_exact_proposal_and_rolls_back():
+    keys = ('output', 'output_identity', 'env', 'env_backup', 'state_db', 'db_backup', 'lock_paths',
+            'controller', 'original', 'temporary', 'engine')
+    original = {key: key for key in keys}
+    original.update(state='preparing', mutation_intent=False, temporary_owners={})
+    pending = dict(original)
+    with patch.object(Path, 'is_dir', return_value=True):
+        ops = engine.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
+    ops.record = original
+    def publish(path, proposal):
+        pending.clear()
+        pending.update(proposal)
+        raise OSError(5, 'directory sync')
+    def classify(record):
+        assert (record['state'], record['mutation_intent']) in (('preparing', False), ('updating', True))
+        return JournalState(record['state'])
+    receipt = Mock()
+    ops.save = Mock(); ops.lock = Mock(); ops.check_paths = Mock(); ops.check_original = Mock()
+    ops.backup = Mock(); ops.install = Mock(); ops.rollback = Mock(); ops.unlock = Mock()
+    ops.record_diagnostics = Mock()
+    with patch.object(engine.transaction, 'atomic_json', side_effect=publish, create=True), \
+            patch.object(engine.transaction, 'classify_record', side_effect=classify, create=True), \
+            patch.object(engine.transaction, 'validate_record_target', create=True), \
+            patch.object(engine.transaction, 'directory_identity', return_value='output_identity', create=True), \
+            patch.object(engine.transaction, 'sync_file', create=True), \
+            patch.object(engine.transaction, 'sync_dir', create=True), \
+            patch.object(Path, 'read_text', side_effect=lambda *args, **kwargs: json.dumps(pending)), \
+            patch.object(Path, 'is_dir', return_value=True):
+        result = engine.perform_update(ops, original=receipt)
+    assert result['status'] == 'failed'
+    assert result['rollback'] == 'verified'
+    assert result['diagnostics'][0]['stage'] == 'save_install_intent'
+    ops.rollback.assert_called_once()
+    ops.install.assert_not_called()
 
 
 def test_visible_durable_commit_keeps_success_and_original_error():
