@@ -21,6 +21,6 @@
 
 Python CLI 的完整 TOML 字段、默认值、合法范围和自定义交接目录示例见[配置项参考](../camctl/configuration-reference.md)。其中的 C 配置对应表说明两端应如何使用同一组路径。
 
-软件更新在已初始化实例中通过 `camctl_host_update(bundle_path, client_data_path)` 调用。模块内部停止普通工作、应用更新、处理失败恢复，并在允许启动时重建普通资源和安排 `run`；接口返回 `0` 表示新包可靠提交且普通运行已安排，返回 `-1` 表示本次更新失败。更新诊断直接进入 `processing`。普通初始化配置设置 `updater_path` 后，会先自动恢复未完成事务，再安排普通运行。主程序无需解释内部状态或手动恢复、重启。交付物和行为契约见[更新接入规格](../architecture/software-update-interface.md)及[组件版本与软件更新](../architecture/versioning-and-updates.md)，实际调用见[源码说明](../../apps/host-demo/README.md#更新-camctl)。
+软件更新在已初始化实例中通过 `camctl_host_update(bundle_path, client_data_path)` 调用。模块内部停止普通工作、应用更新、处理失败恢复，并在允许启动时重建普通资源和安排 `run`；接口返回 `0` 表示新包可靠提交且普通运行已安排，返回 `-1` 表示本次更新失败。更新诊断直接进入 `processing`。普通初始化配置设置 `updater_path` 后，会先自动恢复未完成事务，再安排普通运行。主程序无需解释内部状态或手动恢复、重启。强制包成功后使用新配置和新实例身份的空状态库，不保留旧业务状态；旧状态仅在更新失败回滚时使用。交付物和行为契约见[更新接入规格](../architecture/software-update-interface.md)及[组件版本与软件更新](../architecture/versioning-and-updates.md)，实际调用见[源码说明](../../apps/host-demo/README.md#更新-camctl)。
 
 部署人员与主程序接入人员可按[版本发布与现场更新操作](../camctl/software-updates.md)构建和应用更新包；C 主程序按更新接口的 `0` 或 `-1` 处理结果。

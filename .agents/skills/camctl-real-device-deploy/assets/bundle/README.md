@@ -91,19 +91,58 @@ python3 install-host.py \
 
 ## 更新已有主机
 
-已有实例使用单独交付的 Python 专用包 `camctl-update.zip`。本完整包用于初次安装；Python 更新包更新 camctl 及其离线依赖，不替换 C 静态库或客户端。目标机需要与现有部署匹配的 CPython 3.11 和 uv。完整更新包的构建、强制重建、恢复和保障范围由项目的更新规格维护。
+已有实例使用单独交付的 Python 专用包 `camctl-update.zip`。本完整包用于初次安装；Python 更新包更新 camctl 及其离线依赖，不替换 C 静态库或客户端。目标机需要与现有部署匹配的基础 CPython 3.11 和 uv，支持 Linux x86_64、ARM64 及 glibc 2.17 或以上。
 
-将更新 ZIP 和配套 `.sha256` 放到独立发布目录，先核对包外摘要并保留两个文件：
+将更新 ZIP 和配套 `.sha256` 放到独立发布目录，在该目录核对包外摘要并保留两个文件：
 
 ```sh
+release_dir=/absolute/path/to/releases
+cd "$release_dir"
 sha256sum -c camctl-update.zip.sha256
 ```
 
-主程序在 `camctl_host_init` 成功后调用 `camctl_host_update(bundle_path, client_data_path)`。`bundle_path` 是更新 ZIP 或已解压目录的绝对路径；`client_data_path` 可为 `NULL`，指定时同步设备能力说明。模块会停止本实例普通工作、应用更新、处理必要恢复，并在允许启动时重建普通资源、安排 `run`。返回 `0` 表示新包已可靠提交且普通运行已安排；返回 `-1` 表示本次更新失败。失败诊断直接进入 `processing`，主程序无需解读内部状态或手动触发恢复、重启。
+更新 ZIP 和解压材料放在独立发布目录，且该目录不得位于虚拟环境、状态库、媒体或 `staging`、`ready`、`processing` 交接目录内。以下示例中的 `deploy_root` 指向已有实例，`update_zip` 指向已核验的 ZIP：
 
-普通启动配置中的 `updater_path` 必须指向安装器为该实例准备的稳定维护入口。初始化会先自动恢复未完成事务，再安排普通运行。host-demo 的 `--apply-update` 会在正常初始化后调用更新接口并继续终端交互；运行期间也可输入 `update /absolute/path/to/camctl-update.zip`。能力同步目录由启动参数 `--client-data` 提供。
+```sh
+deploy_root=/absolute/path/to/existing-instance
+release_dir=/absolute/path/to/releases
+update_zip="$release_dir/camctl-update.zip"
+unpack_dir="$release_dir/unpacked"
+base_python=/absolute/path/to/python3.11
+client_data=/absolute/path/to/client-data
+```
 
-强制更新包自带完整 TOML 配置，并在原部署位置重建 Python 环境、配置、状态库、`staging` 和 `ready`。更新前的完整备份用于失败恢复；`processing`、日志、维护恢复材料、host、客户端数据和相机存储保留。更新与回滚过程可在重复中断后继续恢复；介质损坏及备份丢失不在保障范围内。
+较旧实例首次接入时，先停止并确认原普通主程序退出，并确认没有其他独立 host 或 CLI 使用同一部署。再部署支持 `camctl_host_update` 的 C 模块，重新编译、链接主程序，并保持该程序停止。将更新 ZIP 解压到上述独立目录，从新更新包的 wheel 发布稳定维护入口：
+
+```sh
+unzip -q "$update_zip" -d "$unpack_dir"
+new_wheel="$(find "$unpack_dir/camctl-update/camctl" -maxdepth 1 -type f -name 'camctl-*.whl' -print -quit)"
+test -f "$new_wheel"
+"$base_python" -B -I -c \
+  'import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); runpy.run_module("camctl.update_engine.publisher", run_name="__main__")' \
+  "$new_wheel" --wheel "$new_wheel" --target "$deploy_root" \
+  --base-python "$base_python" --camctl-path "$deploy_root/venv/bin/camctl" \
+  --config "$deploy_root/config.toml"
+```
+
+`base_python` 必须是虚拟环境外的 CPython 3.11，`new_wheel` 指向解压所得实际 wheel。实例使用默认配置来源时，从命令中省略 `--config`。发布器只准备稳定维护入口，不应用更新包；确认该步骤成功后，再由 host-demo 初始化同一实例并调用更新接口。
+
+```sh
+"$deploy_root/host/bin/host-demo" \
+  --camctl "$deploy_root/venv/bin/camctl" \
+  --updater "$deploy_root/maintenance/camctl-updater" \
+  --config "$deploy_root/config.toml" \
+  --client-data "$client_data" \
+  --apply-update "$update_zip"
+```
+
+host-demo 使用普通初始化入口，初始化时先自动恢复未完成事务，然后应用当前更新包；返回后继续终端交互。`--client-data` 可省略，指定时同步设备能力说明。C 主程序也可在 `camctl_host_init` 成功后调用 `camctl_host_update(bundle_path, client_data_path)`。`bundle_path` 是更新 ZIP 或已解压目录的绝对路径；`client_data_path` 可为 `NULL`，指定时同步设备能力说明。模块停止本实例普通工作、应用更新、处理必要恢复，并在允许启动时重建普通资源、安排 `run`。返回 `0` 表示新包已可靠提交且普通运行已安排；返回 `-1` 表示本次更新失败。失败诊断直接进入 `processing`，主程序无需解读内部状态。
+
+实例使用外置配置时，`--config` 须填写实际配置的绝对路径；普通入口使用默认配置来源时省略该参数。`--client-data` 可省略；指定时使用客户端的实际数据目录。
+
+普通启动配置中的 `updater_path` 必须指向该实例的稳定维护入口。初始化会先自动恢复未完成事务，再安排普通运行。host-demo 也可先正常初始化，再输入 `update /absolute/path/to/camctl-update.zip`；该命令使用启动参数 `--client-data` 指定的能力同步目录。
+
+强制更新包自带完整 TOML 配置。成功提交后，原部署位置使用包内新配置、干净的 Python 环境和具有新实例身份的空状态库，并重建为空的 `staging` 与 `ready`；不保留或合并原业务计划、历史及工作状态。原环境、配置、状态库和交接工作目录仅在更新失败或未可靠提交时由完整备份用于回滚。`processing`、日志、维护恢复材料、host、客户端数据和相机存储保留。更新与回滚过程可在重复中断后继续恢复；介质损坏及备份丢失不在保障范围内。
 
 ## camctl 的配置与日志
 
@@ -221,7 +260,7 @@ C 路径最多为 `CAMCTL_HOST_PATH_MAX` 字节，不展开 `$HOME` 或 `~`。`c
 
 路径补齐函数不推断 `updater_path`，由主程序从安装器提供的信息中填写。数值参数分别控制模块的自动重试、计划队列、输出缓冲、日志队列及轮换、电机通知的行缓冲和队列容量。默认值和字段类型见[本包公开头文件](docs/camctl_host.h)，合法范围及日志行为见[camctl_host 配置参考](docs/host-configuration.md)。host-demo 只开放它的 `--help` 所列参数，其他成员由自有主程序在初始化前填写。
 
-其中 `retry_limit` 是同一运行周期共享的自动重试次数，设为 0 关闭自动重试，调用成功不会清零已使用次数，主程序进程重新启动并初始化模块时重新建立预算；它与 TOML 中设备控制的 `recording.max_start_attempts` 等次数分别管理。`plan_capacity` 包含排队、正在提交和等待重试的计划；`stdout_capacity` 限制调用结果缓冲，不决定业务计划是否受理。
+其中 `retry_limit` 是同一普通运行周期共享的自动重试次数，设为 0 关闭自动重试，调用成功不会清零已使用次数；建立新的普通运行周期时重新初始化预算，包括更新流程内部重建普通资源并安排 `run`。它与 TOML 中设备控制的 `recording.max_start_attempts` 等次数分别管理。`plan_capacity` 包含排队、正在提交和等待重试的计划；`stdout_capacity` 限制调用结果缓冲，不决定业务计划是否受理。
 
 ### 调用时机与返回含义
 
@@ -237,7 +276,7 @@ int start_camera_control(void) {
     camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
     config.camctl_path = "/home/user/.camctl/device-test/venv/bin/camctl";
     config.config_path = "/home/user/.camctl/device-test/config.toml";
-    config.updater_path = "/absolute/path/to/installed-maintenance-entry";
+    config.updater_path = "/home/user/.camctl/device-test/maintenance/camctl-updater";
     config.ready_path = "/home/user/.camctl/device-test/ready";
     config.processing_path = "/home/user/.camctl/device-test/processing";
     config.log_path = "/home/user/.camctl/device-test/host.log";
