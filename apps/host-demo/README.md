@@ -173,7 +173,7 @@ camctl_host_update_result result;
 int received = camctl_host_update(&update_config, &request, &result);
 ```
 
-接口可在未初始化、运行中或已经停止时调用。运行中会先等待本模块普通工作收场；返回后保持停止。返回 `0` 只表示收到可信结果，还须检查 `result.outcome`、`result.effect` 和 `result.eligibility`；新版本可靠提交由 `CAMCTL_UPDATE_EFFECT_COMMITTED` 表达。应用失败后原环境已恢复与仍需恢复分别交付，不能只看进程退出码。`prior_recovery` 独立报告上次事务恢复事实。返回 `-1` 时保留 `errno`、未知状态和有界原始输出，完整诊断见更新收据和日志。
+接口可在未初始化、运行中或已经停止时调用。运行中会先等待本模块普通工作收场；返回后保持停止。返回 `0` 只表示收到可信结果，还须检查 `result.outcome`、`result.effect` 和 `result.eligibility`；新版本可靠提交由 `CAMCTL_UPDATE_EFFECT_COMMITTED` 表达。应用失败后原环境已恢复与仍需恢复分别交付，不能只看进程退出码。公开结果只含 `outcome`、`effect`、`eligibility`、`reason` 和 `diagnostic_path`。`reason` 是以 NUL 结束的简短说明，不能作为机器分支依据；`diagnostic_path` 是实际收据或日志的完整绝对路径，没有可交付位置时为空。返回 `-1` 时检查 `errno` 和实际结果。原始输出、上次恢复、阶段、退出及解析等事实由模块在收场并释放维护互斥后统一交给 stderr，完整维护日志及收据继续保留；主程序不需要处理底层诊断字段。
 
 只恢复未完成更新时，将 `action` 设为 `CAMCTL_UPDATE_ACTION_RECOVER`，`bundle_path` 与 `client_data_path` 设为 `NULL`。应用时可指定 `client_data_path` 同步能力文件并纳入恢复。并发维护、实例配置不一致和会等待自身的线程调用会被拒绝；其他线程的停止须等待维护写入者结束。维护返回后，主程序可在同一进程调用 `camctl_host_restart()`。它仅接受已经可靠停止且无在途停止或维护的实例，复用配置和回调，重新检查资格并建立新资源，不重送旧首次计划；失败且资源已收场时保留停止实例可重试。未初始化时先使用 `init`。直接 `init` 的重复初始化规则保持不变。完整契约见[更新接入规格](../../docs/architecture/software-update-interface.md)。
 
