@@ -1,6 +1,8 @@
 #ifndef CAMCTL_UPDATE_PROTOCOL_H
 #define CAMCTL_UPDATE_PROTOCOL_H
 
+#include <stdbool.h>
+
 typedef enum {
     CAMCTL_UPDATE_ACTION_INVALID = 0,
     CAMCTL_UPDATE_ACTION_CHECK,
@@ -46,6 +48,7 @@ typedef enum {
 #ifdef __cplusplus
 extern "C" {
 #endif
+bool camctl_update_outcome_succeeded(camctl_update_outcome value);
 const char *camctl_update_effect_description(camctl_update_effect value);
 const char *camctl_update_eligibility_description(camctl_update_eligibility value);
 #ifdef __cplusplus

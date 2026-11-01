@@ -106,8 +106,11 @@ static int run_maintenance(const camctl_host_config *config, const char *bundle,
             (void)fwrite(result->stdout_data, 1, result->stdout_length, stderr);
     }
     bool allowed = result->eligibility == CAMCTL_UPDATE_ELIGIBILITY_ALLOWED;
+    bool succeeded = camctl_update_outcome_succeeded(result->outcome);
+    if (!error && !succeeded)
+        fputs("维护请求未成功完成。\n", stderr);
     free(result);
-    return error || !allowed ? 1 : 0;
+    return error || !succeeded || !allowed ? 1 : 0;
 }
 
 int main(int argc, char **argv) {

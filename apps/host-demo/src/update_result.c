@@ -73,13 +73,15 @@ static bool permitted(host_update_result *r) {
     }
     return false;
 }
-static bool success(host_update_result *r) {
-    if (r->eligibility != CAMCTL_UPDATE_ELIGIBILITY_ALLOWED)
-        return false;
+bool camctl_update_outcome_succeeded(camctl_update_outcome value) {
     for (size_t i = 0; i < COUNT(update_success_outcomes); ++i)
-        if ((int)r->outcome == update_success_outcomes[i])
+        if ((int)value == update_success_outcomes[i])
             return true;
     return false;
+}
+static bool success(host_update_result *r) {
+    return r->eligibility == CAMCTL_UPDATE_ELIGIBILITY_ALLOWED &&
+           camctl_update_outcome_succeeded(r->outcome);
 }
 bool host_update_result_parse(camctl_update_action expected, const char *data, size_t length,
                               host_exit termination, int exit_code, host_update_result *result) {
