@@ -1,6 +1,7 @@
 """稳定入口对请求结果、恢复事实和启动资格的隔离判断。"""
 import importlib.util
 import io
+import json
 from enum import Enum
 from pathlib import Path
 import sys
@@ -88,3 +89,60 @@ def test_unverifiable_frozen_engine_preserves_recovery_responsibility():
             patch.object(router.os, 'close'):
         result = call()
     assert (result['outcome'], result['eligibility']) == ('recovery_required', 'blocked')
+
+
+def test_old_recovery_uses_recorded_configuration_before_new_config():
+    for new_config in (None, '/new-config'):
+        with patch.object(router, '_lock', side_effect=[11, 12]), \
+                patch.object(router, '_pending', side_effect=[(active, JournalState.UPDATING),
+                                                              ({}, JournalState.ROLLED_BACK)]), \
+                patch.object(router, '_frozen', return_value=Path('/frozen')), \
+                patch.object(router, '_invoke', return_value={'status': 'recovered'}) as invoke, \
+                patch.object(router.os, 'close'), patch.object(sys, 'stderr', io.StringIO()):
+            result = router.execute(binding, 'recover', binding['camctl_path'], new_config, None, None)
+        assert (result['outcome'], result['effect'], result['eligibility']) == ('recovered', 'rolled_back', 'allowed')
+        assert invoke.call_args.args[3] == ['--target', '/target', '--recover-only']
+
+
+def test_old_recovery_precedes_new_apply_configuration():
+    old_default = {'original': {'config_source': None}, 'mutation_intent': True}
+    with patch.object(router, '_lock', side_effect=[11, 12, 13]), \
+            patch.object(router, '_pending', side_effect=[(old_default, JournalState.UPDATING),
+                ({}, JournalState.ROLLED_BACK), ({'output': '/target/updates/id'}, JournalState.COMMITTED)]), \
+            patch.object(router, '_frozen', return_value=Path('/frozen')), \
+            patch.object(router, '_invoke', side_effect=[{'status': 'recovered'},
+                {'status': 'updated_stopped', 'effect': 'committed'}]) as invoke, \
+            patch.object(router, '_engine_memfd', return_value=14), \
+            patch.object(router.uuid, 'uuid4', return_value=SimpleNamespace(hex='id')), \
+            patch.object(router.os, 'close'), patch.object(sys, 'stderr', io.StringIO()):
+        result = router.execute(binding, 'apply', binding['camctl_path'], '/new-config', '/bundle', None)
+    assert (result['outcome'], result['effect'], result['prior_recovery']) == ('applied', 'committed', 'recovered')
+    assert '--config' not in invoke.call_args_list[0].args[3]
+    assert invoke.call_args_list[1].args[3][-2:] == ['--config', '/new-config']
+
+
+def test_check_blocks_active_record_for_any_configuration():
+    for new_config in (None, '/new-config'):
+        with patch.object(router, '_lock', return_value=11), \
+                patch.object(router, '_pending', return_value=(active, JournalState.UPDATING)), \
+                patch.object(router.os, 'close'), patch.object(sys, 'stderr', io.StringIO()):
+            result = router.execute(binding, 'check', binding['camctl_path'], new_config, None, None)
+        assert (result['outcome'], result['eligibility']) == ('recovery_required', 'blocked')
+
+
+def test_error_diagnostic_is_delivered_after_closing_qualification():
+    events = []
+    class Stream(io.StringIO):
+        def write(self, text):
+            events.append('diagnostic')
+            return super().write(text)
+    stream = Stream()
+    with patch.object(router, '_lock', return_value=11), \
+            patch.object(router, '_pending', return_value=(None, None)), \
+            patch.object(router, '_engine_memfd', side_effect=ValueError('bad wheel')), \
+            patch.object(router.os, 'close', side_effect=lambda fd: events.append('close')), \
+            patch.object(sys, 'stderr', stream):
+        result = router.execute(binding, 'apply', binding['camctl_path'], '/config', '/bundle', None)
+    assert events == ['close', 'diagnostic']
+    assert json.loads(stream.getvalue()) == {'type': 'ValueError', 'message': 'bad wheel', 'stage': 'read_new_engine'}
+    assert result['eligibility'] == 'allowed'

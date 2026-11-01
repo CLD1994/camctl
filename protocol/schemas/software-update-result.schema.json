@@ -120,7 +120,10 @@
             "const": "unchanged"
           },
           "eligibility": {
-            "const": "allowed"
+            "enum": [
+              "allowed",
+              "unknown"
+            ]
           }
         }
       }
@@ -142,7 +145,10 @@
             ]
           },
           "eligibility": {
-            "const": "allowed"
+            "enum": [
+              "allowed",
+              "unknown"
+            ]
           }
         }
       }
@@ -161,7 +167,10 @@
             "const": "committed"
           },
           "eligibility": {
-            "const": "allowed"
+            "enum": [
+              "allowed",
+              "unknown"
+            ]
           }
         }
       }
@@ -185,7 +194,10 @@
             ]
           },
           "eligibility": {
-            "const": "blocked"
+            "enum": [
+              "blocked",
+              "unknown"
+            ]
           }
         }
       }
@@ -230,7 +242,10 @@
             ]
           },
           "eligibility": {
-            "const": "allowed"
+            "enum": [
+              "allowed",
+              "unknown"
+            ]
           }
         }
       }

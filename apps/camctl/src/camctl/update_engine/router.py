@@ -126,12 +126,21 @@ def _engine_memfd(bundle):
 
 
 def execute(binding, action, camctl_path, config, bundle, client_data):
+    diagnostics = []
+    result = _execute(binding, action, camctl_path, config, bundle, client_data, diagnostics)
+    for error, stage in diagnostics:
+        _diagnose(error, stage)
+    return result
+
+
+def _execute(binding, action, camctl_path, config, bundle, client_data, diagnostics):
     result = dict(version=1, action=action, outcome='not_started', effect='not_started', eligibility='unknown',
                   prior_recovery='none', reason=None, stage=None, evidence=None)
     target = Path(binding['target'])
     python = binding['python']
     if camctl_path != binding['camctl_path']:
         result['reason'] = '普通入口与维护入口绑定不一致'
+        diagnostics.append((ValueError(result['reason']), 'binding'))
         return result
     lock_fd = None
     invoked = False
@@ -149,8 +158,6 @@ def execute(binding, action, camctl_path, config, bundle, client_data):
             if action == 'check':
                 result.update(outcome='recovery_required', eligibility='blocked', reason='存在未完成更新')
                 return result
-            if record['original'].get('config_source') != config:
-                raise ValueError('维护配置来源与未完成事务不一致')
             stage = 'frozen_engine'
             frozen = _frozen(record)
             child_args = ['--target', str(target), '--recover-only']
@@ -219,11 +226,11 @@ def execute(binding, action, camctl_path, config, bundle, client_data):
         else:
             raise ValueError('更新结果与持久记录不一致')
     except LockBusy as error:
-        _diagnose(error, stage)
+        diagnostics.append((error, stage))
         result.update(outcome='unknown' if invoked else 'not_started',
                       effect='unknown' if invoked else 'not_started', eligibility='blocked', reason='维护资格被占用')
     except Exception as error:
-        _diagnose(error, stage)
+        diagnostics.append((error, stage))
         if qualification_proven and lock_fd is not None:
             result.update(outcome='failed', effect='unchanged', eligibility='allowed')
         elif known_active and not invoked:
@@ -234,7 +241,11 @@ def execute(binding, action, camctl_path, config, bundle, client_data):
         result['stage'] = stage
     finally:
         if lock_fd is not None:
-            os.close(lock_fd)
+            try:
+                os.close(lock_fd)
+            except OSError as error:
+                diagnostics.append((error, 'unlock'))
+                result.update(eligibility='unknown', reason='维护资格关闭失败', stage='unlock')
     return result
 
 
