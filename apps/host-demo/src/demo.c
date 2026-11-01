@@ -85,25 +85,12 @@ static int run_maintenance(const camctl_host_config *config, const char *bundle,
     int saved_errno = errno;
     printf("%s；%s。\n", camctl_update_effect_description(result->effect),
            camctl_update_eligibility_description(result->eligibility));
-    if (result->reason_present) {
-        size_t length = result->reason_length < CAMCTL_HOST_UPDATE_TEXT_MAX ?
-                        result->reason_length : CAMCTL_HOST_UPDATE_TEXT_MAX;
-        fputs("原因：", stderr);
-        (void)fwrite(result->reason, 1, length, stderr);
-        fputc('\n', stderr);
-    }
-    if (result->evidence_present)
-        printf("维护收据和日志：%s%s\n", result->evidence, result->evidence_truncated ? "（路径已截断）" : "");
-    if (result->stderr_length)
-        (void)fwrite(result->stderr_data, 1, result->stderr_length, stderr);
-    if (result->stderr_truncated || result->stderr_io_error)
-        fprintf(stderr, "维护 stderr：截断=%d，读取错误=%d。\n", result->stderr_truncated, result->stderr_io_error);
-    if (result->process_diagnostics_length)
-        (void)fwrite(result->process_diagnostics, 1, result->process_diagnostics_length, stderr);
+    if (result->reason[0])
+        fprintf(stderr, "原因：%s\n", result->reason);
+    if (result->diagnostic_path[0])
+        printf("维护收据和日志：%s\n", result->diagnostic_path);
     if (error) {
         fprintf(stderr, "维护调用未能确认：%s。\n", strerror(saved_errno));
-        if (result->stdout_length)
-            (void)fwrite(result->stdout_data, 1, result->stdout_length, stderr);
     }
     bool allowed = result->eligibility == CAMCTL_UPDATE_ELIGIBILITY_ALLOWED;
     bool succeeded = camctl_update_outcome_succeeded(result->outcome);

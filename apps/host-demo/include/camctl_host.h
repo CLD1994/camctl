@@ -50,10 +50,7 @@ typedef struct camctl_host_config {
     const char *updater_path; /* NULL：不启用启动前维护资格检查。 */
 } camctl_host_config;
 
-#define CAMCTL_HOST_UPDATE_STDOUT_MAX (64 * 1024)
-#define CAMCTL_HOST_UPDATE_TEXT_MAX 4095
-#define CAMCTL_HOST_UPDATE_STDERR_MAX 8192
-#define CAMCTL_HOST_UPDATE_PROCESS_MAX 8192
+#define CAMCTL_HOST_UPDATE_REASON_MAX 255
 
 typedef struct camctl_host_update_config {
     const char *camctl_path;
@@ -68,31 +65,11 @@ typedef struct camctl_host_update_request {
 } camctl_host_update_request;
 
 typedef struct camctl_host_update_result {
-    camctl_update_action action;
     camctl_update_outcome outcome;
     camctl_update_effect effect;
     camctl_update_eligibility eligibility;
-    camctl_update_prior_recovery prior_recovery;
-    char reason[CAMCTL_HOST_UPDATE_TEXT_MAX + 1];
-    char stage[CAMCTL_HOST_UPDATE_TEXT_MAX + 1];
-    char evidence[CAMCTL_HOST_UPDATE_TEXT_MAX + 1];
-    size_t reason_length, stage_length, evidence_length;
-    bool reason_present, stage_present, evidence_present;
-    bool reason_truncated, stage_truncated, evidence_truncated;
-    char stderr_data[CAMCTL_HOST_UPDATE_STDERR_MAX + 1];
-    size_t stderr_length;
-    uint64_t stderr_bytes_seen;
-    bool stderr_truncated, stderr_io_error;
-    char process_diagnostics[CAMCTL_HOST_UPDATE_PROCESS_MAX + 1];
-    size_t process_diagnostics_length;
-    bool process_diagnostics_truncated;
-    char stdout_data[CAMCTL_HOST_UPDATE_STDOUT_MAX + 1];
-    size_t stdout_length;
-    uint64_t stdout_bytes_seen;
-    bool stdout_truncated, stdout_io_error;
-    bool process_signaled, process_exit_known;
-    int process_exit_code;
-    int poll_error, parse_error;
+    char reason[CAMCTL_HOST_UPDATE_REASON_MAX + 1];
+    char diagnostic_path[CAMCTL_HOST_PATH_MAX + 1];
 } camctl_host_update_result;
 
 /* 阻塞执行维护；返回 0 表示已接收可信结果，具体效果由 result 判断。

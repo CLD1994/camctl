@@ -13,23 +13,15 @@ static int fake_fputs(const char *text, FILE *stream) {
 }
 static int fake_printf(const char *format, ...) { (void)format; return 0; }
 static int fake_fprintf(FILE *stream, const char *format, ...) { (void)stream; (void)format; return 0; }
-static size_t fake_fwrite(const void *data, size_t size, size_t count, FILE *stream) {
-    (void)data; (void)stream; return size ? count : 0;
-}
-static int fake_fputc(int value, FILE *stream) { (void)stream; return value; }
 #define fputs fake_fputs
 #define printf fake_printf
 #define fprintf fake_fprintf
-#define fwrite fake_fwrite
-#define fputc fake_fputc
 #define main unused_demo_main
 #include "../../src/demo.c"
 #undef main
 #undef fputs
 #undef printf
 #undef fprintf
-#undef fwrite
-#undef fputc
 
 static camctl_update_outcome outcome;
 static camctl_update_effect effect;

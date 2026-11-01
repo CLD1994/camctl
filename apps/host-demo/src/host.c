@@ -613,45 +613,12 @@ static void deliver_construction_report(const construction_report *report) {
         (void)fflush(stderr);
 }
 
-static void deliver_maintenance_check(const camctl_host_update_result *result, int error) {
-    if (!error && !result->stdout_truncated && !result->stdout_io_error && !result->stderr_length &&
-        !result->stderr_truncated && !result->stderr_io_error && !result->process_diagnostics_length &&
-        !result->process_diagnostics_truncated && !result->poll_error && !result->parse_error)
-        return;
-    if (error) {
-        fprintf(stderr, "camctl 启动资格检查失败 errno=%d reason=%.*s\n", error,
-                (int)(result->reason_length < CAMCTL_HOST_UPDATE_TEXT_MAX ?
-                      result->reason_length : CAMCTL_HOST_UPDATE_TEXT_MAX), result->reason);
-        if (result->stdout_length)
-            (void)fwrite(result->stdout_data, 1, result->stdout_length, stderr);
-    }
-    if (result->stdout_truncated)
-        fputs("camctl 维护 stdout 已截断\n", stderr);
-    if (result->stdout_io_error)
-        fputs("camctl 维护 stdout 读取失败\n", stderr);
-    if (result->stderr_length)
-        (void)fwrite(result->stderr_data, 1, result->stderr_length, stderr);
-    if (result->stderr_truncated)
-        fputs("camctl 维护 stderr 已截断\n", stderr);
-    if (result->stderr_io_error)
-        fputs("camctl 维护 stderr 读取失败\n", stderr);
-    if (result->process_diagnostics_length)
-        (void)fwrite(result->process_diagnostics, 1, result->process_diagnostics_length, stderr);
-    if (result->process_diagnostics_truncated)
-        fputs("camctl 维护进程诊断已截断\n", stderr);
-    if (result->poll_error)
-        fprintf(stderr, "camctl 维护进程等待错误 errno=%d\n", result->poll_error);
-    if (result->parse_error)
-        fprintf(stderr, "camctl 维护结果解析错误 errno=%d\n", result->parse_error);
-    (void)fflush(stderr);
-}
-
 static int host_start(const camctl_host_config *config, const char *initial, host *restarting) {
     int cancel_state;
     int e = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
     if (e)
         return failure(e);
-    camctl_host_update_result *check_result = NULL;
+    host_update_result *check_result = NULL;
     bool check_performed = false;
     construction_report report = {0};
     pthread_mutex_lock(&instance_mutex);
@@ -812,7 +779,7 @@ static int host_start(const camctl_host_config *config, const char *initial, hos
     pthread_mutex_unlock(&instance_mutex);
     deliver_construction_report(&report);
     if (check_performed)
-        deliver_maintenance_check(check_result, 0);
+        host_update_result_deliver(check_result, CAMCTL_UPDATE_ACTION_CHECK, 0);
     free(check_result);
     pthread_setcancelstate(cancel_state, NULL);
     return 0;
@@ -830,7 +797,7 @@ unlock:
     pthread_mutex_unlock(&instance_mutex);
     deliver_construction_report(&report);
     if (check_performed)
-        deliver_maintenance_check(check_result, e);
+        host_update_result_deliver(check_result, CAMCTL_UPDATE_ACTION_CHECK, e);
     free(check_result);
     pthread_setcancelstate(cancel_state, NULL);
     return failure(e);
@@ -1086,16 +1053,29 @@ static bool same_optional_path(const char *a, const char *b) {
 
 int camctl_host_update(const camctl_host_update_config *config,
                        const camctl_host_update_request *request, camctl_host_update_result *result) {
-    if (!result)
-        return failure(EINVAL);
-    host_maintenance_result_init(result, request ? request->action : CAMCTL_UPDATE_ACTION_INVALID);
-    int error = host_maintenance_validate(config, request, false);
-    if (error)
+    camctl_update_action action = request ? request->action : CAMCTL_UPDATE_ACTION_INVALID;
+    int error = result ? host_maintenance_validate(config, request, false) : EINVAL;
+    if (result) {
+        memset(result, 0, sizeof(*result));
+        result->outcome = CAMCTL_UPDATE_OUTCOME_NOT_STARTED;
+        result->effect = CAMCTL_UPDATE_EFFECT_NOT_STARTED;
+        result->eligibility = CAMCTL_UPDATE_ELIGIBILITY_UNKNOWN;
+    }
+    if (error) {
+        if (result) snprintf(result->reason, sizeof(result->reason), "errno=%d", error);
+        host_update_result_deliver(NULL, action, error);
         return failure(error);
+    }
+    host_update_result *detail = calloc(1, sizeof(*detail));
+    if (!detail) {
+        snprintf(result->reason, sizeof(result->reason), "errno=%d", ENOMEM);
+        host_update_result_deliver(NULL, action, ENOMEM);
+        return failure(ENOMEM);
+    }
+    host_maintenance_result_init(detail, action);
     int cancel_state;
     error = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
-    if (error)
-        return failure(error);
+    if (error) goto early;
     pthread_mutex_lock(&instance_mutex);
     if (module_thread)
         error = EDEADLK;
@@ -1111,18 +1091,26 @@ int camctl_host_update(const camctl_host_update_config *config,
     }
     host *h = instance;
     pthread_mutex_unlock(&instance_mutex);
-    if (error)
-        return stop_result(error, cancel_state);
+    if (error) goto deliver;
     if (h && camctl_host_stop())
         error = errno;
     if (!error)
-        error = host_maintenance_run(config, request, result);
+        error = host_maintenance_run(config, request, detail);
     pthread_mutex_lock(&instance_mutex);
     maintenance_owner = false;
     maintenance_active = false;
     pthread_cond_broadcast(&instance_ready);
     pthread_mutex_unlock(&instance_mutex);
+deliver:
+    host_update_result_project(detail, error, result);
+    host_update_result_deliver(detail, action, error);
+    free(detail);
     return stop_result(error, cancel_state);
+early:
+    host_update_result_project(detail, error, result);
+    host_update_result_deliver(detail, action, error);
+    free(detail);
+    return failure(error);
 }
 
 int camctl_host_restart(void) {

@@ -3,14 +3,18 @@
 #include <setjmp.h>
 #include <cmocka.h>
 #include <stdio.h>
+#include <stdlib.h>
 static int test_host_fprintf(FILE *stream, const char *format, ...);
 static int test_host_fflush(FILE *stream);
+static void *test_host_calloc(size_t count, size_t size);
 #define fprintf test_host_fprintf
 #define fflush test_host_fflush
+#define calloc test_host_calloc
 /* 执行公开入口和生产 worker/callback；所有进程、等待和文件接口均为替身。 */
 #include "../../src/host.c"
 #undef fprintf
 #undef fflush
+#undef calloc
 
 static host owned;
 static int spawns, requests[2], collects, polls, joins, diag_closes, log_closes;
@@ -23,6 +27,22 @@ static int restart_creates, restart_join_error, restart_join_count, restart_clos
 static int restart_closed_fd_count, construction_messages;
 static camctl_update_eligibility restart_eligibility;
 static int restart_check_error;
+static int maintenance_diagnostics;
+static bool fail_update_allocation;
+static void *test_host_calloc(size_t count, size_t size) {
+    if (fail_update_allocation && size == sizeof(host_update_result)) return NULL;
+    return calloc(count, size);
+}
+void __wrap_host_update_result_deliver(const host_update_result *detail, camctl_update_action action, int error) {
+    (void)detail; (void)action; (void)error;
+    assert_int_equal(pthread_mutex_trylock(&instance_mutex), 0);
+    pthread_mutex_unlock(&instance_mutex);
+    int previous;
+    assert_int_equal(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous), 0);
+    if (detail) assert_int_equal(previous, PTHREAD_CANCEL_DISABLE);
+    pthread_setcancelstate(previous, NULL);
+    maintenance_diagnostics++;
+}
 static int test_host_fprintf(FILE *stream, const char *format, ...) {
     (void)stream; (void)format; construction_messages++; return 0;
 }
@@ -44,7 +64,7 @@ static bool poll_error, callback_work, start_submit, borrower_done, other_stop_d
 static bool notification_eof, clock_error, stop_before_admission;
 static host_result results[2];
 int __wrap_host_maintenance_run(const camctl_host_update_config *config,
-                                const camctl_host_update_request *request, camctl_host_update_result *result) {
+                                const camctl_host_update_request *request, host_update_result *result) {
     (void)config; (void)request;
     if (!maintenance_stub_enabled) {
         fail_msg("%s", "不得启动真实维护");
@@ -382,6 +402,24 @@ static void update_uninitialized(void **state) {
     assert_int_equal(maintenance_calls, 1); assert_false(maintenance_active);
     assert_int_equal(result.effect, CAMCTL_UPDATE_EFFECT_COMMITTED);
 }
+static void update_early_errors_are_delivered(void **state) {
+    (void)state;
+    camctl_host_update_config config = {"/camctl", "/updater", NULL};
+    camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_RECOVER, NULL, NULL};
+    camctl_host_update_result result;
+    maintenance_diagnostics = 0;
+    assert_int_equal(camctl_host_update(&config, &request, NULL), -1);
+    assert_int_equal(errno, EINVAL); assert_int_equal(maintenance_diagnostics, 1);
+    config.updater_path = "relative"; fail_update_allocation = true;
+    assert_int_equal(camctl_host_update(&config, &request, &result), -1);
+    assert_int_equal(errno, EINVAL); assert_int_equal(maintenance_diagnostics, 2);
+    assert_int_equal(result.effect, CAMCTL_UPDATE_EFFECT_NOT_STARTED);
+    config.updater_path = "/updater";
+    assert_int_equal(camctl_host_update(&config, &request, &result), -1);
+    assert_int_equal(errno, ENOMEM); assert_int_equal(maintenance_diagnostics, 3);
+    assert_int_equal(result.effect, CAMCTL_UPDATE_EFFECT_NOT_STARTED);
+    fail_update_allocation = false;
+}
 static void update_stops_and_drains_borrower(void **state) {
     (void)state; maintenance_stub_enabled = true;
     owned.config.camctl_path = "/camctl"; owned.config.updater_path = "/updater";
@@ -567,7 +605,7 @@ int main(void) {
 #elif defined(HOST_UPDATE_STOP_ONLY)
         CASE(maintenance_before_stop), CASE(maintenance_while_waiting_for_other_stop),
         CASE(maintenance_accepted_during_stop), CASE(callback_cannot_wait_for_maintenance),
-        CASE(update_uninitialized), CASE(update_stops_and_drains_borrower),
+        CASE(update_uninitialized), CASE(update_early_errors_are_delivered), CASE(update_stops_and_drains_borrower),
         CASE(update_gates_and_checks_active_configuration),
 #else
         CASE(uninitialized), CASE(terminal_idempotent), CASE(stops_both_no_restart),
@@ -576,7 +614,7 @@ int main(void) {
         CASE(infrastructure_error_preserves_active), CASE(clock_failure_preserves_active), CASE(waits_borrower), CASE(claim_reference),
         CASE(concurrent_stop), CASE(maintenance_before_stop), CASE(maintenance_while_waiting_for_other_stop),
         CASE(maintenance_accepted_during_stop), CASE(callback_cannot_wait_for_maintenance),
-        CASE(update_uninitialized), CASE(update_stops_and_drains_borrower),
+        CASE(update_uninitialized), CASE(update_early_errors_are_delivered), CASE(update_stops_and_drains_borrower),
         CASE(update_gates_and_checks_active_configuration),
         CASE(restart_state_gates), CASE(restart_reuses_config_and_callback_without_first_plan),
         CASE(restart_join_failure_keeps_candidate_until_stop_finishes),

@@ -3,6 +3,77 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <stdio.h>
+#include <pthread.h>
+
+void host_update_result_project(const host_update_result *d, int error, camctl_host_update_result *r) {
+    memset(r, 0, sizeof(*r));
+    r->outcome = d->outcome; r->effect = d->effect; r->eligibility = d->eligibility;
+    if (d->reason_present) {
+        size_t n = d->reason_length < CAMCTL_HOST_UPDATE_REASON_MAX ? d->reason_length : CAMCTL_HOST_UPDATE_REASON_MAX;
+        const char *nul = memchr(d->reason, 0, n);
+        if (nul) n = (size_t)(nul - d->reason);
+        memcpy(r->reason, d->reason, n);
+    } else if (error) {
+        snprintf(r->reason, sizeof(r->reason), "errno=%d", error);
+    }
+    if (d->evidence_present && !d->evidence_truncated && d->evidence_length &&
+        d->evidence[0] == '/' && !memchr(d->evidence, 0, d->evidence_length))
+        memcpy(r->diagnostic_path, d->evidence, d->evidence_length);
+}
+
+void host_update_result_deliver(const host_update_result *d, camctl_update_action action, int error) {
+    camctl_host_update_result projected;
+    if (d) host_update_result_project(d, error, &projected);
+    bool projection_lost = d && ((d->reason_present && (d->reason_truncated ||
+        d->reason_length > CAMCTL_HOST_UPDATE_REASON_MAX || memchr(d->reason, 0, d->reason_length < CAMCTL_HOST_UPDATE_TEXT_MAX ? d->reason_length : CAMCTL_HOST_UPDATE_TEXT_MAX))) ||
+        (d->evidence_present && !projected.diagnostic_path[0]));
+    if (d && !error && camctl_update_outcome_succeeded(d->outcome) &&
+        d->eligibility == CAMCTL_UPDATE_ELIGIBILITY_ALLOWED && !projection_lost &&
+        !d->stderr_length && !d->stderr_truncated && !d->stderr_io_error &&
+        !d->process_diagnostics_length && !d->process_diagnostics_truncated && !d->poll_error && !d->parse_error)
+        return;
+    static bool disabled;
+    int saved = errno;
+    int cancel_state;
+    if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state)) {
+        errno = saved;
+        return;
+    }
+    flockfile(stderr);
+    if (disabled) goto done;
+    if (ferror(stderr)) goto failed;
+#define DIAG(...) do { if (fprintf(stderr, __VA_ARGS__) < 0) goto failed; } while (0)
+#define RAW(label, data, length) do { DIAG("%s length=%zu\n", label, (size_t)(length)); \
+    if ((length) && fwrite(data, 1, (length), stderr) != (length)) goto failed; \
+    if (fputc('\n', stderr) == EOF) goto failed; } while (0)
+    if (!d) {
+        DIAG("camctl maintenance action=%d not_started errno=%d\n", action, error);
+        if (fflush(stderr)) goto failed;
+        goto done;
+    }
+    DIAG("camctl maintenance action=%d outcome=%d effect=%d eligibility=%d prior_recovery=%d errno=%d exit_known=%d signaled=%d exit_code=%d poll_error=%d parse_error=%d\n",
+         d->action, d->outcome, d->effect, d->eligibility, d->prior_recovery, error,
+         d->process_exit_known, d->process_signaled, d->process_exit_code, d->poll_error, d->parse_error);
+    DIAG("stdout seen=%llu truncated=%d io_error=%d stderr seen=%llu truncated=%d io_error=%d process_truncated=%d projection_lost=%d\n",
+         (unsigned long long)d->stdout_bytes_seen, d->stdout_truncated, d->stdout_io_error,
+         (unsigned long long)d->stderr_bytes_seen, d->stderr_truncated, d->stderr_io_error,
+         d->process_diagnostics_truncated, projection_lost);
+    RAW("stdout", d->stdout_data, d->stdout_length);
+    RAW("stderr", d->stderr_data, d->stderr_length);
+    RAW("process", d->process_diagnostics, d->process_diagnostics_length);
+    if (fflush(stderr)) goto failed;
+    goto done;
+failed:
+    disabled = true;
+done:
+    funlockfile(stderr);
+    errno = saved;
+    (void)pthread_setcancelstate(cancel_state, NULL);
+    errno = saved;
+#undef RAW
+#undef DIAG
+}
 
 struct update_name { int value; const char *text; const char *description; };
 struct update_combination { int action, outcome, effect, eligibility, prior_recovery; };

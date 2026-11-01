@@ -51,7 +51,7 @@ int main(void) {
     const char *multiple = "{\"bad\":true}\n{\"bad\":true}\n";
     camctl_host_update_config config = {"/camctl", "/updater", NULL};
     camctl_host_update_request request = {CAMCTL_UPDATE_ACTION_CHECK, NULL, NULL};
-    camctl_host_update_result result;
+    host_update_result result;
     config.config_path = "relative.toml";
     assert(host_maintenance_validate(&config, &request, true) == EINVAL);
     config.config_path = "/config.toml";

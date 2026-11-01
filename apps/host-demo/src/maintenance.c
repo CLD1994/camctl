@@ -56,7 +56,7 @@ int host_maintenance_validate(const camctl_host_update_config *config,
     return EINVAL;
 }
 
-void host_maintenance_result_init(camctl_host_update_result *result, camctl_update_action action) {
+void host_maintenance_result_init(host_update_result *result, camctl_update_action action) {
     memset(result, 0, sizeof(*result));
     result->action = action;
     result->outcome = CAMCTL_UPDATE_OUTCOME_NOT_STARTED;
@@ -66,7 +66,7 @@ void host_maintenance_result_init(camctl_host_update_result *result, camctl_upda
 }
 
 int host_maintenance_run(const camctl_host_update_config *config,
-                         const camctl_host_update_request *request, camctl_host_update_result *result) {
+                         const camctl_host_update_request *request, host_update_result *result) {
     int error = host_maintenance_validate(config, request, true);
     if (!result)
         return EINVAL;
