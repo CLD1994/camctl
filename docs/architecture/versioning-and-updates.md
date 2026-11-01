@@ -31,7 +31,7 @@ C 接入模块在日志建立后、其他工作线程启动前记录一次已编
 
 版本记录不进入 `run`、`submit` 的结果 JSON、通知管道或 `describe` 的能力 JSON。它是运维诊断信息，不产生计划、动作、报告或数据库历史变化。
 
-## 普通离线更新 Python 包
+## 停机离线更新 Python 包
 
 首次安装使用部署包的 `install-host.py`；已有部署由 camctl 自身的维护能力更新，C 主程序通过 `camctl_host.h` 的更新接口调用。更新实现和稳定恢复引导由 camctl wheel 提供，Python 专用更新包交付 wheel、离线依赖和元数据。组件归属、稳定入口、主程序生命周期及公共结果边界由[更新接入规格](software-update-interface.md)定义；部署工具调用组件能力。首次安装交付仍由[部署 skill](../../.agents/skills/camctl-real-device-deploy/SKILL.md)和[完整部署包契约](../../.agents/skills/camctl-real-device-deploy/references/packaging.md)维护。
 
