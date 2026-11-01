@@ -14,6 +14,10 @@ def register(log_path, configuration_source, *, environment=None):
     layout_path = read_reference(environment_locator(environment))
     if layout_path is None:
         return False
+    if not Path(log_path).is_absolute():
+        raise ValueError('日志登记路径必须为绝对路径')
+    if configuration_source is not None and not Path(configuration_source).is_absolute():
+        raise ValueError('日志登记配置来源必须为绝对路径')
     layout = json.loads(layout_path.read_text(encoding='utf-8'))
     if not isinstance(layout, dict) or layout.get('environment') != str(environment):
         raise ValueError('日志登记的维护布局与当前环境不一致')

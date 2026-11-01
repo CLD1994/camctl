@@ -24,6 +24,9 @@ bundle.update_metadata = Mock(return_value={'force': False})
 archive = ModuleType('archive_support'); archive.UpdateArchive = Mock()
 integrity = ModuleType('maintenance_integrity'); integrity.verify_maintenance_integrity = Mock()
 transaction = ModuleType('update_transaction')
+config_paths = ModuleType('config_paths')
+config_paths.log_registration_id = Mock()
+config_paths.rotated_log_names = Mock()
 class Locks:
     def __init__(self):
         self.fds = []
@@ -35,7 +38,8 @@ spec = importlib.util.spec_from_file_location('owned_update_engine_under_test', 
 engine = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, {'bundle_support': bundle, 'archive_support': archive,
                               'maintenance_integrity': integrity, 'update_transaction': transaction,
-                              'error_diagnostics': encoder, 'diagnostic_fallback': fallback}), \
+                              'error_diagnostics': encoder, 'diagnostic_fallback': fallback,
+                              'config_paths': config_paths}), \
         patch.object(sys, 'dont_write_bytecode', True):
     spec.loader.exec_module(engine)
 
