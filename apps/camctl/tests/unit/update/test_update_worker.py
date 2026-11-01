@@ -17,7 +17,7 @@ with patch.object(sys, 'dont_write_bytecode', True):
 def test_worker_keeps_lock_descriptors_while_command_runs():
     with patch.object(shutil, 'get_terminal_size', return_value=os.terminal_size((80, 24))), \
             patch.object(worker.argparse, '_', new=lambda text: text), \
-            patch.object(sys, 'argv', ['update-worker.py', '--lock-fd', '7', '--lock-fd', '8', '--',
+            patch.object(sys, 'argv', ['worker.py', '--lock-fd', '7', '--lock-fd', '8', '--',
                                     'uv', 'pip', 'install']), \
             patch.object(worker.subprocess, 'run', return_value=SimpleNamespace(returncode=4)) as run:
         assert worker.main() == 4
