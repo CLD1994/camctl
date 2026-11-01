@@ -157,6 +157,8 @@ host 在 `processing` 内的隐藏准备目录写完文件并完成文件同步�
 
 ## 更新 camctl
 
+从版本发布、更新包构建到现场应用、失败恢复及主程序重启的完整步骤见[更新操作说明](../../docs/camctl/software-updates.md)。下面说明 C 调用方式和演示入口。
+
 部署时由 camctl wheel 的发布器建立 `<target>/maintenance/camctl-updater`。正常业务初始化时填写 `config.updater_path`，启用启动前资格检查；软件维护使用相同部署的普通程序、维护入口和配置来源。该路径必须显式传入，不能从任意 `camctl_path` 推断。
 
 ```c

@@ -93,6 +93,19 @@ python3 install-host.py \
 
 已有实例使用单独交付的 Python 专用包 `camctl-update.zip`。本完整包用于初次安装；Python 更新包只更新 camctl 及离线依赖，不替换 C 静态库或客户端。目标机须已有与原虚拟环境匹配的基础 CPython 3.11 和 uv，支持 Linux x86_64、ARM64 及 glibc 2.17 或以上。保留原配置、客户端数据及媒体。
 
+将更新 ZIP 和配套 `.sha256` 放到独立发布目录，在该目录先执行下面的检查。摘要匹配后保留两个文件；组件还会在应用时校验包内完整文件集合和摘要。
+
+```sh
+sha256sum -c camctl-update.zip.sha256
+```
+
+更新包和解压材料放在原虚拟环境、状态库、媒体及交接目录之外。以下命令中的 `deploy_root` 指向已有实例，`update_zip` 指向接收并校验过的 ZIP；C 接口直接接收 ZIP，无须主程序自行解包。
+
+```sh
+deploy_root=/absolute/path/to/existing-instance
+update_zip=/absolute/path/to/releases/camctl-update.zip
+```
+
 首次安装已经建立 `<target>/maintenance/camctl-updater`，生成的普通启动脚本显式使用它检查启动资格。主程序通过本包 `camctl_host.h` 的 `camctl_host_update` 调用该组件入口；接口等待本模块的普通工作收场后执行维护。其他独立 host 和 CLI 须先停止。可在普通主程序已退出后，使用已安装演示程序执行一次性维护：
 
 ```sh
@@ -100,7 +113,7 @@ python3 install-host.py \
   --camctl "$deploy_root/venv/bin/camctl" \
   --updater "$deploy_root/maintenance/camctl-updater" \
   --config "$deploy_root/config.toml" \
-  --apply-update /absolute/releases/camctl-update.zip
+  --apply-update "$update_zip"
 ```
 
 原实例使用外置配置时，传入实际配置的绝对路径；普通入口使用默认配置来源时省略 `--config`。配置文件原本缺失时仍按普通 CLI 默认值加载，不创建替代配置。维护入口显式绑定部署和基础解释器，恢复时不要求原 `venv/bin/camctl` 仍然可执行。
@@ -109,9 +122,21 @@ python3 install-host.py \
 
 每次维护在 `<target>/updates/<标识>/` 保留日志、收据和恢复材料。不要删除未完成记录、备份或恢复目录。更新和回滚完成后均保持停机；检查本次请求结果、部署效果和启动资格，再由主程序显式调用 `camctl_host_restart()` 恢复业务。它复用原配置和回调，重新核对资格并建立新资源，不重送首次计划；未初始化的实例使用 `init`。不能核实恢复或结果未知时继续保持停机，修正日志指出的原因后再次恢复。演示程序不会自动启动普通业务。
 
+host-demo 的退出 0 表示本次请求成功且允许启动。更新失败后即使原部署已核实恢复，演示仍以非零状态退出。查看输出所列的原因及诊断目录，再决定恢复原业务或处理恢复责任。维护模式没有初始化普通实例；它退出后应重新运行原主程序启动入口。同进程的 `camctl_host_restart()` 用于已经初始化并停止的主程序实例。
+
+只恢复未完成更新时执行以下命令，不传新包或能力同步目录。入口按旧事务冻结的引擎、配置和绑定恢复，不要求原 `venv/bin/camctl` 仍能启动；若资格仍被原写入者占用，先核实其结束情况，再调用维护。
+
+```sh
+"$deploy_root/host/bin/host-demo" \
+  --camctl "$deploy_root/venv/bin/camctl" \
+  --updater "$deploy_root/maintenance/camctl-updater" \
+  --config "$deploy_root/config.toml" \
+  --recover
+```
+
 应用时可添加 `--client-data /absolute/path/to/client-data` 同步能力说明，原文件内容或不存在状态会纳入恢复；省略时仅在更新产物目录保存新声明。该选项不更改客户端数据库和媒体。
 
-较旧实例首次接入时，先部署支持该接口的 C 模块，再从新 wheel 准备维护入口；不能先覆盖原 Python 环境来取得更新器。下面使用原环境之外的基础解释器，从交付 wheel 加载组件发布器。`new_wheel`、`base_python` 和 `deploy_root` 均填写绝对路径：
+较旧实例首次接入时，先部署支持该接口的 C 模块，再从新 wheel 准备维护入口；不能先覆盖原 Python 环境来取得更新器。把更新 ZIP 解压到新的独立目录，找到其中的实际 wheel。下面使用原环境之外的基础解释器，从该 wheel 加载组件发布器。`new_wheel`、`base_python` 和 `deploy_root` 均填写绝对路径：
 
 ```sh
 base_python=/absolute/path/to/python3.11
@@ -124,6 +149,8 @@ new_wheel=/absolute/path/to/camctl-new-version-py3-none-any.whl
 ```
 
 发布器只准备维护入口，不应用新版本；它核对原部署配置及目录归属，所有材料可靠保存后才发布可执行入口。随后使用新 C 模块或演示程序调用维护接口应用完整的 Python 更新 ZIP。普通 wheel 安装本身不会为任意部署准备入口。
+
+已有维护入口且存在中断更新时，直接使用恢复入口，不重新发布维护材料。更新已经可靠提交后，切换到旧软件不属于本次失败回滚；数据库没有受支持的降级路径时，不能只安装旧 wheel 或改写数据库格式号。
 
 ## camctl 的配置与日志
 

@@ -76,6 +76,8 @@ README 说明安装参数与产物、客户端默认及自定义数据目录、c
 
 ## 初次安装与已有实例更新
 
+发布版本与已有实例的操作流程见[版本发布与现场更新操作](../../../../docs/camctl/software-updates.md)；交付接收方仍按包内 README 操作，不要求目标机器具有源码仓库。
+
 完整部署包用于初次安装。安装器初始化 camctl 后，调用新 wheel 的发布器建立 `<target>/maintenance/camctl-updater`，将路径记录到收据并传给生成的 host-demo 启动入口。维护实现由组件提供，不在完整部署包顶层维护另一份更新程序。
 
 已有实例使用 `apps/camctl/scripts/build_update.py` 构建的 Python 专用更新包。它与完整包共用 Python 构建和依赖收集能力，交付 `camctl-update.zip`、包外摘要及同结构目录。ZIP 只有 `camctl-update/` 顶层目录，包含 `RELEASE.json`、`source-manifest.json`、`SHA256SUMS` 和 `camctl/` 下的单个 wheel、锁定依赖与双架构离线 wheel；不携带 host 或客户端。

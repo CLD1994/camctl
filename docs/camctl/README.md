@@ -66,6 +66,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 ## 运行与主程序对接
 
+- [版本发布与现场更新操作](software-updates.md)：版本来源与锁文件、更新包构建、现场应用、C 接口五字段结果、显式重启和中断恢复。
 - [配置项参考](configuration-reference.md)：集中查询 TOML 字段、类型、默认值、合法范围、设备配置及 C 接入路径对应关系。
 - [结果读取性能人工验证](../hardware/result-reading-performance-validation.md)：单次目录列举、新增候选查询、独立调度及阶段耗时的实机对照方法。
 - [CLI 命令与主程序调用](../architecture/cli-commands.md)：命令、输入路径、进程结果与退出。

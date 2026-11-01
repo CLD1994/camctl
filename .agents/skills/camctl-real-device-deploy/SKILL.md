@@ -111,6 +111,8 @@ python3 install-host.py \
 
 ## 停机更新已有 camctl
 
+版本递增、交付物校验、首次接入、演示与 C 接口应用、恢复及重启的完整操作步骤见[版本发布与现场更新操作](../../../docs/camctl/software-updates.md)。现场命令使用同一实例的普通入口、维护入口和配置来源。
+
 更新实现和引导发布器归 camctl wheel。完整部署包用于初次安装，其安装器在初始化后调用组件发布器，建立 `<target>/maintenance/camctl-updater`，记录路径并传给 host-demo 的 `--updater`。已有环境首次接入也使用新 wheel 的发布能力，不能先替换原 wheel 来取得更新功能。
 
 已有实例使用 Python 专用更新包。构建入口只需 Python 3.11、uv、Git 和下载条件，不构建 host 或客户端：
