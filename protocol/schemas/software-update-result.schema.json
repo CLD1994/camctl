@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://camctl.local/schemas/software-update-result.schema.json",
+  "title": "camctl 软件维护结果",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "action",
+    "outcome",
+    "effect",
+    "eligibility",
+    "prior_recovery",
+    "reason",
+    "stage",
+    "evidence"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "action": {
+      "enum": [
+        "check",
+        "recover",
+        "apply"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "not_started",
+        "unchanged",
+        "recovered",
+        "applied",
+        "failed",
+        "recovery_required",
+        "unknown"
+      ]
+    },
+    "eligibility": {
+      "enum": [
+        "allowed",
+        "blocked",
+        "unknown"
+      ]
+    },
+    "prior_recovery": {
+      "enum": [
+        "none",
+        "recovered",
+        "unknown"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effect": {
+      "enum": [
+        "not_started",
+        "unchanged",
+        "committed",
+        "rolled_back",
+        "recovery_required",
+        "unknown"
+      ]
+    }
+  },
+  "x-exit-status": {
+    "success": 0,
+    "failure": 1,
+    "success_outcomes": [
+      "unchanged",
+      "recovered",
+      "applied"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "not_started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": {
+            "const": "not_started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "unchanged"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": {
+            "const": "unchanged"
+          },
+          "eligibility": {
+            "const": "allowed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "recovered"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": {
+            "enum": [
+              "unchanged",
+              "rolled_back"
+            ]
+          },
+          "eligibility": {
+            "const": "allowed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": {
+            "const": "committed"
+          },
+          "eligibility": {
+            "const": "allowed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "recovery_required"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": {
+            "enum": [
+              "not_started",
+              "unchanged",
+              "recovery_required",
+              "unknown"
+            ]
+          },
+          "eligibility": {
+            "const": "blocked"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "unknown"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": {
+            "const": "unknown"
+          },
+          "eligibility": {
+            "enum": [
+              "unknown",
+              "blocked"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "effect": {
+            "enum": [
+              "unchanged",
+              "rolled_back",
+              "unknown"
+            ]
+          },
+          "eligibility": {
+            "const": "allowed"
+          }
+        }
+      }
+    }
+  ]
+}

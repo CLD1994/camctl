@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ import sys
 import tomllib
 import zipfile
 
-from bundle_support import WHEEL_TARGETS, wheel_target_manifest
+from bundle_support import wheel_target_manifest
 
 
 SKILL_PATH = Path('.agents/skills/camctl-real-device-deploy')
@@ -136,35 +137,18 @@ def main():
         bundle = output / BUNDLE_NAME
         shutil.copytree(skill / 'assets/bundle', bundle)
         write_configuration_docs(source, bundle)
-        for name in ('install-host.py', 'update-camctl.py', 'update-worker.py', 'update_transaction.py',
-                     'bundle_support.py', 'deploy_support.py', 'camera_discovery.py'):
+        for name in ('install-host.py', 'deploy_support.py', 'camera_discovery.py'):
             shutil.copyfile(skill / 'scripts' / name, bundle / name)
-        shutil.copyfile(source / 'apps/camctl/src/camctl/persistence/maintenance_integrity.py',
-                        bundle / 'maintenance_integrity.py')
-        dist = bundle / 'camctl'
-        dist.mkdir()
+        shutil.copyfile(source / 'apps/camctl/src/camctl/update_engine/bundle_support.py',
+                        bundle / 'bundle_support.py')
         project = source / 'apps/camctl'
-        run('导出锁定依赖', ['uv', 'export', '--project', project, '--frozen', '--no-dev', '--no-emit-project', '--no-header', '-o', dist / 'requirements.txt'])
-        run('构建 wheel', ['uv', 'build', '--project', project, '--python', sys.executable, '--wheel', '--out-dir', dist])
-        # uv 自动写出的 .gitignore 不属于部署内容。
-        (dist / '.gitignore').unlink(missing_ok=True)
-        wheels = list(dist.glob('*.whl'))
-        if len(wheels) != 1:
-            raise ValueError('wheel 必须恰好有一个')
+        builder_spec = importlib.util.spec_from_file_location('camctl_build_update', project / 'scripts/build_update.py')
+        builder = importlib.util.module_from_spec(builder_spec)
+        builder_spec.loader.exec_module(builder)
         venv = output / 'build-venv'
-        run('创建构建验证环境', ['uv', 'venv', '--python', sys.executable, venv])
-        run('安装下载工具', ['uv', 'pip', 'install', '--python', venv / 'bin/python', 'pip'])
-        wheelhouse = dist / 'wheelhouse'
-        for arch, platforms in WHEEL_TARGETS.items():
-            destination = wheelhouse / arch
-            destination.mkdir(parents=True)
-            platform_args = [part for value in platforms for part in ('--platform', value)]
-            run('下载离线依赖 ' + arch, [venv / 'bin/python', '-m', 'pip', 'download',
-                '--dest', destination, '--only-binary=:all:', '--implementation', 'cp',
-                '--python-version', '311', '--abi', 'cp311', *platform_args,
-                '--require-hashes', '-r', dist / 'requirements.txt'])
-            if not list(destination.glob('*.whl')):
-                raise ValueError('目标平台离线依赖为空: ' + arch)
+        wheel = builder.build_payload(project, bundle, venv, run)
+        dist = bundle / 'camctl'
+        wheels = [wheel]
         run('安装锁定依赖', ['uv', 'pip', 'install', '--python', venv / 'bin/python', '--require-hashes', '-r', dist / 'requirements.txt'])
         run('安装本次 wheel', ['uv', 'pip', 'install', '--python', venv / 'bin/python', '--no-deps', wheels[0]])
         run('检查依赖', ['uv', 'pip', 'check', '--python', venv / 'bin/python'])

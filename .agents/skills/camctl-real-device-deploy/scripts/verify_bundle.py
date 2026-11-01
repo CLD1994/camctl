@@ -55,12 +55,17 @@ def main():
         release = json.loads((bundle / 'RELEASE.json').read_text(encoding='utf-8'))
         expected_targets = wheel_target_manifest(bundle)
         if (release.get('wheel_targets') != expected_targets
-                or any(not target['files'] for target in expected_targets.values())
-                or any(not (bundle / name).is_file() for name in
-                       ('update-camctl.py', 'update-worker.py', 'update_transaction.py',
-                        'maintenance_integrity.py'))):
+                or any(not target['files'] for target in expected_targets.values())):
             raise ValueError('离线更新入口或目标依赖清单不完整')
-        report['checks'].append('离线更新入口与目标依赖清单')
+        wheels = list((bundle / 'camctl').glob('camctl-*.whl'))
+        if len(wheels) != 1:
+            raise ValueError('camctl wheel 数量无效')
+        with zipfile.ZipFile(wheels[0]) as wheel:
+            required = {'camctl/update_engine.pyz', 'camctl/update_engine/publisher.py',
+                        'camctl/update_engine/router.py', 'camctl/update_engine/update_transaction.py'}
+            if not required.issubset(wheel.namelist()):
+                raise ValueError('camctl wheel 缺少维护资源')
+        report['checks'].append('组件维护资源与目标依赖清单')
         readme = (bundle / 'README.md').read_text(encoding='utf-8')
         for target_link in re.findall(r'\[[^\]]+\]\(([^)]+)\)', readme):
             if not target_link.startswith(('http://', 'https://', '#')):
@@ -90,7 +95,8 @@ def main():
         with sqlite3.connect(config['paths']['state_db']) as db:
             if db.execute('pragma integrity_check').fetchone()[0] != 'ok':
                 raise ValueError('状态库完整性检查失败')
-        for path in (target / 'start-host-demo.sh', target / 'host/bin/host-demo'):
+        for path in (target / 'start-host-demo.sh', target / 'host/bin/host-demo',
+                     target / 'maintenance/camctl-updater'):
             if not path.is_file():
                 raise ValueError('安装入口缺失：' + str(path))
         run(['bash', '-n', target / 'start-host-demo.sh'], workspace)

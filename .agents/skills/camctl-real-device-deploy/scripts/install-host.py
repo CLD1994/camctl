@@ -124,6 +124,10 @@ def main():
             raise ValueError('C 源码包没有唯一构建入口')
         install_host(run, candidates[0], target)
         run('显式初始化新状态库', [target / 'venv/bin/camctl', 'init', '--config', config_path])
+        run('发布组件维护入口', [target / 'venv/bin/python', '-B', '-m', 'camctl.update_engine.publisher',
+            '--wheel', wheels[0], '--target', target, '--base-python', getattr(sys, '_base_executable', sys.executable),
+            '--camctl-path', target / 'venv/bin/camctl', '--config', config_path])
+        receipt['updater_path'] = str(target / 'maintenance/camctl-updater')
         command = [target / 'host/bin/host-demo', '--camctl', target / 'venv/bin/camctl', '--config', config_path,
                    '--ready', configuration['paths']['ready'], '--processing', configuration['paths']['processing'],
                    '--log', target / 'host.log']
