@@ -1,10 +1,98 @@
 #include "update_result.h"
+#include "diagnostic.h"
 #include "yyjson.h"
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <unistd.h>
+
+static void diagnostic_evidence(FILE *out, const char *evidence, size_t length,
+                                bool present, bool truncated) {
+    if (!present || truncated || !length || evidence[0] != '/' || memchr(evidence, 0, length)) return;
+    const char *names[] = {"update.log", "receipt.json"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        char path[CAMCTL_HOST_UPDATE_TEXT_MAX + 32];
+        int n = snprintf(path, sizeof(path), "%s/%s", evidence, names[i]);
+        if (n < 0 || (size_t)n >= sizeof(path)) continue;
+        FILE *source = fopen(path, "rb");
+        if (!source) {
+            fprintf(out, "evidence %s open_errno=%d\n", names[i], errno);
+            continue;
+        }
+        fprintf(out, "evidence %s begin\n", names[i]);
+        char bytes[8192];
+        size_t count;
+        while ((count = fread(bytes, 1, sizeof(bytes), source)) != 0)
+            if (fwrite(bytes, 1, count, out) != count) break;
+        fprintf(out, "\nevidence %s read_error=%d\n", names[i], ferror(source) != 0);
+        fclose(source);
+    }
+}
+
+static void diagnostic_result(FILE *out, const char *name, const host_update_result *d, int error) {
+    fprintf(out, "%s error=%d present=%d\n", name, error, d != NULL);
+    if (!d) return;
+    fprintf(out, "action=%d outcome=%d effect=%d eligibility=%d prior_recovery=%d "
+                 "started=%d pid=%ld pgid=%ld spawn_errno=%d cwd_errno=%d "
+                 "exit_known=%d signaled=%d exit_code=%d poll_error=%d parse_error=%d\n",
+            d->action, d->outcome, d->effect, d->eligibility, d->prior_recovery,
+            d->process_started, d->pid, d->pgid, d->spawn_errno, d->working_directory_errno,
+            d->process_exit_known, d->process_signaled, d->process_exit_code, d->poll_error, d->parse_error);
+    fprintf(out, "cwd=%s\nstdout length=%zu seen=%llu truncated=%d io_error=%d\n",
+            d->working_directory, d->stdout_length, (unsigned long long)d->stdout_bytes_seen,
+            d->stdout_truncated, d->stdout_io_error);
+    fwrite(d->stdout_data, 1, d->stdout_length, out);
+    fprintf(out, "\nstderr length=%zu seen=%llu truncated=%d io_error=%d\n",
+            d->stderr_length, (unsigned long long)d->stderr_bytes_seen,
+            d->stderr_truncated, d->stderr_io_error);
+    fwrite(d->stderr_data, 1, d->stderr_length, out);
+    fprintf(out, "\nprocess length=%zu truncated=%d\n", d->process_diagnostics_length,
+            d->process_diagnostics_truncated);
+    fwrite(d->process_diagnostics, 1, d->process_diagnostics_length, out);
+    fputc('\n', out);
+    diagnostic_evidence(out, d->evidence, d->evidence_length, d->evidence_present, d->evidence_truncated);
+    if (d->evidence_truncated || d->prior_evidence_truncated ||
+        d->prior_evidence_length != d->evidence_length ||
+        memcmp(d->prior_evidence, d->evidence, d->evidence_length))
+        diagnostic_evidence(out, d->prior_evidence, d->prior_evidence_length,
+                            d->prior_evidence_present, d->prior_evidence_truncated);
+}
+
+typedef struct {
+    const char *bundle, *config;
+    const host_update_result *apply, *recovery;
+    int apply_error, recovery_error, run_error;
+} update_diagnostic;
+
+static int write_update_diagnostic(int fd, void *context) {
+    update_diagnostic *d = context;
+    int copy = dup(fd);
+    if (copy < 0) return errno;
+    FILE *out = fdopen(copy, "w");
+    if (!out) {
+        int error = errno;
+        close(copy);
+        return error;
+    }
+    fprintf(out, "CAMCTL-UPDATE-DIAGNOSTIC 1\nbundle=%s\nconfig=%s\nrun_error=%d\n",
+            d->bundle ? d->bundle : "(none)", d->config ? d->config : "(default)", d->run_error);
+    diagnostic_result(out, "apply", d->apply, d->apply_error);
+    diagnostic_result(out, "recovery", d->recovery, d->recovery_error);
+    int error = ferror(out) ? EIO : 0;
+    if (fclose(out) && !error) error = errno;
+    return error;
+}
+
+void host_update_diagnostic(const char *processing, const char *bundle, const char *config,
+                            const host_update_result *apply, int apply_error,
+                            const host_update_result *recovery, int recovery_error, int run_error) {
+    if (!processing) return;
+    update_diagnostic data = {bundle, config, apply, recovery, apply_error, recovery_error, run_error};
+    int error = host_diagnostic_publish_update(processing, write_update_diagnostic, &data);
+    if (error) fprintf(stderr, "camctl update diagnostic errno=%d\n", error);
+}
 
 void host_update_result_project(const host_update_result *d, int error, camctl_host_update_result *r) {
     memset(r, 0, sizeof(*r));
@@ -201,6 +289,8 @@ bool host_update_result_parse(camctl_update_action expected, const char *data, s
                        &parsed->stage_truncated) &&
             text_field(field(root, "evidence"), parsed->evidence, &parsed->evidence_length, &parsed->evidence_present,
                        &parsed->evidence_truncated) &&
+            text_field(field(root, "prior_evidence"), parsed->prior_evidence, &parsed->prior_evidence_length,
+                       &parsed->prior_evidence_present, &parsed->prior_evidence_truncated) &&
             permitted(parsed) && exit_code == (success(parsed) ? UPDATE_SUCCESS_EXIT : UPDATE_FAILURE_EXIT);
     }
     if (valid)

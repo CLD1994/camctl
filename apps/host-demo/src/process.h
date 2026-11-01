@@ -1,6 +1,7 @@
 #ifndef HOST_PROCESS_H
 #define HOST_PROCESS_H
 #include "result.h"
+#include "update_result.h"
 #include "camctl_host.h"
 #include "process_group.h"
 #include <sys/types.h>

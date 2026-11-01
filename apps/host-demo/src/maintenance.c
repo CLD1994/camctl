@@ -85,6 +85,9 @@ int host_maintenance_run(const camctl_host_update_config *config,
     host_child_init(&child, output, CAMCTL_HOST_UPDATE_STDOUT_MAX, stderr_data, CAMCTL_HOST_UPDATE_STDERR_MAX);
     error = host_maintenance_spawn(&child, config, request);
     if (error) {
+        result->spawn_errno = error;
+        result->working_directory_errno = child.working_directory_errno;
+        memcpy(result->working_directory, child.working_directory, sizeof(result->working_directory));
         free(output);
         free(stderr_data);
         return error;
@@ -135,6 +138,12 @@ int host_maintenance_run(const camctl_host_update_config *config,
     result->process_exit_known = child.termination != HOST_EXIT_UNKNOWN;
     result->process_signaled = child.termination == HOST_EXIT_SIGNAL;
     result->process_exit_code = child.exit_code;
+    result->process_started = child.started;
+    result->spawn_errno = child.spawn_errno;
+    result->pid = child.completed_pid ? child.completed_pid : child.pid;
+    result->pgid = child.completed_pgid ? child.completed_pgid : child.pgid;
+    result->working_directory_errno = child.working_directory_errno;
+    memcpy(result->working_directory, child.working_directory, sizeof(result->working_directory));
     result->poll_error = poll_error;
     host_group_scan_reset(&child.scan);
     free(output);

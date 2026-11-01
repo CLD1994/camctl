@@ -3,7 +3,41 @@
 #include <setjmp.h>
 #include <cmocka.h>
 #include <string.h>
+#include <errno.h>
 #include "diagnostic.h"
+
+static int sync_calls, fail_sync, renames, unlinks;
+int __wrap_open(const char *path, int flags, ...) { (void)path; (void)flags; return 10; }
+int __wrap_openat(int fd, const char *path, int flags, ...) {
+    (void)fd; (void)flags; return !strcmp(path, "record.tmp") ? 12 : 11;
+}
+char *__wrap_mkdtemp(char *path) {
+    size_t n = strlen(path); assert_true(n >= 6); memcpy(path + n - 6, "abcdef", 6); return path;
+}
+int __wrap_fsync(int fd) {
+    (void)fd; ++sync_calls;
+    if (sync_calls == fail_sync) { errno = EIO; return -1; }
+    return 0;
+}
+int __wrap_host_diagnostic_rename_noreplace(int oldfd, const char *oldpath, int newfd, const char *newpath) {
+    (void)oldfd; (void)oldpath; (void)newfd; (void)newpath; renames++; return 0;
+}
+int __wrap_unlinkat(int fd, const char *path, int flags) {
+    (void)fd; (void)path; (void)flags; unlinks++; return 0;
+}
+int __wrap_close(int fd) { (void)fd; return 0; }
+static int write_payload(int fd, void *context) {
+    (void)context; assert_int_equal(fd, 12); return 0;
+}
+
+static void update_publication_preserves_preparation_and_never_repeats_rename(void **state) {
+    (void)state; sync_calls = renames = unlinks = 0; fail_sync = 2;
+    assert_int_equal(host_diagnostic_publish_update("/processing", write_payload, NULL), EIO);
+    assert_int_equal(renames, 0); assert_int_equal(unlinks, 0);
+    sync_calls = renames = unlinks = 0; fail_sync = 3;
+    assert_int_equal(host_diagnostic_publish_update("/processing", write_payload, NULL), EIO);
+    assert_int_equal(renames, 1); assert_int_equal(unlinks, 1);
+}
 
 static void format_contains_context_and_bounded_lengths(void **state) {
     (void)state;
@@ -50,6 +84,7 @@ static void format_contains_context_and_bounded_lengths(void **state) {
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(format_contains_context_and_bounded_lengths),
+        cmocka_unit_test(update_publication_preserves_preparation_and_never_repeats_rename),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

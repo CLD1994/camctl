@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SCHEMA = ROOT / 'protocol/schemas/software-update-result.schema.json'
-HEADER = ROOT / 'apps/host-demo/include/camctl_update_protocol.h'
+HEADER = ROOT / 'apps/host-demo/src/camctl_update_protocol.h'
 TABLE = ROOT / 'apps/host-demo/src/update_protocol_generated.h'
 FIELDS = ('action', 'outcome', 'effect', 'eligibility', 'prior_recovery')
 

@@ -12,6 +12,24 @@ WHEEL_TARGETS = {
 }
 
 
+def update_metadata(release):
+    if not isinstance(release, dict):
+        raise ValueError('发行记录必须是对象')
+    update = release.get('update', {})
+    if not isinstance(update, dict):
+        raise ValueError('更新元数据必须是对象')
+    force = update.get('force', False)
+    if type(force) is not bool:
+        raise ValueError('更新模式必须是布尔值')
+    if force:
+        if not isinstance(update.get('config_toml'), str):
+            raise ValueError('强制更新必须提供完整配置')
+        return {'force': True, 'config_toml': update['config_toml']}
+    if 'config_toml' in update:
+        raise ValueError('普通更新不能包含替换配置')
+    return {'force': False}
+
+
 def wheel_target_manifest(bundle):
     return {name: {'platforms': list(platforms),
                    'files': sorted(p.name for p in (bundle / 'camctl/wheelhouse' / name).glob('*.whl'))}

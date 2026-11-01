@@ -34,7 +34,7 @@ with patch.dict(sys.modules, {'update_transaction': transaction, 'error_diagnost
 
 
 binding = {'target': '/target', 'python': '/python', 'camctl_path': '/target/venv/bin/camctl'}
-active = {'original': {'config_source': '/config'}, 'mutation_intent': True}
+active = {'original': {'config_source': '/config'}, 'mutation_intent': True, 'output': '/target/updates/previous'}
 
 
 def call(action='apply'):
@@ -61,6 +61,7 @@ def test_new_bundle_failure_keeps_prior_recovery_and_eligibility():
             patch.object(router.os, 'close'):
         result = call()
     assert (result['outcome'], result['effect'], result['eligibility'], result['prior_recovery']) == ('failed', 'unchanged', 'allowed', 'recovered')
+    assert result['prior_evidence'] == '/target/updates/previous'
 
 
 def test_failed_current_update_is_separate_from_prior_recovery():
@@ -69,12 +70,14 @@ def test_failed_current_update_is_separate_from_prior_recovery():
                                                           ({}, JournalState.ROLLED_BACK),
                                                           ({'output': '/target/updates/id'}, JournalState.ROLLED_BACK)]), \
             patch.object(router, '_frozen', return_value=Path('/frozen')), \
-            patch.object(router, '_invoke', side_effect=[{'status': 'recovered'}, {'status': 'failed', 'effect': 'rolled_back'}]), \
+            patch.object(router, '_invoke', side_effect=[{'status': 'recovered'}, {'status': 'failed', 'effect': 'rolled_back', 'evidence': '/target/updates/id'}]), \
             patch.object(router, '_engine_memfd', return_value=14), \
             patch.object(router.uuid, 'uuid4', return_value=SimpleNamespace(hex='id')), \
             patch.object(router.os, 'close'):
         result = call()
     assert (result['outcome'], result['effect'], result['eligibility'], result['prior_recovery']) == ('failed', 'rolled_back', 'allowed', 'recovered')
+    assert result['prior_evidence'] == '/target/updates/previous'
+    assert result['evidence'] == '/target/updates/id'
 
 
 def test_lost_qualification_after_invocation_is_not_claimed_allowed():

@@ -143,7 +143,7 @@ def execute(binding, action, camctl_path, config, bundle, client_data):
 
 def _execute(binding, action, camctl_path, config, bundle, client_data, diagnostics):
     result = dict(version=1, action=action, outcome='not_started', effect='not_started', eligibility='unknown',
-                  prior_recovery='none', reason=None, stage=None, evidence=None)
+                  prior_recovery='none', prior_evidence=None, reason=None, stage=None, evidence=None)
     target = Path(binding['target'])
     python = binding['python']
     if camctl_path != binding['camctl_path']:
@@ -163,6 +163,7 @@ def _execute(binding, action, camctl_path, config, bundle, client_data, diagnost
         known_active = active
         qualification_proven = not active
         if active:
+            result['prior_evidence'] = record['output']
             if action == 'check':
                 result.update(outcome='recovery_required', eligibility='blocked', reason='存在未完成更新')
                 return result
@@ -188,7 +189,7 @@ def _execute(binding, action, camctl_path, config, bundle, client_data, diagnost
         if action in ('check', 'recover'):
             result.update(outcome='recovered' if active else 'unchanged',
                           effect='rolled_back' if active and record['mutation_intent'] else 'unchanged',
-                          eligibility='allowed')
+                          eligibility='allowed', evidence=record['output'] if active else None)
             return result
         if bundle is None:
             raise ValueError('应用更新需要交付目录')
@@ -275,7 +276,7 @@ def main():
     except Exception as error:
         _diagnose(error, 'binding')
         result = dict(version=1, action=args.action, outcome='not_started', effect='not_started', eligibility='unknown',
-                      prior_recovery='none', reason=f'{type(error).__name__}: {error}', stage=None, evidence=None)
+                      prior_recovery='none', prior_evidence=None, reason=f'{type(error).__name__}: {error}', stage=None, evidence=None)
     print(json.dumps(result, ensure_ascii=False))
     exits = schema['x-exit-status']
     return exits['success'] if result['eligibility'] == 'allowed' and result['outcome'] in exits['success_outcomes'] else exits['failure']

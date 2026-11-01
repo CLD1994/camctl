@@ -56,7 +56,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, default=Path.cwd())
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--force', action='store_true')
+    parser.add_argument('--config', type=Path)
     args = parser.parse_args()
+    if args.force != (args.config is not None):
+        parser.error('--force 与 --config 必须同时指定')
+    if args.config is not None and not args.config.is_absolute():
+        parser.error('--config 必须是绝对路径')
+    config_text = args.config.read_text(encoding='utf-8') if args.config is not None else None
+    if config_text is not None:
+        tomllib.loads(config_text)
     repo, output = args.repo.resolve(), args.output.resolve()
     if sys.platform != 'linux' or sys.version_info[:2] != (3, 11):
         parser.error('构建需要 Linux 和 Python 3.11')
@@ -109,6 +118,10 @@ def main():
             'components': {'camctl': tomllib.loads((project / 'pyproject.toml').read_text())['project']['version']},
             'wheel_targets': support.wheel_target_manifest(bundle),
             'lock_sha256': _sha(project / 'uv.lock')}
+        release['update'] = {'force': args.force}
+        if args.force:
+            release['update']['config_toml'] = config_text
+        support.update_metadata(release)
         for name, value in (('RELEASE.json', release), ('source-manifest.json', manifest)):
             (bundle / name).write_text(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n')
         files = sorted(p for p in bundle.rglob('*') if p.is_file())

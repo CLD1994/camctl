@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "camctl_update_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,32 +49,8 @@ typedef struct camctl_host_config {
     const char *updater_path; /* NULL：不启用启动前维护资格检查。 */
 } camctl_host_config;
 
-#define CAMCTL_HOST_UPDATE_REASON_MAX 255
-
-typedef struct camctl_host_update_config {
-    const char *camctl_path;
-    const char *updater_path;
-    const char *config_path; /* NULL：普通入口的默认来源。 */
-} camctl_host_update_config;
-
-typedef struct camctl_host_update_request {
-    camctl_update_action action; /* 允许 APPLY 或 RECOVER。 */
-    const char *bundle_path;     /* APPLY 必填：更新 ZIP 或已解压目录；RECOVER 为 NULL。 */
-    const char *client_data_path; /* 仅 APPLY 可指定。 */
-} camctl_host_update_request;
-
-typedef struct camctl_host_update_result {
-    camctl_update_outcome outcome;
-    camctl_update_effect effect;
-    camctl_update_eligibility eligibility;
-    char reason[CAMCTL_HOST_UPDATE_REASON_MAX + 1];
-    char diagnostic_path[CAMCTL_HOST_PATH_MAX + 1];
-} camctl_host_update_result;
-
-/* 阻塞执行维护；返回 0 表示已接收可信结果，具体效果由 result 判断。
- * 参数或通道失败返回 -1，结果保留未知和可用的诊断；调用期间不自动恢复业务。 */
-int camctl_host_update(const camctl_host_update_config *config,
-                       const camctl_host_update_request *request, camctl_host_update_result *result);
+/* 成功表示新包已提交且普通运行已安排；失败返回 -1 并设置 errno。 */
+int camctl_host_update(const char *bundle_path, const char *client_data_path);
 
 /* 路径补齐函数使用的调用方缓冲区；保持有效直至 camctl_host_init 返回。
  * config 中生成的指针指向该对象，不能通过复制该对象来迁移指针。 */
@@ -140,11 +115,6 @@ void camctl_host_claim(void);
  * 调用为 EDEADLK。停止期间 submit/claim 为 ECANCELED，停止后不可重新 init。
  * 不能从信号处理函数调用；用户回调或工具不返回时，本调用可能持续等待。 */
 int camctl_host_stop(void);
-
-/* 同进程显式新建运行周期，复用已停止实例的配置和回调，不重送首次计划。
- * 调用时仍有停止、维护、重启构造或未收场候选时返回 EBUSY；未初始化为 ENODEV，
- * 正在运行返回 EALREADY，模块工作/回调线程调用为 EDEADLK。失败后保留原停止实例。 */
-int camctl_host_restart(void);
 
 #ifdef __cplusplus
 }

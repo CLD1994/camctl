@@ -11,6 +11,7 @@
     "effect",
     "eligibility",
     "prior_recovery",
+    "prior_evidence",
     "reason",
     "stage",
     "evidence"
@@ -49,6 +50,12 @@
         "none",
         "recovered",
         "unknown"
+      ]
+    },
+    "prior_evidence": {
+      "type": [
+        "string",
+        "null"
       ]
     },
     "reason": {

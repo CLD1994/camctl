@@ -1,6 +1,6 @@
 /* 由 generate_update_protocol.py 从根协议生成。 */
 #define UPDATE_PROTOCOL_VERSION 1
-#define UPDATE_PROTOCOL_FIELDS 9
+#define UPDATE_PROTOCOL_FIELDS 10
 
 static const struct update_name update_action_names[] = {
     {CAMCTL_UPDATE_ACTION_CHECK, "check", "check"},

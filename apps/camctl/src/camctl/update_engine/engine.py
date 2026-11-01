@@ -24,7 +24,7 @@ import traceback
 import uuid
 import zipfile
 
-from bundle_support import WHEEL_TARGETS, current_target, verify_checksums, wheel_target_manifest
+from bundle_support import WHEEL_TARGETS, current_target, update_metadata, verify_checksums, wheel_target_manifest
 from archive_support import UpdateArchive
 from maintenance_integrity import verify_maintenance_integrity
 from error_diagnostics import exception_diagnostic
@@ -205,6 +205,9 @@ class UpdateOperations:
                 raise ValueError('camctl wheel 或锁定依赖文件缺失')
             wheel_source = wheel = wheels[0]
             manifest_bytes = (self.bundle / 'SHA256SUMS').read_bytes()
+        update = update_metadata(release)
+        if update['force']:
+            raise ValueError('强制更新事务尚未接入')
         if (release.get('wheel_targets') != expected_targets
                 or any(not target['files'] for target in expected_targets.values())
                 or not expected_targets[arch]['files']):

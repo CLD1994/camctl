@@ -11,6 +11,9 @@ static char captured[200000];
 static size_t captured_length;
 static int failed, writes, fail_at;
 static int cancel_state = PTHREAD_CANCEL_ENABLE, locked;
+int host_diagnostic_publish_update(const char *path, int (*writer)(int, void *), void *context) {
+    (void)path; (void)writer; (void)context; assert(0); return EIO;
+}
 int __wrap_pthread_setcancelstate(int state, int *old) {
     assert(!locked);
     if (old) *old = cancel_state;
@@ -45,22 +48,22 @@ static bool parse(const char *json, host_exit termination, int code, host_update
 
 int main(void) {
     const char *applied = "{\"version\":1,\"action\":\"apply\",\"outcome\":\"applied\","
-        "\"effect\":\"committed\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"effect\":\"committed\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\",\"prior_evidence\":null,"
         "\"reason\":null,\"stage\":null,\"evidence\":\"/receipt\"}\n";
     const char *unchanged = "{\"version\":1,\"action\":\"apply\",\"outcome\":\"failed\","
-        "\"effect\":\"unchanged\",\"eligibility\":\"allowed\",\"prior_recovery\":\"recovered\","
+        "\"effect\":\"unchanged\",\"eligibility\":\"allowed\",\"prior_recovery\":\"recovered\",\"prior_evidence\":\"/previous\","
         "\"reason\":\"bad package\",\"stage\":\"preflight\",\"evidence\":null}\n";
     const char *rolled_back = "{\"version\":1,\"action\":\"apply\",\"outcome\":\"failed\","
-        "\"effect\":\"rolled_back\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"effect\":\"rolled_back\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\",\"prior_evidence\":null,"
         "\"reason\":null,\"stage\":null,\"evidence\":null}\n";
     const char *duplicate = "{\"version\":1,\"action\":\"apply\",\"outcome\":\"applied\","
-        "\"effect\":\"committed\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"effect\":\"committed\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\",\"prior_evidence\":null,"
         "\"reason\":null,\"stage\":null,\"stage\":null}\n";
     const char *contradictory = "{\"version\":1,\"action\":\"apply\",\"outcome\":\"applied\","
-        "\"effect\":\"rolled_back\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"effect\":\"rolled_back\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\",\"prior_evidence\":null,"
         "\"reason\":null,\"stage\":null,\"evidence\":null}\n";
     const char *not_checked = "{\"version\":1,\"action\":\"check\",\"outcome\":\"not_started\","
-        "\"effect\":\"not_started\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"effect\":\"not_started\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\",\"prior_evidence\":null,"
         "\"reason\":null,\"stage\":null,\"evidence\":null}\n";
     host_update_result result;
     assert(parse(applied, HOST_EXIT_NORMAL, 0, &result));
@@ -80,6 +83,7 @@ int main(void) {
     assert(!public_result.diagnostic_path[0]);
     assert(parse(unchanged, HOST_EXIT_NORMAL, 1, &result));
     assert(result.effect == CAMCTL_UPDATE_EFFECT_UNCHANGED && result.prior_recovery == CAMCTL_UPDATE_PRIOR_RECOVERY_RECOVERED);
+    assert(result.prior_evidence_present && !strcmp(result.prior_evidence, "/previous"));
     host_update_result_project(&result, 0, &public_result);
     assert(!strcmp(public_result.reason, "bad package"));
     memset(result.reason, 'a', sizeof(result.reason));

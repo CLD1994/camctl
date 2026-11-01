@@ -3,8 +3,12 @@
 #include "process.h"
 #include <assert.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <poll.h>
 #include <string.h>
+int host_diagnostic_publish_update(const char *path, int (*writer)(int, void *), void *context) {
+    (void)path; (void)writer; (void)context; abort();
+}
 
 static const char *stdout_text;
 static const char *stderr_text;
@@ -46,7 +50,7 @@ int poll(struct pollfd *fds, nfds_t n, int timeout) {
 
 int main(void) {
     const char *valid = "{\"version\":1,\"action\":\"check\",\"outcome\":\"unchanged\","
-        "\"effect\":\"unchanged\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\","
+        "\"effect\":\"unchanged\",\"eligibility\":\"allowed\",\"prior_recovery\":\"none\",\"prior_evidence\":null,"
         "\"reason\":null,\"stage\":null,\"evidence\":null}\n";
     const char *multiple = "{\"bad\":true}\n{\"bad\":true}\n";
     camctl_host_update_config config = {"/camctl", "/updater", NULL};
