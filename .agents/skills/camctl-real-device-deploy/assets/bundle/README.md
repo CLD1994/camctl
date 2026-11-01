@@ -132,13 +132,14 @@ test -f "$new_wheel"
   --camctl "$deploy_root/venv/bin/camctl" \
   --updater "$deploy_root/maintenance/camctl-updater" \
   --config "$deploy_root/config.toml" \
-  --client-data "$client_data" \
+  --ready "$deploy_root/ready" --processing "$deploy_root/processing" \
+  --log "$deploy_root/host.log" --client-data "$client_data" \
   --apply-update "$update_zip"
 ```
 
 host-demo 使用普通初始化入口，初始化时先自动恢复未完成事务，然后应用当前更新包；返回后继续终端交互。`--client-data` 可省略，指定时同步设备能力说明。C 主程序也可在 `camctl_host_init` 成功后调用 `camctl_host_update(bundle_path, client_data_path)`。`bundle_path` 是更新 ZIP 或已解压目录的绝对路径；`client_data_path` 可为 `NULL`，指定时同步设备能力说明。模块停止本实例普通工作、应用更新、处理必要恢复，并在允许启动时重建普通资源、安排 `run`。返回 `0` 表示新包已可靠提交且普通运行已安排；返回 `-1` 表示本次更新失败。失败诊断直接进入 `processing`，主程序无需解读内部状态。
 
-实例使用外置配置时，`--config` 须填写实际配置的绝对路径；普通入口使用默认配置来源时省略该参数。`--client-data` 可省略；指定时使用客户端的实际数据目录。
+示例采用部署根目录内的交接路径；首次安装指定了外部 ready、processing 或日志路径时填写实际值。实例使用外置配置时，`--config` 须填写实际配置的绝对路径；普通入口使用默认配置来源时省略该参数。`--client-data` 可省略；指定时使用客户端的实际数据目录。
 
 普通启动配置中的 `updater_path` 必须指向该实例的稳定维护入口。初始化会先自动恢复未完成事务，再安排普通运行。host-demo 也可先正常初始化，再输入 `update /absolute/path/to/camctl-update.zip`；该命令使用启动参数 `--client-data` 指定的能力同步目录。
 

@@ -172,12 +172,13 @@ int update_camctl(const char *bundle_path, const char *client_data_path) {
 
 必须在 `camctl_host_init` 成功后调用。模块在调用期间停止本实例的普通工作，应用更新包，必要时自动恢复，并在结果允许启动时重建普通资源、安排 `run`。返回 `0` 表示新包已可靠提交且普通运行已安排；返回 `-1` 表示本次更新失败。失败后如原部署已恢复，模块会自动恢复普通运行；恢复尚未完成或结果未知时不会启动部分更新的环境。主程序只需按 `0` 或 `-1` 处理，不解析内部维护状态，也不手动恢复或重启。
 
-`bundle_path` 是 Python 专用更新 ZIP 或已解压目录的绝对路径。`client_data_path` 可为 `NULL`；指定时，更新会同步设备能力说明并将其纳入失败恢复。更新失败的独立诊断直接进入 `processing`，主程序可按普通文件流程传输。强制更新包包含完整 TOML 配置；成功后，同一部署位置使用该新配置、干净的 Python 环境和具有新实例身份的空状态库，并重建空的 `staging`、`ready`。原业务计划、历史和工作状态不保留或合并；原对象仅在更新失败或未可靠提交时从完整备份回滚。`processing`、日志、维护恢复材料、host、客户端数据和相机存储保留。备份、恢复及故障范围见[版本与更新规格](../../docs/architecture/versioning-and-updates.md#强制重建)和[更新接入规格](../../docs/architecture/software-update-interface.md)。
+`bundle_path` 是 Python 专用更新 ZIP 或已解压目录的绝对路径。`client_data_path` 可为 `NULL`；指定时，更新会同步设备能力说明并将其纳入失败恢复。更新失败的独立诊断直接进入 `processing`，主程序可按普通文件流程传输。强制更新包包含完整 TOML 配置；成功后，同一部署位置使用该新配置、干净的 Python 环境和具有新实例身份的空状态库，并重建空的 `staging`、`ready`。原业务计划、历史和工作状态不保留或合并；原对象仅在更新失败或未可靠提交时从完整备份回滚。`processing`、日志、维护恢复材料、host、客户端数据和相机存储保留。成功后旧环境的配置、状态库、环境及冻结日志会压缩为独立诊断包直接发布到 processing，媒体正文排除、清单保留；压缩和清理中断后由下次普通启动继续，不影响新部署运行。备份、恢复及故障范围见[版本与更新规格](../../docs/architecture/versioning-and-updates.md#强制重建)和[更新接入规格](../../docs/architecture/software-update-interface.md)。
 
 演示程序的 `--apply-update` 在正常初始化后调用同一更新接口。它完成更新后继续进入交互终端；启动参数 `--client-data` 指定能力同步目录：
 
 ```sh
 "$HOME/.camctl/host/bin/host-demo" \
+  --updater "$HOME/.camctl/maintenance/camctl-updater" \
   --apply-update /absolute/path/to/camctl-update.zip \
   --client-data /absolute/path/to/client-data
 ```

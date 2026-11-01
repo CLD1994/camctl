@@ -243,3 +243,8 @@ Linux x86_64 开发容器，GCC 13.3.0、CMake 3.28.3、CPython 3.11.16、SQLite
 | 主机突然断电 | 尚未在目标存储上验证断电后的文件位置和 camctl 恢复；普通进程中断不证明物理断电持久性，见清单 E。 |
 
 上述状态是“尚无对应现场证据”，不表示软件接口或进程恢复实现未完成。步骤与通过判据见[目标环境联调清单](../superpowers/plans/2026-10-11-camctl-target-integration-runbook.md)。源码可在记录的目标机工具链构建；本地 x86_64 二进制不能作为 ARM64 交付物。
+
+
+## 无人值守更新接入（2026-11-02）
+
+普通初始化自动恢复、更新内部重建、失败 diagnostic 直接交付 processing 的源码已独立评审，五个 C 隔离单元入口通过。普通更新已在容器中通过真实 wheel、离线依赖、稳定维护入口和 C host 实际验证，包含失败与连续中断恢复。归档后台消费者已完成独立局部验证，Python 生产者及最终实际组合仍待接通。详见[专项验证记录](../camctl/unattended-update-verification-2026-11-02.md)及[实施计划](../superpowers/plans/2026-11-02-unattended-updates.md)；本条不替代目标 ARM64、第三方主程序或物理断电验收。
