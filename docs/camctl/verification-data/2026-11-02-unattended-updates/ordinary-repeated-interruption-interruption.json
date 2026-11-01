@@ -1,0 +1,32 @@
+{
+  "scenario": "ordinary-crash-recovery",
+  "interrupted_argv": [
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/maintenance/camctl-updater",
+    "apply",
+    "--camctl-path",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/venv/bin/camctl",
+    "--config",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/config.toml",
+    "--bundle",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/ordinary-update-candidate/camctl-update.zip"
+  ],
+  "pid": 22308,
+  "pgid": 22308,
+  "returncode": -9,
+  "intent_state": "updating",
+  "mutation_intent": true,
+  "version_at_interruption": "1.0.0",
+  "gate": {
+    "pid": 22505,
+    "argv": [
+      "/workspaces/camctl/tmp/unattended-validation-20261102/operator-tools/bin/uv",
+      "pip",
+      "check",
+      "--python",
+      "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/venv/bin/python"
+    ],
+    "time_ns": 1793575241058085569
+  },
+  "interruption": "SIGKILL process group after actual installation and dependency check, before commit",
+  "physical_power_loss": false
+}

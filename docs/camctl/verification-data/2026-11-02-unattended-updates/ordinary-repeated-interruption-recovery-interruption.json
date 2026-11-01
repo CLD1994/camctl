@@ -1,0 +1,41 @@
+{
+  "scenario": "recovery-interrupted-after-environment-restored",
+  "ordinary_host_argv": [
+    "/workspaces/camctl/tmp/unattended-validation-20261102/host-build-ordinary/host-demo",
+    "--camctl",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/venv/bin/camctl",
+    "--updater",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/maintenance/camctl-updater",
+    "--config",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/config.toml",
+    "--ready",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/ready",
+    "--processing",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/processing",
+    "--log",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/host.log",
+    "--retry-limit",
+    "0"
+  ],
+  "host_pid": 22772,
+  "returncode": -9,
+  "owned_processes": [
+    22772,
+    22773,
+    22777
+  ],
+  "killed_groups": [
+    22772,
+    22773
+  ],
+  "pending_state": "updating",
+  "gate_rename": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/.camctl-update-a8a723ae9a3447499e40ec39484d2a50/staging\n/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/venv\n",
+  "command_lines": {
+    "22772": "/workspaces/camctl/tmp/unattended-validation-20261102/host-build-ordinary/host-demo --camctl /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/venv/bin/camctl --updater /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/maintenance/camctl-updater --config /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/config.toml --ready /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/ready --processing /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/processing --log /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/host.log --retry-limit 0 ",
+    "22773": "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11 -B -I /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/maintenance/versions/132391a4b203125ec53b75b60941ce7a864637cc99e19821726b1a59d404d066/router.py recover --camctl-path /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/venv/bin/camctl --config /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/config.toml ",
+    "22777": "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11 -B -I /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/updates/a8a723ae9a3447499e40ec39484d2a50/engine.pyz --target /workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery --recover-only --lock-fd 3 "
+  },
+  "restored_environment_extra_file": true,
+  "physical_power_loss": false,
+  "gate_library_sha256": "7ac176c26f9aaa2c5bedf9bbde43c5946717c6f65ae34951d8ababa3a79947ff"
+}

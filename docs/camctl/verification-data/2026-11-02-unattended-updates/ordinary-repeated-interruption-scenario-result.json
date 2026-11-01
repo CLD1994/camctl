@@ -1,0 +1,15 @@
+{
+  "scenario": "ordinary-update-and-rollback-repeated-interruption",
+  "status": "passed",
+  "checks": {
+    "repeated_recovery_data_verified": true,
+    "resumed_run_success": true,
+    "subsequent_submit_success": true,
+    "host_exit_zero": true
+  },
+  "host_exit": {
+    "pid": 23022,
+    "returncode": 0,
+    "exited_at_ns": 1793575329571030091
+  }
+}

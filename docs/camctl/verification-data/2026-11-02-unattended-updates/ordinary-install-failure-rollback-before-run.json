@@ -1,0 +1,44 @@
+{
+  "scenario": "ordinary-install-failure-before-business-run",
+  "checks": {
+    "old_version_restored": true,
+    "rollback_recorded": true,
+    "database_identity_retained": true,
+    "logical_database_restored": true,
+    "all_original_objects_restored": true,
+    "old_run_automatically_started": true,
+    "actual_failure_marker_delivered_directly_to_processing": true,
+    "update_call_reported_failure": true
+  },
+  "version": "0.9.0",
+  "status": "passed",
+  "retained_objects": {
+    "config.toml": true,
+    "venv/old-extra-environment-file.txt": true,
+    "staging/capture-originals/old-photo.bin": true,
+    "ready/old-delivery.bin": true,
+    "processing/already-owned-by-main.bin": true
+  },
+  "gate_processes": [
+    {
+      "pid": 19533,
+      "argv": [
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-install-failure/venv/bin/camctl",
+        "run",
+        "--config",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-install-failure/config.toml",
+        "--host-notification-fd",
+        "4"
+      ],
+      "time_ns": 1793574925026655226
+    }
+  ],
+  "diagnostic": [
+    {
+      "name": "camctl-host-diagnostic-19294-0-wOzCwG.log",
+      "size": 8395,
+      "sha256": "7a32f791f7141d913a0529f0a8241fd042ffa19ef18496f5f0555d1ae1fb73a1"
+    }
+  ],
+  "checked_at_ns": 1793575155753730322
+}

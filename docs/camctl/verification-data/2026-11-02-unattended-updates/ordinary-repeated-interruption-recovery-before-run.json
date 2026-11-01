@@ -1,0 +1,46 @@
+{
+  "scenario": "ordinary-update-and-rollback-repeated-interruption",
+  "status": "passed",
+  "checks": {
+    "first_update_was_killed": true,
+    "rollback_was_interrupted_after_env_rename": true,
+    "second_normal_start_completed_rollback": true,
+    "old_version_restored": true,
+    "database_identity_restored": true,
+    "database_logical_contents_restored": true,
+    "all_original_objects_restored": true,
+    "ordinary_run_auto_started": true,
+    "recovery_diagnostic_delivered": true
+  },
+  "version": "0.9.0",
+  "objects": {
+    "config.toml": true,
+    "venv/old-extra-environment-file.txt": true,
+    "staging/capture-originals/old-photo.bin": true,
+    "ready/old-delivery.bin": true,
+    "processing/already-owned-by-main.bin": true
+  },
+  "run_gate": [
+    {
+      "pid": 23032,
+      "argv": [
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/venv/bin/camctl",
+        "run",
+        "--config",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/config.toml",
+        "--host-notification-fd",
+        "4"
+      ],
+      "time_ns": 1793575298960103656
+    }
+  ],
+  "diagnostics": [
+    {
+      "name": "camctl-host-diagnostic-23022-0-O5T0hC.log",
+      "size": 6893,
+      "sha256": "a2206ccd49138e6571c499937ada444c6929fff45a0ee217b27789cc360ea50c",
+      "mentions_recovery": true
+    }
+  ],
+  "checked_at_ns": 1793575318689717453
+}

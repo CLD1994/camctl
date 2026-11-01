@@ -24,6 +24,24 @@
 
 可审计结果见[普通更新](verification-data/2026-11-02-unattended-updates/ordinary-success.json)、[运行前数据比对](verification-data/2026-11-02-unattended-updates/ordinary-before-run.json)、[包身份](verification-data/2026-11-02-unattended-updates/ordinary-candidate-release.json)、[旧 wheel 构建](verification-data/2026-11-02-unattended-updates/baseline-build.json)及[C 构建](verification-data/2026-11-02-unattended-updates/host-build-ordinary.json)。完整原始日志、命令及收据留在上述隔离目录，当前候选只作为阶段验证输入。
 
+## 普通安装失败的实际回滚
+
+在另一个全新独立环境安装同一旧 wheel 和初始数据。通过 PATH 中的外部 uv 包装程序真实执行锁定依赖安装、camctl 安装及依赖检查；只有真实检查成功后才注入退出码 73。包装保留安装 worker 继承的资格描述符，未替代真实安装和回滚。
+
+结果：接口报告本次更新失败，持久记录 rolled_back；原路径重新输出 0.9.0。恢复后、普通 run 打开数据库之前，实例身份、逻辑转储摘要和五个配置/文件对象全部相同。新的旧版本 run 自动启动，释放外部门闩后正常退出 0；同一 host 随后继续提交成功并以 quit 正常退出 0。
+
+独立诊断直接出现在 processing，包含注入工具的原始失败标记和更新日志/收据内容，没有仅留下本地证据路径。见[场景结果](verification-data/2026-11-02-unattended-updates/ordinary-install-failure-scenario-result.json)及[运行前恢复比对](verification-data/2026-11-02-unattended-updates/ordinary-install-failure-rollback-before-run.json)。
+
+## 更新与回滚连续中断后的普通启动
+
+第三个独立环境在真实离线安装及依赖检查结束后暂停，核对持久记录为 updating、修改意图为 true，实际安装版本已为 1.0.0。对该更新进程组发送 SIGKILL，监督进程取得返回 -9。
+
+随后直接启动普通 host-demo，不传恢复选项。外部 LD_PRELOAD 门闩在真实 rename 已将完整旧环境放回原 venv 路径后暂停，此时数据库恢复尚未执行。记录 host 及其维护子进程树和组身份，仅对该次树中的组发送 SIGKILL，host 返回 -9。该门闩不代替 rename，不向生产程序新增测试开关。
+
+再次正常启动同一 host 时，组件继续原冻结事务，最终记录 rolled_back，原版本 0.9.0 恢复。新 run 进入业务之前，实例身份、逻辑数据及所有比对对象与更新前一致。恢复诊断直接发布到 processing；释放门闩后 run 和后续 submit 均正常退出 0，host 最终 quit 退出 0。
+
+见[第一次中断](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-interruption.json)、[恢复再次中断](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-recovery-interruption.json)、[恢复数据比对](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-recovery-before-run.json)及[最终结果](verification-data/2026-11-02-unattended-updates/ordinary-repeated-interruption-scenario-result.json)。该结果验证真实软件恢复和普通入口接线，不证明物理断电时目标存储的同步行为。
+
 ## 局部验证与评审边界
 
 普通生命周期和诊断的固定源码已由独立评审接受。批准范围内的五个 C 文件分别运行通过，其中停止入口 36 项、诊断格式与发布边界 2 项；其余三个入口退出 0。Python 的元数据、普通更新控制、路由、布局、发布及初始化局部入口采用逐文件或逐节点独立进程，并在导入前隔离真实协作者；实际数目以各阶段收据及最终汇总为准。
@@ -34,4 +52,4 @@
 
 ## 尚未取得的证据
 
-安装失败回滚、更新和回滚中断恢复、提交后丢失结果、强制重建、旧环境归档与清理中断仍待实际执行。真实 ARM64、第三方主程序、真实设备和目标存储物理断电没有由此次容器结果证明。
+包校验拒绝、提交后丢失结果、强制重建、旧环境归档与清理中断仍待实际执行。真实 ARM64、第三方主程序、真实设备和目标存储物理断电没有由此次容器结果证明。

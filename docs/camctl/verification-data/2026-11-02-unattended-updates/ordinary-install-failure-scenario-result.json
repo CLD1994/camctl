@@ -1,0 +1,15 @@
+{
+  "scenario": "ordinary-install-failure",
+  "status": "passed",
+  "checks": {
+    "rollback_before_run": true,
+    "resumed_run_success": true,
+    "resumed_submit_success": true,
+    "host_exit_zero": true
+  },
+  "exit": {
+    "pid": 19294,
+    "returncode": 0,
+    "exited_at_ns": 1793575189054488708
+  }
+}
