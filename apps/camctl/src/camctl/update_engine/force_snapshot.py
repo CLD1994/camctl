@@ -67,8 +67,8 @@ def validate_paths(paths, processing, protected):
                     found.add((child.st_dev, child.st_ino))
         return found
 
-    preserved = set()
-    for path in (processing, *protected):
+    preserved = {(info.st_dev, info.st_ino)}
+    for path in protected:
         preserved.update(identities(path.resolve()))
     for name, path in roots.items():
         if identities(path.resolve()) & preserved:
