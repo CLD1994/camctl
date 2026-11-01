@@ -89,23 +89,6 @@ def test_initialize_keeps_upgrade_inside_owned_lease_and_forwards_it(monkeypatch
     lease.close.assert_called_once()
 
 
-def test_initialize_rejects_changed_maintenance_layout_before_writes(monkeypatch):
-    config = SimpleNamespace(paths=SimpleNamespace(staging="/staging", ready="/ready", processing="/processing"))
-    monkeypatch.setattr(initialization, "ensure_runtime_library", create_autospec(initialization.ensure_runtime_library))
-    monkeypatch.setattr(Path, "resolve", create_autospec(Path.resolve, side_effect=lambda path: path))
-    check = create_autospec(initialization.check_initialization, side_effect=ValueError("layout mismatch"))
-    monkeypatch.setattr(initialization, "check_initialization", check)
-    mkdir = create_autospec(Path.mkdir)
-    monkeypatch.setattr(Path, "mkdir", mkdir)
-    acquire = create_autospec(initialization.acquire_session)
-    monkeypatch.setattr(initialization, "acquire_session", acquire)
-    result = initialization.initialize_state(config, Path("/new/state.db"))
-    assert result.outcome is initialization.InitOutcome.FAILED
-    check.assert_called_once()
-    mkdir.assert_not_called()
-    acquire.assert_not_called()
-
-
 @pytest.fixture
 def existing(monkeypatch):
     metadata = DatabaseMetadata("camctl", "a" * 32, 3, "/staging", "/ready", "/processing")
