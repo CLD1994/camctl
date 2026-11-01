@@ -65,6 +65,9 @@ def main():
         version = subprocess.check_output([args.python, "-c", "import sys; print('.'.join(map(str, sys.version_info[:2])))"], text=True).strip()
         if version != "3.11":
             raise ValueError(f"需要 Python 3.11，实际为 {version}")
+        base_python = subprocess.check_output([args.python, "-c", "import sys; print(sys._base_executable)"], text=True).strip()
+        if not Path(base_python).is_absolute():
+            raise ValueError("基础 Python 解释器路径必须为绝对路径")
         if subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True).strip() != str(repo):
             raise ValueError("--repo 必须指向仓库工作树根目录")
     except (OSError, ValueError, subprocess.CalledProcessError, tomllib.TOMLDecodeError) as error:
@@ -126,6 +129,11 @@ def main():
         run("初始化独立状态库", [venv / "bin/camctl", "init", "--config", target / "config.toml"], target)
         receipt["initialized"] = True
         save()
+        run("发布组件维护入口", [venv / "bin/python", "-B", "-m", "camctl.update_engine.publisher",
+            "--wheel", wheels[0], "--target", target, "--base-python", base_python,
+            "--camctl-path", venv / "bin/camctl", "--config", target / "config.toml"], target)
+        receipt["updater_path"] = str(target / "maintenance/camctl-updater")
+        save()
         cap = target / "device-capabilities.json"
         with cap.open("w", encoding="utf-8") as output:
             run("导出能力说明", [venv / "bin/camctl", "describe", "--config", target / "config.toml"], target, output)
@@ -171,7 +179,7 @@ exec "$root/venv/bin/python" - "$root" <<'PY'
 import os, sys, tomllib
 from pathlib import Path
 r=Path(sys.argv[1]); paths=tomllib.loads((r/'config.toml').read_text())['paths']; program=str(r/'host/bin/host-demo')
-os.execv(program,[program,'--camctl',str(r/'venv/bin/camctl'),'--config',str(r/'config.toml'),'--ready',paths['ready'],'--processing',paths['processing'],'--log',str(r/'host.log')])
+os.execv(program,[program,'--camctl',str(r/'venv/bin/camctl'),'--config',str(r/'config.toml'),'--updater',str(r/'maintenance/camctl-updater'),'--ready',paths['ready'],'--processing',paths['processing'],'--log',str(r/'host.log')])
 PY
 '''
         client_script = '''#!/usr/bin/env bash
