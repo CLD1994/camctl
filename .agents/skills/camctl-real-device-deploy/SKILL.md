@@ -1,6 +1,6 @@
 ---
 name: camctl-real-device-deploy
-description: 为 camctl 创建独立的真机验证环境，构建包含主机和客户端的 ZIP 测试部署包，或使用包内入口停机更新已有 camctl。更新自动迁移数据库，并在失败或中断后恢复原部署。
+description: 为 camctl 创建独立真机验证环境、构建包含主机和客户端的 ZIP 部署包，并接入 camctl 自身的停机维护能力。已有实例使用 Python 专用更新包，由组件负责迁移和失败恢复。
 ---
 
 # 准备真机验证部署
@@ -111,8 +111,18 @@ python3 install-host.py \
 
 ## 停机更新已有 camctl
 
-完整部署包中的 `update-camctl.py --target /absolute/path` 对原虚拟环境执行离线更新。先停止 host 和全部 CLI，保留旧部署包，将完整新包解压到新的空目录；更新所用包目录须未安装客户端依赖、未运行客户端。目标机须已有 Python 3.11 和 uv；原配置不在 `<target>/config.toml` 时用 `--config` 指定原配置的绝对路径。
+更新实现和引导发布器归 camctl wheel。完整部署包用于初次安装，其安装器在初始化后调用组件发布器，建立 `<target>/maintenance/camctl-updater`，记录路径并传给 host-demo 的 `--updater`。已有环境首次接入也使用新 wheel 的发布能力，不能先替换原 wheel 来取得更新功能。
 
-更新器先恢复上次未完成更新，再校验本次交付内容，并保持更新锁及原状态库的会话锁和接纳锁。完整环境与数据库一致备份可靠保存后，才安装软件、在副本上执行已登记迁移并验证发布。数据库以 V9 为自动维护基线，当前 V9 只验证，后续格式变化登记迁移路径。提交前失败时自动恢复原环境和数据库；断电或强制终止后，下次调用先继续恢复。回滚失败时保留恢复责任，不能恢复 host 或开始新更新。
+已有实例使用 Python 专用更新包。构建入口只需 Python 3.11、uv、Git 和下载条件，不构建 host 或客户端：
 
-能力说明保存在更新产物；仅显式传入 `--client-data` 才同步，并将该文件纳入回滚。原配置、媒体和客户端数据库保留。成功或回滚后均保持停机；检查实际结果后由操作者恢复 host。具体命令、收据和恢复诊断见随包 README、[打包契约](references/packaging.md)及[更新规格](../../../docs/architecture/versioning-and-updates.md)。
+```bash
+python3.11 apps/camctl/scripts/build_update.py \
+  --repo "$(pwd)" \
+  --output "$(pwd)/tmp/camctl-update-new"
+```
+
+输出目录必须不存在；失败保留日志和收据，使用新目录重试。生成的 `camctl-update.zip` 只含 wheel、双架构离线依赖、锁定依赖和元数据，另有摘要文件。该构建不代表真实升级和恢复已经验证。
+
+主程序配置显式 `updater_path`，通过 `camctl_host_update` 停止本模块普通工作后执行维护，接口返回后不自动恢复业务。组件先按旧记录的冻结引擎恢复，再处理当前包；配置来源沿用普通 CLI 的显式或默认语义，文件原本缺失时保留缺失。V9 起点、备份、回滚和可靠完成点见[更新规格](../../../docs/architecture/versioning-and-updates.md)，主程序及稳定入口边界见[更新接入规格](../../../docs/architecture/software-update-interface.md)。
+
+能力说明只在显式指定同步目标时更新并纳入恢复，配置、媒体及客户端数据库保留。部署 skill 只调用组件能力，完整交付与操作说明见[打包契约](references/packaging.md)及随包 README。

@@ -1,6 +1,6 @@
 # C 接入模块与终端演示
 
-第三方保留现有 C 主程序，在启动、收到计划文件和准备处理待传文件时调用三个接口。模块在后台管理 camctl 进程和有限重试，调用领取入口时同步将 `ready` 文件逐个移动到 `processing`。主程序负责后续传输和文件处理。
+第三方保留现有 C 主程序，在启动、收到计划文件和准备处理待传文件时调用业务接口。模块在后台管理 camctl 进程和有限重试，调用领取入口时同步将 `ready` 文件逐个移动到 `processing`；软件维护通过独立的更新接口执行。主程序负责后续传输和文件处理。
 
 交付以源码为基础，默认构建 `libcamctl_host.a` 和 `host-demo`。目标为 arm64 Ubuntu 18.04；当前开发环境验证情况见仓库的 `docs/host-demo/verification.md`。生产依赖源码和许可证已包含在组件内，构建不联网下载。
 
@@ -126,7 +126,7 @@ CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI
 
 ## 配置范围与日志
 
-所有路径必须是绝对路径，长度最多为 `CAMCTL_HOST_PATH_MAX` 字节，不含末尾 NUL。`config_path` 和首次计划可以为 `NULL`；其他路径必填。数值默认值由公开头文件的具名宏及 `CAMCTL_HOST_CONFIG_INIT` 提供，缺省路径由 `camctl_host_config_set_home_paths` 在运行时构造；不展开 C 字符串中的 `$HOME` 或 `~`。
+所有路径必须是绝对路径，长度最多为 `CAMCTL_HOST_PATH_MAX` 字节，不含末尾 NUL。`config_path`、`updater_path` 和首次计划可以为 `NULL`；其他路径必填。`updater_path` 指向本实例虚拟环境外的稳定维护入口，提供时初始化先检查启动资格；路径补齐函数不推断该值。数值默认值由公开头文件的具名宏及 `CAMCTL_HOST_CONFIG_INIT` 提供，缺省路径由 `camctl_host_config_set_home_paths` 在运行时构造；不展开 C 字符串中的 `$HOME` 或 `~`。
 
 | 成员 | 可配置范围 |
 | --- | --- |
@@ -155,6 +155,39 @@ CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI
 
 host 在 `processing` 内的隐藏准备目录写完文件并完成文件同步、关闭后，通过 Linux `SYS_renameat2` 系统调用的 `RENAME_NOREPLACE` 标志将完整文件原子改名到目录根；发布期间与文件领取共用内部锁。准备目录不作为待传文件暴露。队列容量为两个未完成诊断，队列满时诊断保留在对应的子进程槽，host 延后复用该槽并继续读取和处理另一条仍活跃命令的输出。文件创建、写入或发布失败只记入 host 普通日志，不改变 CLI 分类、重试资格或业务返回值，也不循环写入；失败的 `camctl_host_submit()` 保留原返回结果，并等待这次诊断写入尝试结束后释放提交记录。若文件已经改名但目录同步失败，host 保留已发布文件并记录同步错误，不撤回或重新写入。普通日志通道本身不可用时，不能保证写入本地失败记录。
 
+## 更新 camctl
+
+部署时由 camctl wheel 的发布器建立 `<target>/maintenance/camctl-updater`。正常业务初始化时填写 `config.updater_path`，启用启动前资格检查；软件维护使用相同部署的普通程序、维护入口和配置来源。该路径必须显式传入，不能从任意 `camctl_path` 推断。
+
+```c
+camctl_host_update_config update_config = {
+    .camctl_path = "/home/user/.camctl/venv/bin/camctl",
+    .updater_path = "/home/user/.camctl/maintenance/camctl-updater",
+    .config_path = "/home/user/.camctl/config.toml"
+};
+camctl_host_update_request request = {
+    .action = CAMCTL_UPDATE_ACTION_APPLY,
+    .bundle_path = "/home/user/releases/camctl-update.zip"
+};
+camctl_host_update_result result;
+int received = camctl_host_update(&update_config, &request, &result);
+```
+
+接口可在未初始化、运行中或已经停止时调用。运行中会先等待本模块普通工作收场；返回后保持停止。返回 `0` 只表示收到可信结果，还须检查 `result.outcome`、`result.effect` 和 `result.eligibility`；新版本可靠提交由 `CAMCTL_UPDATE_EFFECT_COMMITTED` 表达。应用失败后原环境已恢复与仍需恢复分别交付，不能只看进程退出码。`prior_recovery` 独立报告上次事务恢复事实。返回 `-1` 时保留 `errno`、未知状态和有界原始输出，完整诊断见更新收据和日志。
+
+只恢复未完成更新时，将 `action` 设为 `CAMCTL_UPDATE_ACTION_RECOVER`，`bundle_path` 与 `client_data_path` 设为 `NULL`。应用时可指定 `client_data_path` 同步能力文件并纳入恢复。并发维护、实例配置不一致和会等待自身的线程调用会被拒绝；其他线程的停止须等待维护写入者结束。已有普通 `stop` 后直接 `init` 的语义保持不变。完整契约见[更新接入规格](../../docs/architecture/software-update-interface.md)。
+
+演示程序提供一次性维护模式，不先初始化普通业务，完成后退出：
+
+```sh
+host-demo --camctl /absolute/target/venv/bin/camctl \
+  --updater /absolute/target/maintenance/camctl-updater \
+  --config /absolute/target/config.toml \
+  --apply-update /absolute/releases/camctl-update.zip
+```
+
+将 `--apply-update` 及其路径换为 `--recover` 可只执行恢复；应用时可选 `--client-data /absolute/client-data`。更新实现属于 camctl，C 模块仅调用其维护入口。更新包不更新已链接到主程序的静态库。
+
 ## 运行终端演示
 
 camctl 和部署目录准备好后：
@@ -163,7 +196,7 @@ camctl 和部署目录准备好后：
 "$HOME/.camctl/host/bin/host-demo"
 ```
 
-演示程序从 `HOME` 取得主目录；未设置时读取当前用户记录中的主目录。路径无法补齐时明确报错。`--camctl`、`--ready`、`--processing`、`--log`、`--config`、`--initial-plan`、`--retry-limit`、`--retry-delay-ms` 均可选；显式值覆盖对应默认项。指定全部必填路径时不依赖 home。启动参数中的空格路径按 shell 规则加引号。
+演示程序从 `HOME` 取得主目录；未设置时读取当前用户记录中的主目录。路径无法补齐时明确报错。`--camctl`、`--updater`、`--ready`、`--processing`、`--log`、`--config`、`--initial-plan`、`--retry-limit`、`--retry-delay-ms` 均可选；显式值覆盖对应默认项。指定全部必填路径时不依赖 home。启动参数中的空格路径按 shell 规则加引号。
 
 运行期间输入：
 

@@ -8,6 +8,8 @@
 
 `camctl --version` 输出当前安装的发行版本。`run`、`submit`、`init` 和 `describe` 在日志通道建立后各记录一次启动版本；日志文件或队列不可用时尝试通过 stderr 交付。
 
+软件更新、数据库迁移、回滚和中断恢复由本组件的维护引擎负责。Python 专用更新包只交付 wheel、离线依赖和元数据；构建入口为 `scripts/build_update.py`。部署时由 wheel 中的发布器准备虚拟环境外的维护入口，C 主程序通过 `camctl_host_update` 调用。入口与冻结引擎、启动资格及配置来源的契约见[更新接入规格](../../docs/architecture/software-update-interface.md)，进度见[实施计划](../../docs/superpowers/plans/2026-10-31-camctl-owned-update-api.md)。
+
 技术选型、模块边界和接口契约见[实现规格](../../docs/camctl/implementation.md)。实施前须完成其中列明的设计事项。
 
 部署配置的全部字段、默认值、合法范围及主程序路径对应关系见[配置项参考](../../docs/camctl/configuration-reference.md)；首次安装和联调步骤见[部署样例](../../docs/architecture/deployment-example.md)。

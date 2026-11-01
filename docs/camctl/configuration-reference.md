@@ -238,6 +238,7 @@ output_storage = "host"
 C 成员|对应对象|配置责任
 -|-|-
 `camctl_path`|已安装的 camctl 可执行程序|主程序填写绝对路径；不决定 Python 的用户主目录或数据路径。
+`updater_path`|本实例虚拟环境外的稳定维护入口|可选绝对路径；提供时初始化先检查更新资格。维护接口必须显式提供，路径补齐函数不推断此值。
 `config_path`|CLI 的 TOML 文件|非 `NULL` 时显式传入；`NULL` 时由 CLI 选择默认文件。
 `ready_path`|TOML 的 `paths.ready`|主程序从这里领取；须与 Python 实际使用的目录一致。
 `processing_path`|TOML 的 `paths.processing`|主程序将领取的文件移入这里；须与 Python 实际使用的目录一致。

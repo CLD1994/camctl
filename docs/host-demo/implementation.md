@@ -31,6 +31,7 @@ yyjson 固定版本，源码随模块交付并参与编译。公开 C 接口使�
 | 参数 | 归属与使用方式 |
 | --- | --- |
 | camctl 程序位置 | 主程序传入；模块用它启动 camctl |
+| `updater_path` | 可选的稳定维护入口绝对路径；提供时，初始化先检查启动资格。维护调用必须显式提供该值 |
 | `ready`、`processing` 绝对路径 | 主程序传入；模块按这些路径领取文件 |
 | `staging` 路径 | 第三方在 camctl 部署配置中确定，由 camctl 使用 |
 | camctl 配置文件路径 | 主程序可选传入；提供时，模块为各次 camctl 调用附带 `--config` |
@@ -75,6 +76,26 @@ camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
 接入示例先使用该宏，再填写程序位置、交接目录和日志路径，按需填写 camctl 配置路径及覆盖参数。结构体成员和整数类型由[公开头文件](../../apps/host-demo/include/camctl_host.h)定义，合法范围见[调用说明](../../apps/host-demo/README.md#配置范围与日志)。默认值由头文件的宏提供，示例与测试通过该定义取得默认配置。
 
 初始化成功后，模块随主程序持续运行，主程序准备退出时调用 `camctl_host_stop()`，等待其管理的进程及线程收场。停止契约见[主程序主动停止](design.md#主程序主动停止)。第三方先完成初始化；随后普通线程可递交计划或领取文件。多个递交调用按入队顺序处理，各自等待本次结果。需要同时处理主程序其他工作的调用方，应在独立普通线程中调用递交入口。
+
+### 软件维护接口
+
+主程序使用与普通实例相同的 `camctl_path`、`config_path`，并显式提供虚拟环境外的 `updater_path`：
+
+```c
+int camctl_host_update(
+    const camctl_host_update_config *config,
+    const camctl_host_update_request *request,
+    camctl_host_update_result *result
+);
+```
+
+请求的 `action` 取 `CAMCTL_UPDATE_ACTION_APPLY` 或 `CAMCTL_UPDATE_ACTION_RECOVER`。应用时 `bundle_path` 为 Python 专用更新 ZIP 或已解压目录的绝对路径；恢复时该成员为 `NULL`。`client_data_path` 仅在应用时按需提供，只同步能力说明。结构体及生成的枚举由[公开头文件](../../apps/host-demo/include/camctl_host.h)交付，公共机器状态以根 `protocol` 的 Schema 为唯一来源。
+
+该阻塞调用可以在未初始化或已经停止时执行。运行期间调用会先核对当前实例配置，停止接收普通工作，并等待在管进程、线程和在途调用收场。它不进入普通在途调用计数后等待自身；并发维护拒绝，其他线程的停止须等待实际维护结束。工作线程和回调线程不能调用会等待自身的维护。维护有自己的进程组、输出捕获、退出记录和取消保护，不依赖普通业务资源仍可用。
+
+返回 `0` 表示收到了可信结果，调用方检查 `outcome`、`effect`、`eligibility` 和 `prior_recovery`，不能仅凭返回值认定新版本已提交。返回 `-1` 时检查 `errno`、结果中的原始输出及进程诊断。仅 stderr 截断不撤销合法结果，stdout 缺失、截断、矛盾或非正常退出保留未知。所有返回均不自动恢复业务；原停止后的直接初始化语义保持不变。
+
+普通初始化配置的 `updater_path` 为非 `NULL` 时，模块在启动原虚拟环境程序前检查维护资格；未完成恢复、资格占用或未知结果阻止启动。入口绑定、可靠完成及失败恢复的完整契约见[更新接入规格](../architecture/software-update-interface.md)。
 
 ### 用户目录与路径补齐
 

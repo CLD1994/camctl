@@ -20,3 +20,5 @@
 默认部署使用运行账户的 `$HOME/.camctl`，主程序可通过[路径补齐接口](implementation.md#用户目录与路径补齐)取得绝对路径；演示程序省略路径参数时采用相同布局。
 
 Python CLI 的完整 TOML 字段、默认值、合法范围和自定义交接目录示例见[配置项参考](../camctl/configuration-reference.md)。其中的 C 配置对应表说明两端应如何使用同一组路径。
+
+软件更新通过 `camctl_host_update` 调用 camctl 的独立维护入口，接口等待本模块普通工作停止后执行更新或恢复，返回后保持停机。初始化配置中的 `updater_path` 启用启动前资格检查。交付物、部署绑定和结果含义见[更新接入规格](../architecture/software-update-interface.md)，实际调用见[源码说明](../../apps/host-demo/README.md#更新-camctl)。
