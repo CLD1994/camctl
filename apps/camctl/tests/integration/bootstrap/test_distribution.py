@@ -1436,7 +1436,8 @@ def test_distribution_works_outside_repository(installed: _Installed) -> None:
     # 版本入口：安装物自带版本说明。
     versioned = installed.cli("--version")
     assert versioned.returncode == 0, versioned.stderr
-    assert versioned.stdout.strip() == "0.1.0", versioned.stdout
+    project_metadata = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text(encoding="utf-8"))
+    assert versioned.stdout.strip() == project_metadata["project"]["version"], versioned.stdout
 
     # 运行日志：会话失败记录经日志链写入配置的日志文件；干净会话
     # 无记录不创建文件是既定行为，日志验证走失败路径。
