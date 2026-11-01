@@ -1,5 +1,6 @@
 """从 wheel 在虚拟环境外发布与部署绑定的稳定维护入口。"""
 import argparse
+import builtins
 import fcntl
 import hashlib
 import json
@@ -20,10 +21,26 @@ from camctl.update_engine.log_registry import register as register_log_location
 
 
 def _module_from_wheel(archive, name):
-    module = types.ModuleType(name)
-    source = archive.read('camctl/update_engine/' + name + '.py')
-    exec(compile(source, name + '.py', 'exec'), module.__dict__)
-    return module
+    sources = {'config_paths': 'camctl/config_paths.py',
+               'force_record': 'camctl/update_engine/force_record.py',
+               'update_transaction': 'camctl/update_engine/update_transaction.py'}
+    loaded = {}
+
+    def load(module_name):
+        if module_name not in loaded:
+            module = types.ModuleType(module_name)
+            module.__dict__['__builtins__'] = dict(vars(builtins), __import__=wheel_import)
+            loaded[module_name] = module
+            source = archive.read(sources[module_name])
+            exec(compile(source, module_name + '.py', 'exec'), module.__dict__)
+        return loaded[module_name]
+
+    def wheel_import(module_name, globals=None, locals=None, fromlist=(), level=0):
+        if level == 0 and module_name in sources:
+            return load(module_name)
+        return builtins.__import__(module_name, globals, locals, fromlist, level)
+
+    return load(name)
 
 
 def _publish_file(path, content, mode):
