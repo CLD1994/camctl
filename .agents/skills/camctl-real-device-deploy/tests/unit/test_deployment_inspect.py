@@ -80,25 +80,53 @@ class DeploymentInspectionTests(unittest.TestCase):
         integrity.verify_maintenance_integrity = Mock()
         runtime = ModuleType('camctl.persistence.runtime')
         runtime.DbConfig = Mock()
-        runtime.DbOpenMode = SimpleNamespace(EXISTING_RO=object())
+        runtime.DbOpenMode = SimpleNamespace(EXISTING_RW=object())
         runtime.configured_directory_binding = Mock(side_effect=lambda path, name: path)
         runtime.verify_directory_binding = Mock()
         connection = Mock()
+        connection.execute.return_value.fetchone.return_value = (0, 0, 0)
         runtime.open_existing = Mock(return_value=SimpleNamespace(connection=connection, metadata=Metadata('new', 9)))
         modules = {'camctl.bootstrap.application': application, 'camctl.persistence.initialization': initialization,
                    'camctl.persistence.maintenance_integrity': integrity, 'camctl.persistence.runtime': runtime}
         with patch.dict(sys.modules, modules), patch.object(Path, 'resolve', lambda path: path), \
                 patch.object(deployment.os, 'open', return_value=41) as open_file, \
-                patch.object(deployment.os, 'close') as close_file:
+                patch.object(deployment.os, 'close') as close_file, patch.object(deployment.os, 'fsync') as sync:
             result = deployment.create_database_copy(Path('/new.toml'), Path('/transaction/new.db'))
         self.assertEqual(result, {'state_db': '/state.db', 'metadata': {'instance_id': 'new', 'format_version': 9}})
         self.assertTrue(open_file.call_args.args[1] & deployment.os.O_EXCL)
-        close_file.assert_called_once_with(41)
+        self.assertEqual(close_file.call_count, 2)
+        sync.assert_called_once_with(41)
         initialization._build_initial_database.assert_called_once_with(
             Path('/transaction/new.db'), '/stage', '/ready', '/processing')
         integrity.verify_maintenance_integrity.assert_called_once_with(connection)
         runtime.verify_directory_binding.assert_called_once()
+        connection.execute.assert_called_once_with('PRAGMA wal_checkpoint(TRUNCATE)')
         connection.close.assert_called_once()
+
+    def test_new_database_checkpoint_busy_is_not_published(self):
+        config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db', staging='/stage',
+            ready='/ready', processing='/processing'), database=SimpleNamespace(busy_timeout_ms=100))
+        application = ModuleType('camctl.bootstrap.application')
+        application.ConfigAdapter = Mock(return_value=SimpleNamespace(load=Mock(return_value=config)))
+        initialization = ModuleType('camctl.persistence.initialization')
+        initialization._build_initial_database = Mock(); initialization._fsync_directory = Mock()
+        integrity = ModuleType('camctl.persistence.maintenance_integrity')
+        integrity.verify_maintenance_integrity = Mock()
+        runtime = ModuleType('camctl.persistence.runtime')
+        runtime.DbConfig = Mock(); runtime.DbOpenMode = SimpleNamespace(EXISTING_RW=object())
+        runtime.configured_directory_binding = Mock(side_effect=lambda path, name: path)
+        runtime.verify_directory_binding = Mock()
+        connection = Mock(); connection.execute.return_value.fetchone.return_value = (1, 2, 1)
+        runtime.open_existing = Mock(return_value=SimpleNamespace(connection=connection, metadata=Metadata('new', 9)))
+        modules = {'camctl.bootstrap.application': application, 'camctl.persistence.initialization': initialization,
+                   'camctl.persistence.maintenance_integrity': integrity, 'camctl.persistence.runtime': runtime}
+        with patch.dict(sys.modules, modules), patch.object(Path, 'resolve', lambda path: path), \
+                patch.object(deployment.os, 'open', return_value=41), patch.object(deployment.os, 'close'), \
+                patch.object(deployment.os, 'fsync') as sync:
+            with self.assertRaises(ValueError):
+                deployment.create_database_copy(Path('/new.toml'), Path('/transaction/new.db'))
+        connection.close.assert_called_once()
+        sync.assert_not_called()
 
     def test_new_database_cannot_overwrite_configured_database(self):
         config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db'))

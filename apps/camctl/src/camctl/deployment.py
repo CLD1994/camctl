@@ -42,14 +42,24 @@ def create_database_copy(config_path: Path | None, destination: Path) -> dict:
     os.close(fd)
     _build_initial_database(destination, *bindings)
     _fsync_directory(destination.parent)
-    owned = open_existing(destination, DbOpenMode.EXISTING_RO,
+    owned = open_existing(destination, DbOpenMode.EXISTING_RW,
                           DbConfig(busy_timeout_ms=config.database.busy_timeout_ms))
     try:
         verify_maintenance_integrity(owned.connection)
         verify_directory_binding(owned.metadata, *roots)
-        return {'state_db': str(target), 'metadata': asdict(owned.metadata)}
+        result = {'state_db': str(target), 'metadata': asdict(owned.metadata)}
+        busy, remaining, checkpointed = owned.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+        if busy or remaining != checkpointed:
+            raise ValueError('新状态库 WAL 无法完成检查点')
     finally:
         owned.connection.close()
+    descriptor = os.open(destination, os.O_RDWR | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    _fsync_directory(destination.parent)
+    return result
 
 
 def prepare_new_directories(config_path: Path | None) -> None:

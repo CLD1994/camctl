@@ -552,7 +552,7 @@ def test_pending_record_rejects_other_transaction_but_accepts_added_creator():
             'state': 'updating', 'temporary_owners': {'staging': [{'uid': 0, 'gid': 0}]}}
     ops.record = base
     formal = dict(base, temporary_owners={'staging': [{'uid': 0, 'gid': 0}, {'uid': 1, 'gid': 1}]})
-    states = SimpleNamespace(PREPARING=object())
+    states = SimpleNamespace(PREPARING=object(), UPDATING=object())
     with patch.object(Path, 'read_text', return_value=json.dumps(formal)) as read, \
             patch.object(transaction, 'classify_record', return_value=object(), create=True), \
             patch.object(transaction, 'validate_record_target', create=True), \
