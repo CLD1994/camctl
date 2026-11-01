@@ -39,7 +39,7 @@ def main():
             parser.error(str(error))
 
     # 仅在 Python 3.11 中导入依赖新语法和 tomllib 的安装实现。
-    from deploy_support import configure_paths, install_host, require_new_state_db, write_config
+    from deploy_support import configure_paths, host_command, install_host, require_new_state_db, write_config
     from bundle_support import current_target
     from camera_discovery import format_report, resolve_hb_cli
 
@@ -128,10 +128,7 @@ def main():
             '--wheel', wheels[0], '--target', target, '--base-python', getattr(sys, '_base_executable', sys.executable),
             '--camctl-path', target / 'venv/bin/camctl', '--config', config_path])
         receipt['updater_path'] = str(target / 'maintenance/camctl-updater')
-        command = [target / 'host/bin/host-demo', '--camctl', target / 'venv/bin/camctl', '--config', config_path,
-                   '--updater', target / 'maintenance/camctl-updater',
-                   '--ready', configuration['paths']['ready'], '--processing', configuration['paths']['processing'],
-                   '--log', target / 'host.log']
+        command = host_command(target, configuration['paths'])
         launcher = target / 'start-host-demo.sh'
         exports = ''.join('export ' + key + '=' + shlex.quote(value) + '\n'
             for key, value in discovery['environment'].items())
