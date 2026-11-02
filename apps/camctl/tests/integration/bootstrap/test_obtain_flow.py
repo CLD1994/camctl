@@ -349,7 +349,7 @@ def _capture_factory(cfg, registry, results, clock, tools_dir, *, scenario_clock
         results=results,
         staging=Path(cfg.paths.staging),
         wait_config=lambda params: CaptureWaitConfig(
-            target_duration_ms=1_000, driver_margin_ms=0),
+            target_duration_ms=int(_Catalog.duration_s * 1000), driver_margin_ms=0),
         wall_us=scenario_clock.utc_micros if scenario_clock is not None else None,
         monotonic_ns=lambda: clock["ns"],
         probe_request=ProbeRequest(
@@ -472,12 +472,15 @@ def _scalar(db_path: Path, sql: str, *params):
         return connection.execute(sql, params).fetchone()
 
 
-async def _await_query(db_path: Path, sql: str, expected, timeout_s: float = 15.0):
+async def _await_query(db_path: Path, sql: str, expected, timeout_s: float = 15.0, *, task=None):
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         row = _scalar(db_path, sql)
         if row is not None and row == expected:
             return
+        if task is not None and task.done():
+            await task
+            raise AssertionError(f"会话已结束但条件未成立: {sql}，当前 {row}")
         await asyncio.sleep(0.05)
     raise AssertionError(
         f"等待查询结果超时: {sql} 期望 {expected}，"
@@ -741,27 +744,50 @@ class TestObtainExecutionLink:
                         == internal_outcome["settlement"]["evidence"]["type"]
                         == "read_returned")
                 photo_release = transition(
-                    "COPY_CHANGED", "SLOT", "file_copies", photo_copy,
+                    "COPY_CHANGED", "VERIFY", "file_copies", photo_copy,
                     "slot_device_id", device_id, None)
+                copy_round, source_id, target_id, source_size, end_id = connection.execute(
+                    "SELECT round,source_device_file_id,target_file_id,source_size,read_end_event_id"
+                    " FROM file_copies WHERE id=?", (photo_copy,)).fetchone()
+                run_id, attempt_no = connection.execute(
+                    "SELECT t.run_id,t.attempt_no FROM operation_attempts t"
+                    " JOIN operation_runs r ON r.id=t.run_id WHERE r.copy_id=?",
+                    (photo_copy,)).fetchone()
+                read_end = events[end_id]
+                assert read_end.event_type == registry["COPY_CHANGED"]["id"]
+                assert read_end.reason == registry["COPY_CHANGED"]["branches"]["READ_END"]["reason"]
+                assert read_end.evidence["read_end"] == {
+                    "ticket": {"run_id": run_id, "attempt_no": attempt_no,
+                               "operation": "read", "target_id": str(photo_copy),
+                               "responsibility_key": f"read/{photo_copy}"},
+                    "copy_round": copy_round, "source_device_file_id": source_id,
+                    "source_intermediate_file_id": None, "target_file_id": target_id,
+                    "source_size": source_size, "committed_bytes": len(_PHOTO_CONTENT),
+                    "reset_state": enum_for("file_copies.reset_state").READY,
+                    "end": {"stopped": True, "bytes_read": len(_PHOTO_CONTENT), "error": None},
+                }
+                verified = next(change.after.values for change in events[photo_release].rows
+                                if change.table == "file_copies" and change.row_id == photo_copy)
+                digest = hashlib.sha256(_PHOTO_CONTENT).hexdigest()
+                assert verified["source_sha256"] == verified["target_sha256"] == digest
+                assert verified["verification_state"] == enum_for("file_copies.verification_state").MATCHED
                 internal_grant = transition(
                     "COPY_CHANGED", "SLOT", "file_copies", internal_copy,
                     "slot_device_id", None, device_id)
                 # 用原历史及 attempt 引用证明实际设备边界，不从最终投影推断 End。
                 assert stopped < ended <= released < photo_intent < photo_result
-                assert photo_result < photo_release < internal_grant < internal_intent
+                assert photo_intent < end_id <= photo_result
+                assert end_id <= photo_release < internal_grant < internal_intent
         finally:
             await _cancel(task)
         close_runtime(deps)
 
-    async def test_obtain_read_parallel_with_recording(self,
-                                                       tmp_path: Path, monkeypatch) -> None:
-        """驱动声明拍摄与读取并行时，执行中的录像不阻塞取回读取。
-
-        照片先完成，取回读取首次失败进入重试等待；等待期间录像到
-        时启动并持续执行，重试在录像仍执行中时并行授予并推进到发
-        布，动作成功终态。一次一份拷贝互斥保持（本用例只有取回一
-        份拷贝）。
-        """
+    @pytest.mark.parametrize("first", ["read_batch", "recording"])
+    async def test_read_batch_and_parallel_recording_respect_start_order(
+            self, tmp_path: Path, monkeypatch, first) -> None:
+        """已有取回批次阻止新录像；已有录像允许声明兼容的读取及重试。"""
+        # 三秒录像覆盖取回稍后到期及原有1.5秒读取重试，其他场景仍使用一秒录像。
+        monkeypatch.setattr(_Catalog, "duration_s", Decimal("3"))
         clock = {
             "ns": time.monotonic_ns(),
             "wall_us": (time.time_ns() // 1_000_000_000 + 1) * 1_000_000,
@@ -800,10 +826,13 @@ class TestObtainExecutionLink:
         photo_row = _scalar(
             Path(cfg.paths.state_db),
             "SELECT id FROM actions WHERE name='shoot'")
-        await _submit(tmp_path, cfg, _obtain_plan(
-            "2", {"action_instance_id": str(photo_row[0])}))
+        obtain = _obtain_plan("2", {"action_instance_id": str(photo_row[0])})
+        if first == "recording":
+            obtain["actions"][0]["scheduled_at"] = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.gmtime((clock["wall_us"] + 2_000_000) / 1_000_000))
+        await _submit(tmp_path, cfg, obtain)
         tools_dir = _tools(tmp_path)
-        # 时钟在首次读取失败保存前不推进，录像始终尚未到期。
+        # 录像在一秒后到期；先录像分区的取回在两秒后到期。
         record_due = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.gmtime((clock["wall_us"] + 1_000_000) / 1_000_000))
         await _submit(
@@ -820,30 +849,44 @@ class TestObtainExecutionLink:
             deps, cfg, driver, results, clock, tools_dir,
             capture_read_parallel=True, scenario_clock=scenario_clock)
         try:
+            if first == "recording":
+                await _await_query(db, "SELECT status FROM actions WHERE name='shoot'", (3,), task=task)
+                scenario_clock.advance(1_000_000)
+                await asyncio.wait_for(driver.record_requested.wait(), 10)
+                assert driver.read_calls == []
+                driver.release_record.set()
+                await _await_query(db, "SELECT started_at IS NOT NULL FROM device_activities"
+                    " WHERE action_id=(SELECT id FROM actions WHERE name='record')", (1,), task=task)
+                scenario_clock.advance(1_000_000)
             await _await_query(
                 db, "SELECT attempts_used, retry_wait_required FROM operation_runs"
-                " WHERE responsibility_key = 'read/1'", (1, 1))
+                " WHERE responsibility_key = 'read/1'", (1, 1), task=task)
             assert len(driver.read_calls) == 1, driver.read_calls
-            scenario_clock.advance(1_000_000)
-            await asyncio.wait_for(driver.record_requested.wait(), 10)
-            # 控制端口明确暂停；读数与重试前提保持，不依赖真实延迟。
-            assert len(driver.read_calls) == 1, driver.read_calls
-            driver.release_record.set()
+            if first == "read_batch":
+                scenario_clock.advance(1_000_000)
+                await _await_query(db, "SELECT first_window_observed_at IS NOT NULL FROM actions"
+                    " WHERE name='record'", (1,), task=task)
+                assert not driver.record_requested.is_set()
+                assert _scalar(db, "SELECT released_event_id FROM device_file_batches") == (None,)
+                assert len(driver.read_calls) == 1
+                scenario_clock.advance(600_000)
+            else:
+                scenario_clock.advance(1_500_000)
+            await _await_query(db, "SELECT status FROM actions WHERE name='grab'", (3,), task=task)
+            assert len(driver.read_calls) == 2
+            assert _scalar(db, "SELECT released_event_id IS NOT NULL FROM device_file_batches") == (1,)
+            if first == "read_batch":
+                await asyncio.wait_for(driver.record_requested.wait(), 10)
+                driver.release_record.set()
             await _await_query(
                 db,
                 "SELECT started_at IS NOT NULL FROM device_activities"
                 " WHERE action_id ="
-                " (SELECT id FROM actions WHERE name='record')", (1,))
-            assert len(driver.read_calls) == 1, driver.read_calls
+                " (SELECT id FROM actions WHERE name='record')", (1,), task=task)
             record_action, record_activity = _scalar(
                 db, "SELECT a.id, da.id FROM device_activities da"
                 " JOIN actions a ON a.id=da.action_id WHERE a.name='record'")
             assert record_activity != record_action
-            scenario_clock.advance(600_000)
-            # 声明并行：重试不为执行中的录像让路，在录像终态前完成
-            # 拷贝、校验与发布。
-            await _await_query(
-                db, "SELECT status FROM actions WHERE name='grab'", (3,))
             delivery = _scalar(db, "SELECT id, status FROM deliveries")
             assert delivery[1] == 5, delivery
             ready_file = Path(cfg.paths.ready) / f"{delivery[0]}.jpg"
@@ -853,6 +896,7 @@ class TestObtainExecutionLink:
             assert _scalar(
                 db, "SELECT status FROM actions WHERE name='record'") == (2,)
         finally:
+            driver.release_record.set()
             await _cancel(task)
             close_runtime(deps)
         # 同一时钟越过启动加目标加余量，第二会话继续原录像结算。
