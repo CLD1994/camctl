@@ -555,7 +555,18 @@ async def test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pag
             async def elapsed(seconds):
                 world.mono[0] += int(seconds * 1_000_000_000)
             monkeypatch.setattr(asyncio, "sleep", elapsed)
-        await capture_handler(world.kind)(1, resumed)
+        # 原票据恢复与新一轮派发可以分轮推进；等待真实新调用，仍保留原预算。
+        async with asyncio.timeout(2):
+            while len(world.channel.result_tickets) == original_calls:
+                await capture_handler(world.kind)(1, resumed)
+                assert resumed.last_recovery_diagnostic is None
+                if len(world.channel.result_tickets) == original_calls:
+                    assert world.owned.connection.execute(
+                        "SELECT status FROM actions WHERE id=1").fetchone() == (2,), record_driver_state(
+                            world, "new_result_call_not_dispatched")
+                    assert world.owned.connection.execute(
+                        "SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)
+                    ).fetchone()[0] <= 2
         status, result, _error = _row(world, ticket)
         assert status == 4 and json.loads(result)["settlement"]["evidence"]["type"] == "adb_foreground_recovery"
         assert world.channel.result_tickets[original_calls:] == [(ticket.run_id, 2)]
