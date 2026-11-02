@@ -104,8 +104,8 @@ static int spawn_prepared(host_child *c, const char *executable, char *const arg
         (rc = posix_spawn_file_actions_addclose(&actions, err[1])))
         goto attr;
     if (notify && ((rc = posix_spawn_file_actions_adddup2(&actions, c->notification_write_fd,
-                                                          c->notification_write_fd)) ||
-                   (rc = posix_spawn_file_actions_addclose(&actions, c->notification_fd))))
+                                                          c->notification_fd)) ||
+                   (rc = posix_spawn_file_actions_addclose(&actions, c->notification_write_fd))))
         goto attr;
     pid_t pid;
     rc = posix_spawn(&pid, executable, &actions, &attr, argv, environ);
@@ -161,7 +161,7 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
         argv[n++] = (char *)cfg->config_path;
     }
     if (notify) {
-        snprintf(notification_number, sizeof(notification_number), "%d", c->notification_write_fd);
+        snprintf(notification_number, sizeof(notification_number), "%d", c->notification_fd);
         argv[n++] = "--host-notification-fd";
         argv[n++] = notification_number;
     }
