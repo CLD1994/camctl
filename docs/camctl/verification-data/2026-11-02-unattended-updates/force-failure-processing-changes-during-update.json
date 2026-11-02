@@ -1,0 +1,16 @@
+{
+  "before_release_state": "updating",
+  "target_install_gate": {
+    "pid": 46197,
+    "argv": [
+      "/workspaces/camctl/tmp/unattended-validation-20261102/operator-tools/bin/uv",
+      "pip",
+      "check",
+      "--python",
+      "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-failure/venv/bin/python"
+    ],
+    "time_ns": 1793577553829527616
+  },
+  "main_deleted": "already-owned-by-main.bin",
+  "main_added": "new-file-added-by-main.bin"
+}

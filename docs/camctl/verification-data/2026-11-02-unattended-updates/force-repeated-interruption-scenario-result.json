@@ -1,0 +1,14 @@
+{
+  "scenario": "force-repeated-interruption",
+  "status": "passed",
+  "checks": {
+    "recovery_data_verified": true,
+    "host_exit_zero": true,
+    "ordinary_business_resumed": true
+  },
+  "exit": {
+    "pid": 40930,
+    "returncode": 0,
+    "exited_at_ns": 1793577157767097933
+  }
+}

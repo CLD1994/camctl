@@ -1,0 +1,14 @@
+{
+  "scenario": "force-missing-originals",
+  "status": "passed",
+  "checks": {
+    "new_deployment_verified": true,
+    "new_business_run_success": true,
+    "host_exit_zero": true
+  },
+  "exit": {
+    "pid": 43075,
+    "returncode": 0,
+    "exited_at_ns": 1793577335721721641
+  }
+}

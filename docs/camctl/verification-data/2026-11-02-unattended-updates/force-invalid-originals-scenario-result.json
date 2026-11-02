@@ -1,0 +1,14 @@
+{
+  "scenario": "force-invalid-originals",
+  "status": "passed",
+  "checks": {
+    "data_and_archive_verified": true,
+    "new_run_success": true,
+    "host_exit_zero": true
+  },
+  "exit": {
+    "pid": 39640,
+    "returncode": 0,
+    "exited_at_ns": 1793577052152536688
+  }
+}

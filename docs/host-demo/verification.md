@@ -247,4 +247,4 @@ Linux x86_64 开发容器，GCC 13.3.0、CMake 3.28.3、CPython 3.11.16、SQLite
 
 ## 无人值守更新接入（2026-11-02）
 
-普通初始化自动恢复、更新内部重建、失败 diagnostic 直接交付 processing 的源码已独立评审，五个 C 隔离单元入口通过。普通更新已在容器中通过真实 wheel、离线依赖、稳定维护入口和 C host 实际验证，包含失败与连续中断恢复。归档后台消费者已完成独立局部验证，Python 生产者及最终实际组合仍待接通。详见[专项验证记录](../camctl/unattended-update-verification-2026-11-02.md)及[实施计划](../superpowers/plans/2026-11-02-unattended-updates.md)；本条不替代目标 ARM64、第三方主程序或物理断电验收。
+普通初始化自动恢复、更新内部重建、失败 diagnostic 直接交付 processing 的源码已独立评审，五个 C 隔离单元入口通过。普通更新已在容器中通过真实 wheel、离线依赖、稳定维护入口和 C host 实际验证，包含失败与连续中断恢复。归档后台消费者、Python 生产者及实际容器组合已接通并通过归档和清理中断续做验证。详见[专项验证记录](../camctl/unattended-update-verification-2026-11-02.md)及[实施计划](../superpowers/plans/2026-11-02-unattended-updates.md)；本条不替代目标 ARM64、第三方主程序或物理断电验收。

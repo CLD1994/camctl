@@ -1,0 +1,13 @@
+{
+  "scenario": "force-failure",
+  "status": "passed",
+  "checks": {
+    "recovery_data_verified": true,
+    "host_exit_zero": true
+  },
+  "exit": {
+    "pid": 38376,
+    "returncode": 0,
+    "exited_at_ns": 1793576937660989699
+  }
+}

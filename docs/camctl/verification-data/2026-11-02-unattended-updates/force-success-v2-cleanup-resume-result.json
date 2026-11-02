@@ -1,0 +1,13 @@
+{
+  "scenario": "archive-cleanup-interrupted-then-normal-start",
+  "status": "passed",
+  "checks": {
+    "same_commit_retained": true,
+    "cleanup_resumed_to_completion": true,
+    "all_namespaces_removed": true,
+    "published_archive_retained": true,
+    "new_run_succeeded": true
+  },
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/3e220475d9c6446fbfde62cf6f7a56f4",
+  "archive": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/processing/camctl-force-diagnostic-3e220475d9c6446fbfde62cf6f7a56f4.tar.gz"
+}

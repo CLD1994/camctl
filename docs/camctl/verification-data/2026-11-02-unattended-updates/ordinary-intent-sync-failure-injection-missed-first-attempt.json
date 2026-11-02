@@ -1,0 +1,6 @@
+{
+  "injected": false,
+  "reason": "external helper read only initial 64KiB; state field follows large environment manifest",
+  "deployment_state": "committed",
+  "status": "not_a_fault_injection_pass"
+}

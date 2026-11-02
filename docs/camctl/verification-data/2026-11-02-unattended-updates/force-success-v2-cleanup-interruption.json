@@ -1,0 +1,16 @@
+{
+  "scenario": "archive-cleanup-interrupted",
+  "committed": true,
+  "archive_complete_before_cleanup": true,
+  "archive_already_in_processing": true,
+  "backup_already_removed": true,
+  "killed_groups": [
+    42981
+  ],
+  "processes": {
+    "42981": "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11 -B -I /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/maintenance/versions/dbbe742d42a035561d126c3b26a849541db2d5d763e5c1b146660d1357015d79/router.py finalize --camctl-path /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/venv/bin/camctl --config /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/config.toml ",
+    "42982": "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11 -B -I /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/3e220475d9c6446fbfde62cf6f7a56f4/engine.pyz --target /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2 --finalize-only --finalize-output /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/3e220475d9c6446fbfde62cf6f7a56f4 "
+  },
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/3e220475d9c6446fbfde62cf6f7a56f4",
+  "main_update_succeeded": true
+}

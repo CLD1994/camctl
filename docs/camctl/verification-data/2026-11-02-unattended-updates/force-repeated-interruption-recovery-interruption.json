@@ -1,0 +1,17 @@
+{
+  "scenario": "forced-rollback-interrupted-after-environment-restored",
+  "host_pid": 40497,
+  "returncode": -9,
+  "owned_pids": [
+    40497,
+    40498,
+    40499
+  ],
+  "killed_groups": [
+    40497,
+    40498
+  ],
+  "state": "updating",
+  "renamed": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/.camctl-restore-80eef7e0075f499ea7da00dbbd5d8f78-environment/stage\n/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/venv\n",
+  "physical_power_loss": false
+}

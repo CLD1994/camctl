@@ -1,0 +1,98 @@
+{
+  "source_commit": "25da2adbf99e47c5011a1d2418286cf4e3202d6e",
+  "status": "passed",
+  "scenarios": [
+    {
+      "scenario": "普通更新成功",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/scenario-result.json"
+    },
+    {
+      "scenario": "无效包拒绝",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-invalid-bundle/scenario-result.json"
+    },
+    {
+      "scenario": "普通安装失败回滚",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-install-failure/scenario-result.json"
+    },
+    {
+      "scenario": "普通更新及回滚重复中断",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-crash-recovery/scenario-result.json"
+    },
+    {
+      "scenario": "提交后结果丢失",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-committed-lost-result/scenario-result.json"
+    },
+    {
+      "scenario": "修改意图目录同步失败",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-intent-sync-failure/scenario-result.json"
+    },
+    {
+      "scenario": "强制全新部署及归档",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/force-before-run.json"
+    },
+    {
+      "scenario": "强制安装失败恢复原始数据",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-failure/force-rollback-before-run.json"
+    },
+    {
+      "scenario": "强制更新及回滚重复中断",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/scenario-result.json"
+    },
+    {
+      "scenario": "坏旧配置和库及包",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-invalid-originals/scenario-result.json"
+    },
+    {
+      "scenario": "旧环境及配置和库缺失",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-missing-originals/scenario-result.json"
+    },
+    {
+      "scenario": "错误新配置修改前拒绝",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-missing-originals/wrong-config-result.json"
+    },
+    {
+      "scenario": "主程序processing变化保留",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-failure/processing-preservation-result.json"
+    },
+    {
+      "scenario": "归档中断普通启动续做",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/archive-resume-result.json"
+    },
+    {
+      "scenario": "清理中断普通启动续做",
+      "status": "passed",
+      "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/cleanup-resume-result.json"
+    }
+  ],
+  "owned_processes_at_end": {
+    "alive": [],
+    "missing_exit_receipts": []
+  },
+  "scope": {
+    "isolated_container_actual_updates": true,
+    "physical_power_loss": false,
+    "arm64": false,
+    "real_camera": false,
+    "third_party_main_program": false,
+    "integration_test_suites": false,
+    "new_database_migration_steps": false
+  },
+  "retained_failed_attempts": [
+    "worlds/force-success/first-force-attempt-failure.json",
+    "worlds/ordinary-intent-sync-failure/injection-missed-first-attempt.json"
+  ]
+}

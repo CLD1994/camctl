@@ -1,0 +1,17 @@
+{
+  "scenario": "archive-interrupted-after-compression",
+  "deployment_state": "committed",
+  "archive_state_before_kill": "prepared",
+  "archive_output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/ee1aaeb7265643ec89cd1216c92008af",
+  "gate_rename": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/ee1aaeb7265643ec89cd1216c92008af/.archive.tar.gz.tmp\n/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/ee1aaeb7265643ec89cd1216c92008af/archive.tar.gz\n",
+  "killed_archive_groups": [
+    41745
+  ],
+  "archive_processes": {
+    "41745": "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11 -B -I /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/maintenance/versions/dbbe742d42a035561d126c3b26a849541db2d5d763e5c1b146660d1357015d79/router.py finalize --camctl-path /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/venv/bin/camctl --config /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/config.toml ",
+    "41747": "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11 -B -I /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/ee1aaeb7265643ec89cd1216c92008af/engine.pyz --target /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2 --finalize-only --finalize-output /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/ee1aaeb7265643ec89cd1216c92008af "
+  },
+  "main_host_pid": 41429,
+  "main_reported_update_success": true,
+  "new_main_run_alive": true
+}

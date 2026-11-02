@@ -1,0 +1,16 @@
+{
+  "scenario": "archive-interruption-normal-start-resumes",
+  "status": "passed",
+  "checks": {
+    "same_committed_transaction": true,
+    "archive_finished_after_normal_restart": true,
+    "same_transaction_archive_delivered": true,
+    "archive_hash_matches_job": true,
+    "backup_released": true,
+    "new_run_success": true,
+    "original_processing_file_preserved": true
+  },
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/ee1aaeb7265643ec89cd1216c92008af",
+  "archive": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/processing/camctl-force-diagnostic-ee1aaeb7265643ec89cd1216c92008af.tar.gz",
+  "job_state": "cleaned"
+}
