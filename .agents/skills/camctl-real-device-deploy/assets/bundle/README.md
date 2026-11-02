@@ -244,6 +244,8 @@ cc -std=c11 main.c \
 
 也可解压包内 `host/*-Source.tar.gz`，将源码作为 CMake 子目录加入工程，再用 `target_link_libraries(my-main PRIVATE camctl_host)` 链接。静态库必须与目标架构和系统工具链匹配。
 
+更新 C 模块时，先停止原主程序，用新源码和目标系统工具链重新构建静态库，再重新链接并部署主程序。电机通知管道等 C 模块修复通过这一步生效；Python 专用更新包不会替换已经静态链接的代码。
+
 ### 配置对应关系
 
 先用 `CAMCTL_HOST_CONFIG_INIT` 初始化结构体，再设置路径和需要覆盖的数值。C 配置独立于 TOML，模块通过 `config_path` 为各次 camctl 调用添加 `--config`，不会读取 TOML 来替主程序填交接目录。
