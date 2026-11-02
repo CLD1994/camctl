@@ -49,6 +49,19 @@ def test_photo_setup_commands_follow_selected_branches(mode, fields, expected, w
     assert preparation + capture == commands
 
 
+@pytest.mark.parametrize("movement", [-19, 37])
+def test_user_entered_focus_movement_is_sent_once_at_capture(movement):
+    from camctl.devices.drivers.hasselblad.commands import PhotoPhase, photo_start_commands
+
+    params = _photo_params()
+    params["focus"]["relative_move"] = movement
+    settings = parse_photo_settings(params)
+    preparation = photo_start_commands(settings, phase=PhotoPhase.PREPARATION)
+    capture = photo_start_commands(settings, phase=PhotoPhase.CAPTURE)
+    assert all(command.argv[0] != "focus" for command in preparation)
+    assert [command.argv for command in capture] == [("focus", str(movement)), ("capture",)]
+
+
 def test_capture_parser_consumes_two_complete_separate_streams():
     from camctl.devices.drivers.hasselblad.responses import parse_capture
     from camctl.host_files.photo_formats import CaptureFormat

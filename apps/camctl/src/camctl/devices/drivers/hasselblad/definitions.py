@@ -86,7 +86,7 @@ def capability() -> ActionCapability:
             f"`{PHOTO_COMMANDS.DRIVE_MODE_SINGLE.value}`。"
             f"手动白平衡通过 `{PHOTO_COMMANDS.WHITE_BALANCE_FIELD.value}` 设置，"
             f"色调固定为 `{PHOTO_COMMANDS.WHITE_BALANCE_TINT.value}`。"
-            "手动调焦相对移动量是开发验证临时选项；省略时不移动焦点，正值向无限远，"
+            "手动调焦关闭时保留相机执行当时的焦点位置；开启后填写非零整数，正值向无限远，"
             "负值向近处，单位为 CLI 调焦单位。"
             + cancellation_description(task)
         ),

@@ -87,7 +87,7 @@ def test_hasselblad_photo_definition_is_exported_with_its_fixed_task():
         {"const": item.command_value, "title": item.title}
         for item in CAPTURE_FORMATS.values()
     ]
-    assert all(word in description["description"] for word in ("曝光", "白平衡", "对焦", "开发验证临时选项"))
+    assert all(word in description["description"] for word in ("曝光", "白平衡", "对焦", "非零整数"))
     assert (
         f"`{PHOTO_COMMANDS.DRIVE_MODE_FIELD.value}` 设置为 "
         f"`{PHOTO_COMMANDS.DRIVE_MODE_SINGLE.value}`"

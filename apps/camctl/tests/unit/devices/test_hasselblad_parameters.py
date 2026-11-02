@@ -211,20 +211,27 @@ def test_manual_white_balance_integer_bounds():
         parse_photo_settings(missing)
 
 
-def test_manual_focus_absence_differs_from_zero():
+def test_manual_focus_accepts_user_entered_nonzero_integers_and_can_be_omitted():
     omitted = _photo()
     del omitted["focus"]["relative_move"]
     assert parse_photo_settings(omitted).focus.relative_move is None
 
-    for value in (-5, 5):
+    for value in (-127, -5, -1, 1, 5, 37):
         params = _photo()
         params["focus"]["relative_move"] = value
         assert parse_photo_settings(params).focus.relative_move == value
 
-    zero = _photo()
-    zero["focus"]["relative_move"] = 0
-    with pytest.raises(BodySchemaError):
-        parse_photo_settings(zero)
+    for value in (0, None, True, "5", Decimal("1.5")):
+        invalid = _photo()
+        invalid["focus"]["relative_move"] = value
+        with pytest.raises(BodySchemaError):
+            parse_photo_settings(invalid)
+
+    manual = next(branch for branch in _branches(photo_schema(), "focus")
+                  if _branch_value(branch) == "MF")
+    movement = manual["properties"]["relative_move"]
+    assert movement["x-camctl-input-toggle"] is True
+    assert "enum" not in movement and "oneOf" not in movement
 
     auto_with_move = _photo()
     auto_with_move["focus"] = {"mode": "AF-S", "relative_move": 5}
