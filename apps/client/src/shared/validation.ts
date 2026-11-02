@@ -79,6 +79,7 @@ export function createValidator() {
     useDefaults: false,
     passContext: true,
   });
+  ajv.addKeyword({ keyword: "x-camctl-input-toggle", schemaType: "boolean" });
   // Ajv 继续负责原生类型与 Schema 分支；此关键词只追加原词元整数性。
   ajv.removeKeyword("type");
   ajv.addKeyword({

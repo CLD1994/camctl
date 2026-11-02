@@ -15,6 +15,18 @@ const content = (value = token) => ({
 });
 const path = ["value"];
 const props = { name: "value", required: true, path, change: () => {} };
+it("普通可选数值仍直接显示输入框", () => {
+  const html = renderToStaticMarkup(
+    createElement(Field, {
+      ...props,
+      required: false,
+      schema: { type: "integer" },
+      content: { text: '{"actions":[]}' },
+    }),
+  );
+  expect(html).toContain('aria-label="value (value)"');
+  expect(html).not.toContain('role="switch"');
+});
 function linkedHtml(
   params: Record<string, unknown>,
   pending?: DraftContent["pending"],

@@ -134,6 +134,18 @@ function assertedCapabilities(size: number) {
     ],
   };
 }
+it("能力说明只接受已登记且类型正确的开关注解", () => {
+  const capabilities = assertedCapabilities(1);
+  const value = capabilities.devices[0].actions[0].parameter_types[0].schema
+    .properties.value as Record<string, unknown>;
+  value["x-camctl-input-toggle"] = true;
+  expect(() => loadCapabilities(capabilities)).not.toThrow();
+  value["x-camctl-input-toggle"] = "true";
+  expect(() => loadCapabilities(capabilities)).toThrow();
+  delete value["x-camctl-input-toggle"];
+  value["x-unknown"] = true;
+  expect(() => loadCapabilities(capabilities)).toThrow();
+});
 it.each([4096, 4097])("附带局部 type 的 %s 常量分支可完整编译", (size) => {
   const parameter = assertedParameter(size);
   const check = createValidator().compile(parameter.schema);
