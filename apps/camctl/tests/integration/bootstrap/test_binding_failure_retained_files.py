@@ -86,7 +86,8 @@ async def test_canceled_timelapse_binding_failure_registers_retained_files_atomi
             "request_id": "2", "created_at": instant, "name": "取消延时摄影",
             "actions": [{"name": "取消", "type": "cancel_task", "params": {
                 "target": {"action_instance_id": str(world.action_id)}}}]}, clock)
-        await cancel_flow(ready=canonical_to_path(database.metadata.ready_path),
+        await cancel_flow(staging=canonical_to_path(database.metadata.staging_path),
+            ready=canonical_to_path(database.metadata.ready_path),
             processing=canonical_to_path(database.metadata.processing_path))(
                 SimpleNamespace(database=database, clock=clock))
         assert preparing.connection.execute(

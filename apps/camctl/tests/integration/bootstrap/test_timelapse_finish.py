@@ -188,7 +188,7 @@ def _run_session(deps, driver, results, *,
                            stopper=stopper, wait_ms=wait_ms, extra_ms=extra_ms))}
     if cancel_flow_paths is not None:
         flows["cancel"] = cancel_flow(
-            ready=Path(cancel_flow_paths[0]),
+            staging=Path(deps.config.paths.staging), ready=Path(cancel_flow_paths[0]),
             processing=Path(cancel_flow_paths[1]))
     return asyncio.create_task(execute_command(
         deps, None,

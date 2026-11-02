@@ -288,7 +288,8 @@ class BootstrapCaptureCase:
             AcceptanceContext(CommandMode.RUN, ResultCatalog(), AcceptanceRepository(),
                 clock=SimpleNamespace(utc_micros=self.clock.wall_us)), new_operation_key(), self.database)
         assert accepted.plan_id is not None, accepted
-        await cancel_flow(ready=Path(self.config.paths.ready), processing=Path(self.config.paths.processing))(
+        await cancel_flow(staging=Path(self.config.paths.staging),
+            ready=Path(self.config.paths.ready), processing=Path(self.config.paths.processing))(
             SimpleNamespace(database=self.database, clock=SimpleNamespace(utc_micros=self.clock.wall_us)))
 
     async def reconnect(self, *, cold=False):

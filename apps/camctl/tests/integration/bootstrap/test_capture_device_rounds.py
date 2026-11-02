@@ -140,7 +140,7 @@ async def test_other_device_stops_in_next_round_while_original_call_is_held(tmp_
         return await factory(database, device)
 
     residual = residual_flow(guarded_factory, owns_device=capture.owns_device)
-    cancel = cancel_flow(ready=tmp_path / "ready", processing=tmp_path / "processing")
+    cancel = cancel_flow(staging=tmp_path / "staging", ready=tmp_path / "ready", processing=tmp_path / "processing")
     context = SimpleNamespace(database=database, clock=clock)
     task = None
     try:

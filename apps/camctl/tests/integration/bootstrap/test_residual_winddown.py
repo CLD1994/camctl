@@ -315,7 +315,8 @@ def _run_session(deps, cfg, factory, *, settled_round=None):
     flows = {
         "scheduling": scheduling,
         "residual": residual,
-        "cancel": cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing)),
+        "cancel": cancel_flow(staging=Path(cfg.paths.staging),
+            ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing)),
     }
     if settled_round is not None:
         async def observe_round(_context):

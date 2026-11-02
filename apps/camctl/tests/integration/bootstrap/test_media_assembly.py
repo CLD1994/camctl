@@ -264,7 +264,7 @@ def _run_session(deps, cfg, factory):
         deps, None,
         flows={
             "scheduling": capture_flow(factory),
-            "cancel": cancel_flow(ready=Path(cfg.paths.ready),
+            "cancel": cancel_flow(staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
         poll_interval_s=0.1,

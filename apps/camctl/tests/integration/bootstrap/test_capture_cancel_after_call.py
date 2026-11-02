@@ -34,7 +34,7 @@ async def _cancel(runtime, action_id, tmp_path):
         "actions": [{"name": "取消", "type": "cancel_task", "params": {
             "target": {"action_instance_id": str(action_id)}}}]},
         SimpleNamespace(utc_micros=lambda: now))
-    await cancel_flow(ready=tmp_path / "ready", processing=tmp_path / "processing")(
+    await cancel_flow(staging=tmp_path / "staging", ready=tmp_path / "ready", processing=tmp_path / "processing")(
         SimpleNamespace(database=runtime.database, clock=SimpleNamespace(utc_micros=lambda: now)))
 
 

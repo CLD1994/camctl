@@ -386,7 +386,7 @@ def _run_session(deps, cfg, driver, results, clock, tools_dir, *,
                 cfg, _registry(
                     driver, capture_read_parallel=capture_read_parallel),
                 scenario_clock=scenario_clock)),
-            "cancel": cancel_flow(ready=Path(cfg.paths.ready),
+            "cancel": cancel_flow(staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
         poll_interval_s=0.1,

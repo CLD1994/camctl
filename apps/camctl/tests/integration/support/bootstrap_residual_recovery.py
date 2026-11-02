@@ -116,7 +116,8 @@ class ResidualCase:
     async def cancel_trigger(self):
         await self.accept(3, {"name": "取消原触发", "type": "cancel_task",
             "params": {"target": {"action_instance_id": str(self.trigger)}}})
-        await cancel_flow(ready=self.home / "ready", processing=self.home / "processing")(self.context)
+        await cancel_flow(staging=self.home / "staging",
+            ready=self.home / "ready", processing=self.home / "processing")(self.context)
         assert self.action(self.trigger)["status"] == 6
 
     async def reconnect(self):

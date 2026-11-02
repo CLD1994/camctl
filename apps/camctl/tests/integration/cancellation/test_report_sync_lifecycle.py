@@ -630,7 +630,7 @@ async def test_cancel_finish_store_failure_stops_session_without_member_result(e
 
     context = session_context(home / "state.db", clock=SimpleNamespace(utc_micros=lambda: _NOW),
         catalog=Catalog(), open_database=open_database, flows={
-            "cancel": cancel_flow(ready=home / "ready", processing=home / "processing"),
+            "cancel": cancel_flow(staging=home / "staging", ready=home / "ready", processing=home / "processing"),
             "device": device_flow,
         })
     outcome = await run_session(context, None)

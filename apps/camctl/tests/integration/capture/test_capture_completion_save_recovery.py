@@ -48,7 +48,8 @@ async def completion_world(tmp_path, monkeypatch, consumer):
                         clock=SimpleNamespace(utc_micros=lambda: occurred)), new_operation_key(), database)
                 assert accepted.plan_id is not None, accepted
                 metadata = database.metadata
-                await cancel_flow(ready=Path(metadata.ready_path), processing=Path(metadata.processing_path))(
+                await cancel_flow(staging=Path(metadata.staging_path),
+                    ready=Path(metadata.ready_path), processing=Path(metadata.processing_path))(
                     SimpleNamespace(database=database, clock=SimpleNamespace(utc_micros=lambda: occurred)))
             assert current.connection.execute(
                 "SELECT status,cancel_requested FROM actions WHERE id=?", (world.action_id,)).fetchone() == (2, 1)

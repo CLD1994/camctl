@@ -96,7 +96,7 @@ async def test_default_cancel_confirms_original_media_before_new_cancel_success(
         async def media(database):
             await resume_media_saves(database, world.collections["pending_media_results"], executor=world.executor)
 
-        cancel = cancel_flow(ready=Path(world.config.paths.ready),
+        cancel = cancel_flow(staging=Path(world.config.paths.staging), ready=Path(world.config.paths.ready),
             processing=Path(world.config.paths.processing), resume_media_results=media)
         outcome = await _one_session_step(world, cancel)
         if confirmation == "rejected":

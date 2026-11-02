@@ -197,7 +197,7 @@ async def test_changed_binding_respects_execution_eligibility(functional_environ
             "actions": [{"name": "取消原设备", "type": "cancel_task",
                          "params": {"target": {"action_instance_id": str(ids["cam-a"])}}}],
         })
-        await cancel_flow(ready=home / "ready", processing=home / "processing")(context)
+        await cancel_flow(staging=home / "staging", ready=home / "ready", processing=home / "processing")(context)
     devices = {"cam-b": {"driver": "camctl-adb"}}
     if change == "mismatch":
         devices["cam-a"] = {"driver": "alternate-camera"}
@@ -435,7 +435,8 @@ async def _recovery_world(home, kind, *, unsettled=False, canceled=False):
                     "request_id": "2", "created_at": scheduled, "name": "取消原调用",
                     "actions": [{"name": "取消", "type": "cancel_task", "params": {
                         "target": {"action_instance_id": str(action_id)}}}]}, clock)
-                await cancel_flow(ready=home / "ready", processing=home / "processing")(context)
+                await cancel_flow(staging=home / "staging",
+                    ready=home / "ready", processing=home / "processing")(context)
                 assert owned.connection.execute("SELECT cancel_requested FROM actions WHERE id=?",
                     (action_id,)).fetchone() == (1,)
             yield SimpleNamespace(database=database, owned=owned, home=home,

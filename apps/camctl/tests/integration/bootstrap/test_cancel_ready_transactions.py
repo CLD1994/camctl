@@ -179,7 +179,8 @@ async def test_later_cancel_request_joins_original_pending_or_failed_delivery_re
             removed.append(Path(path).name)
         return original_remove(path, *args, **kwargs)
     monkeypatch.setattr(os, "remove", remove)
-    await cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), work_files=runtime)(context)
+    await cancel_flow(staging=Path(cfg.paths.staging),
+        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), work_files=runtime)(context)
     statuses = owned.connection.execute("SELECT cdi.status FROM cancel_delivery_items cdi JOIN cancel_items ci ON ci.id=cdi.cancel_item_id WHERE ci.action_id=? ORDER BY cdi.id", (second,)).fetchall()
     assert statuses == ([(2,),(2,)] if original_choice is None else [(4,),(4,)])
     assert len(removed) == (2 if original_choice is None else 0)

@@ -131,11 +131,12 @@ async def test_actual_withdrawal_result_is_held_with_original_key_after_save_fai
     monkeypatch.setattr(handoff, "_remove", remove)
     monkeypatch.setattr(OutputsRepository, "advance_withdrawal", save)
     with pytest.raises(StateDbFailure):
-        await cancel_flow(ready=ready, processing=processing, work_files=runtime)(context)
+        await cancel_flow(staging=Path(cfg.paths.staging),
+            ready=ready, processing=processing, work_files=runtime)(context)
     assert len(removed) == 1 and not (ready / removed[0]).exists()
     assert owned.connection.execute("SELECT status FROM actions WHERE type=6").fetchone() == (2,)
     # cancel_flow 已关闭原独立连接；下一实际装配以新连接核实原输入，不能再 unlink。
-    await cancel_flow(ready=ready, processing=processing, work_files=runtime)(context)
+    await cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing, work_files=runtime)(context)
     assert inputs[0] == inputs[1]
     assert sorted(removed) == sorted(contents)
     assert len(removed) == len(set(removed)) == 2
@@ -315,11 +316,12 @@ async def test_held_actual_withdrawal_failure_remains_cancel_failure_after_save_
     monkeypatch.setattr(handoff, "_remove", remove)
     monkeypatch.setattr(OutputsRepository, "advance_withdrawal", save)
     with pytest.raises(StateDbFailure):
-        await cancel_flow(ready=ready, processing=processing, work_files=runtime)(context)
+        await cancel_flow(staging=Path(cfg.paths.staging),
+            ready=ready, processing=processing, work_files=runtime)(context)
     assert len(attempted) == 2
     assert owned.connection.execute("SELECT status FROM actions WHERE type=6").fetchone() == (2,)
     # 最后一份实际失败结果保存不确定；恢复后没有其余 pending 可掩盖汇总。
-    await cancel_flow(ready=ready, processing=processing, work_files=runtime)(context)
+    await cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing, work_files=runtime)(context)
     assert inputs[0] == inputs[1]
     assert sorted(attempted) == sorted(contents) and len(set(attempted)) == 2
     state = 5 if actual_state == "failed" else 6
@@ -330,5 +332,5 @@ async def test_held_actual_withdrawal_failure_remains_cancel_failure_after_save_
     assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (3,0)
     assert {name: (ready/name).read_bytes() for name in contents} == contents
     before = tuple(owned.connection.iterdump())
-    await cancel_flow(ready=ready, processing=processing, work_files=runtime)(context)
+    await cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing, work_files=runtime)(context)
     assert tuple(owned.connection.iterdump()) == before and len(attempted) == 2

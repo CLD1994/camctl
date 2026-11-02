@@ -138,7 +138,7 @@ async def _recording_in_flight(tmp_path: Path, home_name: str, *, driver=None):
                 _factory(cfg, _registry(driver), results, None,
                          monotonic_ns=lambda: clock["ns"],
                          media_enabled=False)),
-            "cancel": cancel_flow(ready=Path(cfg.paths.ready),
+            "cancel": cancel_flow(staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
         poll_interval_s=0.1,
@@ -171,7 +171,7 @@ async def _restricted_session(
             flows={},
             restricted_flows={
                 "cancel": cancel_flow(
-                    ready=Path(cfg.paths.ready),
+                    staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
                     processing=Path(cfg.paths.processing),
                     unscheduled_only=True),
                 "winddown": winddown_flow(
@@ -256,7 +256,7 @@ class TestNormalSessionResumesProgress:
             flows={
                 "scheduling": capture_flow(
                     _factory(cfg, _registry(driver), results, tools_dir)),
-                "cancel": cancel_flow(ready=Path(cfg.paths.ready),
+                "cancel": cancel_flow(staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
                                       processing=Path(cfg.paths.processing)),
             },
             poll_interval_s=0.1,

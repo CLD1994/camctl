@@ -182,7 +182,7 @@ async def _replay_session(tmp_path, name, *, stopper, state_query=None):
             "scheduling": capture_flow(_replay_factory(
                 driver, stopper, ResultsDouble({}, set_finalized=False), clock,
                 state_query=state_query)),
-            "cancel": cancel_flow(ready=Path(cfg.paths.ready),
+            "cancel": cancel_flow(staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
         poll_interval_s=0.1,

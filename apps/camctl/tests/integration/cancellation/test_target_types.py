@@ -172,7 +172,8 @@ async def _real_withdrawal_flow(environment):
     cfg, owned, context, _driver = environment
     target, contents, files = await _published(environment)
     origin = owned.connection.execute("SELECT id FROM actions WHERE type=6").fetchone()[0]
-    flow = cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
+    flow = cancel_flow(staging=Path(cfg.paths.staging),
+        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
                        work_files=files)
     return target, contents, origin, flow, context
 

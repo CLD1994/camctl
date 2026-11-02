@@ -7,6 +7,7 @@ import pytest
 
 from camctl.bootstrap.flows import cancel_flow
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.directory_switch import canonical_to_path
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.transaction import saved_transaction_events
 from camctl.session.service import StateDbFailure
@@ -42,7 +43,8 @@ async def test_real_flow_resumes_original_phase_before_current_terminal(tmp_path
             return result
 
         monkeypatch.setattr(CancellationRepository, selected, save)
-        flow = cancel_flow(ready=tmp_path / "ready", processing=tmp_path / "processing")
+        flow = cancel_flow(staging=canonical_to_path(world.database.metadata.staging_path),
+            ready=tmp_path / "ready", processing=tmp_path / "processing")
         context = SimpleNamespace(database=world.database, clock=world.clock)
         with pytest.raises((StateDbFailure, ValueError, OSError)):
             await flow(context)
@@ -87,7 +89,8 @@ async def test_flow_rejects_other_database_then_resumes_original_pending_finish(
             return actual(repository, request, key, owned)
 
         monkeypatch.setattr(CancellationRepository, "finish_origin_canceled", save)
-        flow = cancel_flow(ready=tmp_path / "ready", processing=tmp_path / "processing")
+        flow = cancel_flow(staging=canonical_to_path(world.database.metadata.staging_path),
+            ready=tmp_path / "ready", processing=tmp_path / "processing")
         context = SimpleNamespace(database=world.database, clock=world.clock)
         with pytest.raises(ValueError):
             await flow(context)

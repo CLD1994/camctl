@@ -164,7 +164,8 @@ async def accept_origin(cfg, owned, runtime, target):
 
 
 async def cancel(cfg, runtime):
-    await cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
+    await cancel_flow(staging=Path(cfg.paths.staging),
+        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
         start_entries=runtime.start_entries)(SimpleNamespace(database=runtime.database,
             clock=SimpleNamespace(utc_micros=runtime.wall_us)))
 
