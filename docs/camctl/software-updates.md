@@ -106,25 +106,168 @@ C 更新接口会停止本模块接收新工作，并等待其进程、通知、
 
 ## 5. 准备稳定维护入口
 
-完整包首次安装成功后，安装器已建立 `<target>/maintenance/camctl-updater`，安装收据记录 `updater_path`，生成的普通启动命令带 `--updater`。已有当前维护入口的实例直接正常启动并调用更新；存在未完成记录时由启动流程自动恢复，不重新发布入口。
+### camctl-updater 是什么
 
-旧实例首次接入时，主程序须先链接支持当前维护接口的 C 模块。操作者保持停机，从新 wheel 发布维护入口，再执行 Python 更新；发布入口不会应用新版本。
+`camctl-updater` 是 camctl 为某一个部署生成的更新和恢复启动脚本。它的固定位置是：
 
-从专用 ZIP 解压到一个新的独立目录，找到其中实际的 `camctl/camctl-<version>-py3-none-any.whl`。下面变量均填写绝对路径；示例 wheel 文件名须换成实际交付名称：
-
-```sh
-base_python=/absolute/path/to/base-python3.11
-new_wheel=/absolute/path/to/unpacked/camctl-update/camctl/camctl-1.0.1-py3-none-any.whl
-"$base_python" -B -I -c \
-  'import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); runpy.run_module("camctl.update_engine.publisher", run_name="__main__")' \
-  "$new_wheel" --wheel "$new_wheel" --target "$deploy_root" \
-  --base-python "$base_python" --camctl-path "$deploy_root/venv/bin/camctl" \
-  --config "$deploy_root/config.toml"
+```text
+<部署目录>/
+  venv/bin/camctl              普通程序：执行计划、拍摄、取回和生成报告
+  maintenance/camctl-updater  维护入口：更新软件、恢复未完成更新、启动旧环境归档
 ```
 
-基础解释器须为虚拟环境外的 CPython 3.11。发布器核对普通入口、目标、原配置和目录归属，先可靠保存材料，最后发布可执行入口；退出 0 后保存其输出路径。失败时查看 stderr，不先覆盖原 Python 包来取得更新器。
+C 模块通过 `updater_path` 找到这个脚本。主程序调用更新接口时，模块通过它执行更新；主机重启后，模块也先通过它恢复未完成的更新，再启动普通 camctl。
 
-上述例子使用显式配置。原普通入口使用其他配置时填写其实际路径；原普通入口使用默认来源时省略 `--config`。两种来源不能混用。普通 CLI 允许配置文件缺失时采用默认值，维护也保存这个缺失事实；因此操作者必须确认路径，不能以没有报文件缺失来证明选对了配置。
+维护入口放在 `venv` 外面，并使用独立的基础 Python 3.11。这样，即使更新过程中 `venv` 被改到一半、暂时不能运行，组件仍有可用的程序执行恢复。这里的“稳定”指调用路径固定，并且恢复入口不依赖正在被替换的虚拟环境。
+
+**本节只准备更新工具。执行成功后，原 camctl 版本保持不变。第六节才实际安装更新包。**
+
+### 先判断是否需要手工准备
+
+| 你的部署情况 | 应当执行什么 |
+| --- | --- |
+| 使用支持无人值守更新的完整部署包安装成功，或使用当前 `deploy.py` 部署成功 | 安装器已经生成入口，并在启动脚本中传入其路径。可以跳到第六节。自有 C 主程序仍须填写 `updater_path`。 |
+| 旧部署尚未接入这套更新能力 | 在原环境仍可运行时，按下面步骤准备一次，并让主程序使用该入口。以后日常更新沿用它。 |
+| 已有维护入口，但上次更新中断了 | 按第八节正常启动主程序，让组件自动恢复。保留已有入口和恢复材料，不重新准备。 |
+
+下面的手工步骤在目标主机上执行，使用原实例的运行账户，依次在同一个终端完成。先停止原主程序及使用同一实例的其他 CLI；主程序还须已链接支持当前更新接口的 C 模块，构建方式见第十一节。
+
+首次准备会启动旧环境读取生效配置、核对已有状态库和目录绑定，因此需要旧 Python 环境、配置和状态库仍能正常读取。**准备完成后的中断恢复**才不依赖旧环境可用。如果还没有维护入口，旧环境就已经损坏，不能靠下面的命令直接补出恢复能力。
+
+### 步骤一：填入原部署和收到的更新包路径
+
+下面以已有实例 `/srv/camctl/device01`、收到的 `1.0.1` 更新包为例。先将路径改成现场实际值：
+
+```sh
+deploy_root=/srv/camctl/device01
+update_zip=/srv/camctl/releases/1.0.1/camctl-update.zip
+config_path="$deploy_root/config.toml"
+```
+
+这三行只是给当前终端保存路径，没有安装或修改软件：
+
+- `deploy_root` 是已有实例目录，其中已经有 `venv/bin/camctl`。
+- `update_zip` 是第四节已核对摘要的 Python 专用更新包。
+- `config_path` 是原主程序实际使用的配置文件。原来使用其他显式配置时，填写那个绝对路径。
+
+如果原主程序一直省略 `--config`，则在本步骤使用 `config_path=''`。后面的脚本会省略配置参数，继续读取运行账户的默认配置。不要把默认来源改成另一份配置；配置文件缺失时程序允许采用默认值，不能用“没有报错”来证明路径选对了。
+
+### 步骤二：解压更新包，找到其中的新 wheel
+
+wheel 是 Python 的安装包文件，扩展名为 `.whl`。本步骤只解压文件，不安装它。解压目录应放在虚拟环境、媒体和交接目录之外，并使用尚不存在的新目录：
+
+```sh
+unpack_dir=/srv/camctl/releases/1.0.1/unpacked-for-maintenance
+mkdir "$unpack_dir"
+unzip "$update_zip" -d "$unpack_dir"
+ls "$unpack_dir/camctl-update/camctl/"
+```
+
+`mkdir` 创建独立目录，`unzip` 把更新包展开到该目录，`ls` 显示里面的文件。任何一步失败都先处理该错误，再继续。列表中应有一个 `camctl-<版本>-py3-none-any.whl`。按实际文件名设置：
+
+```sh
+new_wheel="$unpack_dir/camctl-update/camctl/camctl-1.0.1-py3-none-any.whl"
+ls -l "$new_wheel"
+```
+
+`new_wheel` 指向收到的新包；`ls -l` 供你确认路径和文件名。示例中的 `1.0.1` 不是固定版本号。
+
+### 步骤三：找到原虚拟环境所用的基础 Python
+
+基础 Python 是创建这个 `venv` 所用的独立解释器。下面从旧环境读取它的位置，保存到 `base_python`：
+
+```sh
+base_python=$(
+  "$deploy_root/venv/bin/python" -B -I -c \
+    'import sys; print(sys._base_executable)'
+)
+```
+
+这条查询只输出解释器路径，不更新软件。随后独立检查取得的解释器是否符合维护要求：
+
+```sh
+"$base_python" -B -I - <<'PYTHON'
+import sys
+
+print("基础解释器：", sys.executable)
+print("Python 版本：", sys.version.split()[0])
+assert sys.implementation.name == "cpython", "维护入口需要 CPython"
+assert sys.version_info[:2] == (3, 11), "维护入口需要 Python 3.11"
+assert sys.prefix == sys.base_prefix, "维护入口不能使用虚拟环境中的解释器"
+PYTHON
+```
+
+检查应正常结束，且打印实际的基础解释器及 3.11 版本。检查失败时先处理解释器问题，不继续发布。该基础解释器今后仍供更新和恢复使用，应保留在原位置。
+
+### 步骤四：从新 wheel 运行发布器，生成维护入口
+
+下面整段可以原样复制。它使用前面设置好的路径，从新 wheel 加载组件自带的发布器；无需先把新 wheel 安装到旧环境。
+
+```sh
+"$base_python" -B -I - "$new_wheel" "$deploy_root" "$config_path" <<'PYTHON'
+from pathlib import Path
+import runpy
+import sys
+
+wheel_path, deployment, configuration = sys.argv[1:]
+
+# 从收到的新 wheel 加载发布器。
+sys.path.insert(0, wheel_path)
+
+# 为发布器准备与本实例对应的命令行参数。
+sys.argv = [
+    "camctl.update_engine.publisher",
+    "--wheel", wheel_path,
+    "--target", deployment,
+    "--base-python", sys.executable,
+    "--camctl-path", str(Path(deployment) / "venv/bin/camctl"),
+]
+if configuration:
+    sys.argv.extend(["--config", configuration])
+
+runpy.run_module("camctl.update_engine.publisher", run_name="__main__")
+PYTHON
+```
+
+这段命令按以下顺序执行：
+
+1. `"$base_python"` 启动刚核对过的基础解释器。`-B` 禁止生成 Python 字节码缓存，`-I` 隔离 Python 环境变量和用户安装目录对模块加载的影响；最后的 `-` 表示执行 `PYTHON` 标记之间的代码。
+2. `sys.path.insert(0, wheel_path)` 让本次进程从指定的新 wheel 读取发布器。读取安装包中的代码不等于安装新版本。
+3. `sys.argv` 为发布器组装参数。各参数的目标见下表；配置变量为空时不传 `--config`。
+4. `runpy.run_module(...)` 执行发布器。发布器核对旧环境、配置、状态库和目录，保存基础解释器与部署的对应关系及维护程序，最后生成 `maintenance/camctl-updater`。
+
+| 发布器参数 | 本例传入什么 | 用途 |
+| --- | --- | --- |
+| `--wheel` | `new_wheel` | 从这份新安装包取得维护程序。 |
+| `--target` | `deploy_root` | 为这个已有实例准备入口。 |
+| `--base-python` | 当前基础解释器的路径 | 让维护入口今后使用同一独立解释器。 |
+| `--camctl-path` | `<deploy_root>/venv/bin/camctl` | 明确该入口负责更新和恢复哪个普通 camctl。 |
+| `--config` | 原实例的显式配置路径；默认来源时省略 | 核对这份配置实际使用的状态库和交接目录。 |
+
+### 步骤五：确认结果，并把入口交给主程序
+
+上一步应退出 0，并打印类似下面的绝对路径：
+
+```text
+/srv/camctl/device01/maintenance/camctl-updater
+```
+
+还可确认脚本已经生成且可执行：
+
+```sh
+ls -l "$deploy_root/maintenance/camctl-updater"
+test -x "$deploy_root/maintenance/camctl-updater"
+```
+
+文件存在不代替发布器成功的退出结果。发布失败时先查看该命令的 stderr，不继续应用更新，也不要删除已有恢复材料。
+
+自有 C 主程序在普通初始化配置中设置：
+
+```c
+config.updater_path = "/srv/camctl/device01/maintenance/camctl-updater";
+```
+
+使用 host-demo 时，传入同一路径的 `--updater` 参数即可，第六节给出完整命令。至此只是把更新和恢复工具准备好，旧版本仍未被替换；接下来再应用完整的 `camctl-update.zip`。
 
 ## 6. 使用 host-demo 更新并继续运行
 
