@@ -48,43 +48,52 @@ it("开关关闭时保留字段说明和数值范围", () => {
   expect(html).toContain("最小值 -10");
   expect(html).toContain("最大值 10");
 });
-it.each([
-  ["/actions/0/device_id", true],
-  ["/actions/0/type", true],
-  ["/actions/0/params/type", true],
-  ["/actions/0/params/move", false],
-  ["/actions/0/name", false],
-])("顶层开关按身份和自身输入分别判断阻塞：%s", (pendingPath, blocked) => {
-  const parameter = {
-    type: "photo",
-    name: "照片",
-    description: "",
-    preview_supported: false,
-    schema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["type"],
-      properties: {
-        type: { const: "photo" },
-        move: { type: "integer", "x-camctl-input-toggle": true },
+it.each(
+  [false, true].flatMap((open) =>
+    (
+      [
+        ["/actions/0/device_id", true],
+        ["/actions/0/type", true],
+        ["/actions/0/params/type", true],
+        ["/actions/0/params/move", false],
+        ["/actions/0/name", false],
+      ] as const
+    ).map(([pendingPath, blocked]) => [open, pendingPath, blocked] as const),
+  ),
+)(
+  "顶层开关按身份和自身输入分别判断阻塞：开放 %s，路径 %s",
+  (open, pendingPath, blocked) => {
+    const parameter = {
+      type: "photo",
+      name: "照片",
+      description: "",
+      preview_supported: false,
+      schema: {
+        type: "object",
+        additionalProperties: open,
+        required: ["type"],
+        properties: {
+          type: { const: "photo" },
+          move: { type: "integer", "x-camctl-input-toggle": true },
+        },
       },
-    },
-  };
-  const html = renderToStaticMarkup(
-    createElement(SchemaFields, {
-      parameter,
-      path: ["actions", 0, "params"],
-      change: () => {},
-      content: {
-        text: '{"actions":[{"type":"camera_take_photo","device_id":"camera","params":{"type":"photo"}}]}',
-        pending: { [pendingPath]: { kind: "number", text: "" } },
-      },
-    }),
-  );
-  const control = html.match(/<input[^>]*role="switch"[^>]*>/)?.[0];
-  expect(control).toBeDefined();
-  expect(control!.includes("disabled")).toBe(blocked);
-});
+    };
+    const html = renderToStaticMarkup(
+      createElement(SchemaFields, {
+        parameter,
+        path: ["actions", 0, "params"],
+        change: () => {},
+        content: {
+          text: '{"actions":[{"type":"camera_take_photo","device_id":"camera","params":{"type":"photo"}}]}',
+          pending: { [pendingPath]: { kind: "number", text: "" } },
+        },
+      }),
+    );
+    const control = html.match(/<input[^>]*role="switch"[^>]*>/)?.[0];
+    expect(control).toBeDefined();
+    expect(control!.includes("disabled")).toBe(blocked);
+  },
+);
 function linkedHtml(
   params: Record<string, unknown>,
   pending?: DraftContent["pending"],
