@@ -1547,6 +1547,10 @@ export function SchemaFields({
                   : undefined
               }
               choicesBlocked={blocked}
+              toggleBlocked={
+                catalog.kind !== "unavailable" &&
+                parameterChoiceBlocked(content, [...path, name], catalog, true)
+              }
               choiceBasis={
                 scope.kind === "independent" ? "independent" : "linked"
               }

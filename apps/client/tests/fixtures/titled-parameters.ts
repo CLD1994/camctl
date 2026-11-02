@@ -90,7 +90,8 @@ export function titledParameter(): ParameterType {
                 relative_move: {
                   type: "integer",
                   title: "手动调焦相对移动量",
-                  enum: [-5, 5],
+                  not: { const: 0 },
+                  "x-camctl-input-toggle": true,
                 },
               },
               [],

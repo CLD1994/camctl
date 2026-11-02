@@ -104,13 +104,6 @@ async function setup(
 
 it("可选数值开关保留未完成输入并按当前模式导出", async () => {
   const parameter = titledParameter();
-  const focus = (parameter.schema.properties as any).focus;
-  focus.oneOf[0].properties.relative_move = {
-    type: "integer",
-    title: "手动调焦相对移动量",
-    not: { const: 0 },
-    "x-camctl-input-toggle": true,
-  };
   const capabilities = {
     devices: [
       {
@@ -1691,10 +1684,14 @@ it.each([
         .filter((item) => item.value !== "")
         .map((item) => item.text),
     ).toEqual(["手动曝光", "光圈优先", "快门优先", "程序曝光"]);
-    await check(control("手动调焦相对移动量 (relative_move)")).toHaveAttribute(
-      "data-value",
-      "",
-    );
+    const focusToggle = page.getByRole("switch", {
+      name: "启用手动调焦相对移动量 (relative_move)",
+      exact: true,
+    });
+    const focusMove = page.getByLabel("手动调焦相对移动量 (relative_move)", {
+      exact: true,
+    });
+    await check(focusToggle).not.toBeChecked();
     expect(current().focus).toEqual({ mode: "MF" });
     const temperature = page.getByLabel("色温 (temperature_k)", {
       exact: true,
@@ -1718,19 +1715,13 @@ it.each([
     await choose(control("白平衡模式 (mode)"), "branch:1");
     await check(temperature).toHaveValue("5e");
     await temperature.fill("5500");
-    await choose(control("手动调焦相对移动量 (relative_move)"), "1");
+    await focusToggle.check();
+    await focusMove.fill("5");
     await choose(control("对焦模式 (mode)"), "branch:1");
     await choose(control("对焦模式 (mode)"), "branch:0");
-    await check(control("手动调焦相对移动量 (relative_move)")).toHaveAttribute(
-      "data-value",
-      "1",
-    );
-    await page
-      .getByRole("button", {
-        name: "清空手动调焦相对移动量 (relative_move)",
-        exact: true,
-      })
-      .click();
+    await check(focusToggle).toBeChecked();
+    await check(focusMove).toHaveValue("5");
+    await focusToggle.uncheck();
     await choose(exposure(), "branch:1");
     await choose(control("ISO 感光度 (iso)"), "0");
     await choose(exposure(), "branch:2");

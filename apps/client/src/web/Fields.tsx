@@ -89,6 +89,7 @@ export function Field({
   choices,
   allowed,
   choicesBlocked = false,
+  toggleBlocked = choicesBlocked,
   jsonChoices = false,
   choiceBasis = "linked",
 }: {
@@ -102,6 +103,7 @@ export function Field({
   choices?: unknown[];
   allowed?: unknown[];
   choicesBlocked?: boolean;
+  toggleBlocked?: boolean;
   jsonChoices?: boolean;
   choiceBasis?: "linked" | "independent";
 }) {
@@ -185,7 +187,7 @@ export function Field({
               role="switch"
               aria-label={`启用${label}`}
               checked={enabled}
-              disabled={pendingBlocks(content, path)}
+              disabled={toggleBlocked || pendingBlocks(content, path)}
               onChange={(e) =>
                 e.target.checked
                   ? change(editValue(content, path, "", "number"))
@@ -393,26 +395,6 @@ export function Field({
                     : "此值与当前参数不兼容，原值已保留；请选择兼容值或在参数 JSON 中修正。"}
                 </small>
               )}
-            <small>
-              {String(schema.description ?? "")}
-              {schema.default !== undefined
-                ? ` 默认值说明：${optionLabel(schema.default, schema, "default")}。`
-                : ""}
-              {schema.minimum !== undefined
-                ? ` 最小值 ${displayJsonValue(schema, "minimum", schema.minimum)}。`
-                : ""}
-              {schema.maximum !== undefined
-                ? ` 最大值 ${displayJsonValue(schema, "maximum", schema.maximum)}。`
-                : ""}
-              {(type === "number" || type === "integer") &&
-              schema.exclusiveMinimum !== undefined
-                ? ` 必须大于 ${displayJsonValue(schema, "exclusiveMinimum", schema.exclusiveMinimum)}。`
-                : ""}
-              {(type === "number" || type === "integer") &&
-              schema.exclusiveMaximum !== undefined
-                ? ` 必须小于 ${displayJsonValue(schema, "exclusiveMaximum", schema.exclusiveMaximum)}。`
-                : ""}
-            </small>
             {pending && <small className="danger-text">输入尚未完成</small>}
             {!toggle && !required && (value !== undefined || pending) && (
               <button
@@ -434,6 +416,26 @@ export function Field({
             )}
           </>
         )}
+        <small>
+          {String(schema.description ?? "")}
+          {schema.default !== undefined
+            ? ` 默认值说明：${optionLabel(schema.default, schema, "default")}。`
+            : ""}
+          {schema.minimum !== undefined
+            ? ` 最小值 ${displayJsonValue(schema, "minimum", schema.minimum)}。`
+            : ""}
+          {schema.maximum !== undefined
+            ? ` 最大值 ${displayJsonValue(schema, "maximum", schema.maximum)}。`
+            : ""}
+          {(type === "number" || type === "integer") &&
+          schema.exclusiveMinimum !== undefined
+            ? ` 必须大于 ${displayJsonValue(schema, "exclusiveMinimum", schema.exclusiveMinimum)}。`
+            : ""}
+          {(type === "number" || type === "integer") &&
+          schema.exclusiveMaximum !== undefined
+            ? ` 必须小于 ${displayJsonValue(schema, "exclusiveMaximum", schema.exclusiveMaximum)}。`
+            : ""}
+        </small>
       </>
     </div>
   );
