@@ -374,6 +374,7 @@ async def test_cold_resume_exhausts_batches_without_taking_local_owner(owned, tm
             return DirectoryRead(None, None, Page((), None))
     case.owned, case.path = owned, Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     case.config = load_config({"paths": {"state_db": str(case.path),
+        "log_file": str(tmp_path / "camctl.log"),
         "staging": owned.metadata.staging_path, "ready": owned.metadata.ready_path,
         "processing": owned.metadata.processing_path}, "devices": {"cam-1": {
             "kind": "camera", "driver": "dji-action6"}}}, ConfigDefaults())
