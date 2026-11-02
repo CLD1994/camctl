@@ -1,4 +1,4 @@
-"""相机正式源共用单张捕获并保留双源和固定摘要。"""
+"""相机正式源保留单张拍摄身份、双角色及独立取回责任。"""
 import hashlib
 import json
 from pathlib import Path
@@ -28,8 +28,7 @@ async def test_device_photo_registers_pair_and_reclaims_host_copies(tmp_path):
         files = owned.connection.execute("SELECT id,role,original_device_file_id,size_bytes,checksum_support,sha256,locator_json FROM device_files ORDER BY id").fetchall()
         assert len(files) == 2
         assert [(f[1], f[3], f[4], f[5]) for f in files] == [
-            (2, len(_ORIGINAL), 2, hashlib.sha256(_ORIGINAL).hexdigest()),
-            (3, len(_PREVIEW), 2, hashlib.sha256(_PREVIEW).hexdigest())]
+            (2, None, 1, None), (3, None, 1, None)]
         assert files[1][2] == files[0][0]
         assert [json.loads(f[6])["variant"] for f in files] == ["original", "thumbnail"]
         assert all(json.loads(f[6])["camera_path"] == "/mnt/media/DCIM/B9996039.3FR" for f in files)
@@ -38,10 +37,13 @@ async def test_device_photo_registers_pair_and_reclaims_host_copies(tmp_path):
         assert [(f[1], f[2]) for f in outputs] == [(files[0][0], None), (files[1][0], None)]
         assert owned.connection.execute("SELECT output_id,original_output_id FROM output_origins").fetchall() == [(outputs[1][0], outputs[0][0])]
         paths = [Path(cfg.paths.staging) / r[0] for r in owned.connection.execute("SELECT relative_path FROM intermediate_files WHERE owner_action_id=1")]
-        assert len(paths) == 2 and all(p.is_file() for p in paths)
+        assert len(paths) == 2 and [p.read_bytes() for p in paths] == [_ORIGINAL, _PREVIEW]
+        assert [call.argv[3] for call in driver.transport.calls].count("capture") == 1
+        assert not any(call.argv[3] == "download" for call in driver.transport.calls)
         await _maintain(cfg, owned)
         assert all(not p.exists() for p in paths)
         assert owned.connection.execute("SELECT retention_state,cleanup_state FROM intermediate_files WHERE owner_action_id=1").fetchall() == [(2,4),(2,4)]
+        assert owned.connection.execute("SELECT presence_state FROM device_files ORDER BY id").fetchall() == [(2,), (2,)]
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(driver.requests) == 1
     finally:
@@ -121,109 +123,122 @@ async def test_original_storage_controls_full_capture_after_config_change(tmp_pa
     ))
         await capture_handler("camera_take_photo")(1,runtime)
         assert len(driver.requests) == 1
-        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        status, execution = owned.connection.execute(
+            "SELECT status,execution_spec_json FROM actions WHERE id=1").fetchone()
+        assert status == 3
+        spec = json.loads(execution)
+        assert spec["output_storage"] == first
+        assert spec.get("photo_source_policy") == ("deferred" if first == "device" else None)
         rows = owned.connection.execute("SELECT device_file_id,intermediate_file_id FROM outputs").fetchall()
         assert len(rows) == 2
         assert all((row[0] is not None) == (first == "device") for row in rows)
     finally:
         owned.connection.close()
 
-@pytest.mark.parametrize("interruption", ["archive","checksum","finish"])
-@pytest.mark.parametrize("committed", [False,True])
+@pytest.mark.parametrize("interruption", ["file_completion", "finish"])
+@pytest.mark.parametrize("committed", [False, True])
 async def test_device_registration_resumes_original_request_without_camera(tmp_path, monkeypatch, interruption, committed, capture_resources):
-    from camctl.capture import host_photo
     from camctl.contracts.values import ConsistencyError
-    from camctl.persistence.models import DbOutcome,DbOutcomeKind
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.devices.drivers.registry import DriverRegistry
-    cfg,owned,driver,_,_ = await _world(tmp_path,storage="device")
+
+    cfg, owned, driver, _, _ = await _world(tmp_path, storage="device")
     devices = dict(cfg.devices)
     factory = await capture_resources.factory(owned, driver=driver, evidence=_entry(driver).evidence,
         devices=devices, drivers=DriverRegistry((_entry(driver),)), staging=Path(cfg.paths.staging),
         wait_config=lambda _: None, wall_us=lambda: _NOW, monotonic_ns=lambda: 9_000_000_000)
     runtime = await factory(owned)
-    saved_calls=[]
-    first_receipts=[]
-    archive_completed=[]
+    method = "save_file_completion" if interruption == "file_completion" else "finish_capture"
+    original = getattr(CaptureRepository, method)
+    saved_calls = []
+    first_receipts = []
+
+    def interrupted(repository, request, key, current):
+        if (getattr(request, "action_id", 1) != 1 or
+                getattr(request, "file_id", 1) not in (1, 2)):
+            return original(repository, request, key, current)
+        saved_calls.append((request, key))
+        if committed:
+            result = original(repository, request, key, current)
+            assert result.kind is DbOutcomeKind.COMPLETED, result.error
+            first_receipts.append(result)
+        unknown = DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("回执未知"))
+        first_receipts.append(unknown)
+        return unknown
+
+    monkeypatch.setattr(CaptureRepository, method, interrupted)
     try:
-        if interruption == "archive":
-            original=host_photo.archive_capture_file
-            async def interrupted(*args, **kwargs):
-                result = await original(*args, **kwargs)
-                archive_completed.append(result)
-                raise OSError("归档中断")
-            monkeypatch.setattr(host_photo,"archive_capture_file",interrupted)
-        else:
-            method="save_file_checksum" if interruption == "checksum" else "finish_capture"
-            original=getattr(CaptureRepository,method)
-            def interrupted(repository,request,key,owned):
-                if (getattr(request, "action_id", 1) != 1 or
-                        getattr(request, "file_id", 1) not in (1, 2)):
-                    return original(repository,request,key,owned)
-                saved_calls.append((request,key))
-                if committed:
-                    result=original(repository,request,key,owned)
-                    assert result.kind is DbOutcomeKind.COMPLETED,result.error
-                    first_receipts.append(result)
-                unknown = DbOutcome(DbOutcomeKind.UNKNOWN,error=OSError("回执未知"))
-                first_receipts.append(unknown)
-                return unknown
-            monkeypatch.setattr(CaptureRepository,method,interrupted)
-        with pytest.raises((OSError,ConsistencyError)):
-            await capture_handler("camera_take_photo")(1,runtime)
-        assert len(driver.requests)==1
-        if interruption == "archive":
-            # 归档中断不涉及仓储提交，committed 仅区分下面两种保存故障。
-            assert len(archive_completed) == 1
-            assert saved_calls == []
-        else:
-            assert saved_calls
-            assert all(call == saved_calls[0] for call in saved_calls)
-            assert first_receipts[-1].kind is DbOutcomeKind.UNKNOWN
-            assert len(first_receipts) == len(saved_calls) * (2 if committed else 1)
-            initial_key = saved_calls[0][1]
-            assert owned.connection.execute(
-                "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
-                (str(initial_key),)).fetchone() == (int(committed),)
-        paths=[Path(cfg.paths.staging)/r[0] for r in owned.connection.execute("SELECT relative_path FROM intermediate_files")]
-        assert any(p.exists() for p in paths)
+        with pytest.raises(ConsistencyError):
+            await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1
+        assert saved_calls and all(call == saved_calls[0] for call in saved_calls)
+        assert first_receipts[-1].kind is DbOutcomeKind.UNKNOWN
+        assert len(first_receipts) == len(saved_calls) * (2 if committed else 1)
+        request, key = saved_calls[0]
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (int(committed),)
         original_call_count = len(saved_calls)
-        if interruption == "archive":
-            archived, = (path for path in paths if path.exists())
-            before_archive = (archived.read_bytes(), archived.stat().st_ino, archived.stat().st_mtime_ns)
         devices.pop("cam-1")
         runtime = await factory(owned)
-        if interruption == "archive":
-            monkeypatch.setattr(host_photo,"archive_capture_file",original)
-        else:
-            def resumed(repository,request,key,owned):
-                if (getattr(request, "action_id", 1) == 1 and
-                        getattr(request, "file_id", 1) in (1, 2)):
-                    saved_calls.append((request,key))
-                return original(repository,request,key,owned)
-            monkeypatch.setattr(CaptureRepository,method,resumed)
-        await capture_handler("camera_take_photo")(1,runtime)
-        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(3,)
-        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(2,)
-        assert len(driver.requests)==1
-        if interruption == "archive":
-            assert (archived.read_bytes(), archived.stat().st_ino, archived.stat().st_mtime_ns) == before_archive
-        else:
-            first=saved_calls[0]
-            same=[call for call in saved_calls if call[0].__class__ is first[0].__class__ and getattr(call[0],"file_id",None)==getattr(first[0],"file_id",None)]
-            assert len(same) >= 2
-            assert len(same) > original_call_count
-            assert all(call==first for call in same)
-            assert owned.connection.execute(
-                "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
-                (str(first[1]),)).fetchone() == (1,)
+
+        def resumed(repository, current_request, current_key, current):
+            if (getattr(current_request, "action_id", 1) == 1 and
+                    getattr(current_request, "file_id", 1) == getattr(request, "file_id", 1)):
+                saved_calls.append((current_request, current_key))
+            return original(repository, current_request, current_key, current)
+
+        monkeypatch.setattr(CaptureRepository, method, resumed)
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+        assert len(driver.requests) == 1
+        same = [call for call in saved_calls if call[0].__class__ is request.__class__
+                and getattr(call[0], "file_id", None) == getattr(request, "file_id", None)]
+        assert len(same) > original_call_count and all(call == (request, key) for call in same)
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
     finally:
         owned.connection.close()
 
+
+async def test_device_sync_cache_archive_error_preserves_source_and_other_role(tmp_path, monkeypatch):
+    from camctl.host_files import capture_sources
+
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device")
+    link = capture_sources.os.link
+    attempts = []
+
+    def denied(source, destination, *args, **kwargs):
+        if source == "capture.3fr":
+            attempts.append((source, destination))
+            raise PermissionError("同步原图归档被拒绝")
+        return link(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(capture_sources.os, "link", denied)
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(attempts) == 1
+        assert len(driver.requests) == 1
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+        assert owned.connection.execute("SELECT size_bytes,sha256 FROM device_files ORDER BY id").fetchall() == [(None, None)] * 2
+        rows = owned.connection.execute(
+            "SELECT relative_path,size_bytes,sha256,last_error_json FROM intermediate_files ORDER BY id").fetchall()
+        assert rows[0][1:3] == (None, None) and rows[0][3] is not None
+        assert rows[1][1:3] == (len(_PREVIEW), None) and rows[1][3] is None
+        assert (Path(cfg.paths.staging) / rows[1][0]).read_bytes() == _PREVIEW
+        assert (Path(cfg.paths.staging) / "capture-work/1/capture.3fr").read_bytes() == _ORIGINAL
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1
+    finally:
+        owned.connection.close()
+
+
 async def test_cancel_after_reliable_photo_is_rejected_and_retains_device_pair(tmp_path, monkeypatch):
-    from camctl.capture import host_photo
+    from camctl.host_files import capture_sources
     from .test_host_photo_flow import _cancel_through_service
     cfg,owned,driver,runtime,_=await _world(tmp_path,storage="device",cancel_action=True)
-    original=host_photo.archive_capture_file
+    original=capture_sources.archive_photo_sync_cache
     canceled=False
     async def cancel_after_archive(*args, **kwargs):
         nonlocal canceled
@@ -232,9 +247,10 @@ async def test_cancel_after_reliable_photo_is_rejected_and_retains_device_pair(t
             canceled=True
             result = await _cancel_through_service(owned, runtime)
             assert result[0] == 4
-    monkeypatch.setattr(host_photo,"archive_capture_file",cancel_after_archive)
+    monkeypatch.setattr(capture_sources,"archive_photo_sync_cache",cancel_after_archive)
     try:
         await capture_handler("camera_take_photo")(1,runtime)
+        assert canceled
         assert len(driver.requests)==1
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(3,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(2,)
@@ -311,9 +327,9 @@ async def test_device_terminal_replay_after_cleanup_preserves_report_and_history
         photo=next(a for p in document["plans"] for a in p["actions"] if a["action_instance_id"]=="1")
         pair={o["kind"]:o for o in photo["outputs"]}
         assert pair["preview"]["preview_of_output_id"]==pair["original"]["output_id"]
-        for kind,content in (("original",_ORIGINAL),("preview",_PREVIEW)):
-            assert pair[kind]["checksum"]=={"status":"available","sha256":hashlib.sha256(content).hexdigest()}
-            assert pair[kind]["size"]==len(content)
+        for kind in ("original", "preview"):
+            assert pair[kind]["checksum"] == {"status": "not_obtained"}
+            assert "size" not in pair[kind] and "media_type" not in pair[kind]
     finally:
         owned.connection.close()
 
@@ -381,71 +397,23 @@ async def test_device_success_requires_complete_matching_device_pair(tmp_path,mo
                 owned.connection.execute("UPDATE device_files SET locator_json=? WHERE id=2", (json.dumps(locator),))
             owned.connection.commit()
         else:
-            column,value={"role":("role",1),"owner":("source_action_id",None),"complete":("completion_state",1),"support":("checksum_support",1)}[defect]
+            column,value={"role":("role",1),"owner":("source_action_id",None),"complete":("completion_state",1),"support":("checksum_support",2)}[defect]
             # 故障注入制造不一致投影；仓储不得把损坏事实登记为成功。
             owned.connection.execute("PRAGMA ignore_check_constraints=ON")
             owned.connection.execute(f"UPDATE device_files SET {column}=? WHERE id=2",(value,))
             owned.connection.commit()
         monkeypatch.setattr(CaptureRepository, "finish_capture", finish_capture)
+        before = tuple(owned.connection.iterdump())
         result=CaptureRepository().finish_capture(command,new_operation_key(),owned)
-        assert result.kind is DbOutcomeKind.ROLLED_BACK,result
+        assert result.kind is DbOutcomeKind.ROLLED_BACK,(defect, result)
+        assert not owned.connection.in_transaction, defect
+        assert tuple(owned.connection.iterdump()) == before, defect
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(2,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(0,)
         assert owned.connection.execute("SELECT retention_state FROM intermediate_files").fetchall()==[(1,),(1,)]
     finally:
         owned.connection.close()
 
-@pytest.mark.parametrize("after_checksum",[False,True])
-async def test_restart_without_configured_camera_finishes_original_registration(tmp_path,monkeypatch,after_checksum,capture_resources):
-    from dataclasses import replace
-    from camctl.bootstrap.capture_assembly import session_capture_assembly
-    from camctl.capture import host_photo
-    from camctl.devices.drivers.registry import DriverRegistry
-    from camctl.persistence.models import DbOutcomeKind
-    cfg,owned,driver,runtime,_=await _world(tmp_path,storage="device")
-    if after_checksum:
-        original=CaptureRepository.save_file_checksum
-        def interrupted(repository,request,key,current):
-            receipt=original(repository,request,key,current)
-            assert receipt.kind is DbOutcomeKind.COMPLETED,receipt.error
-            return replace(receipt, handoff_error=OSError("摘要保存后会话中断"))
-        monkeypatch.setattr(CaptureRepository,"save_file_checksum",interrupted)
-    else:
-        original=host_photo.archive_capture_file
-        async def interrupted(*args, **kwargs):
-            await original(*args, **kwargs)
-            raise OSError("归档后会话中断")
-        monkeypatch.setattr(host_photo,"archive_capture_file",interrupted)
-    try:
-        with pytest.raises(ConsistencyError if after_checksum else OSError) as interrupted_error:
-            await capture_handler("camera_take_photo")(1,runtime)
-        if after_checksum:
-            assert isinstance(interrupted_error.value.__cause__, OSError)
-            monkeypatch.setattr(CaptureRepository,"save_file_checksum",original)
-        else:
-            monkeypatch.setattr(host_photo,"archive_capture_file",original)
-        owned.connection.close()
-        owned=open_existing(Path(cfg.paths.state_db),DbOpenMode.EXISTING_RW,DbConfig())
-        await capture_resources.restart_database(owned)
-        resumed=(await capture_runtime(
-        owned,
-        driver=driver,
-        evidence=_entry(driver).evidence,
-        devices={},
-        drivers=DriverRegistry(()),
-        staging=Path(cfg.paths.staging),
-        wait_config=lambda _:None,
-        wall_us=lambda:_NOW,
-    ))
-        await capture_handler("camera_take_photo")(1,resumed)
-        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(3,)
-        assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone()==(2,)
-        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(2,)
-        assert len(driver.requests)==1
-        await _maintain(cfg,owned)
-        assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files").fetchall()==[(4,),(4,)]
-    finally:
-        owned.connection.close()
 
 async def test_cleanup_continues_from_unsupported_device_to_local_host_sources(tmp_path):
     from camctl.acceptance.input import ParsedInput
@@ -500,57 +468,12 @@ async def test_cleanup_continues_from_unsupported_device_to_local_host_sources(t
         owned.connection.close()
 
 
-@pytest.mark.parametrize("entry", ["action_event", "output_event"])
-async def test_event_guards_reject_partial_device_pair(tmp_path, entry):
-    """直接事件入口也不能绕过 FinishCapture 的双源约束。"""
-    from camctl.contracts.enums import enum_for
-    from camctl.history.validators import EventValidationError
-    from camctl.persistence.repositories.capture import _action_finish_guard, _output_guard
-    from camctl.persistence.transaction import row_facts
-
-    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device")
-    try:
-        await capture_handler("camera_take_photo")(1, runtime)
-        state = {
-            table: {identity: row_facts(owned.connection, table, identity)
-                    for (identity,) in owned.connection.execute(f"SELECT id FROM {table}")}
-            for table in ("actions", "device_files", "intermediate_files", "outputs", "output_origins")
-        }
-        original = next(row for row in state["outputs"].values()
-                        if row["kind"] == enum_for("outputs.kind").ORIGINAL)
-
-        class Context:
-            state_rows = state
-            transaction_rows = {"outputs": {original["id"]: original}, "output_origins": {}}
-
-            def complete_rows(self, table, column, identity):
-                return {key: row for key, row in state[table].items() if row[column] == identity}
-
-        if entry == "action_event":
-            guard = _action_finish_guard
-            row = SimpleNamespace(
-                table="actions", row_id=1,
-                before=SimpleNamespace(exists=True, values={"cancel_requested": 0}),
-                after=SimpleNamespace(values={"status": enum_for("actions.status").SUCCEEDED}),
-            )
-        else:
-            guard = _output_guard
-            row = SimpleNamespace(
-                table="outputs", row_id=original["id"],
-                before=SimpleNamespace(exists=False), after=SimpleNamespace(values=original),
-            )
-        with pytest.raises(EventValidationError, match="原图.*预览|两份"):
-            guard(SimpleNamespace(rows=(row,), event_type=None, evidence={}), Context())
-    finally:
-        owned.connection.close()
-
-
 @pytest.mark.parametrize("capture_format,camera_name", [("raw", "B9996039.3FR"), ("jpeg", "B9996039.JPG")])
 async def test_device_source_uses_camera_basename_and_full_locator(tmp_path, capture_format, camera_name):
     import asyncio
     from decimal import Decimal
     from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
-    from camctl.devices.read_session import SourceFile
+    from camctl.devices.read_session import DeferredSourceFile
     from camctl.host_files.models import BoundDirectories
     from camctl.operations.models import AttemptTicket
     from camctl.operations.process import LocalExit, RawToolOutcome
@@ -578,7 +501,7 @@ async def test_device_source_uses_camera_basename_and_full_locator(tmp_path, cap
                 self.downloads.append((variant, spec.argv[5]))
                 (Path(spec.argv[7]) / "downloaded.bin").write_bytes(payloads[variant])
                 output = b"downloaded\n"
-            return RawToolOutcome(LocalExit(exit_code=0), output, None, None)
+            return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
 
     try:
         await capture_handler("camera_take_photo")(1, runtime)
@@ -592,12 +515,14 @@ async def test_device_source_uses_camera_basename_and_full_locator(tmp_path, cap
             assert locator["camera_path"] == "/mnt/media/DCIM/" + camera_name
             assert locator["camera_name"] == camera_name
             assert locator["variant"] == variant
-            assert locator["sha256"] == digest == hashlib.sha256(payloads[variant]).hexdigest()
-            source = SourceFile(identity_key, locator, size)
+            assert "sha256" not in locator and size is None and digest is None
+            source = DeferredSourceFile(identity_key, locator)
             session = await downloader.open_read(source, 0, AttemptTicket(1, "read", "22", "read/22", 31), idle_timeout_s=Decimal("10"))
-            chunk = await asyncio.to_thread(session.read_chunk, size)
+            assert session.source_size == len(payloads[variant])
+            chunk = await asyncio.to_thread(session.read_chunk, session.source_size)
             assert chunk.eof and chunk.data == payloads[variant]
-            assert (await session.wait_stopped()).stopped
+            ended = await session.wait_stopped()
+            assert ended.stopped and ended.error is None and ended.bytes_read == len(payloads[variant])
         assert transport.downloads == [("original", camera_name), ("thumbnail", camera_name)]
         assert len(captured_driver.requests) == 1
     finally:
@@ -605,8 +530,64 @@ async def test_device_source_uses_camera_basename_and_full_locator(tmp_path, cap
 
 
 @pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
-@pytest.mark.parametrize("storage", ["host", "device"])
-async def test_photo_recovery_uses_saved_format_and_camera_locator(tmp_path, monkeypatch, capture_format, storage, capture_resources):
+@pytest.mark.parametrize("committed", [False, True])
+async def test_device_cold_resume_preserves_original_source_without_camera(tmp_path, monkeypatch, capture_format, committed, capture_resources):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.devices.drivers.registry import DriverRegistry
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device", capture_format=capture_format)
+    original = CaptureRepository.finish_capture
+    saves = []
+
+    def interrupt(repository, request, key, current):
+        saves.append((request, key))
+        if committed:
+            receipt = original(repository, request, key, current)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("完成事务回执未知"))
+
+    monkeypatch.setattr(CaptureRepository, "finish_capture", interrupt)
+    try:
+        with pytest.raises(ConsistencyError):
+            await capture_handler("camera_take_photo")(1, runtime)
+        assert saves and all(call == saves[0] for call in saves)
+        request, key = saves[0]
+        assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+            (str(key),)).fetchone() == (int(committed),)
+        start_before = owned.connection.execute(
+            "SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id "
+            "WHERE r.responsibility_key='start/1'").fetchone()
+        files_before = owned.connection.execute(
+            "SELECT id,identity_key,locator_json,size_bytes,sha256 FROM device_files ORDER BY id").fetchall()
+        assert len(files_before) == 2 and all(row[3:] == (None, None) for row in files_before)
+        execution_before, = owned.connection.execute("SELECT execution_spec_json FROM actions WHERE id=1").fetchone()
+        assert json.loads(execution_before)["photo_source_policy"] == "deferred"
+        monkeypatch.setattr(CaptureRepository, "finish_capture", original)
+        owned.connection.close()
+        database = await capture_resources.restart_database(Path(cfg.paths.state_db))
+        owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+        resumed = await capture_runtime(database, driver=driver, evidence=_entry(driver).evidence,
+            devices={}, drivers=DriverRegistry(()), staging=Path(cfg.paths.staging),
+            wait_config=lambda _: None, wall_us=lambda: _NOW, monotonic_ns=lambda: 9_000_000_000)
+        await capture_handler("camera_take_photo")(1, resumed)
+        assert owned.connection.execute("SELECT status,execution_spec_json FROM actions WHERE id=1").fetchone() == (3, execution_before)
+        assert owned.connection.execute("SELECT id,identity_key,locator_json,size_bytes,sha256 FROM device_files ORDER BY id").fetchall() == files_before
+        assert owned.connection.execute("SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='start/1'").fetchone() == start_before
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+        assert len(driver.requests) == 1
+        if committed:
+            assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+                (str(key),)).fetchone() == (1,)
+        await capture_handler("camera_take_photo")(1, resumed)
+        assert len(driver.requests) == 1
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+async def test_photo_recovery_uses_saved_format_and_camera_locator(tmp_path, monkeypatch, capture_format, capture_resources):
+    storage = "host"
     from camctl.bootstrap.capture_assembly import session_capture_assembly
     from camctl.capture import host_photo
     from camctl.devices.drivers.registry import DriverRegistry
@@ -670,7 +651,7 @@ async def test_photo_recovery_uses_saved_format_and_camera_locator(tmp_path, mon
 async def test_device_photo_original_file_requests_remain_verifiable_after_copy_cleanup(tmp_path, capture_format, cleanup_state):
     from camctl.contracts.values import new_operation_key
     from camctl.history.host_photo_request import PrepareHostPhoto, parse_host_photo_request
-    from camctl.history.events import branch_of
+    from camctl.history.photo_cache_request import parse_photo_sync_cache_request
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
 
@@ -679,18 +660,20 @@ async def test_device_photo_original_file_requests_remain_verifiable_after_copy_
     try:
         await capture_handler("camera_take_photo")(1, runtime)
         repository = HostCaptureRepository()
-        before = repository.prepare_host_photo(1, _NOW, new_operation_key(), owned)
-        assert before.kind is DbOutcomeKind.COMPLETED, before.error
+        prepared = repository.prepare_host_photo(1, _NOW, new_operation_key(), owned)
+        assert prepared.kind is DbOutcomeKind.COMPLETED, prepared.error
         original_requests = []
         for key, body_json in owned.connection.execute(
                 "SELECT t.operation_key,e.body_json FROM history_transactions t JOIN history_events e ON e.transaction_id=t.id WHERE e.event_type=26 ORDER BY e.id"):
-            body = json.loads(body_json)
-            raw = body["evidence"].get("host_photo_request")
-            if raw is not None:
-                branch, _ = branch_of(26, body["reason"])
-                request_reason = {"CREATE": 1, "HOST_PHOTO_COMPLETE": 2}[branch]
-                original_requests.append((parse_host_photo_request(raw, reason=request_reason), key))
-        assert len(original_requests) == 2
+            evidence = json.loads(body_json)["evidence"]
+            if "host_photo_request" in evidence:
+                original_requests.append((parse_host_photo_request(evidence["host_photo_request"], reason=1), key))
+            elif "photo_sync_cache_request" in evidence:
+                original_requests.append((parse_photo_sync_cache_request(evidence["photo_sync_cache_request"]), key))
+        assert len(original_requests) == 3
+        assert isinstance(original_requests[0][0], PrepareHostPhoto)
+        assert [request.role for request, _ in original_requests[1:]] == ["original", "thumbnail"]
+        assert all(request.archive_error is None for request, _ in original_requests[1:])
         await _advance_photo_copy_cleanup(cfg, owned, cleanup_state)
         expected_cleanup = {"pending": 2, "running": 3, "completed": 4, "failed": 5, "unknown": 6}[cleanup_state]
         assert owned.connection.execute("SELECT retention_state,cleanup_state FROM intermediate_files").fetchall() == [(2, expected_cleanup)] * 2
@@ -699,15 +682,16 @@ async def test_device_photo_original_file_requests_remain_verifiable_after_copy_
         for request, key in original_requests:
             verified = repository.verify_operation(request, key, verification)
             assert verified.kind is DbOutcomeKind.COMPLETED, verified.error
-            assert verified.value == before.value
             if isinstance(request, PrepareHostPhoto):
+                assert verified.value == prepared.value
                 repeated = repository.prepare_host_photo(request.action_id, request.occurred_at, key, owned)
                 fresh = repository.prepare_host_photo(request.action_id, request.occurred_at, new_operation_key(), owned)
             else:
-                repeated = repository.save_host_photo_complete(request, key, owned)
-                fresh = repository.save_host_photo_complete(request, new_operation_key(), owned)
+                assert verified.value == request.file_id
+                repeated = repository.save_photo_sync_cache_complete(request, key, owned)
+                fresh = repository.save_photo_sync_cache_complete(request, new_operation_key(), owned)
             assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
-            assert repeated.value == before.value
+            assert repeated.value == verified.value
             assert fresh.kind is DbOutcomeKind.ROLLED_BACK
         assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions").fetchone() == transaction_count
         assert len(driver.requests) == 1
@@ -769,7 +753,6 @@ async def test_photo_original_requests_reject_released_copies_without_registered
     from dataclasses import replace
     from camctl.capture.media import RecordingFailure
     from camctl.contracts.values import new_operation_key
-    from camctl.history.host_photo_request import HostPhotoComplete
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
@@ -809,14 +792,120 @@ async def test_photo_original_requests_reject_released_copies_without_registered
             if raw is None:
                 continue
             from camctl.history.host_photo_request import parse_host_photo_request
-            request = parse_host_photo_request(raw, reason=2 if "original_file_id" in raw else 1)
+            request = parse_host_photo_request(raw, reason=1)
             assert repository.verify_operation(request, key, owned).kind is DbOutcomeKind.UNKNOWN
-            if isinstance(request, HostPhotoComplete):
-                fresh = repository.save_host_photo_complete(request, new_operation_key(), owned)
-            else:
-                fresh = repository.prepare_host_photo(request.action_id, request.occurred_at, new_operation_key(), owned)
+            fresh = repository.prepare_host_photo(request.action_id, request.occurred_at, new_operation_key(), owned)
             assert fresh.kind is DbOutcomeKind.ROLLED_BACK
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
         assert len(driver.requests) == 1
+    finally:
+        owned.connection.close()
+
+
+
+
+@pytest.mark.parametrize("missing", ["preview", "pair"])
+async def test_device_transaction_rejects_forged_partial_pair(tmp_path, monkeypatch, missing):
+    from contextlib import closing
+    import sqlite3
+    from dataclasses import replace
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+    from camctl.persistence.runtime import OwnedConnection
+    from camctl.persistence.transaction import commit_operation
+    from ..support.output_planning import EventSequence, capture_operation
+
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device")
+    commands = []
+    original = CaptureRepository.finish_capture
+
+    def interrupt(repository, request, key, current):
+        commands.append(request)
+        error = OSError("保存前中断")
+        return DbOutcome(DbOutcomeKind.NOT_EXECUTED, error=error, handoff_error=error)
+
+    monkeypatch.setattr(CaptureRepository, "finish_capture", interrupt)
+    try:
+        with pytest.raises(OSError):
+            await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1 and len(commands) == 1
+        request = commands[0]
+        monkeypatch.setattr(CaptureRepository, "finish_capture", original)
+        proposal = capture_operation(owned, lambda current: original(
+            CaptureRepository(), request, new_operation_key(), current))
+        with closing(sqlite3.connect(":memory:")) as copied:
+            owned.connection.backup(copied)
+            foreign_keys, = owned.connection.execute("PRAGMA foreign_keys").fetchone()
+            copied.execute(f"PRAGMA foreign_keys={foreign_keys}")
+            baseline = commit_operation(EventSequence(proposal.events, proposal), new_operation_key(),
+                                        OwnedConnection(copied, owned.metadata))
+            assert baseline.kind == "completed", baseline.error
+        preview_event, = [event for event in proposal.events if any(
+            row.table == "output_origins" for row in event.rows)]
+        if missing == "preview":
+            forged = tuple(event for event in proposal.events if event is not preview_event)
+        else:
+            forged = tuple(replace(event, rows=tuple(row for row in event.rows if row.table != "output_origins"))
+                           if event is preview_event else event for event in proposal.events)
+        before = tuple(owned.connection.iterdump())
+        from camctl.history.validators import EventValidationError
+        rejected = commit_operation(EventSequence(forged, proposal), new_operation_key(), owned)
+        assert rejected.kind == "rolled_back", rejected.error
+        assert isinstance(rejected.error, EventValidationError)
+        if missing == "preview":
+            assert "正式产物必须恰有原图和预览" in str(rejected.error)
+        else:
+            assert "预览必须唯一关联同动作正式原图" in str(rejected.error)
+        assert not owned.connection.in_transaction
+        assert tuple(owned.connection.iterdump()) == before
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("committed", [False, True])
+async def test_device_sync_cache_unknown_receipt_recovers_original_request_key(tmp_path, monkeypatch, committed):
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+    from camctl.persistence.repositories.host_capture import HostCaptureRepository
+
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device")
+    original_save = HostCaptureRepository.save_photo_sync_cache_complete
+    original_verify = HostCaptureRepository.verify_operation
+    saves, verifies = [], []
+
+    def save(repository, request, key, current):
+        if request.action_id != 1 or request.role != "original":
+            return original_save(repository, request, key, current)
+        saves.append((request, key))
+        if len(saves) == 1:
+            if committed:
+                receipt = original_save(repository, request, key, current)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("同步缓存回执未知"))
+        return original_save(repository, request, key, current)
+
+    def verify(repository, request, key, current):
+        receipt = original_verify(repository, request, key, current)
+        if getattr(request, "role", None) == "original":
+            verifies.append((request, key, receipt.kind))
+        return receipt
+
+    monkeypatch.setattr(HostCaptureRepository, "save_photo_sync_cache_complete", save)
+    monkeypatch.setattr(HostCaptureRepository, "verify_operation", verify)
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1
+        assert len(verifies) == 1 and verifies[0][:2] == saves[0]
+        assert verifies[0][2] is (DbOutcomeKind.COMPLETED if committed else DbOutcomeKind.ROLLED_BACK)
+        assert len(saves) == (1 if committed else 2) and all(item == saves[0] for item in saves)
+        request, key = saves[0]
+        assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+            (str(key),)).fetchone() == (1,)
+        assert request.occurred_at == _NOW
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+        assert owned.connection.execute("SELECT size_bytes,sha256 FROM intermediate_files ORDER BY id").fetchall() == [
+            (len(_ORIGINAL), None), (len(_PREVIEW), None)]
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1 and len(verifies) == 1
     finally:
         owned.connection.close()

@@ -1068,32 +1068,17 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
 async def test_unknown_host_photo_verification_error_retains_original_request_and_recovers(
     tmp_path, monkeypatch, verifier_failure,
 ):
-    from dataclasses import replace
+    import importlib.util
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
-    from ..support import database as database_support
     from ..support.capture import capture_test_session
 
-    closed = []
-    open_database = database_support.open_existing
-
-    class ConnectionClose:
-        def __init__(self, connection, position):
-            self.connection, self.position = connection, position
-
-        def __getattr__(self, name):
-            return getattr(self.connection, name)
-
-        def close(self):
-            self.connection.close()
-            closed[self.position] = True
-
-    def tracked_open(*args, **kwargs):
-        owned = open_database(*args, **kwargs)
-        position = len(closed)
-        closed.append(False)
-        return replace(owned, connection=ConnectionClose(owned.connection, position))
-
-    monkeypatch.setattr(database_support, "open_existing", tracked_open)
+    probe_path = Path(__file__).resolve().parents[5] / "tests/integration/_hbf_readonly_probe.py"
+    spec = importlib.util.spec_from_file_location("hbf_readonly_probe", probe_path)
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    monkeypatch.setattr(sqlite3, "connect", probe.tracked_connect_factory(sqlite3.connect))
+    verifier_connections = []
+    verification_error = OSError("测试仓储核实错误")
     async with capture_test_session():
         _cfg, owned, driver, runtime, _clock = await _world(tmp_path)
         real = HostCaptureRepository()
@@ -1118,9 +1103,11 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
 
             def verify_operation(self, request, key, verifier):
                 self.verified.append((request, key))
+                assert isinstance(verifier.connection, probe.TrackedConnection)
+                verifier_connections.append(verifier.connection)
                 if self.fail_verification:
                     if verifier_failure == "raises":
-                        raise OSError("测试仓储核实错误")
+                        raise verification_error
                     return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("核实仍未知"))
                 return self.delegate.verify_operation(request, key, verifier)
 
@@ -1130,8 +1117,10 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
                     ("save_host_photo_complete", "verify_operation"),
                     matches=lambda _name, args, _kwargs: args[0].action_id == 1):
                 expected_error = ConsistencyError if verifier_failure == "unknown" else OSError
-                with pytest.raises(expected_error):
+                with pytest.raises(expected_error) as captured:
                     await capture_handler("camera_take_photo")(1, runtime)
+                if verifier_failure == "raises":
+                    assert captured.value is verification_error
             assert len(driver.requests) == 1
             assert len(uncertain.saved) == len(uncertain.verified) == 1
             assert uncertain.saved[0] == uncertain.verified[0]
@@ -1156,7 +1145,7 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
             assert len(_saved_output_rows(owned)) == 2
         finally:
             owned.connection.close()
-    assert len(closed) >= 3 and all(closed)
+    assert verifier_connections and all(connection.closed_by_owner for connection in verifier_connections)
 
 
 async def test_v1_metadata_rejects_host_photo_before_grant_or_workspace(tmp_path, capture_resources):

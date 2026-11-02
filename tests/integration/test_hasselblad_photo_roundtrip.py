@@ -561,6 +561,7 @@ class PhotoWorld:
                                       for item in self.case.settings_argv if item[0] == "set"]],
                     "steps": [*[item[0] for item in self.case.settings_argv
                                 if item[0] in ("focus", "autofocus")], "capture"],
+                    "camera_identity": {"serial": "H8B-SERIAL", "product_id": 10},
                     "camera_name": "camera-copy" + extension,
                     "camera_path": "/CAMERA/DCIM/100HASSELBL/camera-copy" + extension,
                     "artifacts": {}}
@@ -787,8 +788,15 @@ def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_d
             assert [row["locator_json"] for row in _rows(world.deployment.state_db,
                     "SELECT locator_json FROM device_files WHERE source_action_id=? ORDER BY role", (action_id,))] == world.frozen_locators
         if case.capture_format == "jpeg" and case.shutter == "1/4000":
-            assert outputs["original"]["media_type"] == outputs["preview"]["media_type"] == "image/jpeg"
-            assert outputs["original"]["checksum"] == outputs["preview"]["checksum"]
+            if case.source == "host":
+                assert outputs["original"]["media_type"] == outputs["preview"]["media_type"] == "image/jpeg"
+                assert outputs["original"]["checksum"] == outputs["preview"]["checksum"]
+            else:
+                assert all("media_type" not in outputs[role] for role in ("original", "preview"))
+                assert all(outputs[role]["checksum"] == {"status": "not_obtained"}
+                           for role in ("original", "preview"))
+                assert world.original_bytes == world.preview_bytes
+                assert deliveries[0]["sha256"] == deliveries[1]["sha256"]
         world.assert_upload_and_ack(deliveries)
         history_after = world.observe_history("after", world.history_before)
         before = json.loads(world.history_before.read_text(), parse_float=Decimal)
@@ -957,8 +965,8 @@ def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, inst
         assert before['result_event_id'] is not None and before['result_json'] is not None
         result = json.loads(before['result_json'])
         assert [row['type'] for row in result['observations']] == ['photo_taken', 'hasselblad_start_entered']
-        assert all(row['version'] == 1 and row['data']['activity_id'] == str(target['activity_id'])
-                   for row in result['observations'])
+        assert [row['version'] for row in result['observations']] == [2 if case.source == 'device' else 1, 1]
+        assert all(row['data']['activity_id'] == str(target['activity_id']) for row in result['observations'])
         event, = _rows(world.deployment.state_db, 'SELECT * FROM history_events WHERE id=?', (before['result_event_id'],))
         transaction, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (event['transaction_id'],))
         assert transaction['operation_key'] == marker['operation_key']
@@ -1008,10 +1016,22 @@ def test_installed_hasselblad_complete_commit_receipt_loss_reuses_request(tmp_pa
         assert (transaction['id'], transaction['last_event_id']) == (saved['boundary']['txn_id'], saved['boundary']['last_event_id'])
         files = _rows(world.deployment.state_db, 'SELECT * FROM intermediate_files WHERE owner_action_id=? ORDER BY purpose', (target['action_id'],))
         assert len(files) == 2
-        for file, prefix in zip(files, ('original','preview'), strict=True):
-            assert file['id'] == saved['request'][prefix+'_file_id']
-            assert file['size_bytes'] == saved['request'][prefix+'_size_bytes']
-            assert file['sha256'] == saved['request'][prefix+'_sha256']
+        if case.source == 'host':
+            assert saved['kind'] == 'host_complete'
+            for file, prefix in zip(files, ('original','preview'), strict=True):
+                assert file['id'] == saved['request'][prefix+'_file_id']
+                assert file['size_bytes'] == saved['request'][prefix+'_size_bytes']
+                assert file['sha256'] == saved['request'][prefix+'_sha256']
+        else:
+            assert saved['kind'] == 'sync_cache' and saved['request']['role'] == 'original'
+            assert files[0]['id'] == saved['request']['file_id']
+            assert files[0]['size_bytes'] == saved['request']['size_bytes'] == len(world.original_bytes)
+            assert files[1]['size_bytes'] == len(world.preview_bytes)
+            assert all(file['sha256'] is None for file in files)
+            device_files = _rows(world.deployment.state_db,
+                'SELECT id,size_bytes,sha256 FROM device_files WHERE source_action_id=? ORDER BY role', (target['action_id'],))
+            assert len(device_files) == 2 and saved['request']['device_file_id'] == device_files[0]['id']
+            assert all(file['size_bytes'] is None and file['sha256'] is None for file in device_files)
         assert len(_rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],))) == 2
         assert len(_rows(world.deployment.state_db, 'SELECT oo.id FROM output_origins oo JOIN outputs o ON o.id=oo.output_id WHERE o.source_action_id=?', (target['action_id'],))) == 1
         world.assert_precision_and_sources(report_path, capture)

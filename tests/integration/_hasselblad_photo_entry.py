@@ -60,7 +60,7 @@ def _assert_steps(result, steps, expected_steps, expected):
         assert step["transport_error"] is None and step["output_failure"] is None and step["signal_failures"] == []
         if step["name"] in ("focus", "autofocus"):
             assert step["lens_operation_returned"] is True
-        if step["name"] == "capture" and "camera_name" in expected:
+        if step["name"] == "capture" and "camera_name" in expected and expected.get("source", "host") == "host":
             assert step["files"] == [{"host_name": expected["artifacts"][role]["original_name"],
                                       "size_bytes": expected["artifacts"][role]["size_bytes"],
                                       "media_type": expected["artifacts"][role]["media_type"]}
@@ -84,11 +84,26 @@ def _assert_steps(result, steps, expected_steps, expected):
 def _assert_start_result(attempt, raw, target, expected):
     result, ticket = _validated_control_result(attempt, raw, target)
     assert [item["type"] for item in result["observations"]] == ["photo_taken", "hasselblad_start_entered"]
-    for observation in result["observations"]:
-        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
-    photo = result["observations"][0]["data"]
-    for role in ("original", "preview"):
-        assert photo[role] == expected["artifacts"][role], ("原角色字节身份不符", role)
+    photo_observation, entered = result["observations"]
+    assert entered["version"] == 1 and entered["data"]["activity_id"] == str(target["activity_id"])
+    assert photo_observation["version"] == (2 if expected.get("source", "host") == "device" else 1)
+    photo = photo_observation["data"]
+    assert photo["activity_id"] == str(target["activity_id"])
+    if expected.get("source", "host") == "device":
+        assert photo["camera_identity"] == expected["camera_identity"]
+        assert photo["camera_locator"] == {"status": "path", "camera_name": expected["camera_name"],
+                                            "camera_path": expected["camera_path"]}
+        assert photo["prepared_by"] == expected["prepared_by"]
+        for role in ("original", "preview"):
+            artifact = expected["artifacts"][role]
+            saved = photo[role]
+            assert saved["host_name"] == artifact["original_name"]
+            assert Path(saved["host_path"]).name == saved["host_name"]
+            assert saved["size"] == artifact["size_bytes"] and saved["media_type"] == artifact["media_type"]
+            assert photo[role + "_error"] is None
+    else:
+        for role in ("original", "preview"):
+            assert photo[role] == expected["artifacts"][role], ("原角色字节身份不符", role)
     steps = photo["steps"]
     assert expected["steps"].count("capture") == 1
     streams = _assert_steps(result, steps, expected["steps"], expected)
@@ -153,7 +168,9 @@ def _history_facts(database, request, expected, original=None):
                               "responsibility_key": preparation_run["responsibility_key"]}
         preparation = _assert_preparation_result(preparation_attempt, preparation_attempt["result_json"],
                                                  preparation_target, expected)
-        start = _assert_start_result(attempt, attempt["result_json"], target, expected)
+        start = _assert_start_result(attempt, attempt["result_json"], target, {
+            **expected, "prepared_by": {"run_id": preparation_run["id"],
+                                       "attempt_no": preparation_attempt["attempt_no"]}})
         files = [dict(row) for row in connection.execute(
             "SELECT * FROM intermediate_files WHERE owner_action_id=? AND purpose IN (?,?) ORDER BY purpose",
             (action["id"], int(enum_for("intermediate_files.purpose").CAPTURE_ORIGINAL),
@@ -162,23 +179,41 @@ def _history_facts(database, request, expected, original=None):
             "SELECT * FROM outputs WHERE source_action_id=? ORDER BY kind", (action["id"],))]
         assert len(files) == len(outputs) == 2
         complete = []
-        for event in connection.execute("SELECT id,body_json FROM history_events WHERE json_extract(body_json,'$.evidence.host_photo_request.action_id')=?", (action["id"],)):
-            raw = parse_exact_json(event["body_json"])["evidence"]["host_photo_request"]
-            if "original_file_id" not in raw:
-                continue
-            saved = parse_host_photo_request(raw, reason=2)
-            assert saved.original_file_id == files[0]["id"] and saved.preview_file_id == files[1]["id"]
-            for role in ("original", "preview"):
-                assert getattr(saved, role + "_size_bytes") == expected["artifacts"][role]["size_bytes"]
-                assert getattr(saved, role + "_sha256") == expected["artifacts"][role]["sha256"]
-            complete.append((event["id"], raw))
-        assert len(complete) == 1
+        if expected["source"] == "host":
+            for event in connection.execute("SELECT id,body_json FROM history_events WHERE json_extract(body_json,'$.evidence.host_photo_request.action_id')=?", (action["id"],)):
+                raw = parse_exact_json(event["body_json"])["evidence"]["host_photo_request"]
+                if "original_file_id" not in raw:
+                    continue
+                saved = parse_host_photo_request(raw, reason=2)
+                assert saved.original_file_id == files[0]["id"] and saved.preview_file_id == files[1]["id"]
+                for role in ("original", "preview"):
+                    assert getattr(saved, role + "_size_bytes") == expected["artifacts"][role]["size_bytes"]
+                    assert getattr(saved, role + "_sha256") == expected["artifacts"][role]["sha256"]
+                complete.append((event["id"], raw))
+            assert len(complete) == 1
+        else:
+            from camctl.history.photo_cache_request import parse_photo_sync_cache_request
+            for event in connection.execute("SELECT id,body_json FROM history_events WHERE json_extract(body_json,'$.evidence.photo_sync_cache_request.action_id')=? ORDER BY id", (action["id"],)):
+                raw = parse_exact_json(event["body_json"])["evidence"]["photo_sync_cache_request"]
+                saved = parse_photo_sync_cache_request(raw)
+                index = {"original": 0, "thumbnail": 1}[saved.role]
+                role = ("original", "preview")[index]
+                assert saved.file_id == files[index]["id"] and saved.start_result_event_id == attempt["result_event_id"]
+                assert saved.host_name == expected["artifacts"][role]["original_name"]
+                assert saved.size_bytes == expected["artifacts"][role]["size_bytes"] and saved.archive_error is None
+                complete.append((event["id"], raw))
+            assert len(complete) == 2 and [item[1]["role"] for item in complete] == ["original", "thumbnail"]
         derived = {"start_result": _event_boundary(connection, attempt["result_event_id"]),
-                   "files_complete": _event_boundary(connection, complete[0][0]),
                    "outputs_registered": _event_boundary(connection, outputs[0]["created_event_id"])}
         assert _event_boundary(connection, outputs[1]["created_event_id"]) == derived["outputs_registered"]
         derived["start_result"]["event_ids"] = [attempt["result_event_id"]]
-        derived["files_complete"]["event_ids"] = [complete[0][0]]
+        if expected["source"] == "host":
+            derived["files_complete"] = _event_boundary(connection, complete[0][0])
+            derived["files_complete"]["event_ids"] = [complete[0][0]]
+        else:
+            for index, phase in enumerate(("sync_original", "sync_thumbnail")):
+                derived[phase] = _event_boundary(connection, complete[index][0])
+                derived[phase]["event_ids"] = [complete[index][0]]
         derived["outputs_registered"]["event_ids"] = [row["created_event_id"] for row in outputs]
         entities = [{"entity": "plan", "id": plan["id"], "table": "plans", "created_event_id": plan["created_event_id"]},
                     {"entity": "action", "id": action["id"], "table": "actions", "created_event_id": action["created_event_id"]}]
@@ -215,7 +250,10 @@ def _history_facts(database, request, expected, original=None):
             historical = action_rows[("actions", action["id"])]
             assert historical["input_fields_json"]["params"] == parse_exact_json(expected["params_text"])
             assert historical["effective_params_json"] == parse_exact_json(expected["params_text"])
-            assert historical["execution_spec_json"] == {"output_storage": expected["source"], "start_call_timeout_s": 180}
+            spec = {"output_storage": expected["source"], "start_call_timeout_s": 180}
+            if expected["source"] == "device":
+                spec["photo_source_policy"] = "deferred"
+            assert historical["execution_spec_json"] == spec
             for table, row in (("operation_runs", run), ("operation_attempts", attempt), ("device_activities", activity)):
                 assert (table, row["id"]) in action_rows
             saved_attempt = action_rows[("operation_attempts", attempt["id"])]
@@ -235,33 +273,39 @@ def _history_facts(database, request, expected, original=None):
             assert saved_preparation["result_json"] == parse_exact_json(preparation_attempt["result_json"])
             for index, role in enumerate(("original", "preview")):
                 file_rows = image[f"intermediate_file/{files[index]['id']}"]
-                completed = h.last_event_id >= boundaries["files_complete"]["last_event_id"]
+                completion_phase = ("files_complete" if expected["source"] == "host" else
+                                    ("sync_original" if index == 0 else "sync_thumbnail"))
+                completed = h.last_event_id >= boundaries[completion_phase]["last_event_id"]
                 assert file_rows or not completed, "完成事务 H 缺少原捕获文件"
                 if file_rows:
                     file = next(row["values"] for row in file_rows if row["table"] == "intermediate_files")
                     assert file["owner_action_id"] == action["id"] and file["purpose"] == files[index]["purpose"]
                     assert file["relative_path"] == files[index]["relative_path"]
                     assert file["size_bytes"] == (expected["artifacts"][role]["size_bytes"] if completed else None)
-                    assert file["sha256"] == (expected["artifacts"][role]["sha256"] if completed else None)
+                    assert file["sha256"] == (expected["artifacts"][role]["sha256"]
+                                              if completed and expected["source"] == "host" else None)
                 output_rows = image[f"output/{outputs[index]['id']}"]
                 if not output_rows:
                     continue
                 output = next(row["values"] for row in output_rows if row["table"] == "outputs")
                 assert output["source_action_id"] == action["id"] and output["kind"] == int(enum_for("outputs.kind")[role.upper()])
-                assert output["media_type"] == expected["artifacts"][role]["media_type"]
-                assert output["original_name"] == expected["artifacts"][role]["original_name"]
                 if expected["source"] == "host":
+                    assert output["media_type"] == expected["artifacts"][role]["media_type"]
+                    assert output["original_name"] == expected["artifacts"][role]["original_name"]
                     assert output["intermediate_file_id"] == files[index]["id"] and output["device_file_id"] is None
                 else:
                     assert len(device_files) == 2 and output["device_file_id"] == device_files[index]["id"] and output["intermediate_file_id"] is None
                     device = next(row["values"] for row in image[f"device_file/{device_files[index]['id']}"] if row["table"] == "device_files")
                     locator = device["locator_json"]
-                    assert locator == {"camera_path": expected["camera_path"], "camera_name": expected["camera_name"],
-                                       "variant": "original" if index == 0 else "thumbnail", "sha256": expected["artifacts"][role]["sha256"]}
-                    assert device["size_bytes"] == expected["artifacts"][role]["size_bytes"]
-                    assert device["sha256"] == expected["artifacts"][role]["sha256"]
-                    assert device["original_name"] == expected["artifacts"][role]["original_name"]
-                    assert device["media_type"] == expected["artifacts"][role]["media_type"]
+                    assert locator == {"serial": expected["camera_identity"]["serial"],
+                                       "product_id": expected["camera_identity"]["product_id"],
+                                       "activity_id": str(activity["id"]),
+                                       "camera_path": expected["camera_path"], "camera_name": expected["camera_name"],
+                                       "variant": "original" if index == 0 else "thumbnail"}
+                    assert device["size_bytes"] is None and device["sha256"] is None
+                    assert device["media_type"] is None and output["media_type"] is None
+                    name = expected["camera_name"] + (".thumbnail.jpg" if index else "")
+                    assert device["original_name"] == output["original_name"] == name
                     assert device["role"] == int(enum_for("device_files.role")[role.upper()])
                     assert device["original_device_file_id"] == (None if index == 0 else device_files[0]["id"])
                 if index:
@@ -270,7 +314,8 @@ def _history_facts(database, request, expected, original=None):
             restored[phase] = image
         return {"identity": target, "boundaries": boundaries, "entities": entities,
                 "start": start, "preparation": preparation,
-                "complete_request": complete[0][1], "snapshots": restored}
+                "complete_request": (complete[0][1] if expected["source"] == "host"
+                                     else [item[1] for item in complete]), "snapshots": restored}
     finally:
         connection.close()
 
@@ -484,18 +529,19 @@ def _install_fault(root: Path, fault: str):
         from _hbf_readonly_probe import TrackedConnection, main_database_readonly, tracked_connect_factory
         sqlite3.connect = tracked_connect_factory(sqlite3.connect)
         real_save = HostCaptureRepository.save_host_photo_complete
+        real_sync_save = HostCaptureRepository.save_photo_sync_cache_complete
         real_verify = HostCaptureRepository.verify_operation
         write_connections = {}
 
-        def save(self, request, key, owned):
-            result = real_save(self, request, key, owned)
+        def save_with(real, kind, self, request, key, owned):
+            result = real(self, request, key, owned)
             target = _target(root, owned.connection)
             if (target is not None and request.action_id == target["action_id"]
                     and result.kind is DbOutcomeKind.COMPLETED and _once(root, "complete-commit")):
                 assert not owned.connection.in_transaction
                 write_connections[str(key)] = owned.connection
                 _write(root, "complete-commit", {
-                    "request": asdict(request), "operation_key": str(key), "target": target,
+                    "request": asdict(request), "operation_key": str(key), "target": target, "kind": kind,
                     "boundary": asdict(result.boundary), "in_transaction": owned.connection.in_transaction,
                     "write_connection": id(owned.connection), "returned_receipt": "unknown",
                 })
@@ -524,7 +570,14 @@ def _install_fault(root: Path, fault: str):
                 "returned_receipt": result.kind.value,
             })
             return result
+        def save(self, request, key, owned):
+            return save_with(real_save, "host_complete", self, request, key, owned)
+
+        def save_sync(self, request, key, owned):
+            return save_with(real_sync_save, "sync_cache", self, request, key, owned)
+
         HostCaptureRepository.save_host_photo_complete = save
+        HostCaptureRepository.save_photo_sync_cache_complete = save_sync
         HostCaptureRepository.verify_operation = verify
     elif fault == "report-before-publish":
         from camctl.persistence.repositories.history import HistoryRepository
