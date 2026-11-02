@@ -139,7 +139,7 @@ async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,p
             task=asyncio.create_task(capture_handler('camera_take_photo')(1,runtime))
             await asyncio.wait_for(transport.entered.wait(),1)
         elif hb_state=='unknown':
-            grant_unknown(owned,runtime)
+            grant_unknown(owned,runtime,config=cfg)
         target={'plan_instance_id':'1',**({'group':'g'} if address_kind=='group' else {})}
         origin,repository=await accept_origin(cfg,owned,runtime,target)
         expected=[(1,1,1),(2,1,1),(4,2,1)] if address_kind=='group' else [(1,1,1),(2,1,1),(3,1,1),(4,3,1)]

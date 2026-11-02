@@ -81,7 +81,7 @@ async def test_fixed_repository_accepts_reliable_original_link_source(tmp_path,m
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'terminal' if state=='terminal' else 'ready',monkeypatch)
     try:
         origin=3
-        if state=='blocked': save_blocked(owned,runtime)
+        if state=='blocked': save_blocked(owned,runtime,config=cfg)
         if state=='canceled':
             await cancel(cfg,runtime)
             origin,repository=await accept_origin(cfg,owned,runtime,{'action_instance_id':'1'})
@@ -168,7 +168,7 @@ async def test_mixed_composite_sources_keep_each_previews_own_source(tmp_path,mo
         task=asyncio.create_task(capture_handler('camera_take_photo')(1,runtime))
         await asyncio.wait_for(transport.entered.wait(),1)
     else:
-        grant_unknown(owned,runtime)
+        grant_unknown(owned,runtime,config=cfg)
     try:
         origin,repository=await accept_origin(cfg,owned,runtime,{'plan_instance_id':'1','group':'g'})
         permit=runtime.start_entries.reserve(owned.metadata.instance_id,2,no_intent=True)
@@ -221,7 +221,7 @@ async def test_independent_guard_accepts_reliable_preceding_original_source(tmp_
     from camctl.persistence.repositories import cancellation as module
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'terminal' if state=='terminal' else 'ready',monkeypatch)
     try:
-        if state=='blocked': save_blocked(owned,runtime)
+        if state=='blocked': save_blocked(owned,runtime,config=cfg)
         event,context=bare_context(owned,runtime)
         validate_event(event,context)
     finally:

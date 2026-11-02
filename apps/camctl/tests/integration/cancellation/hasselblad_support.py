@@ -27,11 +27,11 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.capture import CaptureRepository, ActivityObservationSave
-from camctl.persistence.repositories.scheduling import SchedulingRepository, GrantRequest
+from camctl.persistence.repositories.scheduling import SchedulingRepository, GrantRequest, GrantOutcome
 from camctl.persistence.transaction import row_facts
 from camctl.scheduling.rules import LaunchWindow
 
-from ..capture.test_host_photo_flow import _world, _input_time, _ManagedCaptureTransport
+from ..capture.test_host_photo_flow import _world, _input_time, _ManagedCaptureTransport, _configured_identity
 from ..support.acceptance import accept_document
 from ..support.database import database_path
 
@@ -73,22 +73,24 @@ def action(owned, identity):
     return row_facts(owned.connection, "actions", identity)
 
 
-def grant_unknown(owned, runtime, identity=1):
+def grant_unknown(owned, runtime, identity=1, *, config):
     """冷会话只有已提交 START 意图，没有该会话的入口许可。"""
     source = action(owned, identity)
     now = runtime.wall_us()
     saved = SchedulingRepository().grant_start(GrantRequest(
         source["device_id"], identity,
         LaunchWindow(source["scheduled_at"], source["scheduled_at"] + source["max_delay_ms"] * 1000),
-        now, AttemptConfig(1, Decimal(180)), now), new_operation_key(), owned)
+        now, AttemptConfig(1, Decimal(180)), now,
+        current_identity=_configured_identity(config)), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    assert saved.value.outcome is GrantOutcome.GRANTED, saved.value.reason
     assert saved.value.ticket is not None
     return saved.value.ticket
 
 
-def save_blocked(owned, runtime):
+def save_blocked(owned, runtime, *, config):
     """存储契约夹具：原 START 票据可靠保存未派发依据与活动观察。"""
-    ticket = grant_unknown(owned, runtime)
+    ticket = grant_unknown(owned, runtime, config=config)
     outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
         settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue.of(PREVENTED)),
         error=ErrorValue("canceled", "dispatch"))
@@ -132,9 +134,9 @@ async def world(tmp_path, state, monkeypatch=None, *, photo_group=None):
             await runtime.database.read(lambda db: db.connection.set_authorizer(None))
         assert action(owned, 1)["status"] == 2
     elif state == "unknown":
-        grant_unknown(owned, runtime)
+        grant_unknown(owned, runtime, config=cfg)
     elif state == "blocked":
-        save_blocked(owned, runtime)
+        save_blocked(owned, runtime, config=cfg)
     elif state != "ready":
         raise ValueError(state)
     repository = CancellationRepository()
