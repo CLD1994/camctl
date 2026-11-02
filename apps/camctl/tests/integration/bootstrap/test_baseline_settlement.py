@@ -29,10 +29,27 @@ from ..acceptance.test_acceptance import _plan_body
 from ..acceptance.test_adb_camera_definitions import _catalog, _params
 from ..capture.test_baseline_prepare import Directory
 from ..capture.test_record_segment_scope_recovery import SegmentWaitCatalog
-from ..scheduling.test_start_action import _SCHEDULED, _accept_plan, owned
+from ..scheduling.test_start_action import _SCHEDULED, _accept_plan
 from ..support.bootstrap_capture_cases import bootstrap_case, SavedBoundary
+from ..support.session import session_config
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture
+def owned(tmp_path):
+    from pathlib import Path
+    from camctl.persistence.initialization import initialize_state, InitOutcome
+    from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
+
+    config = session_config(tmp_path)
+    path = Path(config.paths.state_db)
+    assert initialize_state(config, path).outcome is InitOutcome.CREATED
+    connection = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        yield connection
+    finally:
+        connection.connection.close()
 
 
 @pytest_asyncio.fixture(autouse=True)
