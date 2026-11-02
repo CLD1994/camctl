@@ -1,0 +1,1874 @@
+{
+  "schema_version": 1,
+  "phase": "失败测试的公开契约重构与实际故障分类",
+  "production_subtree": "6245f669a10e4cd990aa5c386a2144686f852b81",
+  "code_checkpoint": "1814642f2e3ad8d7a63f993ed2d16868dfa4d561",
+  "runs": {
+    "prior/installed-file-shards3": {
+      "source": {
+        "root": "/tmp/camctl-failure-refactor-20261031/device-photo",
+        "head": "5fb538aa98226fd3610f0e957f84e95557922822",
+        "status": "",
+        "snapshot_sha256": "627b77d2e46111201e9c62e99d6d9b42f8ec0531298fe70ecbd3c8b4b4e2e15f"
+      },
+      "scope": "root",
+      "selection": [
+        "tests/integration/test_hasselblad_photo_roundtrip.py"
+      ],
+      "status": "finished",
+      "exit_code": 1,
+      "wall_seconds": 824.7753474900019,
+      "cases": 29,
+      "passed": 26,
+      "failed": 3,
+      "skipped": 0
+    },
+    "prior/installed-start-device-final": {
+      "source": {
+        "root": "/tmp/camctl-failure-refactor-20261031/device-photo",
+        "head": "4b47132b5be00211702e680de271e25f40d6e763",
+        "status": "",
+        "snapshot_sha256": "38947ef25bb240ceb7c1785498128fb5fa1e61bb2ffb34863b2a957e8057c201"
+      },
+      "scope": "root",
+      "selection": [
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[raw-device-1-3000]"
+      ],
+      "status": "finished",
+      "exit_code": 0,
+      "wall_seconds": 118.85566876200028,
+      "cases": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "prior/installed-device-fault": {
+      "source": {
+        "root": "/tmp/camctl-failure-refactor-20261031/device-photo",
+        "head": "81a1fff0b8a1e034dc3f3a5cf236e079289c7bbc",
+        "status": "M apps/camctl/tests/integration/capture/test_device_photo_flow.py\n M apps/camctl/tests/integration/capture/test_host_photo_flow.py\n M tests/integration/_hasselblad_photo_entry.py\n M tests/integration/test_hasselblad_photo_roundtrip.py",
+        "snapshot_sha256": "0f205fa862c95c791e98123124dcdaa71e459cf09dd5aaf0158137c9783754c6"
+      },
+      "scope": "root",
+      "selection": [
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-1-3000]"
+      ],
+      "status": "finished",
+      "exit_code": 1,
+      "wall_seconds": 45.276433314000315,
+      "cases": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0
+    },
+    "prior/installed-device-first": {
+      "source": {
+        "root": "/tmp/camctl-failure-refactor-20261031/device-photo",
+        "head": "81a1fff0b8a1e034dc3f3a5cf236e079289c7bbc",
+        "status": "M apps/camctl/tests/integration/capture/test_device_photo_flow.py\n M apps/camctl/tests/integration/capture/test_host_photo_flow.py\n M tests/integration/_hasselblad_photo_entry.py\n M tests/integration/test_hasselblad_photo_roundtrip.py",
+        "snapshot_sha256": "52e3589984fa514913f0ae5010afb3915a724940f86bf09175650c27858c483d"
+      },
+      "scope": "root",
+      "selection": [
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-1-1500]"
+      ],
+      "status": "finished",
+      "exit_code": 0,
+      "wall_seconds": 85.57253420599955,
+      "cases": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "prior/installed-jpeg-device": {
+      "source": {
+        "root": "/tmp/camctl-failure-refactor-20261031/device-photo",
+        "head": "81a1fff0b8a1e034dc3f3a5cf236e079289c7bbc",
+        "status": "M apps/camctl/tests/integration/capture/test_device_photo_flow.py\n M apps/camctl/tests/integration/capture/test_host_photo_flow.py\n M tests/integration/_hasselblad_photo_entry.py\n M tests/integration/test_hasselblad_photo_roundtrip.py",
+        "snapshot_sha256": "b31bea394a192b578a6bd4998945c3f702727b118c566bbf61eb9d5de39b56f4"
+      },
+      "scope": "root",
+      "selection": [
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-1-4000]"
+      ],
+      "status": "finished",
+      "exit_code": 0,
+      "wall_seconds": 120.12546040399684,
+      "cases": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "combined-e86f19ca": {
+      "source": {
+        "root": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "head": "e86f19caf39eca2eed9e8c7999989c9fcf270421",
+        "status": "",
+        "snapshot_sha256": "b26d9b2dd09781fec8c880d80b637b108239e5b7a6580d92bf337d0bd34e8949"
+      },
+      "scope": "camctl",
+      "selection": [
+        "apps/camctl/tests/integration/bootstrap/test_baseline_settlement.py",
+        "apps/camctl/tests/integration/bootstrap/test_binding_canceled_result_transactions.py",
+        "apps/camctl/tests/integration/bootstrap/test_binding_canceled_results.py",
+        "apps/camctl/tests/integration/bootstrap/test_binding_changes.py",
+        "apps/camctl/tests/integration/bootstrap/test_binding_failure_retained_files.py",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_origin_resume.py",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_ready_runtime.py::test_cancel_published_delivery_uses_actual_withdrawal_result",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_ready_runtime.py::test_default_session_cancel_waits_for_actual_withdrawal_and_saves_it",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_ready_runtime.py::test_ready_disappears_during_actual_withdrawal_uses_new_reliable_position",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_ready_transactions.py",
+        "apps/camctl/tests/integration/bootstrap/test_capture_call_session_state.py",
+        "apps/camctl/tests/integration/bootstrap/test_capture_cancel_after_call.py",
+        "apps/camctl/tests/integration/bootstrap/test_capture_device_rounds.py",
+        "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py",
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py",
+        "apps/camctl/tests/integration/bootstrap/test_file_fact_consumers.py",
+        "apps/camctl/tests/integration/bootstrap/test_foreground_error_scopes.py",
+        "apps/camctl/tests/integration/bootstrap/test_log_copy_diagnostics.py",
+        "apps/camctl/tests/integration/bootstrap/test_media_assembly.py",
+        "apps/camctl/tests/integration/bootstrap/test_media_cancel_save_order.py",
+        "apps/camctl/tests/integration/bootstrap/test_obtain_flow.py",
+        "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+        "apps/camctl/tests/integration/bootstrap/test_read_finish_time.py",
+        "apps/camctl/tests/integration/bootstrap/test_read_held_end_required_digest.py",
+        "apps/camctl/tests/integration/bootstrap/test_recording_stop.py",
+        "apps/camctl/tests/integration/bootstrap/test_report_diagnostic_ownership.py",
+        "apps/camctl/tests/integration/bootstrap/test_residual_binding.py",
+        "apps/camctl/tests/integration/bootstrap/test_residual_binding_transactions.py",
+        "apps/camctl/tests/integration/bootstrap/test_residual_result_transactions.py",
+        "apps/camctl/tests/integration/bootstrap/test_residual_winddown.py",
+        "apps/camctl/tests/integration/bootstrap/test_restricted_winddown.py",
+        "apps/camctl/tests/integration/bootstrap/test_result_error_flow.py",
+        "apps/camctl/tests/integration/bootstrap/test_result_page_saves.py",
+        "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py::test_cancel_during_local_drain_withdraws_queued_startup_sweep",
+        "apps/camctl/tests/integration/bootstrap/test_timelapse_finish.py",
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py",
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+        "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+        "apps/camctl/tests/integration/cancellation/test_target_types.py",
+        "apps/camctl/tests/integration/capture/test_baseline_read_owner.py",
+        "apps/camctl/tests/integration/capture/test_call_result_save.py",
+        "apps/camctl/tests/integration/capture/test_capture_completion_save_recovery.py",
+        "apps/camctl/tests/integration/capture/test_capture_contract.py",
+        "apps/camctl/tests/integration/capture/test_device_photo_flow.py",
+        "apps/camctl/tests/integration/capture/test_hasselblad_start_recovery.py",
+        "apps/camctl/tests/integration/capture/test_host_photo_flow.py",
+        "apps/camctl/tests/integration/capture/test_listing_rounds.py",
+        "apps/camctl/tests/integration/capture/test_natural_wait_retention.py",
+        "apps/camctl/tests/integration/capture/test_natural_wait_source_transitions.py",
+        "apps/camctl/tests/integration/capture/test_natural_wait_time_eligibility.py",
+        "apps/camctl/tests/integration/capture/test_photo_diagnostics_ownership.py",
+        "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py",
+        "apps/camctl/tests/integration/capture/test_recording_queries.py",
+        "apps/camctl/tests/integration/capture/test_recording_recovery_diagnostics.py",
+        "apps/camctl/tests/integration/capture/test_recording_start_release.py",
+        "apps/camctl/tests/integration/capture/test_recording_start_runtime.py",
+        "apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py",
+        "apps/camctl/tests/integration/capture/test_retry_intervals.py",
+        "apps/camctl/tests/integration/capture/test_start_close_save_recovery.py",
+        "apps/camctl/tests/integration/capture/test_stop_close_save_recovery.py",
+        "apps/camctl/tests/integration/history/test_stop_query_result_replay.py",
+        "apps/camctl/tests/integration/logging_runtime/test_diagnostics.py",
+        "apps/camctl/tests/integration/outputs/test_read_diagnostics.py"
+      ],
+      "status": "finished",
+      "exit_code": 1,
+      "wall_seconds": 374.36164993199054,
+      "cases": 1179,
+      "passed": 1096,
+      "failed": 83,
+      "skipped": 0
+    }
+  },
+  "local_followups": [
+    {
+      "name": "osmo-new-round",
+      "source_commit": "1721c6b713dd59f291d5e2510d71037ef307f3e0",
+      "exit_code": 0,
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "environment": {
+        "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+      },
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages",
+        "-q",
+        "--basetemp=/tmp/camctl-osmo-new-round-20261103-tmp",
+        "--junitxml=/tmp/camctl-osmo-new-round-20261103.xml"
+      ],
+      "stdout_stderr": "/tmp/camctl-osmo-new-round-20261103.log"
+    },
+    {
+      "name": "hbf-cancel",
+      "source_commit": "ad8d3d19b01ba46cb021a72340735b92adbce2c2",
+      "exit_code": 0,
+      "tests": 144,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "environment": {
+        "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+      },
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py",
+        "-q",
+        "--basetemp=/tmp/camctl-hbf-cancel-20261103-tmp",
+        "--junitxml=/tmp/camctl-hbf-cancel-20261103.xml"
+      ],
+      "stdout_stderr": "/tmp/camctl-hbf-cancel-20261103.log"
+    },
+    {
+      "name": "baseline-settlement",
+      "source_commit": "b7d3cdeb8bcc999a6308a26ccce728331aa4bb3f",
+      "exit_code": 0,
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "environment": {
+        "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+      },
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_baseline_settlement.py",
+        "-q",
+        "--basetemp=/tmp/camctl-baseline-settlement-20261103-tmp",
+        "--junitxml=/tmp/camctl-baseline-settlement-20261103.xml"
+      ],
+      "stdout_stderr": "/tmp/camctl-baseline-settlement-20261103.log"
+    },
+    {
+      "name": "baseline-paths",
+      "source_commit": "1814642f2e3ad8d7a63f993ed2d16868dfa4d561",
+      "exit_code": 0,
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "environment": {
+        "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+      },
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_baseline_settlement.py::test_cold_resume_exhausts_batches_without_taking_local_owner",
+        "-q",
+        "--basetemp=/tmp/camctl-baseline-paths-20261103-tmp",
+        "--junitxml=/tmp/camctl-baseline-paths-20261103.xml"
+      ],
+      "stdout_stderr": "/tmp/camctl-baseline-paths-20261103.log"
+    },
+    {
+      "name": "obtain-link",
+      "source_commit": "1814642f2e3ad8d7a63f993ed2d16868dfa4d561",
+      "exit_code": 1,
+      "tests": 6,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "environment": {
+        "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+      },
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_obtain_flow.py",
+        "-q",
+        "--basetemp=/tmp/camctl-obtain-link-20261103-tmp",
+        "--junitxml=/tmp/camctl-obtain-link-20261103.xml"
+      ],
+      "stdout_stderr": "/tmp/camctl-obtain-link-20261103.log"
+    }
+  ],
+  "reviews": [
+    {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high",
+      "scope": "启动恢复、日志、读取结束、取消目录与机身身份、诊断异常序列化和基准目录",
+      "result": "相关局部修正已独立评审；实际运行范围分别记录"
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high",
+      "scope": "DEVICE 候选与取回协作",
+      "result": "DEVICE 六项新增 READ 依赖内部装配，未合入；取回并行分区存在规格冲突，未验收"
+    }
+  ],
+  "limits": [
+    "不同源码的结果不能拼成一次全量通过，组合选择不代表全量。",
+    "installed 5fb 全文件26通过3失败；4b仅单项补测通过，其余两项核实连接可写仍失败。",
+    "e86组合1179项1096通过83失败；后续修复分别有独立补测，未进行后续统一全量。",
+    "181取回文件5通过1失败：已有录像期间新批次的并行目标等待规格决定。",
+    "16项独立分段检查与9项撤回结果重送仍未解除暂缓；原Python内存增长判据仍未决定。",
+    "未执行新容量或严格无交换验收。"
+  ],
+  "payloads": {
+    "diagnostics.tar.gz": {
+      "bytes": 3431629,
+      "sha256": "eb63c2d25af2dc4f994507446c3dd3f49a6f5d7dd5237c91da79b6c67dfec80a"
+    },
+    "device-photo-candidate-4b47132b.py.gz": {
+      "bytes": 13034,
+      "sha256": "f8193743e2b883c8e237a3c4900c3b624b2714a54c639ae2a01fa5a110de88da"
+    },
+    "combined-node-timings.csv.gz": {
+      "bytes": 65793,
+      "sha256": "b2396756ca62eabc1a1dc1ee867af669d2c82d4145fabbfcd53725952ff2afa2"
+    },
+    "doc-links.log.gz": {
+      "bytes": 136,
+      "sha256": "33c68b35535f2e51be7daf39b105189eed7c4927371921127d6eb1fbef07e88c"
+    }
+  },
+  "members": [
+    {
+      "path": "combined-e86f19ca/budget-launcher.json",
+      "bytes": 15064,
+      "sha256": "db6dab1ae5f06c9e0686314019fb0953ea009f3e47129874a05d85d540e2cde0"
+    },
+    {
+      "path": "combined-e86f19ca/plan.json",
+      "bytes": 6537,
+      "sha256": "ea9d27d8619885bf3ae6cc80449ab03ee6b3b15788d707bfef29532085a60575"
+    },
+    {
+      "path": "combined-e86f19ca/runner.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "combined-e86f19ca/runner.log",
+      "bytes": 9373,
+      "sha256": "8103257e7038488da05f681d47b15bf78f7259160a8383dc8b116bb61b1ddd66"
+    },
+    {
+      "path": "combined-e86f19ca/source.json",
+      "bytes": 2431653,
+      "sha256": "f5bc59bc55a3693a64068055a4f0b1d48ad2f7fb63d98f36f99f1de8de47fb8b"
+    },
+    {
+      "path": "combined-e86f19ca/summary.json",
+      "bytes": 36670,
+      "sha256": "65061aa494c6db7b59ac9b085a164f8ddab1e2b84604a34acf504552400b55ed"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/cases.json",
+      "bytes": 1598,
+      "sha256": "0b56fcdd8c7895523d1d73c404173b717500c4af4bc7bef6809098ec90c9dbc2"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/command.json",
+      "bytes": 3289,
+      "sha256": "5845d7e8acb17708df302f60777ef42c1bae23ddb20837f8107c53704a7ee32f"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/events.jsonl",
+      "bytes": 5968,
+      "sha256": "836116e1c816446021494345b09071a325d84d7915f2fe6970cc17ec1e7068a8"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/inventory.json",
+      "bytes": 324,
+      "sha256": "b2ec56e8179853dc9f119a1243ec41c641fef40330c05c6a2ed204b31d912288"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/output.log",
+      "bytes": 596,
+      "sha256": "37a0934f3915b71dba217331616077d90d291edd23e44277e2b3f84b2a3b994a"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/preparations.json",
+      "bytes": 554,
+      "sha256": "a5719701e8b28140b2a1cd7bce172082de9c35dfe60c4fa49f8b676f0400eb01"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/prepare.log",
+      "bytes": 26,
+      "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/progress.json",
+      "bytes": 219,
+      "sha256": "ed381cd4dc9303b1ba938c9bf6af426afd139d00b1b859895cb7717880931f02"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/001-camctl-history/artifacts/result.json",
+      "bytes": 3019,
+      "sha256": "e52365e4889a086494816edff2333f69579efbedff10d54ba3871854caeb07d9"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/cases.json",
+      "bytes": 193497,
+      "sha256": "695a59593de0ab2334524a737d0dbd3bd0d155042af94d8c6d0a2e34b6302b87"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/command.json",
+      "bytes": 9089,
+      "sha256": "9a0d40554f36ef94fb28da15c3683ea3e1de3c53cc3ff4acaf7d359111bc3de7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/events.jsonl",
+      "bytes": 681136,
+      "sha256": "498fa171c8f8365d3646cdf3d61bc64aef5a4da503d5cce6c38fdb94f304ad62"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/inventory.json",
+      "bytes": 49362,
+      "sha256": "081c71fc2f22e60beef85a71fb2c5c5c55540263cdffaab34fba639f591e27d5"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/output.log",
+      "bytes": 318758,
+      "sha256": "635b269bfc8e74e695075561add581144050257da33a098096a017ebd9882da4"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/preparations.json",
+      "bytes": 558,
+      "sha256": "dff05a262be313bf31f131dba735d3f6c401ca1bea5231726677445117a58483"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/prepare.log",
+      "bytes": 26,
+      "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/progress.json",
+      "bytes": 242,
+      "sha256": "ce8fe948654e052e4fd1526709ce7ffacee7925648232ae332d1ae7477cbd73f"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/002-camctl-bootstrap/artifacts/result.json",
+      "bytes": 8843,
+      "sha256": "1036ffc9265ac4defb819b423e6fd91061fc3e55a40571ee4071bd33b1619bcd"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/cases.json",
+      "bytes": 341824,
+      "sha256": "9d600a363017417c9fd99dd1f17db66dfea1a84efadf976efd0a971ab1796427"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/command.json",
+      "bytes": 6357,
+      "sha256": "149902db211e3ba057209e7ea6a9a516075c0f632f4dd01058d139dbb4ed0c52"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/events.jsonl",
+      "bytes": 1209037,
+      "sha256": "3697274634caf59de08150373276ab0c97dd09e0fad9ba7fd2f9feea4fd4e47e"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/inventory.json",
+      "bytes": 89358,
+      "sha256": "abe6a53d088a03a6621fd085baa42ac2aa86e7bbae3b91a0c9a2031c770a18b1"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/output.log",
+      "bytes": 231365,
+      "sha256": "2a76e7e6c7fa40fb35a3f318f8a8cc95e502bceb8368d6bd8a9d0a979b4c5977"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/preparations.json",
+      "bytes": 555,
+      "sha256": "a3cbbed96f49d7136b7e882f481b035911a6ffafa230703afaa860910494bca2"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/prepare.log",
+      "bytes": 26,
+      "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/progress.json",
+      "bytes": 241,
+      "sha256": "8c3f1015d4938dc614672ab0a04e2f1b38583b8851857e2da43cd87185c00ac2"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/003-camctl-capture/artifacts/result.json",
+      "bytes": 6111,
+      "sha256": "a0065d1c1ae36483c373dc3b8f5d7276ccf64a523526c44048b36b5bc68330af"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/cases.json",
+      "bytes": 7628,
+      "sha256": "4a21c305d98d7ee9d2b2fdf69e07e9840a1989123c76e405fa90a29c4194e10d"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/command.json",
+      "bytes": 3272,
+      "sha256": "da327f336d33af13dd6404320734b5474a04cf61bf7dabcda149b103977b08fa"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/events.jsonl",
+      "bytes": 26389,
+      "sha256": "85bc3d62952722478831e654cfe3d61a4de38448b06bac344dd70415d19b55bd"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/inventory.json",
+      "bytes": 1709,
+      "sha256": "eed8af1ab9973cdebf631769c56744c4a7fdf30467e460c8c1da0a24c48373a7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/output.log",
+      "bytes": 14128,
+      "sha256": "fa3455b3bdbce3b2fea4a1fb05762908394761de096213f360e8dc9109b7e1a1"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/preparations.json",
+      "bytes": 554,
+      "sha256": "1febec4529f6211c1018c650a1c66a6816fb73e83e8ccf0a9af0bcd2d1a4d4bf"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/prepare.log",
+      "bytes": 26,
+      "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/progress.json",
+      "bytes": 239,
+      "sha256": "d7e480db3f0882c350e3acfee553ac14f066e6fdc4169e6776454c744cfd46d8"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/004-camctl-outputs/artifacts/result.json",
+      "bytes": 3024,
+      "sha256": "026fdf9fcfa6f0f65469c8f074c60f1b04949fe3d2ddae27562508618154c84b"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/cases.json",
+      "bytes": 126550,
+      "sha256": "c04121daf01d5ff1ce1b8227c753f1302f3a1940cfce4ca27edce552fc4bb14e"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/command.json",
+      "bytes": 4180,
+      "sha256": "5d3e61a168240401b8b7c32909bce7fa5256bfd9668d2d8d05fd196361434dce"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/events.jsonl",
+      "bytes": 451031,
+      "sha256": "6d516ed05ec76212def18458df4e0946f2bfb713f9876f9a36cb81ad243bcc0f"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/inventory.json",
+      "bytes": 33706,
+      "sha256": "3792dce0e9027766c985abe1ac147f1381b2cd45230d46839fa870a15db73fdb"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/output.log",
+      "bytes": 190352,
+      "sha256": "02444b42a2f9eec7e9dea758923f85777099f8f43f2af6d807b88cc476a8ab8d"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/preparations.json",
+      "bytes": 562,
+      "sha256": "0515681526e95af09705d7d113443a0267234869425f6b0a22b72af8c1e7a6b5"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/prepare.log",
+      "bytes": 26,
+      "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/progress.json",
+      "bytes": 242,
+      "sha256": "327008c180263271051d6433b4bc67d759f0ca8547b949dd4cf52ae36db90680"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/005-camctl-cancellation/artifacts/result.json",
+      "bytes": 3931,
+      "sha256": "60621a600239fb7132e8467cb641287c586f120a94b234f352cd68841ec19285"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/cases.json",
+      "bytes": 4476,
+      "sha256": "6333d4b55ee4edbadfc86524ce91ac598653b00e4dd891015b069995da1cc262"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/command.json",
+      "bytes": 3368,
+      "sha256": "ee45bfa312f712d8dd6495158b5ec6caebaa46fab37d6b6de337774eba0f8f91"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/events.jsonl",
+      "bytes": 15981,
+      "sha256": "55bebf4b7284a965d5500d102c4f992e46e6e5bdd7ff510794d2e2d947623338"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/inventory.json",
+      "bytes": 1054,
+      "sha256": "ad6a4be91c670b4592fd395efe94a21598059df5fda97660391cd1e3ab7099f1"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/output.log",
+      "bytes": 1237,
+      "sha256": "84d893515a24b23828239c52c5b58d3ced23d1ed21223f7cf036908425736901"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/preparations.json",
+      "bytes": 571,
+      "sha256": "91a25220905c09d1df3a4f09b09e73bc1e5f863a59d83f26478ec02e61ecf53b"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/prepare.log",
+      "bytes": 26,
+      "sha256": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/progress.json",
+      "bytes": 220,
+      "sha256": "22b3b8307bf7d94483be43a61bb1ca2153bd743d18cac9e169f72db973e5790c"
+    },
+    {
+      "path": "combined-e86f19ca/tasks/006-camctl-logging_runtime/artifacts/result.json",
+      "bytes": 3091,
+      "sha256": "acdc99c0dd081b3ef88b53601ab4e39557485f662934447afb65f6d7ec079acf"
+    },
+    {
+      "path": "local/baseline-paths.log",
+      "bytes": 98,
+      "sha256": "00d5ef44fec2f2bebb2bb8a4abc2950e874d68385f34d0f2ffe7160e0a2a119e"
+    },
+    {
+      "path": "local/baseline-paths.xml",
+      "bytes": 577,
+      "sha256": "19401a3eb3ba1741cb2b71e95eb8d5c24049e498e926212f5f470511e4385047"
+    },
+    {
+      "path": "local/baseline-settlement.log",
+      "bytes": 99,
+      "sha256": "c1cca5014c74b95ee198295d861432bb74907d9e1b81c11d57b86c431b9713d0"
+    },
+    {
+      "path": "local/baseline-settlement.xml",
+      "bytes": 3161,
+      "sha256": "200fad2720503bf394d3cb8f9ec0419f7efada0b92ca4f10314ce83886c2c1e5"
+    },
+    {
+      "path": "local/hbf-cancel.log",
+      "bytes": 181,
+      "sha256": "2e4ebc5775796c8cafc5d67ba1dd31d510a583ae3090b9cc42149844c6967982"
+    },
+    {
+      "path": "local/hbf-cancel.xml",
+      "bytes": 28493,
+      "sha256": "8c6a3b07c2db6c81c2ea9c6692a2af44b1674f45c5739616c245d594ef33cd27"
+    },
+    {
+      "path": "local/obtain-link.log",
+      "bytes": 6270,
+      "sha256": "7380bdd3d29c815d0e8922b2f11ec8b703a22c0a44ee5990c9ae4fb1ec5660f3"
+    },
+    {
+      "path": "local/obtain-link.xml",
+      "bytes": 7206,
+      "sha256": "29a8ca7881a94c22d1fedc750755cd58cb66885196ab35ccce6636d6e7320aa0"
+    },
+    {
+      "path": "local/osmo-new-round.log",
+      "bytes": 98,
+      "sha256": "48d7720e36fa73d4466ba56d46a9bf3512f01f395e9e35759d2821e14d0b4299"
+    },
+    {
+      "path": "local/osmo-new-round.xml",
+      "bytes": 605,
+      "sha256": "57f1dbe8fb3110b2ec7016cebdd33777e857173fb5b4787739586119c8633294"
+    },
+    {
+      "path": "prior/cache-archive-error.log",
+      "bytes": 98,
+      "sha256": "4b6d07f3dd9162cdd77e3e17e4080e549552f0916da64fe26a751d430973d321"
+    },
+    {
+      "path": "prior/cache-completed.log",
+      "bytes": 98,
+      "sha256": "8964ec0c2d96a99a0012763cb299d0385e0125f9a98c492b18fdae2e013f728a"
+    },
+    {
+      "path": "prior/cache-unknown.log",
+      "bytes": 98,
+      "sha256": "3275522a65c60210c9aee3615ac7c007be3d0dd63b9902e872ac3dd10094cc3d"
+    },
+    {
+      "path": "prior/cancel-callers.json",
+      "bytes": 126476,
+      "sha256": "17724d5ffedad3c7b4543925203b7dd6a5851f652a6fc9d65534524420f99fcf"
+    },
+    {
+      "path": "prior/cancel-device.log",
+      "bytes": 98,
+      "sha256": "6a188187cc4acf92013e1fe24b04baf7dba1edd907ad7d4feecc4ff2465c741f"
+    },
+    {
+      "path": "prior/cleanup-evidence-test.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/cleanup-evidence-test.log",
+      "bytes": 3059,
+      "sha256": "714d4487768726351eb8aa055edb75c5dce62add561aeb923838f8fd8bdb17f8"
+    },
+    {
+      "path": "prior/cleanup-evidence-test.xml",
+      "bytes": 5192,
+      "sha256": "054c3290670359f1d28ccef7f3455da4f45836ea1676d8b1cd835138371d06d0"
+    },
+    {
+      "path": "prior/cold-matrix.log",
+      "bytes": 98,
+      "sha256": "3644f1d287e4045eef3384c4110368a33fbe92fa24182386c953b95a4f9bcd64"
+    },
+    {
+      "path": "prior/cold-raw-uncommitted.log",
+      "bytes": 98,
+      "sha256": "fb9eab2e9be43235f832f2e1ea81774c6515d986b40a1f7f9489b4fb98f9c9bc"
+    },
+    {
+      "path": "prior/combined-command.json",
+      "bytes": 12443,
+      "sha256": "f3a3695e6505a79e0d97a88a1c34ed10594240242604a9cbb0d046ddbcbe2285"
+    },
+    {
+      "path": "prior/defect-support-final.log",
+      "bytes": 98,
+      "sha256": "69ecfaf567d422eefd466e0fe6d916331525411012bbb3614286aa68e60a291c"
+    },
+    {
+      "path": "prior/deferred-read-initial.log",
+      "bytes": 2214,
+      "sha256": "00786c9dff82f451b6ab9ace2701f5fc300b884feea8e855c5084353502e0522"
+    },
+    {
+      "path": "prior/deferred-read-next.log",
+      "bytes": 708,
+      "sha256": "e230dfb6c2f4d3164065b45bf37c2b6f7bfead279e863c5cc279c96153d557e6"
+    },
+    {
+      "path": "prior/deferred-read-v3.log",
+      "bytes": 98,
+      "sha256": "6262a8e2e6f2ad2d2de112173e9d549955762f82a7ab80d9fb2f247e0426b472"
+    },
+    {
+      "path": "prior/device-baseline-normal.log",
+      "bytes": 911,
+      "sha256": "32c546009a6b2acac29fd81e8f76772c2550baac3c5a972847da7e568f2258e3"
+    },
+    {
+      "path": "prior/device-deletion-map.json",
+      "bytes": 16996,
+      "sha256": "d4d129b0910a2b607ab7e28d686869e5b5a3b23c86ee922c66b911080d2dd187"
+    },
+    {
+      "path": "prior/device-file-complete.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/device-file-complete.log",
+      "bytes": 100,
+      "sha256": "bbb6d99725435e5c9ee892a8e915eb54769b6408a51a463ca438fce3b20bdf3c"
+    },
+    {
+      "path": "prior/device-file-final.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/device-file-final.log",
+      "bytes": 100,
+      "sha256": "e272975a4bfda35fab5dae2ef0a2d89b37161f6d2bb667eb442b7e9fbac67fa8"
+    },
+    {
+      "path": "prior/device-file-first.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/device-file-first.log",
+      "bytes": 1843,
+      "sha256": "653db4cc31253e9b1c4dc5799c39b241d6f8f17b82149fe9dd8bee575cb39614"
+    },
+    {
+      "path": "prior/device-normal-final.log",
+      "bytes": 98,
+      "sha256": "271e673dafc49d58dd8cc057b3c73869f6a08dac635fba8173269f7a3b981495"
+    },
+    {
+      "path": "prior/event-guards-final.log",
+      "bytes": 98,
+      "sha256": "07802561b4860bb4c945562e8f6d4c8e88fe6f28628a1d03f2bce219878da8c8"
+    },
+    {
+      "path": "prior/event-pair.log",
+      "bytes": 101,
+      "sha256": "024b278058fc2781712c2645c8b0277cd415606213b35fcca61cdb6066a3f10f"
+    },
+    {
+      "path": "prior/event-preview-v2.log",
+      "bytes": 110,
+      "sha256": "e169a51cee53f199e0bf685857617b82b4e220c3b0f8a209845ad0db96ffc099"
+    },
+    {
+      "path": "prior/event-preview.log",
+      "bytes": 625,
+      "sha256": "1a67a31bc5f2423500936d6e5367df02f196038bcb2fcc0c79cda119665b9c4c"
+    },
+    {
+      "path": "prior/event-proposal-first.log",
+      "bytes": 148,
+      "sha256": "3f165662f0dc444922f0477e49edc32f153e9b09841a6ced811499cfdbd34eb7"
+    },
+    {
+      "path": "prior/file-completion-uncommitted.log",
+      "bytes": 98,
+      "sha256": "3275522a65c60210c9aee3615ac7c007be3d0dd63b9902e872ac3dd10094cc3d"
+    },
+    {
+      "path": "prior/finish-committed.log",
+      "bytes": 98,
+      "sha256": "b632ba3b5d75d336650a26fbf5403abf707ec37cfb411ae61bc5620f7427d6ca"
+    },
+    {
+      "path": "prior/hbefore-initial.log",
+      "bytes": 98,
+      "sha256": "5059e8cab1917830313cc43d37cfdd4ecf17d2efd090c6732645c0ea98e41ff8"
+    },
+    {
+      "path": "prior/hbefore-missing-final.log",
+      "bytes": 98,
+      "sha256": "99d161a645be50b349f708e7258256d26012e07682341df9edd3b5d8fc1da2cf"
+    },
+    {
+      "path": "prior/hbefore-missing-proof.log",
+      "bytes": 98,
+      "sha256": "2581df6f5672a6567b264f7a0acae07d2467ce99ecb6f946aa3e6fd7629cfaed"
+    },
+    {
+      "path": "prior/hbefore-missing.log",
+      "bytes": 728,
+      "sha256": "2b3b96ab80e5d30839d45709678981415f70c3378e0bd3d9862d7847c3efba1e"
+    },
+    {
+      "path": "prior/hbefore-read-error.log",
+      "bytes": 98,
+      "sha256": "5e3abe1410e15df540f2b4903e34bd7afe69b059b8897bbbb779f25917dd5472"
+    },
+    {
+      "path": "prior/host-file-final.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/host-file-final.log",
+      "bytes": 8501,
+      "sha256": "1eeec50ffcb049fcf7a973ff757ac329e496b395feef4682f356b74945636bd5"
+    },
+    {
+      "path": "prior/installed-device-fault-runner.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/installed-device-fault-runner.log",
+      "bytes": 761,
+      "sha256": "f97026c2ddf1f4e258c84784cd2699685c2f8073f6a0083aca7e027f145f8eb5"
+    },
+    {
+      "path": "prior/installed-device-fault/budget-launcher.json",
+      "bytes": 2961,
+      "sha256": "e5e7f62e36383f7930b896ebb3a8c3dbf4a3efd403543c5dfe964e219a1fd3c3"
+    },
+    {
+      "path": "prior/installed-device-fault/plan.json",
+      "bytes": 396,
+      "sha256": "cc7b143850e140bc134dbe8c4e04985591c0de755054d06b692bda4430583d58"
+    },
+    {
+      "path": "prior/installed-device-fault/source.json",
+      "bytes": 2431894,
+      "sha256": "6b68a3c1c2a3c83d6a9b01f564080d1c0d7fd616574b2a55a37981988d0dcdbb"
+    },
+    {
+      "path": "prior/installed-device-fault/summary.json",
+      "bytes": 6197,
+      "sha256": "020745516e8029a963352971c61312e3fa5ee82f2cc1e21188dcf18f1b31fdb7"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+      "bytes": 572,
+      "sha256": "750751350c1ec002c90e9eeca07442c19592f835bf938b4d2d0e87ed2d832698"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+      "bytes": 4677,
+      "sha256": "aaa4ec90936ce6b15b61d89452a24e19306d5b5dde1360de3e1eef938638bd3a"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/events.jsonl",
+      "bytes": 3043,
+      "sha256": "96f2cd3bc3e7692c262d7e7f589ba1ae29fe01fccd08f733318553ca3773f270"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/inventory.json",
+      "bytes": 152,
+      "sha256": "15468803eae47544485eb425d87dd47e12161c11a99532c954eaed52b2830140"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "bytes": 14344,
+      "sha256": "b320aba4e310df9f2e34045d98a4983f41c55a890c5178dd1bb60952d43192c6"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/preparations.json",
+      "bytes": 1060,
+      "sha256": "af7e1bb99fcc2143fc07cf8461b5c691bb97428bcd0e094587f93a1d045ca232"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/prepare.log",
+      "bytes": 184234,
+      "sha256": "8053da3da38e1228467e603d290951860ab5dd792151078e55de382b6306e84f"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/progress.json",
+      "bytes": 221,
+      "sha256": "33aaabf935d0d09fafedc4a5ee445b141fd590b5e2aab149335e2aea5898fa41"
+    },
+    {
+      "path": "prior/installed-device-fault/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+      "bytes": 4394,
+      "sha256": "7afe2d76df3302af48c0cc062bd0180c009df1d7efd5f8113b69ce3ae1397650"
+    },
+    {
+      "path": "prior/installed-device-first-runner.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/installed-device-first-runner.log",
+      "bytes": 1227,
+      "sha256": "b6f0134ea1e384df228733989b22f2bf3f659420149743d65541aa8923b848a8"
+    },
+    {
+      "path": "prior/installed-device-first/budget-launcher.json",
+      "bytes": 2905,
+      "sha256": "31af917beb35233e7a0c2a3b09c07b9e39243d94c0db0c2bc16ff92d8c0db561"
+    },
+    {
+      "path": "prior/installed-device-first/plan.json",
+      "bytes": 367,
+      "sha256": "d6a95e590e46823ce88612ff82eb419c77fd26bdb42436a5745a7e2747d9149c"
+    },
+    {
+      "path": "prior/installed-device-first/source.json",
+      "bytes": 2431894,
+      "sha256": "92444fed04874cf40cde6cd43f4338b42d50e41c999270a4c45c0ab7e6fa11f4"
+    },
+    {
+      "path": "prior/installed-device-first/summary.json",
+      "bytes": 6111,
+      "sha256": "8d6fa37a4d8969051d4fce4135caa2c188faff3cdbcd726c94e4d041fa091f6a"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+      "bytes": 541,
+      "sha256": "cf6d88f13346191131725bc4a5a9989c312254a72867c9d2b75b4c2c9740aeb7"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+      "bytes": 4621,
+      "sha256": "a0ef22562ac6a6ceeec0d0211cebd3cfa451b00fa736ae268d1612397e4b0bed"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/events.jsonl",
+      "bytes": 2810,
+      "sha256": "3945ab6587e028a94a3c9093874ad96a15bdd3217802b9a801bedaf4b026ec6b"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/inventory.json",
+      "bytes": 123,
+      "sha256": "f283f256e3c77b8f5370655ca198311910b5ba93b7de347fb74de49a37da4aa0"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "bytes": 572,
+      "sha256": "ca48ba7fedd6f0dcf3bf199834863a8137341ad67420779886f4ef3912352575"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/preparations.json",
+      "bytes": 1062,
+      "sha256": "9394dc55c3966d62fc6a00600cc49d034e96e6000950da406d6b3a4cac137984"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/prepare.log",
+      "bytes": 184234,
+      "sha256": "009b72c1e5320fbc73ec6ba72a85703a205ae1b7a2f997d15511a4ac9bee7a83"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/progress.json",
+      "bytes": 221,
+      "sha256": "61bb486bf5db2977241da4e43dacee3a736beece8930167798d966ffbcb950fa"
+    },
+    {
+      "path": "prior/installed-device-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+      "bytes": 4338,
+      "sha256": "d1aec359a53e39d88e4ff47d382179526437cf827accbd9753a72d0c2bac6786"
+    },
+    {
+      "path": "prior/installed-file-final-runner.exit",
+      "bytes": 4,
+      "sha256": "f5bde7eb9f6c71611dc5726e8aca3eb4eba3e386da49e0a4ed5c295a90a73a0d"
+    },
+    {
+      "path": "prior/installed-file-final-runner.log",
+      "bytes": 518,
+      "sha256": "e6837befcdb4031bc298e5a046099001a39a439a510147a9918e751554b2a577"
+    },
+    {
+      "path": "prior/installed-file-shards3-runner.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/installed-file-shards3-runner.log",
+      "bytes": 14031,
+      "sha256": "938e9d2b88e3ffe6e7d7ef0c3fd60903a850e0cc4e1fee420855d35c364d2793"
+    },
+    {
+      "path": "prior/installed-file-shards3/budget-launcher.json",
+      "bytes": 2782,
+      "sha256": "1663ff5088b4e765698500d0e67995ff070a5487bd0f75809bcc683c9f940178"
+    },
+    {
+      "path": "prior/installed-file-shards3/plan.json",
+      "bytes": 5358,
+      "sha256": "97b2ad5ff8d7c2da3a58699c24a3baa083495533fd92d909c56342ae0c8e1b0a"
+    },
+    {
+      "path": "prior/installed-file-shards3/source.json",
+      "bytes": 2431657,
+      "sha256": "5b4cdbcc538ec75637730e121a85d051205857aaa3ae74b8eefa1a347fe5f79f"
+    },
+    {
+      "path": "prior/installed-file-shards3/summary.json",
+      "bytes": 23388,
+      "sha256": "5789d37e1ce37608ba6d37aa666820565967bcb9f58ee8792323241f45a7288b"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/cases.json",
+      "bytes": 540,
+      "sha256": "d4f83843337c26eb8a65d0fb5e8293f0cf5eb4b87b0845b56fe718993ec3fbe0"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/command.json",
+      "bytes": 4984,
+      "sha256": "3dab5f806f191678170cc46b06a8d977d9855695d79a5673b330bf67443201d3"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/events.jsonl",
+      "bytes": 2817,
+      "sha256": "2fd3e67e06ccc6769dbe3d1287cf6bf78956ea20b1621d539546bb50dd3e940b"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/inventory.json",
+      "bytes": 122,
+      "sha256": "96329e9a58729ee565cc194f22463009f09167f752d188ae713c0da2c93d12dc"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/output.log",
+      "bytes": 579,
+      "sha256": "e2fd819e8565094dc9cb43883f4fd7491372a943c834d0e112718de237e3ea9f"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/preparations.json",
+      "bytes": 1084,
+      "sha256": "84951c88bba1ed04c3d564cf28d94a17aaca0317715fe9423eb5a548e5854ffe"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/prepare.log",
+      "bytes": 184234,
+      "sha256": "5ec8a44f71f09b4a85d5f0bdf3e2b46fcc3f270284d12af608dbac0a93a139d3"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/progress.json",
+      "bytes": 220,
+      "sha256": "2c4218affcefbbc51894af6205c6ca46691678527dc1f2841997c6ddaeeeae09"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/001-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/result.json",
+      "bytes": 4700,
+      "sha256": "2ab66bff76e95ac059cd7519a3d409834f96e19407052d1a36925e37a5e31aa3"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/cases.json",
+      "bytes": 2180,
+      "sha256": "662e890bab1fcea8c3e9a973b6934e24dd3b2bd6e74f96eb5e63a9e4777fd4c6"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/command.json",
+      "bytes": 5751,
+      "sha256": "bcc016d56e0f08736cb9f6d52e7b83684c2990aea36e0ad65e43dc88a936f894"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/events.jsonl",
+      "bytes": 8787,
+      "sha256": "6e1c7aef04efc7d774f588a0a142a8c4aa26d532f5a458acd07407ca49d183dd"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/inventory.json",
+      "bytes": 499,
+      "sha256": "a47b94a400483fcf2577d82cc7ddb0544635c370a9adbce5e93ff7b7a1575b84"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/output.log",
+      "bytes": 4367,
+      "sha256": "675f772b74eeb625ed401e934996172c36a9d34cae91a5f21255900aa9391693"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/preparations.json",
+      "bytes": 1085,
+      "sha256": "d53eb2b65ec4e6f835f688249c222d1ba219a04d659893c205f5172b33532727"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/prepare.log",
+      "bytes": 184234,
+      "sha256": "757c2e053273a408145d7e7a624f05fdbf4b3374962edde44a01c195ed4f89b8"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/progress.json",
+      "bytes": 238,
+      "sha256": "53eaffb1ccdb3ae4101b6478fa9fb574e448ec18083e15492bbb0f34b8efba3a"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/result.json",
+      "bytes": 5487,
+      "sha256": "fe931a1899aac1af2321f46d8e4d887c2c0e2bf7df77165218a866e90491427e"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/cases.json",
+      "bytes": 13222,
+      "sha256": "62d5935de5ea3986ce25f92dee2542c1f2b06a9e2a181eca228518677d398e17"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/command.json",
+      "bytes": 10960,
+      "sha256": "6e6001e01bb8ddf24f3d40dadb1fc70472b106c8c63b096291ea5875e87a71c0"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/events.jsonl",
+      "bytes": 48946,
+      "sha256": "16426b5de3108726b5676e76bae5474a6078fc5f45d321bd03287dbbed9de25f"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/inventory.json",
+      "bytes": 3064,
+      "sha256": "b2d4fe94d4679d3883160098361101d7dd358abcf64b933268ef225a30ef9b84"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/output.log",
+      "bytes": 32968,
+      "sha256": "bf35873c5d1ea85c3b92aed3d99027c708f1ddefb8aae4f3f477c4c2ade2ceb5"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/preparations.json",
+      "bytes": 1084,
+      "sha256": "967efea21930b2bb084d8bb878a298fcfdbf9ef150b2c9a41ca201dbdf89cd35"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/prepare.log",
+      "bytes": 184234,
+      "sha256": "d1ae9bc6e3a574b924044cf6b8e276863f921de5af308f782ad661616caefbee"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/progress.json",
+      "bytes": 239,
+      "sha256": "c49402de724a7fbc2444ef67e78ff1fd57e460236418f51023cb5630f182c201"
+    },
+    {
+      "path": "prior/installed-file-shards3/tasks/003-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/result.json",
+      "bytes": 10697,
+      "sha256": "d57a9cab4c4987e3b77d5b77e91c543e81d6f1f6c23c7281489af3c46c8e8ba6"
+    },
+    {
+      "path": "prior/installed-jpeg-device-runner.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/installed-jpeg-device-runner.log",
+      "bytes": 1587,
+      "sha256": "dd36febd554bd0e99ab6a2e0cc5332275bb9225707dc5ed61de93ad1acccd586"
+    },
+    {
+      "path": "prior/installed-jpeg-device/budget-launcher.json",
+      "bytes": 2906,
+      "sha256": "3185765ff71e90689f88a339f50ad91d1ccb5e46c66869606a922c461bcd7f08"
+    },
+    {
+      "path": "prior/installed-jpeg-device/plan.json",
+      "bytes": 368,
+      "sha256": "cf1593b5621e9a0bb956f81e82a907b1bb5213c43ee63746eee09aa1a17fd5d4"
+    },
+    {
+      "path": "prior/installed-jpeg-device/source.json",
+      "bytes": 2431894,
+      "sha256": "d55e634f3f956c3e1de985cc115056b204e66446f4b9803f585ff28be862de2c"
+    },
+    {
+      "path": "prior/installed-jpeg-device/summary.json",
+      "bytes": 6095,
+      "sha256": "790d051198b6190c97cc493e7c5ec902621592c0fd63c4220457f4e229a43005"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+      "bytes": 542,
+      "sha256": "86a6059855445555cf03561f64e3ffb14d9067ec8d0337b51e0360035922e476"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+      "bytes": 4603,
+      "sha256": "86a583625529d64a8f81f369a2e1bed43c4cffa2728b7890a8afac6dd5cd8782"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/events.jsonl",
+      "bytes": 2815,
+      "sha256": "242cafe554013f6fed313caa5ceffa01aa5b86ae6d0f7c25fb704574882981d3"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/inventory.json",
+      "bytes": 124,
+      "sha256": "f20c6a2f01eb44735f0f25634a622d831b82fcac422affcd47b3ff98137eec9d"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "bytes": 585,
+      "sha256": "25a0fd5b7293cb4290e2df32dc8c73a0bcec6d92dbc813974c355b8d700f174d"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/preparations.json",
+      "bytes": 1055,
+      "sha256": "a150cdde57ab000f3143d9369a8d3cbb7eaa6bf9aec4d6415eadaa6fb01d83c2"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/prepare.log",
+      "bytes": 184234,
+      "sha256": "aa59b241ef699b6dfbe3c840aa5e02f99e6ae5a36d8f3ce622d28a97ea071656"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/progress.json",
+      "bytes": 220,
+      "sha256": "b3e7737b75e35f5b77f4edad43e00b3fbc9aeb8b096961b0cd60990bbfc09c26"
+    },
+    {
+      "path": "prior/installed-jpeg-device/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+      "bytes": 4320,
+      "sha256": "48dd8ef6720bccf9a795d122ad1bfc44b86f00fdb04bea1e8c69ebe1a3fb072a"
+    },
+    {
+      "path": "prior/installed-start-device-final-runner.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/installed-start-device-final-runner.log",
+      "bytes": 1464,
+      "sha256": "e7777e4a7866ce832588f8e9f5d9a18f833de69f188bbb17b4e3ee0dea763a2f"
+    },
+    {
+      "path": "prior/installed-start-device-final/budget-launcher.json",
+      "bytes": 2958,
+      "sha256": "d960ba8b8cd0c96f491a0f47cf257ea5c54b6aa0a7945fcb2c2b558a43633415"
+    },
+    {
+      "path": "prior/installed-start-device-final/plan.json",
+      "bytes": 387,
+      "sha256": "a935bcbd8b40454d3943addacf333da2ade8f57f976040ad1714923d48c9e313"
+    },
+    {
+      "path": "prior/installed-start-device-final/source.json",
+      "bytes": 2431657,
+      "sha256": "b22846c3b37ca5d63434b6f69c1bd12da5ae16dcc5afdd1f16065671cf960d96"
+    },
+    {
+      "path": "prior/installed-start-device-final/summary.json",
+      "bytes": 6029,
+      "sha256": "5a6b5d08280c71855b38fd4fe595532f86b3312d491a8968ea58b96ced10a442"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+      "bytes": 560,
+      "sha256": "8fa7965b455560afa9c717fd52d122e9bc9b9d64405ced48b61e35cca2368595"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+      "bytes": 4754,
+      "sha256": "d76882a5dffbcda011b4302f63bcf802525c078ba85112561909740f2414abcc"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/events.jsonl",
+      "bytes": 2980,
+      "sha256": "a6e4d1798a628ead9e405b255df87b84051778a6abd45610d1709cb7a81b8959"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/inventory.json",
+      "bytes": 143,
+      "sha256": "2e7a41c8f14ce253698f7639b870342535e47d4ca3f9aabb43180de81695fda4"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "bytes": 642,
+      "sha256": "2a1b5d297a7c355725d3fae4c659824177598e76b16792863b7e34ab3f243e62"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/preparations.json",
+      "bytes": 1077,
+      "sha256": "f5dab6a9ed494394daabcc5a9e457a8e8bbd058a14d9c7e4abc89ebb09eee272"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/prepare.log",
+      "bytes": 184234,
+      "sha256": "12e28f9aca05969902b27b423aec57c5a048ccd084ba73da0cb5655ecb5fce07"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/progress.json",
+      "bytes": 221,
+      "sha256": "72b7217c477e871c4bc14db24c6ab103451d6007b315a9916332008947ba4795"
+    },
+    {
+      "path": "prior/installed-start-device-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+      "bytes": 4472,
+      "sha256": "382559223b3b761e3affe90b443750219d4b149afa2b28aae311dde5ccc04144"
+    },
+    {
+      "path": "prior/inventory.json",
+      "bytes": 133121,
+      "sha256": "65ffdc81483f914c98d29b5aca349f03fc2772c947c57ae423a162c95675a4f4"
+    },
+    {
+      "path": "prior/log-copy-final.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/log-copy-final.log",
+      "bytes": 99,
+      "sha256": "3e462a9066fad9fa2ab406a0051b81ab068df33634fa8aea3bcb15f9a6c4ebc1"
+    },
+    {
+      "path": "prior/log-copy-final.xml",
+      "bytes": 6328,
+      "sha256": "61e188eec28a10b8cc3c00b8443a059196427edc58b6221bd4bcded13a6077cd"
+    },
+    {
+      "path": "prior/log-copy-full.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/log-copy-full.log",
+      "bytes": 100,
+      "sha256": "d3382ddafec272e8b592209ca86d36da049566ad1fcd0a820199d14b6eff9402"
+    },
+    {
+      "path": "prior/log-copy-full.xml",
+      "bytes": 6329,
+      "sha256": "00c45f57c1629082847c940ccb23b674712a7468a1dd08e722b4cb5520b14e02"
+    },
+    {
+      "path": "prior/log-copy-representative.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "prior/log-copy-representative.log",
+      "bytes": 114,
+      "sha256": "4f674b9be013d2ae589e684edfdb849057855797e71472b255dca518a07854c1"
+    },
+    {
+      "path": "prior/log-copy-representative.xml",
+      "bytes": 2824,
+      "sha256": "273e0b0730e4729acd716ce911c03562d8775e3f64340f6fc347ad028912e351"
+    },
+    {
+      "path": "prior/log-copy-verification.txt",
+      "bytes": 1143,
+      "sha256": "fefa6a72ab992bbc9f9da5b86eaa71503dad53cf0e14c2d2f38b9f5025790aec"
+    },
+    {
+      "path": "prior/read-end-final.log",
+      "bytes": 98,
+      "sha256": "c61d2369f9e3d20a1d9963c3e0d427ddd3a892aeeccb8c1eee8e01a82d15b650"
+    },
+    {
+      "path": "prior/read-end-first.log",
+      "bytes": 1984,
+      "sha256": "35fa77a254a28366fdd34217d1a1c6a1a8882671a3355dace62d65b9cecd935b"
+    },
+    {
+      "path": "prior/read-reset-first.log",
+      "bytes": 98,
+      "sha256": "484714eb4f0e6308d329b77c2b018b4f0c941a20f98722f0157d2c404dbbc11a"
+    },
+    {
+      "path": "prior/read-settlement-commit-fault.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/read-settlement-commit-fault.log",
+      "bytes": 2774,
+      "sha256": "f89e14a8c10a7384c0bea09e00f26299dcc997448becca209e639e3db30136b5"
+    },
+    {
+      "path": "prior/read-settlement-commit-fault.xml",
+      "bytes": 4169,
+      "sha256": "4b3cbf6151ad6e6d91907c460be68f7efeef84cf9abcb3d403da0cd9c85f2445"
+    },
+    {
+      "path": "prior/read-settlement-evidence.txt",
+      "bytes": 1155,
+      "sha256": "612aeecd33953335c9e2253db89fc462355da68e03725b12948fc9c87edddeb2"
+    },
+    {
+      "path": "prior/read-settlement-final.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/read-settlement-final.log",
+      "bytes": 3590,
+      "sha256": "fc65a5f47632bed604b790992d6b5fb503f968b003333dffd196d57eae978c26"
+    },
+    {
+      "path": "prior/read-settlement-final.xml",
+      "bytes": 6240,
+      "sha256": "b31104d7b98f55e88b209424d17c3bd95a2ba30883af10bf0efc35fee8e90f2a"
+    },
+    {
+      "path": "prior/read-settlement-representative.exit",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "prior/read-settlement-representative.log",
+      "bytes": 5457,
+      "sha256": "b3151a0e507177f6cdc1296f74d411379352901676e4c8200bfb9f894946327e"
+    },
+    {
+      "path": "prior/read-settlement-representative.xml",
+      "bytes": 7861,
+      "sha256": "7cd5c930417dfe7374ab15340deba91f11721b502eaacee0046857075f4f718d"
+    },
+    {
+      "path": "prior/release-failed.log",
+      "bytes": 98,
+      "sha256": "51618742eeb866d8fc291a2afa8556ab2397c1e4d001580e539b09705b91792c"
+    },
+    {
+      "path": "prior/release-running.log",
+      "bytes": 98,
+      "sha256": "69ecfaf567d422eefd466e0fe6d916331525411012bbb3614286aa68e60a291c"
+    },
+    {
+      "path": "prior/report-after.log",
+      "bytes": 98,
+      "sha256": "f6a045f41f979ef53bc4d8f565c7e03eb095f8d7eec4b9178d41eba33fa5d72f"
+    },
+    {
+      "path": "prior/report-before.log",
+      "bytes": 1057,
+      "sha256": "3fc49d3d6d632091d0385da215f56f214835f29cb16dc6865eb15908593600db"
+    },
+    {
+      "path": "prior/source-read-raw.log",
+      "bytes": 98,
+      "sha256": "a855b3c5f70f8cab19bae7fe75831012c6b74396f5ebb0b0985cd31c75146cd9"
+    },
+    {
+      "path": "prior/start-recovery-full.log",
+      "bytes": 118,
+      "sha256": "56eb82781bd0d6fe9fd74efebe4684ef0f73dc403ca01e3f5fa03b736de70a96"
+    },
+    {
+      "path": "prior/start-recovery-narrow.log",
+      "bytes": 117,
+      "sha256": "197eaefe6fe19e9522a441add2f7b1b4ac7e90de2e3d8733d9eac4794ac6f6e9"
+    },
+    {
+      "path": "prior/sync-unknown.log",
+      "bytes": 98,
+      "sha256": "7fde11f01db9bdcb9c135d2949567d4df9f0bc705ed0f66f159e9d431e4c5040"
+    },
+    {
+      "path": "prior/verification-error-final.log",
+      "bytes": 98,
+      "sha256": "d1b0a6c4ea02e112f8a41b4f686745bce6a5310061e721527a16099a90284e82"
+    }
+  ],
+  "combined_failure_classification": [
+    {
+      "nodeid": "tests/integration/capture/test_baseline_read_owner.py::test_intent_saved_but_cancelled_before_call_has_no_fabricated_return",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/capture/test_baseline_read_owner.py::test_same_session_cancelled_actual_task_can_save_unknown_without_cold_boundary",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/capture/test_host_photo_flow.py::test_jpeg_photo_unknown_complete_reuses_original_request_and_pair[raw]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/capture/test_host_photo_flow.py::test_jpeg_photo_unknown_complete_reuses_original_request_and_pair[jpeg]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/capture/test_record_segment_scope_recovery.py::test_last_scan_keeps_qualified_prior_files_and_its_own_failure[gap]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[action-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[action-blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[preview-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[preview-blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[group-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[group-blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[plan-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[plan-blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[request-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[request-blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-unknown-confirm_inflight]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-unknown-confirm_ended]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-unknown-confirm_inflight]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-unknown-confirm_ended]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-unknown-confirm_inflight]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-unknown-confirm_ended]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-unknown-confirm_inflight]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-unknown-confirm_ended]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_APPLIED-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_REQUIRED-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_bare_fixed_event_rejects_ineligible_or_missing_source_facts[True-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_bare_fixed_event_rejects_ineligible_or_missing_source_facts[False-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_fixed_repository_accepts_reliable_original_link_source[blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[unknown-SelectionBasis.DIRECT-True-plan]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[unknown-SelectionBasis.DIRECT-True-request]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_mixed_composite_sources_keep_each_previews_own_source[True-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_mixed_composite_sources_keep_each_previews_own_source[False-unknown]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_accepts_reliable_preceding_original_source[blocked]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_rejects_extra_conflicting_or_future_facts[future_result]",
+      "resolution": "共享机身身份准备已修正，ad8d3d19三文件144通过"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_baseline_settlement.py::test_cold_resume_exhausts_batches_without_taking_local_owner[False]",
+      "resolution": "实际目录准备已修正，完整18通过及路径补测2通过"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_baseline_settlement.py::test_cold_resume_exhausts_batches_without_taking_local_owner[True]",
+      "resolution": "实际目录准备已修正，完整18通过及路径补测2通过"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[default-query]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_while_shared_host_file_task_is_running[delete]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_while_shared_host_file_task_is_running[query]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-normal-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-residual-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted_cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted_cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[presence-normal-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[presence-residual-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[presence-cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[presence-cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted_cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted_cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[ownership-normal-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[ownership-residual-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[ownership-cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[ownership-cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted_cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted_cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[completion-normal-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[completion-residual-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[completion-cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[completion-cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted_cancel-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted_cancel-False]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_obtain_flow.py::TestObtainExecutionLink::test_obtain_read_yields_to_recording",
+      "resolution": "完整READ结束及摘要释放顺序已修正，1814642f该项通过"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_obtain_flow.py::TestObtainExecutionLink::test_obtain_read_parallel_with_recording",
+      "resolution": "已由两个先后分区重新核对；已有录像期间的新批次等待，存在规格冲突，未验收"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-True]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+      "resolution": "多轮推进同步已修正，1721c6b7两项通过"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+      "resolution": "多轮推进同步已修正，1721c6b7两项通过"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_read_held_end_required_digest.py::test_internal_held_end_missing_required_sha_saves_actual_then_binding_failure[mismatch-None]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_read_held_end_required_digest.py::test_internal_held_end_reliable_sha_and_saved_results_continue_local_check[missing]",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/bootstrap/test_startup_log_sweep.py::test_cancel_during_local_drain_withdraws_queued_startup_sweep",
+      "resolution": "生产问题保留"
+    },
+    {
+      "nodeid": "tests/integration/outputs/test_read_diagnostics.py::test_local_read_normal_stopped_result_is_not_error[host]",
+      "resolution": "生产问题保留"
+    }
+  ],
+  "documentation_check": {
+    "command": [
+      "node",
+      "scripts/check-doc-links.mjs"
+    ],
+    "exit_code": 1,
+    "unresolved": [
+      ".agents/skills/camctl-real-device-deploy/assets/bundle/README.md: docs/camctl-configuration.md",
+      ".agents/skills/camctl-real-device-deploy/assets/bundle/README.md: docs/camctl_host.h",
+      ".agents/skills/camctl-real-device-deploy/assets/bundle/README.md: docs/host-configuration.md"
+    ],
+    "scope_note": "这三个发布模板内链接在源码树中不可定位；模板本轮未修改。改动的工作记录及复盘没有被报告为缺失链接。"
+  }
+}
