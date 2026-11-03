@@ -119,14 +119,16 @@ OSMO 两个新结果轮次测试现从相同正式入口等待实际第二调用
 
 以下问题来自合并前的合法路径核对或诊断。用户安排生产修复后，按原分区复验；本次同步后的关闭状态以新源码的实际结果为准。
 
+本轮先逐项讨论哪些问题需要修复及具体修法，确认完成后再统一实施。表中明确标记的“确定修复”是本轮已决定事项，其余修复方向仍用于讨论；当前只更新记录，不修改生产代码。
+
 | 问题与实际影响 | 后续核对或修复方向 | 证据 |
 | --- | --- | --- |
 | HBF-02：照片完整字节已提交但回执丢失，原写连接已关闭，新核实连接身份不同，却仍能写入业务库；规格要求独立只读。 | 在核实责任内选择独立只读连接，按原申请、键和完整事务边界核对；普通业务读取不因此全部改为只读。 | [判据修正与实际权限](verification-data/2026-10-26-integration-refactor/stage-23/manifest.json)、[原复现](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json) |
-| 原列举已返回、文件事实已保存，录像取消后原调用记录仍停留在运行中且结果为空，取消继续等待。代表用例确认原返回仍由同一工厂保留，补齐测试准备中的扫描集合也未改善。 | 在终态筛选前交付仍持有的原实际结果，沿原票据与键保存，不重新列举补结果；非分页返回的保存不等于扫描完整性确认。 | [原复现](verification-data/2026-10-26-integration-refactor/stage-2/manifest.json)、[责任排查实验](verification-data/2026-10-26-integration-refactor/stage-23/manifest.json) |
+| 讨论 2：原列举已返回、文件事实已保存，录像取消后原调用记录仍停留在运行中且结果为空，取消继续等待。代表用例确认原返回仍由同一工厂保留，补齐测试准备中的扫描集合也未改善。 | **待讨论。** 在终态筛选前交付仍持有的原实际结果，沿原票据与键保存，不重新列举补结果；保留原通信错误，非分页返回的保存不等于扫描完整性确认。 | [原复现](verification-data/2026-10-26-integration-refactor/stage-2/manifest.json)、[责任排查实验](verification-data/2026-10-26-integration-refactor/stage-23/manifest.json) |
 | 目录检查已登记、尚未开始读取时取消，无返回事实已经保存，拍摄取消收尾却因缺少事实读取端口报错，动作与占用未结束。 | 在分段取消的正式收尾入口交付原核对事实，保留零目录调用及已保存的未知结果。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
 | 原目录任务已经取消结束，同一工厂仍持有原任务，但再次推进在等待分支提前返回，没有保存未知结果。 | 区分仍在工作与已结束的原任务，让后者按原票据和键保存结果；诊断已排除测试没有等待任务结束。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
 | 本地读取五字节后纯停止，尚无写入或关闭错误，却保存成失败并记录 ERROR。 | 按实际读取结果区分纯停止、业务取消和真实错误，保持原进度及责任。 | [读取契约](../architecture/file-copy.md#实际读取结束与所属结果)、[阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/README.md) |
-| 清理取消的四项用例均在汇总读取处因缺少 `closing` 导入而提前结束，覆盖设备删除／查询和主机删除／查询。设备 DELETE 用例已保存取消标记，但原返回尚未保存；等待终态时检测到会话已失败，立即报错。 | 补齐汇总入口的导入，再按原四项验证原调用收场、原票据结果保存及取消完成；当前生产源码仍缺导入。 | [原始 bootstrap 日志](verification-data/2026-10-26-integration-refactor/stage-22/bootstrap-rerun.tar.gz) |
+| 讨论 1：清理取消在核对未完成责任时因缺少 `closing` 导入而退出。历史四项见证覆盖设备删除／查询和主机删除／查询；最近组合三项失败，主机两项还带有后续保存未交接错误。 | **确定修复，待统一实施。** 在 `bootstrap/lifecycle.py::_cleanup_pending_for_action` 可见作用域正确导入 `contextlib.closing`；保持原查询、原操作身份和取消顺序。复验设备及主机删除／查询四种场景，确认原结果可靠保存、取消正常完成、没有重复删除且任务与连接实际结束；后续收场错误分别定位，不以导入修复推定全部通过。 | [原始 bootstrap 日志](verification-data/2026-10-26-integration-refactor/stage-22/bootstrap-rerun.tar.gz)、[最近组合](verification-data/2026-10-26-integration-refactor/stage-25/manifest.json) |
 | 分段判断已保存一处缺段、两份可保留原片，结束动作却按零缺段核对，产物未发布。 | 核对期望数量与已保存决定，仍拒绝真正不一致的输入。 | [阶段 16](verification-data/2026-10-26-integration-refactor/stage-16/README.md) |
 | 默认文件池已满且数据库打开失败时，已退出数据库线程的关闭等待仍排在同一池，阻挡取消与扫描撤回。 | 必要数据库收场独立推进，仍等待真实线程退出；覆盖满池、取消和锁释放。 | [阶段 8](verification-data/2026-10-26-integration-refactor/stage-8/README.md)、[阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/README.md) |
 | 媒体修复或检查仍占有输入文件，同一会话的事实恢复又作为另一任务申请同一文件，发生独占冲突；合法一毫秒轮询、未注入保存故障已复现。 | 协调原任务、原保存阶段和同一会话恢复入口的责任，保持独占、不重复读取或工具调用。 | [阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/manifest.json) |
