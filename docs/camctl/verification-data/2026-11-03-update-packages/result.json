@@ -1,0 +1,182 @@
+{
+  "status": "passed",
+  "checks": {
+    "ordinary": {
+      "version": "1.0.1",
+      "state": "committed",
+      "full_logical_database_retained": true,
+      "metadata_and_instance_retained": true,
+      "config_and_six_markers_retained": true,
+      "capability_sync": true,
+      "post_update_run_submit_and_host_exit": "passed",
+      "host_error_or_abnormal_calls": 0
+    },
+    "force": {
+      "version": "1.0.2",
+      "state": "committed",
+      "new_config_exact": true,
+      "new_database_instance": true,
+      "empty_business": true,
+      "old_environment_media_and_ready_removed": true,
+      "processing_and_client_marker_retained": true,
+      "diagnostic_archive": {
+        "path": "/var/opt/SatService/dt_sending/camctl-force-diagnostic-2dff8fc558fd41479ee5ca4175f2ba49.tar.gz",
+        "size": 2600877,
+        "members": 745,
+        "job_state": "cleaned",
+        "old_environment_config_database_present": true,
+        "media_payloads_excluded": true
+      },
+      "post_update_run_submit_and_host_exit": "passed",
+      "host_error_or_abnormal_calls": 0
+    }
+  },
+  "steps": [
+    {
+      "label": "create-baseline-venv",
+      "argv": [
+        "uv",
+        "venv",
+        "--python",
+        "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11",
+        "/root/.camctl/venv"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.064
+    },
+    {
+      "label": "install-baseline-dependencies",
+      "argv": [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/root/.camctl/venv/bin/python",
+        "--offline",
+        "--no-index",
+        "--find-links",
+        "/workspaces/camctl/tmp/camctl-update-1.0.1-normal/camctl-update/camctl/wheelhouse/x86_64",
+        "--require-hashes",
+        "-r",
+        "/workspaces/camctl/tmp/camctl-update-1.0.1-normal/camctl-update/camctl/requirements.txt"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.114
+    },
+    {
+      "label": "install-baseline-wheel",
+      "argv": [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/root/.camctl/venv/bin/python",
+        "--offline",
+        "--no-index",
+        "--no-deps",
+        "/workspaces/camctl/tmp/deploy-package-20261102-glibc227-ac045cf9/camctl-deploy/camctl/camctl-1.0.0-py3-none-any.whl"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.114
+    },
+    {
+      "label": "baseline-version",
+      "argv": [
+        "/root/.camctl/venv/bin/camctl",
+        "--version"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.214
+    },
+    {
+      "label": "baseline-init",
+      "argv": [
+        "/root/.camctl/venv/bin/camctl",
+        "init",
+        "--config",
+        "/root/.camctl/config.toml"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.365
+    },
+    {
+      "label": "baseline-submit",
+      "argv": [
+        "/root/.camctl/venv/bin/camctl",
+        "submit",
+        "/workspaces/camctl/tmp/update-validation-20261103-final/seed-plan.json",
+        "--config",
+        "/root/.camctl/config.toml"
+      ],
+      "returncode": 0,
+      "elapsed_s": 1.919
+    },
+    {
+      "label": "baseline-describe",
+      "argv": [
+        "/root/.camctl/venv/bin/camctl",
+        "describe",
+        "--config",
+        "/root/.camctl/config.toml"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.866
+    },
+    {
+      "label": "publish-maintenance",
+      "argv": [
+        "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11",
+        "-B",
+        "-I",
+        "-c",
+        "import runpy,sys; sys.path.insert(0,sys.argv[1]); sys.argv=['camctl.update_engine.publisher',*sys.argv[2:]]; runpy.run_module('camctl.update_engine.publisher',run_name='__main__')",
+        "/workspaces/camctl/tmp/camctl-update-1.0.1-normal/camctl-update/camctl/camctl-1.0.1-py3-none-any.whl",
+        "--wheel",
+        "/workspaces/camctl/tmp/camctl-update-1.0.1-normal/camctl-update/camctl/camctl-1.0.1-py3-none-any.whl",
+        "--target",
+        "/root/.camctl",
+        "--base-python",
+        "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11",
+        "--camctl-path",
+        "/root/.camctl/venv/bin/camctl",
+        "--config",
+        "/root/.camctl/config.toml"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.415
+    },
+    {
+      "label": "version-after-publish",
+      "argv": [
+        "/root/.camctl/venv/bin/camctl",
+        "--version"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.164
+    },
+    {
+      "label": "ordinary-version",
+      "argv": [
+        "/root/.camctl/venv/bin/camctl",
+        "--version"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.164
+    },
+    {
+      "label": "force-version",
+      "argv": [
+        "/root/.camctl/venv/bin/camctl",
+        "--version"
+      ],
+      "returncode": 0,
+      "elapsed_s": 0.164
+    }
+  ],
+  "started_at": 1793676677.7837975,
+  "host_exit_codes": [
+    0,
+    0
+  ],
+  "ended_at": 1793676713.4385223
+}

@@ -1,0 +1,62 @@
+{
+  "database": {
+    "metadata": {
+      "id": 1,
+      "application_id": "camctl",
+      "instance_id": "ae0204bee2d54c8c870839a6cc971ec4",
+      "format_version": 9,
+      "staging_path": "/root/.camctl/staging",
+      "ready_path": "/var/opt/SatService/dt_outbox",
+      "processing_path": "/var/opt/SatService/dt_sending"
+    },
+    "logical_sha256": "ffd880f2e3f6392317ad5c8b85ef06a3cb9cbdf00a9af8212cfcfc27a92cbdda",
+    "counts": {
+      "plans": 1,
+      "actions": 1
+    }
+  },
+  "objects": {
+    "/root/.camctl/config.toml": {
+      "sha256": "5d2da5a3a703a9296518657df1f613b8658e4ed87d4ee01eb6cd34600b7a359d",
+      "size": 818,
+      "mode": 420,
+      "uid": 0,
+      "gid": 0
+    },
+    "/root/.camctl/venv/old-extra-marker.bin": {
+      "sha256": "497d45853546a8fc880d16ec3f0ea55df6db48974b710d3c8f23a8551a35259a",
+      "size": 90112,
+      "mode": 420,
+      "uid": 0,
+      "gid": 0
+    },
+    "/root/.camctl/staging/capture-originals/old-photo.bin": {
+      "sha256": "db2b23cf1f74b0e03c2a76fc7cbea8c96066e21eeebcd41086a5f3ad7ac61ba8",
+      "size": 90112,
+      "mode": 420,
+      "uid": 0,
+      "gid": 0
+    },
+    "/var/opt/SatService/dt_outbox/old-delivery.bin": {
+      "sha256": "162365856c66967d4b98ff6c1df15fc394bbbeed11aab8b8891f550094219f45",
+      "size": 90112,
+      "mode": 420,
+      "uid": 0,
+      "gid": 0
+    },
+    "/var/opt/SatService/dt_sending/already-owned-by-host.bin": {
+      "sha256": "954dc52fa636cc1a94ac7d405b3e952a20fe1faaf0f956d19a0cc0fb47a623e4",
+      "size": 90112,
+      "mode": 420,
+      "uid": 0,
+      "gid": 0
+    },
+    "/root/.camctl/client-data/client-data-marker.bin": {
+      "sha256": "fa514ffd89e17933be1307c10b6772c1ed53c856c18f6a1984071dce758be94f",
+      "size": 33,
+      "mode": 420,
+      "uid": 0,
+      "gid": 0
+    }
+  }
+}
