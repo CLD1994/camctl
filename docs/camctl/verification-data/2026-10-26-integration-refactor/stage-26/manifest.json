@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "scope": "来源分页专项纠正额外内存门槛后的完整文件补测",
+  "base_commit": "7eaf36384be8b0bce61df52b278bac4862b16f28",
+  "actual_test_diff": "test-changes.patch",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+    "-q",
+    "--basetemp=/tmp/camctl-source-pages-20261103-tmp",
+    "--junitxml=/tmp/camctl-source-pages-20261103.xml"
+  ],
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "environment": {
+    "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+  },
+  "exit_code": 0,
+  "pytest_seconds": 41.13,
+  "results": {
+    "tests": 230,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0
+  },
+  "coverage_mapping": {
+    "old_node": "test_source_write_and_original_key_keep_bounded_residency",
+    "new_node": "test_source_write_and_original_key_keep_bounded_pages",
+    "preserved": [
+      "输入20/200/600",
+      "写批四",
+      "真实提交与原键复用",
+      "取行上限128",
+      "完整正文一次读取及首次窥读",
+      "索引访问",
+      "同键回执相等"
+    ],
+    "capacity_owner": "apps/camctl/tests/integration/outputs/test_source_capacity.py::test_source_write_and_original_key_fit_process_group_budget"
+  },
+  "review": {
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "high",
+    "result": "接受有效行为保留；发现容量支持说明仍引用旧增长检查，已按建议仅修正文档字符串"
+  },
+  "limits": [
+    "本次没有修改生产代码。",
+    "本次没有执行新的进程组预算、严格无交换或全量集成验收。",
+    "补测后容量支持只修正文档字符串，不改变执行逻辑。"
+  ],
+  "files": {
+    "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py": {
+      "sha256": "6569bc5ec38298307c53438766bc2c3097a7a228f45ab5b0c611b74f7ca3adb0"
+    },
+    "apps/camctl/tests/integration/outputs/test_source_capacity.py": {
+      "sha256": "1a7eafa3abcc18142c7345ec59b69c302f8a59e400c98ab55183d68f62c4e9e7"
+    },
+    "apps/camctl/tests/integration/support/source_capacity.py": {
+      "sha256": "a1a7214b111e16352344277bd48d9c913ee931b5419477e160dd02f1c617ccb4"
+    }
+  },
+  "payloads": {
+    "source-pages.log.gz": {
+      "bytes": 91,
+      "sha256": "cca47aa3432244f1114dff9fdf793db13a553e8210f827d49a33bb1e12c67a5e"
+    },
+    "source-pages.xml.gz": {
+      "bytes": 2972,
+      "sha256": "1a418fb340954f0856817db9e004e3e20eb8826aeeeb6251aa357107398562e2"
+    },
+    "test-changes.patch": {
+      "bytes": 4032,
+      "sha256": "9986868f3a68f1cee42c30a6e71ba73b343bd00f0a810085b756fb2053ea0234"
+    }
+  }
+}

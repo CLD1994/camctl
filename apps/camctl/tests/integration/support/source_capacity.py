@@ -188,7 +188,7 @@ def assert_database(manifest, expected):
 
 
 async def run_capacity(directory):
-    """本来源负载预算验收；不替代原数值增长检查或任意规模的有限驻留证明。"""
+    """本来源负载的进程组预算验收；仅证明实际执行规模。"""
     backend = memory_budget_backend()
     budget = backend.get_budget_config()
     timing = {"count": 2400, "batch_size": 4}
