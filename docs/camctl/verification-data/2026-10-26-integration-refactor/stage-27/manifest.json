@@ -1,0 +1,181 @@
+{
+  "scope": "启动清理取消测试的局部改进；公开接口迁移仍未完成；未修改生产代码",
+  "baseline_commit": "45583fde",
+  "implementation_commit": "e2edc7c8",
+  "integrated_commit": "f16ed0db",
+  "command_provenance": "命令依据执行者会话记录整理；原始日志未打印 argv。JUnit、原始输出、退出码和墙钟保留；不以事后说明冒充运行时源码快照。",
+  "runs": [
+    {
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "junit_suite_seconds": 10.672,
+      "id": "baseline",
+      "scope": "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py::test_cancel_during_local_drain_withdraws_queued_startup_sweep",
+      "source_identity": "45583fde，原节点",
+      "exit_code": 1,
+      "wall_seconds": 12.046,
+      "command": {
+        "cwd": "/tmp/camctl-startup-cancel-refactor-20261103",
+        "outer_timeout_seconds": 70,
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-startup-cancel-refactor-20261103/apps/camctl/src",
+          "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"
+        },
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "-p",
+          "pytest_asyncio.plugin",
+          "-p",
+          "no:cacheprovider",
+          "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py::test_cancel_during_local_drain_withdraws_queued_startup_sweep",
+          "-q",
+          "--tb=short",
+          "--junitxml=/tmp/camctl-startup-cancel-evidence-20261103/baseline.xml"
+        ]
+      }
+    },
+    {
+      "tests": 28,
+      "failures": 2,
+      "errors": 0,
+      "skipped": 0,
+      "junit_suite_seconds": 18.04,
+      "id": "bootstrap-full",
+      "scope": "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py",
+      "source_identity": "作者在同工作树恢复基线 bootstrap 文件后运行；当时仅执行器文件有新增断言；日志保留旧节点名，没有独立冻结的运行源码清单",
+      "exit_code": 1,
+      "wall_seconds": 18.86,
+      "command": {
+        "cwd": "/tmp/camctl-startup-cancel-refactor-20261103",
+        "outer_timeout_seconds": 300,
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-startup-cancel-refactor-20261103/apps/camctl/src",
+          "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"
+        },
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "-p",
+          "pytest_asyncio.plugin",
+          "-p",
+          "no:cacheprovider",
+          "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py",
+          "-q",
+          "--tb=short",
+          "--junitxml=/tmp/camctl-startup-cancel-evidence-20261103/bootstrap-full.xml"
+        ]
+      }
+    },
+    {
+      "tests": 28,
+      "failures": 2,
+      "errors": 0,
+      "skipped": 0,
+      "junit_suite_seconds": 17.146,
+      "id": "final-bootstrap-receipt",
+      "scope": "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py",
+      "source_identity": "e2edc7c8 的最终测试内容；根分支 cherry-pick 为 f16ed0db",
+      "exit_code": 1,
+      "wall_seconds": 17.946,
+      "command": {
+        "cwd": "/tmp/camctl-startup-cancel-refactor-20261103",
+        "outer_timeout_seconds": 300,
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-startup-cancel-refactor-20261103/apps/camctl/src",
+          "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"
+        },
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "-p",
+          "pytest_asyncio.plugin",
+          "-p",
+          "no:cacheprovider",
+          "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py",
+          "-q",
+          "--tb=short",
+          "--junitxml=/tmp/camctl-startup-cancel-evidence-20261103/final-bootstrap-receipt.xml"
+        ]
+      }
+    },
+    {
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "junit_suite_seconds": 0.801,
+      "id": "final-executor",
+      "scope": "apps/camctl/tests/integration/persistence/test_executor.py",
+      "source_identity": "最终执行器测试内容；后续仅 bootstrap 收场记录改变",
+      "exit_code": 0,
+      "wall_seconds": 1.499,
+      "command": {
+        "cwd": "/tmp/camctl-startup-cancel-refactor-20261103",
+        "outer_timeout_seconds": 180,
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-startup-cancel-refactor-20261103/apps/camctl/src",
+          "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"
+        },
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "-p",
+          "pytest_asyncio.plugin",
+          "-p",
+          "no:cacheprovider",
+          "apps/camctl/tests/integration/persistence/test_executor.py",
+          "-q",
+          "--tb=short",
+          "--junitxml=/tmp/camctl-startup-cancel-evidence-20261103/final-executor.xml"
+        ]
+      }
+    }
+  ],
+  "attempts_not_accepted": [
+    {
+      "logs": [
+        "refactor-narrow.log",
+        "refactor-narrow-2.log"
+      ],
+      "result": "候选省略合法状态库准备，未进入目标工厂；分别因缺失状态库与空文件未通过资格检查，不计业务失败或等价回归。"
+    },
+    {
+      "logs": [
+        "refactor-narrow-3.log"
+      ],
+      "result": "恢复合法准备后发生取消与停止未交付，但通用线程池观察无法独立证明扫描身份；候选撤回，不计公开接口迁移完成。"
+    },
+    {
+      "logs": [
+        "final-narrow.log",
+        "final-bootstrap.log"
+      ],
+      "result": "原见证局部改进的较早运行；晚于它们又修订收场结果记录，以 final-bootstrap-receipt 为最终 bootstrap 结果。"
+    }
+  ],
+  "review": {
+    "reviewer": "/root/sol_high_startup_test_design",
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "high",
+    "result": "接受局部测试差异；原观察边界保留，取消明确命中，占位仅收尾放行；不将本次 cleanup_errors=[] 扩称所有超时出口都已证明真实任务结束。"
+  },
+  "remaining": [
+    "日志公开契约缺少扫描已提交且尚未开始的同步事实；原失败见证在等价覆盖前保留。",
+    "取消已提出但停止通知没有交付；本次释放占位后原扫描执行，旧副本消失，原run交付取消，收场错误为空；没有证明原开库错误也已交付。",
+    "普通日志路径未知用例的故障注入同时命中扫描工作线程和日志监听线程，len(resolve_threads)==1 断言失败；本次未修，不能据此定性生产错误。",
+    "未运行全量集成、容量或严格无交换验收；不存在同负载显著提速结论。"
+  ],
+  "archive": {
+    "file": "runs.tar.gz",
+    "bytes": 5195,
+    "sha256": "821c1c19565c44e86699cf478ad7c3e335815a9103505dad474cd1b8e3f8529c",
+    "members": 18
+  }
+}
