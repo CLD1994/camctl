@@ -396,6 +396,7 @@ class TestPriorityAndClose:
         await asyncio.sleep(0.02)
         outcome2 = await handle2
         assert outcome2.kind is DbOutcomeKind.NOT_EXECUTED
+        assert not closing.done()
         blocking.release.set()
         await closing
         outcome1 = await handle1

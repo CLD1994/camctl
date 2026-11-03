@@ -690,7 +690,7 @@ async def test_cancelled_run_with_queued_sweep_advances_business_and_withdraws(
         close_runtime(deps)
 
 
-async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
+async def test_cancel_during_failed_database_open_withdraws_queued_startup_sweep(
         tmp_path: Path, monkeypatch) -> None:
     from contextvars import ContextVar
     import sys
@@ -720,7 +720,7 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
 
     def occupy_worker():
         loop.call_soon_threadsafe(worker_entered.set)
-        _wait_thread_event(release_worker)
+        release_worker.wait()
 
     blocker = loop.run_in_executor(pool, occupy_worker)
 
@@ -786,6 +786,7 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
     monkeypatch.setattr(BusinessDatabase, "open", classmethod(fail_database_open))
 
     run_task = asyncio.create_task(execute_command(deps, None, flows={}))
+    cancellation_requested = False
     try:
         await _wait_event(worker_entered)
         await _wait_event(startup_call_queued)
@@ -801,72 +802,91 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
         observer_thread.join()
         assert not database_threads[0].is_alive()
         assert scans == [] and old_copy.exists()
-        cancellation_requested = False
-        if not run_task.done():
-            with pytest.raises(SessionLockConflictError):
-                acquire_session(deps.session_lock)
-            cancellation_requested = run_task.cancel(
-                "cancel while local work drain owns queued sweep")
-        if cancellation_requested:
-            stop_wait = asyncio.create_task(startup_stop_delivered.wait())
-            done, _ = await asyncio.wait((stop_wait, run_task, blocker),
-                timeout=_GATE_TIMEOUT, return_when=asyncio.FIRST_COMPLETED)
-            try:
-                assert not blocker.done() and (stop_wait in done or run_task in done), (
-                    "数据库线程已结束，取消必须在工作线程释放前撤回启动扫描")
-            finally:
-                if not stop_wait.done():
-                    stop_wait.cancel()
-                    await asyncio.gather(stop_wait, return_exceptions=True)
+        assert not run_task.done()
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        cancellation_requested = run_task.cancel("cancel while database open has failed")
+        assert cancellation_requested
+        stop_wait = asyncio.create_task(startup_stop_delivered.wait())
+        done, _ = await asyncio.wait((stop_wait, run_task, blocker),
+            timeout=_GATE_TIMEOUT, return_when=asyncio.FIRST_COMPLETED)
+        try:
+            assert not blocker.done() and (stop_wait in done or run_task in done), (
+                "数据库线程已结束，取消必须在工作线程释放前撤回启动扫描")
+        finally:
+            if not stop_wait.done():
+                stop_wait.cancel()
+                await asyncio.gather(stop_wait, return_exceptions=True)
         assert scans == [] and old_copy.exists()
         if not run_task.done():
             with pytest.raises(SessionLockConflictError):
                 acquire_session(deps.session_lock)
-        release_worker.set()
-        await _wait_task(blocker)
-        try:
-            outcome = await _wait_task_result(run_task)
-        except asyncio.CancelledError as cancelled:
-            assert cancellation_requested
-            assert cancelled.args == ("cancel while local work drain owns queued sweep",)
-        else:
-            assert not outcome.succeeded and outcome.reason == "state_db_error"
-            assert "controlled locked open failure" in str(outcome.details)
-        await _wait_task(asyncio.gather(
-            asyncio.wrap_future(physical_scans[0]), return_exceptions=True))
-        assert physical_scans[0].done() and not physical_scans[0].running()
-        if not physical_scans[0].cancelled():
-            physical_scans[0].result()
-        assert scans == [], "true cancellation must withdraw queued startup scan"
-        assert old_copy.exists()
-        lease = acquire_session(deps.session_lock)
-        lease.close()
     finally:
         failure = sys.exception()
         release_worker.set()
-        await asyncio.gather(blocker, return_exceptions=True)
-        settlement_error = None
-        if physical_scans:
+        cleanup_errors = []
+        run_result = None
+        try:
+            await _wait_task(asyncio.gather(blocker, return_exceptions=True))
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
+            if not run_task.done() and not cancellation_requested:
+                run_task.cancel("test cleanup")
             try:
+                outcome = await _wait_task_result(run_task)
+            except asyncio.CancelledError as cancelled:
+                run_result = cancelled
+                if cancellation_requested:
+                    assert cancelled.args == ("cancel while database open has failed",)
+            else:
+                run_result = outcome
+                assert not outcome.succeeded and outcome.reason == "state_db_error"
+                assert "controlled locked open failure" in str(outcome.details)
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
+            if physical_scans:
                 await _wait_task(asyncio.gather(
                     asyncio.wrap_future(physical_scans[0]), return_exceptions=True))
-            except BaseException as error:
-                settlement_error = error
+                assert physical_scans[0].done() and not physical_scans[0].running()
+                if not physical_scans[0].cancelled():
+                    physical_scans[0].result()
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
+            if observer_thread is not None:
+                observer_thread.join(timeout=_GATE_TIMEOUT)
+                assert not observer_thread.is_alive()
+            lease = acquire_session(deps.session_lock)
+            lease.close()
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
+            close_runtime(deps)
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
+            pool.shutdown(wait=True)
+        except BaseException as error:
+            cleanup_errors.append(error)
+        if physical_scans:
             if failure is not None:
                 future = physical_scans[0]
                 failure.add_note(
                     f"启动扫描实际任务：done={future.done()}, "
                     f"cancelled={future.cancelled()}, running={future.running()}, "
                     f"scans={scans!r}, old_copy_exists={old_copy.exists()}, "
-                    f"settlement_error={settlement_error!r}")
-        if observer_thread is not None:
-            observer_thread.join()
-        if not run_task.done():
-            run_task.cancel("test cleanup")
-        await _wait_task(asyncio.gather(run_task, return_exceptions=True))
-        close_runtime(deps)
-        if failure is None and settlement_error is not None:
-            raise settlement_error
+                    f"run_result={run_result!r}, "
+                    f"cleanup_errors={cleanup_errors!r}")
+        if cleanup_errors:
+            if failure is not None:
+                failure.add_note(f"收场错误: {cleanup_errors!r}")
+            else:
+                raise BaseExceptionGroup("测试收场失败", cleanup_errors)
+
+    assert scans == [], "true cancellation must withdraw queued startup scan"
+    assert old_copy.exists()
 
 
 async def test_late_clock_winddown_stops_before_blocked_log_settlement(
