@@ -1,0 +1,151 @@
+{
+  "scope": "删除维护成本过高的开库失败取消交叉，普通取消用例改用公开行为；用户明确批准缩减交叉覆盖",
+  "baseline_commit": "dbbdf520cdbf1748c4bdb89439d8125c10058db1",
+  "test_commit": "8ebefffa421d7c8dbdb90803875ab160e119e363",
+  "integrated_commit": "ae4096b3",
+  "production_changed": false,
+  "executor_wait_assertion_changed": false,
+  "source_patch": {
+    "member": "change.patch",
+    "sha256": "ca219ca926b802e2d78a210bd266394d7cf9cf2c9884c143ef0816837e88c087",
+    "identity_check": "归档补丁逐字节等于主树 dbbdf520..ae4096b3 的唯一测试文件差异。"
+  },
+  "receipt": {
+    "cwd": "/tmp/camctl-startup-cancel-public-20261107",
+    "branch": "test/startup-cancel-public-20261107",
+    "baseline_commit": "dbbdf520cdbf1748c4bdb89439d8125c10058db1",
+    "test_commit": "8ebefffa421d7c8dbdb90803875ab160e119e363",
+    "patch": "change.patch",
+    "patch_sha256": "ca219ca926b802e2d78a210bd266394d7cf9cf2c9884c143ef0816837e88c087",
+    "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python (3.11.17)",
+    "commands": "commands.txt",
+    "resource_sync": "sync.log",
+    "runs": {
+      "baseline": {
+        "tests": 28,
+        "failures": 2,
+        "errors": 0,
+        "suite_seconds": 19.087,
+        "exit_code": 1,
+        "wall_time": "0m21.081s",
+        "log": "baseline.log",
+        "xml": "baseline.xml"
+      },
+      "target": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "suite_seconds": 0.561,
+        "exit_code": 1,
+        "wall_time": "0m1.439s",
+        "log": "target.log",
+        "xml": "target.xml"
+      },
+      "target-rerun": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "suite_seconds": 0.468,
+        "exit_code": 0,
+        "wall_time": "0m1.339s",
+        "log": "target-rerun.log",
+        "xml": "target-rerun.xml"
+      },
+      "target-final": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "suite_seconds": 0.57,
+        "exit_code": 0,
+        "wall_time": "0m1.448s",
+        "log": "target-final.log",
+        "xml": "target-final.xml"
+      },
+      "final": {
+        "tests": 27,
+        "failures": 1,
+        "errors": 0,
+        "suite_seconds": 7.356,
+        "exit_code": 1,
+        "wall_time": "0m8.223s",
+        "log": "final.log",
+        "xml": "final.xml"
+      }
+    },
+    "coverage_change": "删除数据库开库失败、默认线程池饱和及父取消的精确交叉自动覆盖；新用例验证业务收到取消、文件字节保留与会话锁可重取。"
+  },
+  "results": {
+    "before": {
+      "passed": 26,
+      "failed": 2,
+      "cases": 28,
+      "pytest_seconds": 19.087,
+      "wall_seconds": 21.081
+    },
+    "after": {
+      "passed": 26,
+      "failed": 1,
+      "cases": 27,
+      "pytest_seconds": 7.356,
+      "wall_seconds": 8.223
+    },
+    "target_final": {
+      "passed": 1,
+      "failed": 0,
+      "suite_seconds": 0.57,
+      "case_seconds": 0.228,
+      "wall_seconds": 1.448
+    },
+    "target_in_full_case_seconds": 0.072
+  },
+  "remaining_failure": {
+    "node": "test_unknown_ordinary_log_target_preserves_startup_candidates",
+    "observed": "resolve_threads 数量实际为 2，旧断言要求 1；前后同名失败，相关代码未改。"
+  },
+  "coverage": {
+    "retained": "正式运行入口与受控业务协作者、真实文件/线程/状态库/锁组合，验证业务收到取消、释放文件工作后旧副本字节不变、运行交付取消及会话锁可重取。",
+    "removed": "数据库打开失败后的保护关闭、默认池饱和、父任务取消的精确交叉自动验证；生产风险未解决，原证据在阶段27保留。",
+    "not_claimed": [
+      "不证明扫描确已提交队列或目录访问次数为零",
+      "不代表原交叉已修复",
+      "不是相同覆盖下的性能对照",
+      "未运行全量、容量或真实设备验收"
+    ]
+  },
+  "attempts": {
+    "target": "首次定向通过 shield 读取取消异常消息而断言失败；改为有限等待原任务结束后直接观察原任务取消。",
+    "target-rerun": "修订后通过；其后收场补充了 gather 返回错误的检查，最终结果以 target-final 与 final 为准。"
+  },
+  "review": {
+    "agent": "/root/sol_high_review_public_cancel_replacement",
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "high",
+    "result": "接受；核实际差异、公开边界、资源收场、命令、XML及日志；未运行新测试。"
+  },
+  "archive": {
+    "file": "runs.tar.gz",
+    "bytes": 7839,
+    "sha256": "522c0a68da965e7be3063ada87a6e4790f157748160839864e7a932162e7a86a",
+    "members": [
+      "baseline.exit",
+      "baseline.log",
+      "baseline.xml",
+      "change.patch",
+      "commands.txt",
+      "final.exit",
+      "final.log",
+      "final.xml",
+      "receipt.json",
+      "sync.log",
+      "target-final.exit",
+      "target-final.log",
+      "target-final.xml",
+      "target-rerun.exit",
+      "target-rerun.log",
+      "target-rerun.xml",
+      "target.exit",
+      "target.log",
+      "target.xml"
+    ]
+  }
+}
