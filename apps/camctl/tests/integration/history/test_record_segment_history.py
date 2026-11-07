@@ -588,10 +588,47 @@ async def test_external_view_read_failure_is_reported_and_later_read_recovers(tm
 
 
 @pytest.mark.asyncio
-async def test_real_large_segment_source_preparation(tmp_path):
-    """真实逐页提交 2048 项并核对完整库；准备耗时属于本次测试。"""
-    from ..support.segment_history_corpus import generate
-    await generate(tmp_path/'world',2048)
+async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
+    """真实生成 1000 项，核对 128 项写批与第 999、1000 项跨目录。"""
+    from collections import Counter
+    import json
+    from camctl.capture.segment_models import SegmentSetRef
+    from camctl.contracts.history_values import HistoryBoundary
+    from camctl.history.snapshots import prepare_snapshot
+    from camctl.persistence.transaction import encode_json_value
+    from ..support.segment_history_corpus import generate, verify_output
+
+    directory=tmp_path/'world'
+    await generate(directory,1000)
+    manifest=json.loads((directory/'segment-history-1000.json').read_text())
+    ref=SegmentSetRef(*(manifest[name] for name in ('action_id','scan_id','final_page_event_id','version')))
+    boundary=HistoryBoundary(**manifest['boundary'])
+    history=HistoryRepository(directory/'state.db')
+    with history.open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
+        members=tuple(_rows(handle,'segment_members',ref,limit=7))
+        gaps=tuple(_rows(handle,'segment_gaps',ref,limit=7))
+        assert len(members)==1000 and len(gaps)==998
+        assert {row.values['directory_number'] for row in members}=={1,2}
+        assert (members[998].values['directory_number'],members[998].values['segment_index'],
+            members[998].values['identity'])==(1,999,'/DCIM/CAM_001/CAM_20261021090000_0999_D.OSV')
+        assert (members[999].values['directory_number'],members[999].values['segment_index'],
+            members[999].values['identity'])==(2,1,'/DCIM/CAM_002/CAM_20261021090000_0001_D.OSV')
+        assert list(Counter(row.values['created_event_id'] for row in members).values())==[128]*7+[104]
+        assert list(Counter(row.values['page_event_id'] for row in members).values())==[128]*7+[104]
+        assert [row.values['empty_member_id'] for row in gaps]==[row.row_id for row in members[1:-1]]
+        with (directory/'rows.jsonl').open('w') as output:
+            for table,rows in (('segment_members',members),('segment_gaps',gaps)):
+                for row in rows:
+                    output.write(encode_json_value({'table':table,'row':dict(row.values)})+'\n')
+        prepared=prepare_snapshot(handle)
+        try:
+            with (directory/'snapshot.jsonl').open('wb') as output:
+                length=sum(output.write(chunk) for chunk in prepared.chunks)
+            assert length==prepared.length
+        finally:prepared.close()
+    (directory/'result.json').write_text(json.dumps({'counts':{'segment_members':len(members),
+        'segment_gaps':len(gaps)},'snapshot_length':length}))
+    verify_output(directory,manifest)
 
 
 @pytest.mark.parametrize('size',[256,2048])
