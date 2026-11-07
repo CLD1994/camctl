@@ -92,8 +92,30 @@ async def test_media_pending_save_cannot_be_declared_settled_or_blindly_retried(
 
 
 @pytest.mark.parametrize("primary", ["state", "configuration", "clock", "cancel"])
-async def test_media_unconfirmed_save_preserves_fatal_primary_and_secondary_state(held_media, primary):
-    state, context = held_media, held_media.context
+async def test_local_settlement_failures_preserve_fatal_primary(pipeline, primary):
+    from pathlib import Path
+    from camctl.bootstrap.background_flow import CombinedLocalWork
+    from ..support.session import session_context
+
+    class Owner:
+        def __init__(self, name):
+            self.error = StateDbFailure(name)
+            self.settled = False
+
+        def required_settlements(self):
+            return 1
+
+        def stop_new_work(self):
+            pass
+
+        async def settle(self):
+            self.settled = True
+            raise self.error
+
+    owners = [Owner("settlement-first"), Owner("settlement-second")]
+    path = Path(pipeline[0].connection.execute("PRAGMA database_list").fetchone()[2])
+    context = session_context(path, catalog=_Catalog(), clock=FixedClock(_NOW + 100),
+        local_work=CombinedLocalWork(owners))
     errors = {"state": StateDbFailure("primary-state"),
         "configuration": DeviceConfigurationError("primary-configuration"),
         "clock": ClockBecameUntrusted("primary-clock"),
@@ -114,18 +136,18 @@ async def test_media_unconfirmed_save_preserves_fatal_primary_and_secondary_stat
         with pytest.raises(asyncio.CancelledError) as canceled:
             await run_session(context, None)
         assert canceled.value is original
-        assert str(state.errors[0]) in str(getattr(canceled.value, "__notes__", ()))
+        details = str(getattr(canceled.value, "__notes__", ()))
     else:
         outcome = await run_session(context, None)
         assert outcome.reason == {"state": "state_db_error", "configuration": "configuration_error",
             "clock": "clock_invalid"}[primary]
         assert f"primary-{primary}" in str(outcome.details)
         secondary = outcome.details.get("secondary_errors", ())
-        assert any(item["reason"] == "state_db_error" and
-            str(state.errors[0]) in str(item["details"]) for item in secondary)
+        assert any(item["reason"] == "state_db_error" for item in secondary)
+        details = str(secondary)
+    assert details.index("settlement-first") < details.index("settlement-second")
+    assert all(owner.settled for owner in owners)
     assert not restricted
-    assert len(state.attempts) == state.work.required_settlements() == 1
-    assert state.world.tools() == ["probe"] and len(state.world.reader.requests) == 1
     assert probe_admission(context.paths.admission_lock).is_free
     lease = acquire_session(context.paths.session_lock)
     lease.close()
