@@ -380,7 +380,7 @@ def test_state_db_failure_delivers_log_copy(
     已打开的连接继续持有原文件，后续报告任务打开原路径时观察到
     状态库失效；日志副本保留该任务交付的原异常事实。
     """
-    deployment = Deployment(tmp_path, devices=False)
+    deployment = Deployment(tmp_path, devices=False, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -388,7 +388,7 @@ def test_state_db_failure_delivers_log_copy(
     hidden_db = deployment.state_db.with_name("state.db.hidden")
     reports_staging = deployment.staging / "reports"
 
-    def _run_fault_round(plan_path: Path, tag: str) -> None:
+    def _run_fault_round(plan_path: Path, tag: str, scheduled_at: str) -> None:
         """递交计划并在报告生成子进程运行期间替换走会话的状态库。
 
             计划携带远期动作，使会话继续承担后续处理责任。报告任务
@@ -413,6 +413,8 @@ def test_state_db_failure_delivers_log_copy(
             _await(_generation_started,
                    timeout_s=120, message=f"{tag}: 报告生成未开始")
             os.rename(deployment.state_db, hidden_db)
+            # 确认报告生成已开始并移库后，推进到原排期，保留同一故障阶段。
+            deployment.freeze_at(scheduled_at)
             stdout, _ = session.communicate(timeout=120)
         finally:
             if session.poll() is None:
@@ -423,9 +425,10 @@ def test_state_db_failure_delivers_log_copy(
         assert failure["body"]["reason"] == "state_db_error"
 
     # 故障轮一：日志副本随报告处理失败交付，不依赖状态库可用。
+    first_scheduled_at = deployment.schedule(12)
     first = deployment.write_plan(
-        _report_plan("5001", "sync-one", future_schedule(12)))
-    _run_fault_round(first, "故障轮一")
+        _report_plan("5001", "sync-one", first_scheduled_at))
+    _run_fault_round(first, "故障轮一", first_scheduled_at)
     copies = _log_copies(deployment.ready)
     assert len(copies) == 1
     first_copy = copies[0]
@@ -457,9 +460,10 @@ def test_state_db_failure_delivers_log_copy(
         deployment.state_db, "SELECT status FROM plans") == [(3,)]
 
     # 故障轮二：恢复后的再次失效取得新的首次触发（新副本、新轮次）。
+    second_scheduled_at = deployment.schedule(60)
     second = deployment.write_plan(
-        _report_plan("5002", "sync-two", future_schedule(60)))
-    _run_fault_round(second, "故障轮二")
+        _report_plan("5002", "sync-two", second_scheduled_at))
+    _run_fault_round(second, "故障轮二", second_scheduled_at)
     copies = _log_copies(deployment.ready)
     assert len(copies) == 2
     second_marker = json.loads(marker_path.read_bytes())
