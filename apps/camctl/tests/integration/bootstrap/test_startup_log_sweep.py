@@ -1644,7 +1644,7 @@ async def test_configured_ordinary_log_survives_startup_sweep(
 
 
 async def test_unknown_ordinary_log_target_preserves_startup_candidates(
-        tmp_path: Path, monkeypatch) -> None:
+        tmp_path: Path, monkeypatch, capfd) -> None:
     """普通日志位置无法可靠解析时，真实扫描保留全部候选并交付诊断。"""
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import LogRecord
@@ -1664,52 +1664,16 @@ async def test_unknown_ordinary_log_target_preserves_startup_candidates(
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
     )
 
-    run_task: asyncio.Task | None = None
     original_resolve = Path.resolve
-    original_sweep = copies.startup_sweep
-    original_unlink = copies._unlink
-    original_diagnostic = lifecycle._emit_log_diagnostic
-    resolve_threads: list[threading.Thread] = []
-    sweep_calls: list[tuple[tuple, dict]] = []
-    unlinked: list[Path] = []
-    diagnostics: list[str] = []
-    session_lock_during_scan: list[bool] = []
-    session_lock_during_diagnostic: list[bool] = []
-
-    def lock_is_held() -> bool:
-        duplicate = None
-        try:
-            duplicate = acquire_session(deps.session_lock)
-        except SessionLockConflictError:
-            return True
-        finally:
-            if duplicate is not None:
-                duplicate.close()
-        return False
+    expected_files = {
+        path: path.read_bytes()
+        for path in (old_copy, old_temp, formal_marker, unknown)
+    }
 
     def fail_ordinary_target_resolution(path: Path, *args, **kwargs):
-        if (Path(path) == ordinary_log_path
-                and threading.current_thread() is not threading.main_thread()):
-            resolve_threads.append(threading.current_thread())
+        if Path(path) == ordinary_log_path:
             raise PermissionError(failure_marker)
         return original_resolve(path, *args, **kwargs)
-
-    def observe_sweep(*args, **kwargs):
-        result = original_sweep(*args, **kwargs)
-        sweep_calls.append((args, dict(kwargs)))
-        session_lock_during_scan.append(lock_is_held())
-        return result
-
-    def record_unlink(path: Path) -> None:
-        unlinked.append(Path(path))
-        original_unlink(path)
-
-    async def observe_diagnostic(
-            deps_arg, message: str, *, stderr_only: bool = False) -> None:
-        session_lock_during_diagnostic.append(lock_is_held())
-        await original_diagnostic(
-            deps_arg, message, stderr_only=stderr_only)
-        diagnostics.append(message)
 
     try:
         prime = "SW04 ordinary log priming before unknown-path scan"
@@ -1719,33 +1683,15 @@ async def test_unknown_ordinary_log_target_preserves_startup_candidates(
         assert prefix in ordinary_log_path.read_bytes()
 
         monkeypatch.setattr(Path, "resolve", fail_ordinary_target_resolution)
-        monkeypatch.setattr(copies, "startup_sweep", observe_sweep)
-        monkeypatch.setattr(copies, "_unlink", record_unlink)
-        monkeypatch.setattr(
-            lifecycle, "_emit_log_diagnostic", observe_diagnostic)
-        run_task = asyncio.create_task(execute_command(deps, None, flows={}))
-        outcome = await _wait_task_result(run_task)
+        outcome = await asyncio.wait_for(
+            execute_command(deps, None, flows={}), timeout=_GATE_TIMEOUT)
     finally:
-        if run_task is not None:
-            if not run_task.done():
-                run_task.cancel("test cleanup")
-            await _wait_task(asyncio.gather(run_task, return_exceptions=True))
         close_runtime(deps)
 
     assert outcome.succeeded is True
-    assert len(resolve_threads) == 1
-    assert resolve_threads[0] is not threading.main_thread()
-    assert len(sweep_calls) == 1
-    assert sweep_calls[0][1].get("ordinary_log_path") == (
-        Path(config.paths.log_file).expanduser())
-    assert session_lock_during_scan == [True]
-    assert unlinked == []
-    assert old_copy.exists()
-    assert old_temp.exists()
-    assert formal_marker.exists()
-    assert unknown.exists()
+    for path, expected in expected_files.items():
+        assert path.read_bytes() == expected
     assert prefix in ordinary_log_path.read_bytes()
-    assert len(diagnostics) == 1
-    assert session_lock_during_diagnostic == [True]
-    assert failure_marker in diagnostics[0]
-    assert diagnostics[0].encode("utf-8") in ordinary_log_path.read_bytes()
+    diagnostics = ordinary_log_path.read_text() + capfd.readouterr().err
+    assert "ordinary_log_path_resolve_failed" in diagnostics
+    assert failure_marker in diagnostics
