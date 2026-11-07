@@ -7,6 +7,7 @@ import errno
 import os
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
@@ -20,7 +21,6 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap import lifecycle
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.recovery import RecoveryBoundary
-from camctl.logging_runtime import copies
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.runtime import StateDatabaseError
 from camctl.session.locks import (
@@ -333,23 +333,23 @@ async def test_locked_early_database_failure_settles_started_sweep(
     loop = asyncio.get_running_loop()
     listdir_started = asyncio.Event()
     release_listdir = threading.Event()
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
     calls: list[Path] = []
 
     def blocked_listdir(path: Path):
-        calls.append(Path(path))
-        loop.call_soon_threadsafe(listdir_started.set)
-        _wait_thread_event(release_listdir)
+        if Path(path) == Path(config.paths.staging) / "logs":
+            calls.append(Path(path))
+            loop.call_soon_threadsafe(listdir_started.set)
+            _wait_thread_event(release_listdir)
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
     source = None
     if early_failure == "open":
-        monkeypatch.setattr(
-            lifecycle, "_open_runtime_connection",
-            lambda _deps: (_ for _ in ()).throw(
-                StateDatabaseError("controlled locked open failure")),
-        )
+        def fail_open(*_args, **_kwargs):
+            raise sqlite3.OperationalError("controlled locked open failure")
+
+        monkeypatch.setattr(sqlite3, "connect", fail_open)
     elif early_failure == "on_session_open":
         monkeypatch.setattr(
             lifecycle, "_initialize_recovery",
@@ -410,7 +410,6 @@ async def test_locked_early_database_failure_waits_for_queued_sweep(
     worker_entered = asyncio.Event()
     listdir_started = asyncio.Event()
     release_listdir = threading.Event()
-    startup_call_queued = asyncio.Event()
     open_attempted = asyncio.Event()
     scans: list[Path] = []
 
@@ -420,34 +419,25 @@ async def test_locked_early_database_failure_waits_for_queued_sweep(
 
     blocker = loop.run_in_executor(pool, occupy_worker)
 
-    original_run_in_executor = loop.run_in_executor
-
-    def observe_submission(executor, function, *args):
-        future = original_run_in_executor(executor, function, *args)
-        startup_call_queued.set()
-        return future
-
-    monkeypatch.setattr(loop, "run_in_executor", observe_submission)
-
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
     def blocked_listdir(path: Path):
-        scans.append(Path(path))
-        loop.call_soon_threadsafe(listdir_started.set)
-        _wait_thread_event(release_listdir)
+        if Path(path) == Path(config.paths.staging) / "logs":
+            scans.append(Path(path))
+            loop.call_soon_threadsafe(listdir_started.set)
+            _wait_thread_event(release_listdir)
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
 
-    def fail_open(_deps):
+    def fail_open(*_args, **_kwargs):
         loop.call_soon_threadsafe(open_attempted.set)
-        raise StateDatabaseError("controlled locked open failure")
+        raise sqlite3.OperationalError("controlled locked open failure")
 
-    monkeypatch.setattr(lifecycle, "_open_runtime_connection", fail_open)
+    monkeypatch.setattr(sqlite3, "connect", fail_open)
     run_task = asyncio.create_task(execute_command(deps, None))
     try:
         await _wait_event(worker_entered)
-        await _wait_event(startup_call_queued)
         await _wait_event(open_attempted)  # 数据库专用线程已实际进入打开。
         assert scans == []
         assert not run_task.done(), "normal early error must retain the queued scan owner"
@@ -610,14 +600,15 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
     old_copy.parent.mkdir(parents=True, exist_ok=True)
     old_copy.write_bytes(b"old snapshot")
 
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
     def blocked_listdir(path: Path):
-        loop.call_soon_threadsafe(listdir_started.set)
-        _wait_thread_event(release_listdir)
+        if Path(path) == Path(config.paths.staging) / "logs":
+            loop.call_soon_threadsafe(listdir_started.set)
+            _wait_thread_event(release_listdir)
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
 
     original_stop = driver.stop
 
@@ -763,14 +754,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
     )
     if initial_restricted:
-        class UntrustedClock:
-            def utc_micros(self) -> int:
-                return 1
-
-            def monotonic_ns(self) -> int:
-                return 0
-
-        monkeypatch.setattr(lifecycle, "SystemClock", UntrustedClock)
+        monkeypatch.setattr(time, "time_ns", lambda: 1_000)
 
     loop = asyncio.get_running_loop()
     listdir_started = asyncio.Event()
@@ -787,14 +771,15 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
     stop_entries: list[object] = []
     ordinary_stop_calls: list[int] = []
     startup_stop_calls: list[int] = []
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
     def blocked_listdir(path: Path):
-        loop.call_soon_threadsafe(listdir_started.set)
-        _wait_thread_event(release_listdir)
+        if Path(path) == Path(config.paths.staging) / "logs":
+            loop.call_soon_threadsafe(listdir_started.set)
+            _wait_thread_event(release_listdir)
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
 
     original_stop = driver.stop
 
@@ -976,13 +961,14 @@ async def test_cancel_during_open_admission_drain_stops_all_new_work(
         return future
 
     monkeypatch.setattr(loop, "run_in_executor", observe_submission)
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
     def record_listdir(path: Path):
-        scans.append(Path(path))
+        if Path(path) == Path(config.paths.staging) / "logs":
+            scans.append(Path(path))
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", record_listdir)
+    monkeypatch.setattr(os, "listdir", record_listdir)
 
     business_settle_started = asyncio.Event()
     release_business_settle = asyncio.Event()
@@ -1107,11 +1093,15 @@ async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
     loop = asyncio.get_running_loop()
     first_unlink_started = asyncio.Event()
     release_first_unlink = threading.Event()
+    diagnostic_sync_started = asyncio.Event()
+    release_diagnostic_sync = threading.Event()
     business_started = asyncio.Event()
     business_cancelled = asyncio.Event()
     release_business = asyncio.Event()
     original_listdir = os.listdir
     original_unlink = os.unlink
+    original_fsync = os.fsync
+    ordinary_log = Path(config.paths.log_file)
     failure_marker = "controlled started unlink failure"
 
     def ordered_listdir(path):
@@ -1126,6 +1116,19 @@ async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
             raise OSError(failure_marker)
         return original_unlink(path, *args, **kwargs)
 
+    def gated_fsync(fd):
+        try:
+            fd_info = os.fstat(fd)
+            log_info = ordinary_log.stat()
+            is_log = (fd_info.st_dev, fd_info.st_ino) == (log_info.st_dev, log_info.st_ino)
+            is_failure = failure_marker.encode() in ordinary_log.read_bytes()
+        except FileNotFoundError:
+            is_log = is_failure = False
+        if is_log and is_failure and not release_diagnostic_sync.is_set():
+            loop.call_soon_threadsafe(diagnostic_sync_started.set)
+            _wait_thread_event(release_diagnostic_sync)
+        return original_fsync(fd)
+
     async def business(_context):
         business_started.set()
         try:
@@ -1136,6 +1139,7 @@ async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
 
     monkeypatch.setattr(os, "listdir", ordered_listdir)
     monkeypatch.setattr(os, "unlink", controlled_unlink)
+    monkeypatch.setattr(os, "fsync", gated_fsync)
     run_task = asyncio.create_task(execute_command(deps, None, flows={"business": business}))
     try:
         await _wait_event(first_unlink_started)
@@ -1149,11 +1153,18 @@ async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
         with pytest.raises(SessionLockConflictError):
             acquire_session(deps.session_lock)
         release_first_unlink.set()
+        await _wait_event(diagnostic_sync_started)
+        assert not run_task.done()
+        assert first.exists() and second.exists()
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        release_diagnostic_sync.set()
         with pytest.raises(asyncio.CancelledError) as cancelled:
             await _wait_task_result(run_task)
         assert cancelled.value.args == ("cancel while startup unlink is started",)
     finally:
         release_first_unlink.set()
+        release_diagnostic_sync.set()
         release_business.set()
         if not run_task.done():
             run_task.cancel("test cleanup")
@@ -1166,110 +1177,6 @@ async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
     assert failure_marker in diagnostics
     lease = acquire_session(deps.session_lock)
     lease.close()
-
-
-async def test_cancelled_unlink_diagnostic_holds_session_lock(
-        tmp_path: Path, monkeypatch) -> None:
-    """取消不撤销已开始的删除，且其诊断完成前保留 SessionLock。"""
-    from camctl.logging_runtime.ownership import LoggingOwner
-
-    config = _config_for(tmp_path)
-    assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
-    logs_dir = Path(config.paths.staging) / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    first = logs_dir / "log-copy-first.log"
-    second = logs_dir / "log-copy-second.log"
-    first.write_bytes(b"first old copy")
-    second.write_bytes(b"second old copy")
-    deps = build_runtime(
-        CommandMode.RUN, config,
-        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-    )
-
-    loop = asyncio.get_running_loop()
-    first_unlink_started = asyncio.Event()
-    release_first_unlink = threading.Event()
-    diagnostics_started = asyncio.Event()
-    release_diagnostic = asyncio.Event()
-    startup_stop_delivered = asyncio.Event()
-    unlink_calls: list[Path] = []
-    diagnostics: list[str] = []
-    original_listdir = copies._listdir
-    original_unlink = copies._unlink
-
-    monkeypatch.setattr(
-        copies, "_listdir", lambda path: (first.name, second.name)
-        if Path(path) == logs_dir else original_listdir(path),
-    )
-
-    def controlled_unlink(path: Path) -> None:
-        path = Path(path)
-        unlink_calls.append(path)
-        if path == first:
-            loop.call_soon_threadsafe(first_unlink_started.set)
-            _wait_thread_event(release_first_unlink)
-            raise OSError("controlled started unlink failure")
-        original_unlink(path)
-
-    monkeypatch.setattr(copies, "_unlink", controlled_unlink)
-    original_cancel_startup = LoggingOwner.cancel_startup_sweep
-
-    def observe_cancel_startup(owner):
-        original_cancel_startup(owner)
-        startup_stop_delivered.set()
-
-    monkeypatch.setattr(
-        LoggingOwner, "cancel_startup_sweep", observe_cancel_startup)
-
-    async def block_diagnostic(_deps, message: str, *, stderr_only=False) -> None:
-        diagnostics.append(message)
-        diagnostics_started.set()
-        await _wait_event(release_diagnostic)
-
-    monkeypatch.setattr(lifecycle, "_emit_log_diagnostic", block_diagnostic)
-
-    def assert_session_lock_held() -> None:
-        duplicate = None
-        try:
-            duplicate = acquire_session(deps.session_lock)
-        except SessionLockConflictError:
-            return
-        finally:
-            if duplicate is not None:
-                duplicate.close()
-        pytest.fail("startup unlink 结果或诊断交付前提前释放 SessionLock")
-
-    run_task = asyncio.create_task(execute_command(deps, None, flows={}))
-    try:
-        await _wait_event(first_unlink_started)
-        assert unlink_calls == [first]
-        assert_session_lock_held()
-        run_task.cancel("cancel while startup unlink is started")
-        await _wait_event(startup_stop_delivered)
-        release_first_unlink.set()
-        await _wait_event(diagnostics_started)
-        assert not run_task.done()
-        assert unlink_calls == [first]
-        assert first.exists()
-        assert second.exists()
-        assert len(diagnostics) == 1
-        assert "controlled started unlink failure" in diagnostics[0]
-        assert_session_lock_held()
-
-        release_diagnostic.set()
-        with pytest.raises(asyncio.CancelledError) as cancelled:
-            await _wait_task_result(run_task)
-        assert cancelled.value.args == ("cancel while startup unlink is started",)
-        assert unlink_calls == [first]
-        assert first.exists()
-        assert second.exists()
-    finally:
-        release_first_unlink.set()
-        release_diagnostic.set()
-        if not run_task.done():
-            run_task.cancel("test cleanup")
-            await _wait_task(asyncio.gather(run_task, return_exceptions=True))
-        close_runtime(deps)
 
 
 async def test_initial_restricted_run_sweeps_once(
@@ -1287,43 +1194,31 @@ async def test_initial_restricted_run_sweeps_once(
     loop.set_default_executor(pool)
     release_worker = threading.Event()
     worker_entered = asyncio.Event()
-    startup_queued = asyncio.Event()
 
     def occupy_worker():
         loop.call_soon_threadsafe(worker_entered.set)
         _wait_thread_event(release_worker)
 
     blocker = loop.run_in_executor(pool, occupy_worker)
-    original_run_in_executor = loop.run_in_executor
-
-    def observe_submission(executor, function, *args):
-        future = original_run_in_executor(executor, function, *args)
-        startup_queued.set()
-        return future
-
-    monkeypatch.setattr(loop, "run_in_executor", observe_submission)
     scan_started = asyncio.Event()
     release_scan = threading.Event()
     restricted_stop = asyncio.Event()
     once_report = asyncio.Event()
     scans: list[Path] = []
     order: list[str] = []
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
     def blocked_listdir(path: Path):
-        scans.append(Path(path))
-        order.append("scan_started")
-        loop.call_soon_threadsafe(scan_started.set)
-        _wait_thread_event(release_scan)
+        if Path(path) == Path(config.paths.staging) / "logs":
+            scans.append(Path(path))
+            order.append("scan_started")
+            loop.call_soon_threadsafe(scan_started.set)
+            _wait_thread_event(release_scan)
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
 
-    class UntrustedClock:
-        def utc_micros(self) -> int:
-            return 1
-
-    monkeypatch.setattr(lifecycle, "SystemClock", UntrustedClock)
+    monkeypatch.setattr(time, "time_ns", lambda: 1_000)
     original_run_session = lifecycle.run_session
 
     async def install_once_report(context, source):
@@ -1344,7 +1239,6 @@ async def test_initial_restricted_run_sweeps_once(
         deps, None, flows={}, restricted_flows={"stop": stop_required_work}))
     try:
         await _wait_event(worker_entered)
-        await _wait_event(startup_queued)
         await _wait_event(restricted_stop)
         await _wait_event(once_report)
         assert order == ["restricted_stop", "once_report"]
