@@ -2,6 +2,8 @@
 from dataclasses import replace
 from decimal import Decimal
 import hashlib
+import os
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -22,6 +24,15 @@ from ..support.capture import capture_database
 from ..support.segment_inspection_doubles import CONTENT as _CONTENT, Digest as _Digest, FailedDigest as _FailedDigest, ReadDriver as _ReadDriver, SegmentTools as _SegmentTools
 
 pytestmark = pytest.mark.asyncio
+
+
+def _read_process_environment():
+    environment = os.environ.copy()
+    test_root = str(Path(__file__).resolve().parents[2])
+    inherited = environment.get('PYTHONPATH')
+    environment['PYTHONPATH'] = os.pathsep.join(
+        (test_root, inherited) if inherited else (test_root,))
+    return environment
 
 
 @pytest_asyncio.fixture
@@ -361,7 +372,8 @@ async def test_process_interruption_keeps_unconfirmed_read_and_slot(inspection_w
     process = await asyncio.create_subprocess_exec(sys.executable, '-m',
         'integration.support.segment_interrupted_read', str(path), str(roots.staging),
         str(original.action_id), str(original.member_id), str(original.occurred_at), str(receipt),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=_read_process_environment())
     try:
         for _ in range(200):
             if receipt.exists() or process.returncode is not None:
@@ -454,7 +466,8 @@ async def test_saved_read_end_recovers_after_process_exit_without_new_attempt(in
     process = await asyncio.create_subprocess_exec(sys.executable, '-m',
         'integration.support.segment_interrupted_read', str(path), str(roots.staging),
         str(original.action_id), str(original.member_id), str(original.occurred_at), str(receipt), 'finished',
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=_read_process_environment())
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
     finally:
@@ -583,7 +596,8 @@ async def test_host_local_recovers_original_ticket_at_eof_after_uncommitted_read
     process = await asyncio.create_subprocess_exec(sys.executable, '-m',
         'integration.support.segment_interrupted_read', str(path), str(roots.staging),
         str(original.action_id), str(original.member_id), str(original.occurred_at), str(receipt), 'eof',
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=_read_process_environment())
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
     finally:
