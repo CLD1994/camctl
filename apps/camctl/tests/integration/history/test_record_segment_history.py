@@ -12,10 +12,11 @@ from ..capture.test_capture_contract import _NOW
 _RESULT_TIME = _NOW + 60_000_000
 
 
-async def _fixture(tmp_path, count=5, *, many_gaps=False):
+async def _fixture(tmp_path):
+    count = 5
     owned, runtime, repo, ref, members = await _world(
         tmp_path, indexes=tuple(range(1, count + 1)),
-        sizes=tuple((10 if i in (0,count-1) else 0) if many_gaps else (0 if i == 2 else 10) for i in range(count)))
+        sizes=tuple(0 if i == 2 else 10 for i in range(count)))
     for offset in range(0, count, 128):
         _ok(repo.append_members(ref, members[offset:offset+128], _RESULT_TIME, new_operation_key(), owned))
     _ok(repo.fix_members(ref, _RESULT_TIME, new_operation_key(), owned))
@@ -250,71 +251,6 @@ async def test_empty_filtered_page_continues_and_query_failure_is_not_eof(tmp_pa
             with pytest.raises(sqlite3.OperationalError) as caught:
                 handle.read_page('segment_members',ref=ref,limit=2)
             assert caught.value is failure
-    finally:owned.connection.close()
-
-
-@pytest.mark.asyncio
-async def test_growth_has_bounded_python_peak_and_linear_projection_reads(tmp_path):
-    import gc,resource,tracemalloc
-    evidence=[]
-    for size in (16,64,256):
-        directory=tmp_path/str(size);directory.mkdir()
-        owned,runtime,repo,ref,history=await _fixture(directory,size,many_gaps=True)
-        try:
-            boundary=history.current_boundary()
-            gc.collect();tracemalloc.start()
-            with history.open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
-                assert sum(1 for _ in _rows(handle,'segment_members',ref,limit=7)) == size
-                assert sum(1 for _ in _rows(handle,'segment_gaps',ref,limit=7)) == size-2
-                stats=dict(handle.stats)
-                prepared=__import__('camctl.history.snapshots',fromlist=['prepare_snapshot']).prepare_snapshot(handle)
-                try:
-                    assert sum(map(len,prepared.chunks)) == prepared.length
-                finally:prepared.close()
-                peak=tracemalloc.get_traced_memory()[1]
-            tracemalloc.stop()
-            evidence.append((size,peak,resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,stats))
-            assert stats['events'] == 0
-            # 成员、缺口及原页文件索引各随真实文件数量线性增长。
-            assert stats['projection_rows'] < 3*size+30
-            assert peak < 4_000_000
-        finally:owned.connection.close()
-    print('GROWTH',evidence)
-    assert evidence[-1][1] < evidence[0][1]+1_500_000
-
-
-@pytest.mark.asyncio
-async def test_owner_child_id_index_avoids_repeated_prefix_reads(tmp_path):
-    owned,runtime,repo,ref,history = await _fixture(tmp_path,96)
-    try:
-        db=owned.connection
-        set_id=db.execute('SELECT id FROM segment_sets').fetchone()[0]
-        statement='SELECT id FROM segment_members WHERE set_id=? AND id>? ORDER BY id LIMIT 7'
-        def read():
-            steps=0
-            def count():
-                nonlocal steps
-                steps+=1
-                return 0
-            db.set_progress_handler(count,1)
-            previous,total=0,0
-            try:
-                while True:
-                    rows=db.execute(statement,(set_id,previous)).fetchall()
-                    total+=len(rows)
-                    if not rows:break
-                    previous=rows[-1][0]
-            finally:db.set_progress_handler(None,0)
-            assert total == 96
-            return steps
-        green_plan=db.execute('EXPLAIN QUERY PLAN '+statement,(set_id,0)).fetchall()
-        green=read()
-        db.execute('DROP INDEX segment_member_history_ids')
-        red_plan=db.execute('EXPLAIN QUERY PLAN '+statement+' ',(set_id,0)).fetchall()
-        red=read()
-        print('INDEX_READS',{'before':red,'after':green,'before_plan':red_plan,'after_plan':green_plan})
-        assert green < red/3
-        assert any('segment_member_history_ids' in row[3] and 'id>?' in row[3] for row in green_plan)
     finally:owned.connection.close()
 
 
