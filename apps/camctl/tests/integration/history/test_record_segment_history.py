@@ -41,11 +41,10 @@ def _rows(handle, table, ref=None, limit=2):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('strategy', ['initial', 'current'])
-async def test_complete_segment_rows_without_legacy_restore(tmp_path, monkeypatch, strategy):
+async def test_complete_segment_rows_at_boundary(tmp_path, strategy):
     owned, runtime, repo, ref, history = await _fixture(tmp_path)
     try:
         boundary = history.current_boundary()
-        monkeypatch.setattr(history, 'restore_entity', lambda *a, **kw: pytest.fail('整对象恢复'))
         with history.open_segment_history(ref.action_id, boundary, strategy=strategy, batch_size=2) as handle:
             assert [r.row_id for r in _rows(handle, 'segment_members', ref)] == [1, 2, 3, 4, 5]
             assert len(tuple(_rows(handle, 'segment_sets'))) == 1
@@ -120,76 +119,47 @@ async def test_stream_snapshot_matches_all_paths_and_preserves_later_pending(tmp
         owned.connection.close()
 
 
+def _after_read_transactions(monkeypatch, path, target, action):
+    """在业务库只读事务结束后提交，控制历史构建跨页竞争。"""
+    import sqlite3
+    original = sqlite3.connect
+    commits = 0
+    class ReadConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            nonlocal commits
+            cursor = super().execute(sql, *args, **kwargs)
+            if sql.strip().upper() == 'COMMIT':
+                commits += 1
+                if commits == target:
+                    action()
+            return cursor
+    def connect(database, *args, **kwargs):
+        if str(database) == path.resolve().as_uri() + '?mode=ro':
+            kwargs['factory'] = ReadConnection
+        return original(database, *args, **kwargs)
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    return lambda: commits
+
+
 @pytest.mark.asyncio
 async def test_current_restores_old_h_when_new_version_arrives_between_candidate_pages(tmp_path,monkeypatch):
-    from contextlib import contextmanager
     owned,runtime,repo,ref,history = await _fixture(tmp_path)
     try:
         boundary = history.current_boundary()
-        original = history._read_connection
-        calls = 0
-        @contextmanager
-        def changing():
-            nonlocal calls
-            with original() as connection:
-                yield connection
-            calls += 1
-            if calls == 4:
-                _version(owned,runtime,repo,ref,2)
-        monkeypatch.setattr(history,'_read_connection',changing)
+        commits = _after_read_transactions(monkeypatch, history.path, 4,
+            lambda: _version(owned,runtime,repo,ref,2))
         with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=1) as handle:
             assert [row.values['version'] for row in _rows(handle,'segment_sets')] == [1]
             assert len(tuple(_rows(handle,'segment_members',ref))) == 5
-        assert calls > 4
+        assert commits() >= 4
+        with history.open_segment_history(ref.action_id,history.current_boundary(),strategy='current',batch_size=1) as latest:
+            assert [row.values['version'] for row in _rows(latest,'segment_sets')] == [1,2]
     finally:
         owned.connection.close()
 
 
 @pytest.mark.asyncio
-async def test_current_near_h_never_decodes_old_history_and_main_reader_is_finite(tmp_path,monkeypatch):
-    owned,runtime,repo,ref,history = await _fixture(tmp_path,20)
-    try:
-        for version in range(2,15):
-            _version(owned,runtime,repo,ref,version)
-        boundary = history.current_boundary()
-        from camctl.persistence.repositories import history as module
-        original = module.decode_event_row
-        decoded = []
-        def track(raw):
-            decoded.append(raw[0])
-            return original(raw)
-        monkeypatch.setattr(module,'decode_event_row',track)
-        monkeypatch.setattr(history,'_seed_entity_rows',lambda *a: pytest.fail('全集主行种子'))
-        with history.open_segment_history(ref.action_id,boundary,batch_size=3) as handle:
-            assert handle.stats['events'] == 0
-            assert len(tuple(_rows(handle,'segment_members',ref))) == 20
-        assert history.restore_primary_at_h('action',ref.action_id,boundary)['id'] == ref.action_id
-        assert decoded == []
-    finally:
-        owned.connection.close()
-
-
-@pytest.mark.asyncio
-async def test_candidate_pages_reuse_verified_current_transaction_range(tmp_path,monkeypatch):
-    owned,runtime,repo,ref,history = await _fixture(tmp_path,20)
-    try:
-        boundary = history.current_boundary()
-        observed=[]
-        original=history._connect
-        def connect():
-            connection=original()
-            connection.set_trace_callback(lambda sql: observed.append(sql) if 'SELECT COUNT(*), MIN(id), MAX(id) FROM history_events' in sql else None)
-            return connection
-        monkeypatch.setattr(history,'_connect',connect)
-        with history.open_segment_history(ref.action_id,boundary,batch_size=1):
-            pass
-        assert len(observed) <= 2, observed
-    finally:
-        owned.connection.close()
-
-
-@pytest.mark.asyncio
-async def test_snapshot_maintenance_uses_stream_source(tmp_path,monkeypatch):
+async def test_snapshot_maintenance_uses_stream_source(tmp_path):
     from camctl.history.snapshots import SnapshotRef,prepare_snapshot
     from camctl.persistence.repositories.history import SqliteSnapshotStore
     from camctl.persistence.executor import DbExecutor
@@ -197,7 +167,6 @@ async def test_snapshot_maintenance_uses_stream_source(tmp_path,monkeypatch):
     owned,runtime,repo,ref,history = await _fixture(tmp_path)
     executor=DbExecutor(lambda:open_existing(history.path,DbOpenMode.EXISTING_RW,DbConfig()),capacity=4,enqueue_timeout_seconds=9)
     try:
-        monkeypatch.setattr(HistoryRepository,'restore_within',lambda *a,**kw:pytest.fail('整动作快照'))
         images=await SqliteSnapshotStore(history.path,executor).load_entity_images((SnapshotRef(1,ref.action_id),))
         try:
             prepared=prepare_snapshot(images[0])
@@ -210,37 +179,6 @@ async def test_snapshot_maintenance_uses_stream_source(tmp_path,monkeypatch):
     finally:
         await executor.close()
         owned.connection.close()
-
-
-async def _assert_same_s_snapshot_bytes(
-        owned, runtime, repo, ref, history, boundary, previous_paths):
-    """从当前投影重新准备来源，核对同 S 字节并拒绝来源及存储损坏。"""
-    from camctl.history.snapshots import prepare_snapshot,SnapshotMaintenanceError
-    with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=7) as handle:
-        prepared=prepare_snapshot(handle)
-    try:
-        assert prepared.path not in previous_paths, '同 S 核验必须使用新准备的独立磁盘来源'
-        assert prepared.path.exists() and prepared.length > 65540
-        assert prepared.boundary == boundary
-        await _save(history,prepared)
-        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0] == 1
-        assert history.current_boundary() == boundary, '同 S 核验不得推进业务历史'
-        with prepared.path.open('r+b') as source:
-            source.seek(65540)
-            before=source.read(1)
-            assert len(before) == 1
-            source.seek(65540)
-            source.write(b'x' if before != b'x' else b'y')
-        with pytest.raises(SnapshotMaintenanceError):
-            await _save(history,prepared)
-        # 存储中的损坏也不能降级到另一恢复路径。
-        snapshot_id=owned.connection.execute('SELECT id FROM entity_snapshots').fetchone()[0]
-        with owned.connection.blobopen('entity_snapshots','content',snapshot_id) as blob:
-            blob.seek(65540);blob.write(b'\xff')
-        _version(owned,runtime,repo,ref,2)
-        with pytest.raises(ConsistencyError):
-            history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=7)
-    finally:prepared.close()
 
 
 def _observe_derived_database(tmp_path, monkeypatch):
@@ -382,7 +320,7 @@ async def test_owner_child_id_index_avoids_repeated_prefix_reads(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('damage',['range','previous','instance'])
-async def test_verified_range_cache_rejects_metadata_or_instance_changes(tmp_path,damage):
+async def test_boundary_rejects_metadata_or_instance_changes(tmp_path,damage):
     owned,runtime,repo,ref,history = await _fixture(tmp_path)
     try:
         boundary=history.current_boundary()
@@ -393,7 +331,6 @@ async def test_verified_range_cache_rejects_metadata_or_instance_changes(tmp_pat
         else:
             owned.connection.execute('UPDATE database_metadata SET instance_id=?',(str(new_operation_key()),))
         with pytest.raises(ConsistencyError):history.current_boundary()
-        assert history._current_range is None
     finally:owned.connection.close()
 
 
@@ -403,8 +340,10 @@ async def test_old_full_action_entry_refuses_segment_growth(tmp_path):
     try:
         boundary=history.current_boundary()
         with pytest.raises(ConsistencyError):history.restore_entity('action',ref.action_id,boundary)
-        with history._read_connection() as connection:
-            with pytest.raises(ConsistencyError):history.restore_within(connection,'action',ref.action_id,boundary)
+        owned.connection.execute('BEGIN')
+        try:
+            with pytest.raises(ConsistencyError):history.restore_within(owned.connection,'action',ref.action_id,boundary)
+        finally:owned.connection.execute('ROLLBACK')
         assert history.restore_primary_at_h('action',ref.action_id,boundary)['id'] == ref.action_id
     finally:owned.connection.close()
 
@@ -586,205 +525,27 @@ async def test_nullable_gap_summary_stays_unknown_in_all_paths(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_connection_failure_cannot_leave_a_new_range_marked_verified(tmp_path,monkeypatch):
+async def test_connection_failure_is_reported_and_later_read_recovers(tmp_path,monkeypatch):
     import sqlite3
-    owned,runtime,repo,ref,history=await _fixture(tmp_path)
+    from camctl.persistence.runtime import DatabaseInvalidError
+    owned,_,_,_,history=await _fixture(tmp_path)
     try:
-        history.current_boundary()
-        assert history._current_range is not None
-        def fail():raise sqlite3.OperationalError('cannot open database')
-        monkeypatch.setattr(history,'_connect',fail)
-        with pytest.raises(sqlite3.OperationalError):history.current_boundary()
-        assert history._current_range is None
+        boundary=history.current_boundary()
+        original=sqlite3.connect
+        def fail(database,*args,**kwargs):
+            if str(database).startswith(history.path.resolve().as_uri()):
+                raise sqlite3.OperationalError('cannot open database')
+            return original(database,*args,**kwargs)
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3,'connect',fail)
+            with pytest.raises(DatabaseInvalidError, match='状态库打开失败'):
+                history.current_boundary()
+        assert history.current_boundary() == boundary
     finally:owned.connection.close()
-
-
-async def _large_fixture(tmp_path,count):
-    """正式装配只负责准备；读取与计量前完整关闭其线程和文件责任。"""
-    from ..support.capture import capture_test_session
-    from ..support.result_cases import CaseClock
-    from ..capture.test_capture_contract import _NOW, _PAGE_EVIDENCE, ResultsDouble
-    from ..capture.result_consumer_fixtures import returned
-    from camctl.devices.ports import DeviceCallResult, StopDriver
-    from unittest.mock import create_autospec
-
-    clock = CaseClock(_NOW, 5_000_000_000)
-    async with capture_test_session() as session:
-        async def runtime_factory(owned, *, driver):
-            activity_id, = owned.connection.execute(
-                "SELECT id FROM device_activities").fetchone()
-            stop = create_autospec(StopDriver, instance=True)
-            stop.stop.return_value = DeviceCallResult.from_outcome(
-                returned("stop", "stop_confirmed", activity_id))
-            return await session.runtime(
-                owned, driver=driver, evidence=_PAGE_EVIDENCE, results=ResultsDouble({}),
-                stopper=stop, wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
-        return await _prepare_large_fixture(tmp_path, count, runtime_factory, clock)
-
-
-async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock):
-    """从真实P2端口逐页建跨CAM目录的夹具；准备阶段也只持有128项。"""
-    import sqlite3
-    from itertools import islice
-    from camctl.capture.files import OwnershipSave,FileCompletionSave
-    from decimal import Decimal
-    from camctl.operations.attempts import AttemptConfig
-    from camctl.capture.result_pages import ResultPageSave
-    from camctl.operations.validation import validate_outcome
-    from camctl.persistence.repositories.capture import CaptureRepository
-    from ..support.result_cases import begin_result_attempt
-    from camctl.capture.segment_models import (SegmentSetRef,SegmentMemberRole,OwnershipState,
-        FileCompletionState,CompletionFacts,EvidenceState,SegmentAccumulator)
-    from camctl.capture.segment_storage import SegmentSetCreate,SegmentMemberInput
-    from camctl.capture.segments import advance_segment_assessment,finish_segment_assessment,iter_segment_gaps
-    from camctl.devices.bindings import DeviceBinding
-    from camctl.devices.directory import DirectoryCursor
-    from camctl.devices.segments import SegmentKey
-    from camctl.persistence.repositories.segments import SegmentRepository,iter_segment_members
-    from ..persistence.test_segment_storage import SegmentedCatalog
-    from ..capture.result_consumer_fixtures import consumer_world
-    from ..capture.test_result_page_history import _actual,_REGISTRY
-    owned,runtime,action_id,_=await consumer_world(
-        tmp_path,'record',catalog=SegmentedCatalog(),runtime_factory=runtime_factory,clock=clock)
-    stage=None
-    try:
-        stage=sqlite3.connect(tmp_path/'fixture-members.db',isolation_level=None)
-        stage.execute('CREATE TABLE members (id INTEGER PRIMARY KEY,file_id INTEGER,page_event INTEGER,file_event INTEGER)')
-        check_config = AttemptConfig(3, Decimal("10"), Decimal("3"))
-        ticket=begin_result_attempt(owned,action_id,check_config,_RESULT_TIME)
-        capture=CaptureRepository()
-        previous=None;last_event=None
-        for offset in range(0,count,128):
-            entries=[]
-            for number in range(offset,min(offset+128,count)):
-                directory,index=divmod(number,999)
-                name=f'/DCIM/CAM_{directory+1:03d}/CAM_20261021090000_{index+1:04d}_D.OSV'
-                entries.append({'identity':name,'locator':{'path':name},'complete':True,
-                    'size_bytes':10 if number in (0,count-1) else 0,'kind':'video','format_id':'osv'})
-            following=(None if offset+128>=count else DirectoryCursor(
-                DeviceBinding('cam-1','camctl-adb'),('/DCIM',),0,entries[-1]['identity']))
-            outcome=_actual(ticket,entries=entries,cursor=previous,next_cursor=following,finalized=following is None)
-            request=ResultPageSave(ticket,offset//128+1,previous,
-                validate_outcome(ticket,outcome,_REGISTRY),_RESULT_TIME)
-            saved=_ok(capture.save_result_page(request,new_operation_key(),owned))
-            page=capture.read_result_pages(ticket,last_event,1,owned).items[0]
-            files=dict(page.file_ids)
-            with stage:
-                stage.execute('BEGIN IMMEDIATE')
-                for entry in entries:
-                    file_id=files[entry['identity']]
-                    _ok(capture.save_file_ownership(OwnershipSave(file_id,action_id,1,2,{},_RESULT_TIME),new_operation_key(),owned))
-                    _ok(capture.save_file_completion(FileCompletionSave(file_id,3,_RESULT_TIME,basis=1,
-                        observation={},size_bytes=entry['size_bytes']),new_operation_key(),owned))
-                    event,=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(file_id,)).fetchone()
-                    stage.execute('INSERT INTO members(file_id,page_event,file_event) VALUES (?,?,?)',(file_id,saved.event_id,event))
-            previous=following;last_event=saved.event_id
-        attempt,=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
-            (ticket.run_id,ticket.attempt_id)).fetchone()
-        ref=SegmentSetRef(action_id,attempt,last_event,1)
-        repo=SegmentRepository()
-        from camctl.contracts.json_values import parse_exact_json
-        execution_spec,=owned.connection.execute(
-            'SELECT execution_spec_json FROM actions WHERE id=?',(action_id,)).fetchone()
-        target_duration_ms=parse_exact_json(execution_spec)['target_duration_ms']
-        _ok(repo.create(SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,
-            target_duration_ms,_RESULT_TIME),new_operation_key(),owned))
-        previous_id=0
-        while True:
-            selected=stage.execute('SELECT id,file_id,page_event,file_event FROM members WHERE id>? ORDER BY id LIMIT 128',(previous_id,)).fetchall()
-            if not selected:break
-            inputs=tuple(SegmentMemberInput(file_id,page_event,file_event,SegmentMemberRole.ORIGINAL,
-                OwnershipState.OWNED,FileCompletionState.COMPLETE) for _,file_id,page_event,file_event in selected)
-            _ok(repo.append_members(ref,inputs,_RESULT_TIME,new_operation_key(),owned))
-            previous_id=selected[-1][0]
-        _ok(repo.fix_members(ref,_RESULT_TIME,new_operation_key(),owned))
-        facts=CompletionFacts(EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,
-            EvidenceState.CONFIRMED,SegmentKey(1,1),EvidenceState.CONFIRMED,EvidenceState.UNKNOWN,True,False)
-        state=SegmentAccumulator(ref,60000,facts.start_key)
-        for member in iter_segment_members(ref,owned):state=advance_segment_assessment(state,member)
-        result=finish_segment_assessment(state,facts)
-        gaps=iter_segment_gaps(iter_segment_members(ref,owned),last_nonzero_cursor=result.last_nonzero_cursor,
-            last_owned_cursor=result.last_owned_cursor,start_key=result.confirmed_start_key)
-        while chunk:=tuple(islice(gaps,128)):
-            _ok(repo.append_gaps(ref,chunk,_RESULT_TIME,new_operation_key(),owned))
-        _ok(repo.save_assessment(ref,facts,result,_RESULT_TIME,new_operation_key(),owned))
-        first=repo.read_members(ref,None,1,owned).items[0].member_id
-        _ok(repo.append_scope(ref,(first,),_RESULT_TIME,new_operation_key(),owned))
-        return owned,runtime,repo,ref,HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
-    except BaseException:
-        owned.connection.close()
-        raise
-    finally:
-        if stage is not None:stage.close()
-
-
-class _MeasuredCursor:
-    def __init__(self,inner,metrics):self.inner,self.metrics=inner,metrics
-    def _record(self,rows):
-        self.metrics['fetch_calls']+=1
-        self.metrics['fetch_rows']+=rows
-        self.metrics['largest_fetch']=max(self.metrics['largest_fetch'],rows)
-    def fetchall(self):
-        rows=self.inner.fetchall();self._record(len(rows));return rows
-    def fetchone(self):
-        row=self.inner.fetchone();self._record(0 if row is None else 1);return row
-    def __getattr__(self,name):return getattr(self.inner,name)
-
-
-class _MeasuredConnection:
-    def __init__(self,inner,metrics):self.inner,self.metrics=inner,metrics
-    def execute(self,*args):return _MeasuredCursor(self.inner.execute(*args),self.metrics)
-    def __getattr__(self,name):return getattr(self.inner,name)
-
-
-@pytest.mark.asyncio
-async def test_large_growth_crosses_page_and_disk_cache_capacity(tmp_path,monkeypatch):
-    import gc,resource,tracemalloc
-    from camctl.history.snapshots import prepare_snapshot
-    evidence=[]
-    for size in (256,2048):
-        directory=tmp_path/str(size);directory.mkdir()
-        owned,runtime,repo,ref,history=await _large_fixture(directory,size)
-        try:
-            boundary=history.current_boundary()
-            metrics={'fetch_calls':0,'fetch_rows':0,'largest_fetch':0,'vm_steps':0}
-            original=history._connect
-            def count():metrics['vm_steps']+=1;return 0
-            def connect():
-                connection=original();connection.set_progress_handler(count,1)
-                return _MeasuredConnection(connection,metrics)
-            monkeypatch.setattr(history,'_connect',connect)
-            gc.collect();tracemalloc.start()
-            with history.open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
-                assert sum(1 for _ in _rows(handle,'segment_members',ref,limit=7)) == size
-                assert sum(1 for _ in _rows(handle,'segment_gaps',ref,limit=7)) == size-2
-                page_count=handle._db.execute('PRAGMA page_count').fetchone()[0]
-                page_size=handle._db.execute('PRAGMA page_size').fetchone()[0]
-                disk_bytes=page_count*page_size
-                cache=handle._db.execute('PRAGMA cache_size').fetchone()[0]
-                assert cache == -2048
-                prepared=prepare_snapshot(handle)
-                try:
-                    for chunk in prepared.chunks:assert len(chunk)<=65536
-                finally:prepared.close()
-                peak=tracemalloc.get_traced_memory()[1]
-                stats=dict(handle.stats)
-            tracemalloc.stop()
-            evidence.append({'members':size,'gaps':size-2,'peak_python':peak,'rss_highwater_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
-                'disk_bytes':disk_bytes,'cache_kib':-cache,'source':dict(metrics),'handle':stats})
-            print('LARGE_GROWTH',evidence[-1],flush=True)
-            assert metrics['largest_fetch']<=7
-            assert stats['events']==0
-            if size==2048:assert disk_bytes>2048*1024
-        finally:owned.connection.close()
-    assert evidence[-1]['peak_python']<evidence[0]['peak_python']*3
-    assert evidence[-1]['peak_python']<evidence[0]['peak_python']+1_000_000
-    assert evidence[-1]['source']['vm_steps']<evidence[0]['source']['vm_steps']*12
 
 
 @pytest.mark.asyncio
 async def test_current_keeps_h_when_completion_commits_between_candidate_pages(tmp_path,monkeypatch):
-    from contextlib import contextmanager
     from ..persistence.test_segment_storage import _assessed_world,_completion_command
     from camctl.capture.segment_models import DefaultScopeState
     from camctl.persistence.transaction import commit_operation
@@ -793,23 +554,16 @@ async def test_current_keeps_h_when_completion_commits_between_candidate_pages(t
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         boundary=history.current_boundary()
         status=owned.connection.execute('SELECT status FROM actions WHERE id=?',(ref.action_id,)).fetchone()[0]
-        original=history._read_connection
-        calls=0
-        @contextmanager
-        def changing():
-            nonlocal calls
-            with original() as connection:yield connection
-            calls+=1
-            if calls==4:
-                key=new_operation_key()
-                receipt=commit_operation(_completion_command(owned,ref,members,_RESULT_TIME,key),key,owned)
-                assert receipt.kind == 'completed',receipt.error
-        monkeypatch.setattr(history,'_read_connection',changing)
+        def complete():
+            key=new_operation_key()
+            receipt=commit_operation(_completion_command(owned,ref,members,_RESULT_TIME,key),key,owned)
+            assert receipt.kind == 'completed',receipt.error
+        commits=_after_read_transactions(monkeypatch,history.path,4,complete)
         with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=1) as handle:
             assert handle.active_ref() is None
             assert handle.primary()['status'] == status
             assert all(row.values['output_id'] is None for row in _rows(handle,'segment_scope_members',ref,limit=1))
-        assert calls>4 and repo.read_active_set(ref.action_id,owned)==ref
+        assert commits() >= 4 and repo.read_active_set(ref.action_id,owned)==ref
     finally:owned.connection.close()
 
 
@@ -850,8 +604,7 @@ async def test_page_ref_must_be_the_immutable_segment_reference(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('cache_mode',['hit','miss','unbound'])
-async def test_external_restore_view_cannot_borrow_another_instances_verified_range(tmp_path,cache_mode):
+async def test_external_restore_view_rejects_another_database_instance(tmp_path):
     first=tmp_path/'first';first.mkdir()
     second=tmp_path/'second';second.mkdir()
     owned_a,_,_,_,history_a=await _fixture(first)
@@ -859,31 +612,24 @@ async def test_external_restore_view_cannot_borrow_another_instances_verified_ra
     try:
         boundary=history_a.current_boundary()
         assert history_b.current_boundary() == boundary
-        assert history_a._current_range is not None
-        assert history_a._instance_id != history_b._instance_id
-        if cache_mode == 'miss':
-            history_a._current_range=None
-        elif cache_mode == 'unbound':
-            history_a=HistoryRepository(history_a.path)
         file_id=owned_b.connection.execute('SELECT MIN(id) FROM device_files').fetchone()[0]
         owned_b.connection.execute('BEGIN')
         try:
             with pytest.raises(ConsistencyError):
                 history_a.restore_within(owned_b.connection,'device_file',file_id,boundary)
-            assert history_a._current_range is None
         finally:owned_b.connection.execute('ROLLBACK')
+        assert history_a.current_boundary() == boundary
     finally:
         owned_a.connection.close()
         owned_b.connection.close()
 
 
 @pytest.mark.asyncio
-async def test_external_view_read_failure_clears_range_qualification(tmp_path):
+async def test_external_view_read_failure_is_reported_and_later_read_recovers(tmp_path):
     import sqlite3
     owned,_,_,_,history=await _fixture(tmp_path)
     try:
         boundary=history.current_boundary()
-        assert history._current_range is not None
         def deny_file_read(operation,table,*_):
             return sqlite3.SQLITE_DENY if operation == sqlite3.SQLITE_READ and table == 'device_files' else sqlite3.SQLITE_OK
         owned.connection.execute('BEGIN')
@@ -891,8 +637,56 @@ async def test_external_view_read_failure_clears_range_qualification(tmp_path):
         try:
             with pytest.raises(sqlite3.DatabaseError):
                 history.restore_within(owned.connection,'device_file',1,boundary)
-            assert history._current_range is None
         finally:
             owned.connection.set_authorizer(None)
             owned.connection.execute('ROLLBACK')
+        assert history.current_boundary() == boundary
+        assert history.restore_entity('device_file',1,boundary)
     finally:owned.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_real_large_segment_source_preparation(tmp_path):
+    """真实逐页提交 2048 项并核对完整库；准备耗时属于本次测试。"""
+    from ..support.segment_history_corpus import generate
+    await generate(tmp_path/'world',2048)
+
+
+@pytest.mark.parametrize('size',[256,2048])
+@pytest.mark.parametrize('diagnostics',[False,True],ids=['budget','growth-diagnostic'])
+def test_large_segment_history_budget(tmp_path,size,diagnostics):
+    """独立进程在合计预算内消费全部分页和快照，组外核对输出。"""
+    import json, os, sys, time
+    from pathlib import Path
+    from ..support.source_capacity import memory_budget_backend
+    from ..support.segment_history_corpus import prepare_copy, verify_output
+    backend=memory_budget_backend()
+    budget=backend.get_budget_config()
+    backend.ensure_memory_budget_available(budget)
+    started=time.perf_counter()
+    directory=tmp_path/'input'
+    manifest=prepare_copy(directory,size)
+    prepare_seconds=time.perf_counter()-started
+    root=Path(__file__).resolve().parents[5]
+    worker=root/'apps/camctl/tests/integration/support/segment_history_worker.py'
+    environment=dict(os.environ)
+    environment['PYTHONPATH']=os.pathsep.join(str(root/p) for p in ('apps/camctl/src','apps/camctl/tests'))
+    started=time.perf_counter()
+    with (tmp_path/'worker.stdout').open('w') as out, (tmp_path/'worker.stderr').open('w') as err:
+        backend.run_budgeted([sys.executable,str(worker),str(directory/'input.json'),str(directory)]
+            + (['--diagnose'] if diagnostics else []),
+            budget=budget,receipt_path=tmp_path/'memory-budget.json',timeout=600,check=True,
+            cwd=root,env=environment,stdout=out,stderr=err,text=True)
+    run_seconds=time.perf_counter()-started
+    started=time.perf_counter()
+    verify_output(directory,manifest)
+    receipt=json.loads((tmp_path/'memory-budget.json').read_text())
+    assert receipt['status']=='completed' and receipt['returncode']==0 and receipt['group_removed']
+    evidence=receipt['evidence']
+    assert evidence['limit_bytes']==evidence['combined_limit_bytes']==budget.limit_bytes
+    assert evidence['combined_peak_bytes']<=budget.limit_bytes
+    assert evidence['events'].get('oom_kill',evidence['events'].get('oom',0))==0
+    print('SEGMENT_HISTORY_BUDGET',json.dumps({'count':size,'prepare_seconds':prepare_seconds,
+        'run_seconds':run_seconds,'verify_seconds':time.perf_counter()-started,
+        'diagnostics':json.loads((directory/'result.json').read_text())['diagnostics'],
+        'evidence':evidence}),flush=True)

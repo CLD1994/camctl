@@ -1,0 +1,14 @@
+{
+  "count": 256,
+  "action_id": 1,
+  "scan_id": 3,
+  "final_page_event_id": 532,
+  "version": 1,
+  "boundary": {
+    "txn_id": 532,
+    "last_event_id": 797
+  },
+  "database_bytes": 2187264,
+  "database_sha256": "aa619e6148cc9428b85f9b25abeeb6a837ea1371fe5c15010c0c6881363c7434",
+  "gzip_sha256": "26dca8dc8694c15277dfece64d8dfb9b9519af492c719dc1851f1d44ff7dbb7f"
+}
