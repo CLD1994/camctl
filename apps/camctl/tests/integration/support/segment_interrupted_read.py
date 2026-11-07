@@ -1,5 +1,7 @@
 """独立进程在真实 READ 进行中等待，供父进程验证中断后的恢复边界。"""
 import asyncio
+import json
+import os
 from decimal import Decimal
 from pathlib import Path
 import sys
@@ -10,13 +12,15 @@ from camctl.capture.media_flow import DriverReadSessions, MediaFlow
 from camctl.capture.segment_inspections import SegmentInspectionRequest, inspect_segment
 from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.devices.read_session import ReadSession
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.outputs.qualification import OperationConfig
 from camctl.session.supervision import Supervisor
 
 from .database import business_database
-from .segment_inspection_cases import Digest, CONTENT, SegmentTools
+from .segment_inspection_cases import Digest, FailedDigest, ReadDriver, CONTENT, SegmentTools
 
 
 class BlockingStream:
@@ -44,21 +48,39 @@ class BlockingDriver:
         return ReadSession(source, offset, BlockingStream(self.marker), idle_timeout_s)
 
 
-async def run(path, staging, action_id, member_id, occurred_at, marker):
+async def run(path, staging, action_id, member_id, occurred_at, marker, mode):
+    driver = BlockingDriver(marker)
+    digest = Digest('0' * 64)
+    if mode == 'finished':
+        original = OperationRepository.finish_attempt
+        def unavailable(repository, command, key, owned):
+            if command.ticket.operation == 'read':
+                return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=OSError('read finish unavailable'))
+            return original(repository, command, key, owned)
+        OperationRepository.finish_attempt = unavailable
+        driver = ReadDriver(CONTENT)
+        digest = FailedDigest()
     async with business_database(path) as database:
         flow = MediaFlow(database=database, roots=BoundDirectories(staging=staging),
-            sessions=DriverReadSessions(database, BlockingDriver(marker), ticket=None),
+            sessions=DriverReadSessions(database, driver, ticket=None),
             tools=SegmentTools(), policy=MediaPolicy(repair_margin_s=Decimal('2')),
             occurred_at=lambda: occurred_at, digest_supported=True,
-            digest=Digest('0' * 64), segment_size=4, retry_interval_s=Decimal('0'),
+            digest=digest, segment_size=4, retry_interval_s=Decimal('0'),
             file_executor=FileTaskExecutor(Supervisor()))
         request = SegmentInspectionRequest(action_id, member_id,
             CoverageTarget(CoverageMetric.DURATION_S, 60),
             OperationConfig(3, Decimal('10'), Decimal('0')), occurred_at)
-        await inspect_segment(flow, request)
-        raise AssertionError('进程应在原 READ 返回之前被终止')
+        try:
+            await inspect_segment(flow, request)
+        except Exception as error:
+            if mode != 'finished':
+                raise
+            marker.write_text(json.dumps({'error': str(error), 'offsets': driver.offsets,
+                'digest_calls': digest.calls}))
+            os._exit(0)
+        raise AssertionError('进程应在原 READ 保存之前被终止')
 
 
 if __name__ == '__main__':
     asyncio.run(run(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]),
-        int(sys.argv[4]), int(sys.argv[5]), Path(sys.argv[6])))
+        int(sys.argv[4]), int(sys.argv[5]), Path(sys.argv[6]), sys.argv[7] if len(sys.argv) > 7 else 'blocked'))

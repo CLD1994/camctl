@@ -5,36 +5,27 @@ from decimal import Decimal
 from camctl.host_files.media import MediaProbe, MediaStream
 from camctl.host_files.tasks import FileTaskId, FileTaskResult
 
-CONTENT = b"0123456789"
-
-from camctl.capture.files import FileCompletionSave, FilePresenceSave, OwnershipSave
-from camctl.capture.segment_models import FileCompletionState, OwnershipState, SegmentMemberRole, SegmentSetRef
-from camctl.capture.segment_storage import SegmentMemberInput, SegmentSetCreate
+from camctl.capture.files import FileCompletionSave, FilePresenceSave, OwnershipFromResultPageSave
+from camctl.capture.result_pages import ResultPageSave
+from camctl.operations.models import EvidenceValue, Settlement, SettlementBasis
+from camctl.operations.validation import validate_outcome
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.repositories.segments import SegmentRepository
 
-from ..capture.result_consumer_fixtures import consumer_world, ResultCatalog
-from ..capture.test_result_page_history import _actual, _request
+from ..capture.result_consumer_fixtures import consumer_world
+from ..capture.test_result_page_history import _actual
+from ..capture.test_record_file_completion_wait import _REGISTRY, _completion, _stop_context
 from ..persistence.result_page_fixtures import begin_result_check
 from ..persistence.test_segment_storage import _ok
-from ..capture.test_action6_segmented_normal import _rules
-from camctl.devices.tasks import VideoResultMode, CaptureResultPolicy
+from ..persistence.test_segment_result_sets import _finish_scan
+from ..capture.test_action6_segmented_normal import Action6RecordCatalog
 
-
-class InspectionCatalog(ResultCatalog):
-    def parameter_definition(self, *args):
-        definition = super().parameter_definition(*args)
-        if definition is None or args[1] != "camera_record":
-            return definition
-        factory = definition.task_factory
-        return replace(definition, task_factory=lambda params: replace(factory(params),
-            video_result_mode=VideoResultMode.SEGMENTED,
-            result_policy=CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1, product_rules=_rules()))
+CONTENT = b"0123456789"
 
 
 async def inspection_source(tmp_path, count=2):
     owned, runtime, action_id, _ = await consumer_world(
-        tmp_path, 'record', catalog=InspectionCatalog(), record_control_elapsed_ns=60_000_000_000)
+        tmp_path, 'record', catalog=Action6RecordCatalog(), record_control_elapsed_ns=60_000_000_000)
     try:
         ticket = begin_result_check(owned, runtime, action_id).ticket
         entries = []
@@ -42,31 +33,32 @@ async def inspection_source(tmp_path, count=2):
             name = f'/DCIM/CAM_001/CAM_20261021090000_{index:04d}_D.MP4'
             entries.append({'identity': name, 'locator': {'path': name}, 'complete': True,
                 'size_bytes': len(CONTENT), 'kind': 'video', 'format_id': 'mp4'})
-        saved = _ok(runtime.capture.save_result_page(
-            _request(runtime, ticket, _actual(ticket, entries=entries, finalized=True)),
-            new_operation_key(), owned))
+        context = _stop_context(owned, action_id)
+        actual_page = replace(_actual(ticket, entries=entries, finalized=True),
+            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('results_returned', 1,
+                {'file_completion': _completion(context), 'file_completion_source_page_event_id': None})))
+        saved = _ok(runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
+            validate_outcome(ticket, actual_page, _REGISTRY), runtime.wall_us()), new_operation_key(), owned))
         page = runtime.capture.read_result_page(saved, owned)
         files = dict(page.file_ids)
-        inputs = []
-        for entry in entries:
-            file_id = files[entry['identity']]
-            for method, request in (
-                (runtime.capture.save_file_ownership, OwnershipSave(file_id, action_id, 1, 2, {}, runtime.wall_us())),
-                (runtime.capture.save_file_completion, FileCompletionSave(file_id, 3, runtime.wall_us(), basis=1, observation={}, size_bytes=len(CONTENT))),
+        for entry in page.page.entries:
+            file_id = files[entry.identity]
+            for method, command in (
+                (runtime.capture.save_ownership_from_result_page, OwnershipFromResultPageSave(saved, file_id, runtime.wall_us())),
+                (runtime.capture.save_file_completion, FileCompletionSave(file_id, 3, runtime.wall_us(), basis=3,
+                    observation=entry.evidence, size_bytes=entry.size_bytes, activity_id=int(context['activity_id']),
+                    result_page_event_id=saved.event_id, stop_result_event_id=context['stop_result_event_id'])),
                 (runtime.capture.save_file_presence, FilePresenceSave(file_id, 2, runtime.wall_us())),
             ):
-                _ok(method(request, new_operation_key(), owned))
-            event_id, = owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?', (file_id,)).fetchone()
-            inputs.append(SegmentMemberInput(file_id, saved.event_id, event_id,
-                SegmentMemberRole.ORIGINAL, OwnershipState.OWNED, FileCompletionState.COMPLETE))
-        attempt_id, = owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
-            (ticket.run_id, ticket.attempt_id)).fetchone()
-        ref = SegmentSetRef(action_id, attempt_id, saved.event_id, 1)
+                _ok(method(command, new_operation_key(), owned))
+        _finish_scan(owned, runtime, page)
         repo = SegmentRepository()
-        target = (await runtime.action(action_id))['execution_spec_json']['target_duration_ms']
-        _ok(repo.create(SegmentSetCreate(ref, int(ticket.target_id), ticket.run_id, target, runtime.wall_us()), new_operation_key(), owned))
-        _ok(repo.append_members(ref, tuple(inputs), runtime.wall_us(), new_operation_key(), owned))
-        _ok(repo.fix_members(ref, runtime.wall_us(), new_operation_key(), owned))
+        request = repo.prepare_result_set(action_id, runtime.wall_us(), owned)
+        ref = _ok(repo.create_result_set(request, new_operation_key(), owned))
+        actual = repo.read_result_member_inputs(ref, None, 128, owned)
+        assert actual.next_cursor is None and len(actual.items) == count
+        _ok(repo.append_result_members(ref, actual.items, runtime.wall_us(), new_operation_key(), owned))
+        _ok(repo.fix_result_members(ref, runtime.wall_us(), new_operation_key(), owned))
         return owned, runtime, ref, repo.read_members(ref, None, 128, owned).items
     except BaseException:
         owned.connection.close()
