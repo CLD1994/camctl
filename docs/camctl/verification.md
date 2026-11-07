@@ -4,14 +4,13 @@
 
 基线 `2329dffd69ed90807162a5ae6a2d7f43a04dbd2e`，Linux x86_64、Python 3.11.17。取消目标为取回动作时，报告保留空或非空 `withdrawals`；单张拍摄和延时摄影目标省略该字段。类型判断从权威整数登记取得 `OBTAIN_ACTION_OUTPUTS`。
 
-定向红测中，既有读取复用用例按契约修正预期后有 2 项失败；新报告生成组合用例有 3 项失败、1 项通过。修复后报告单元目录 **831 项通过、1 项跳过**，新生成组合 **4 项通过**，两组均退出 0。执行命令从仓库根目录运行，解释器为独立 checkout 的 `apps/camctl/.venv311/bin/python`：
+定向红测中，既有读取复用用例按契约修正预期后有 2 项失败。修复后报告单元目录 **831 项通过、1 项跳过**，退出 0。按维护者要求移除本次新增的报告生成组合测试，保留原有集成测试不变。执行命令从仓库根目录运行，解释器为独立 checkout 的 `apps/camctl/.venv311/bin/python`：
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 apps/camctl/.venv311/bin/python -m pytest -p pytest_asyncio.plugin -p pytest_mock -p no:cacheprovider apps/camctl/tests/unit/reporting -q --tb=short
-PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/integration/reporting/test_cancel_withdrawal_generation.py -q
 ```
 
-组合用例通过公开 `generate_report_file` 入口消费受真实接口约束的历史读取替身，使用真实投影、枚举登记、Schema、分块编码及临时文件，验证最终 JSON 中字段是否出现以及各项内容。它不验证 SQLite 历史恢复、实际撤回文件操作或客户端导入。未运行完整组件集成、跨组件或真实设备测试。差异空白检查通过。
+本次最终验证仅覆盖报告单元测试，未运行组件集成、跨组件、真实 SQLite 历史恢复或设备测试。差异空白检查通过。
 
 ## 普通与强制更新包本地验证（2026-11-03）
 
