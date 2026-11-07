@@ -23,8 +23,11 @@
     "setup": "工作区uv新建环境因下载hatchling的TLS连接失败；改用现有3.11解释器，PYTHONPATH显式指本worktree源码，资源同步成功。"
   },
   "review": {
-    "status": "pending",
-    "agent": "/root/sol_high_review_startup_path"
+    "status": "accepted",
+    "agent": "/root/sol_high_review_startup_path",
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "high",
+    "scope": "独立核对提交、公开边界、诊断关联、资源关闭与已有命令/XML/日志；未重跑测试。"
   },
   "archive": {
     "file": "runs.tar.gz",
