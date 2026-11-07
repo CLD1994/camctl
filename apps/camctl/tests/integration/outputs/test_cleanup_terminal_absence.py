@@ -633,9 +633,10 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
         validate_event(event, context)
 
 
-async def test_pending_companion_precondition_is_checked_before_terminal_file_save(
+async def test_inconsistent_pending_companion_prevents_repeated_terminal_handoff(
     environment,
 ):
+    """首次文件交接已完成；发现不一致后不得再次交接。"""
     (_, _), (owned, _, runtime, driver, item_id) = await _terminal(environment)
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories.operations import OperationRepository
