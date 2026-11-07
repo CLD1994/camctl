@@ -17,6 +17,7 @@ from referencing.exceptions import Unresolvable
 from referencing.jsonschema import DRAFT202012
 
 from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.public_projection import ArrayEmission
 from camctl.contracts.json_values import MISSING
 from camctl.contracts.schemas import create_reference_validator, create_type_validator, validation_errors
 from camctl.contracts.values import ObjectId
@@ -533,11 +534,14 @@ class NodeGate:
     def last_position(self, path):
         return self._slots[path].array.last_position
 
-    def omit(self, path, *, authority_end=None):
+    def omit(self, path, *, authority_end=None, projection_decision=None):
         slot = self._slot(path)
         if slot.state is not FieldState.UNDECIDED:
             raise StreamValidationError('字段存在性已确定')
-        if slot.spec.omit_empty:
+        if projection_decision is not None:
+            if projection_decision is not ArrayEmission.OMIT or authority_end is not None:
+                raise StreamValidationError('条件省略不能代替集合耗尽证明')
+        elif slot.spec.omit_empty:
             self._check_end(path, slot, authority_end)
         slot.state = FieldState.OMITTED
 

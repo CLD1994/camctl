@@ -726,3 +726,23 @@ def test_parent_object_count_rules_reuse_covered_items_without_rejecting_valid_c
     else:
         with pytest.raises(StreamValidationError, match='权威 Schema'):
             _consume_object_document(plan, binding(plan), document)
+
+
+def test_projection_condition_omission_does_not_claim_array_exhaustion():
+    from camctl.contracts.public_projection import ArrayEmission
+    plan = plan_for({'type':'object', 'properties':{'items':{'type':'array'}}},
+                    (DeferredField(('items',), omit_empty=True),))
+    gate = plan.begin(binding(plan), {})
+    gate.omit(('items',), projection_decision=ArrayEmission.OMIT)
+    assert gate.state(('items',)) is FieldState.OMITTED
+    gate.close_node()
+
+
+@pytest.mark.parametrize('decision', ['keep_empty', 'omit_empty'])
+def test_projection_array_decision_cannot_replace_empty_read_proof(decision):
+    from camctl.contracts.public_projection import ArrayEmission
+    plan = plan_for({'type':'object', 'properties':{'items':{'type':'array'}}},
+                    (DeferredField(('items',), omit_empty=True),))
+    gate = plan.begin(binding(plan), {})
+    with pytest.raises(StreamValidationError):
+        gate.omit(('items',), projection_decision=ArrayEmission(decision))
