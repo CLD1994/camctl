@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import stat
+import tempfile
 import time
 
 import pytest
@@ -288,7 +289,8 @@ class CompletedOsmoSource:
     def archive(self):
         assert not self.busy and _root_users(self.root) == []
         self._assert_baseline()
-        target = ARTIFACTS / (self.parent.name + "-completed-source")
+        target = Path(tempfile.mkdtemp(
+            prefix=f"{self.parent.name}-completed-source-", dir=ARTIFACTS))
         shutil.copytree(self.baseline, target / "baseline")
         json_write(target / "source-proof.json", self.proof)
         json_write(target / "consumers.json", self.consumers)

@@ -602,7 +602,7 @@ max_query_attempts={max_q}
         if item["error_code"] is not None:
             assert reported["result"]["items"][0]["error"]["code"] == error_code
 
-    def clean_exact(self, key):
+    def clean_exact(self, key, *, verify_report=True):
         before = {name: self.path(name).read_bytes() for name in self.sources
                   if not name.startswith("hb-device") and self.path(name).exists()}
         source = self.sources[key]
@@ -623,7 +623,8 @@ max_query_attempts={max_q}
             if output_id != source["id"]:
                 assert outputs_after[output_id] == original
         assert outputs_after[source["id"]]["availability"] == int(enum_for("outputs.availability").CLEANED)
-        self.assert_report_ack_and_history()
+        if verify_report:
+            self.assert_report_ack_and_history()
 
     def publish_copies(self):
         keys = ("repaired", "osv", "lrf", "hb-original", "hb-preview")

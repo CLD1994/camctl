@@ -195,6 +195,8 @@ def _shell_kind(script: str) -> str:
                 and script == tools.metadata_many_script(selected)):
             return "metadata"
     for path in known_files:
+        if script == tools.family_script(path):
+            return "directory"
         if script == tools.metadata_script(path):
             return "metadata"
         if script == tools.digest_script(path):

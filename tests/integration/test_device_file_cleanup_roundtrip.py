@@ -33,9 +33,15 @@ def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatc
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         world.prepare_hasselblad()
         world.publish_copies()
-        for source in ("repaired", "osv", "lrf", "hb-original", "hb-preview"):
-            world.clean_exact(source)
-        world.assert_report_ack_and_history()
+        sources = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
+        for source in sources:
+            world.clean_exact(source, verify_report=False)
+        snapshot = world.assert_report_ack_and_history()
+        outputs = {output["output_id"]: output for plan in snapshot["plans"]
+                   for action in plan.get("actions", [])
+                   for output in action.get("outputs", [])}
+        for source in sources:
+            assert outputs[str(world.sources[source]["id"])]["availability"] == "cleaned"
 
 
 def test_cleanup_device_delete_unsupported_with_host_files(
