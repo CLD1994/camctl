@@ -48,7 +48,7 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
 ):
     first_driver = _ReadDriver(_CONTENT, fail_after=4)
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path, monkeypatch, (Decimal("70"),), read_driver=first_driver, segment_size=4
+        tmp_path, monkeypatch, (Decimal("70"),), read_driver=first_driver, segment_size=4, recovery_resources=capture_resources
     )
     active_owned = owned
     try:

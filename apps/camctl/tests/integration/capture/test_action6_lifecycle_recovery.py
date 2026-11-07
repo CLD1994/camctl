@@ -289,6 +289,7 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22")),
         read_driver=_ReadDriver(_CONTENT, fail_after=4), segment_size=4,
+        recovery_resources=capture_resources,
     )
     try:
         await _publish_ordinary_result(runtime, owned, action_id, handler, _entries(3), result_port, evidence)

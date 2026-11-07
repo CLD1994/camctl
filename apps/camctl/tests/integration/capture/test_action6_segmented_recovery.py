@@ -136,6 +136,7 @@ def _media_options(tools, *, read_driver=None, segment_size=None, **overrides):
 
 async def _overrun_recording(
     tmp_path, monkeypatch, values, *, catalog=None, fix_baseline=True, read_driver=None, segment_size=None,
+    recovery_resources=None,
 ):
     catalog = Action6RecordCatalog() if catalog is None else catalog
     catalog.duration_s = Decimal("60")
@@ -161,12 +162,23 @@ async def _overrun_recording(
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     await capture_handler(handler)(action_id, runtime)
 
-    wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
+    if recovery_resources is not None:
+        # START 后结束旧 worker 和文件责任；新会话不得复用旧单调钟锚点。
+        database = await recovery_resources.restart_database(owned)
+        runtime = await recovery_resources.runtime(
+            database, driver=tools.assembly_driver, **tools.assembly_options
+        )
+        wall[0], mono[0] = _NOW + 75_000_000, 1_000_000_000
+        expected_elapsed = None
+    else:
+        wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
+        expected_elapsed = 75_000_000_000
     await _prepare_through_handler(runtime, action_id, handler, "conclude")
     assert owned.connection.execute(
         "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
-    ).fetchone() == (75_000_000_000,)
-    wall[0], mono[0] = _NOW + 80_000_000, 85_000_000_000
+    ).fetchone() == (expected_elapsed,)
+    wall[0] = _NOW + 80_000_000
+    mono[0] += 5_000_000_000
     return owned, runtime, action_id, handler, tools, result_port, evidence
 
 
@@ -201,12 +213,12 @@ async def _publish_ordinary_result(runtime, owned, action_id, handler, entries, 
     driver.list_results.assert_awaited_once()
 
 
-async def _assert_saved_decision(owned, action_id, *, coverage, confirmed, count, reason=None):
+async def _assert_saved_decision(owned, action_id, *, coverage, confirmed, count, reason=None, status="succeeded"):
     repository = SegmentRepository()
     ref = repository.read_active_set(action_id, owned)
     assert ref is not None
     decision = repository.read_decision(ref, owned)
-    assert decision.status.value == "succeeded"
+    assert decision.status.value == status
     assert decision.coverage_status.value == coverage
     assert decision.confirmed == confirmed
     assert decision.checked_count == count
@@ -248,9 +260,10 @@ class _Action6TaskScopeCatalog(Action6RecordCatalog):
         )
 
 
-async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(tmp_path, monkeypatch):
+async def test_action6_recovery_measures_only_the_prefix_needed_to_reach_target(tmp_path, monkeypatch, capture_resources):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40"))
+        tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")),
+        recovery_resources=capture_resources,
     )
     try:
         await _publish_ordinary_result(
@@ -284,12 +297,13 @@ async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(t
         owned.connection.close()
 
 
-async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_two_file_prefix(
-    tmp_path, monkeypatch,
+async def test_action6_unknown_third_probe_keeps_two_file_prefix_without_control_success(
+    tmp_path, monkeypatch, capture_resources,
 ):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, monkeypatch,
         (Decimal("18"), Decimal("27"), RuntimeError("ffprobe unavailable"), Decimal("40")),
+        recovery_resources=capture_resources,
     )
     try:
         await _publish_ordinary_result(
@@ -303,6 +317,7 @@ async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_tw
             confirmed=Decimal("45"),
             count=2,
             reason="probe_failed",
+            status="unconfirmed",
         )
         report = _reported_coverage(tmp_path, owned, action_id)
         assert report["status"] == "unconfirmed"
@@ -320,14 +335,15 @@ async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_tw
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members"
         ).fetchone() == (2,)
-        assert (await runtime.action(action_id))["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 4
     finally:
         owned.connection.close()
 
 
-async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path, monkeypatch):
+async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path, monkeypatch, capture_resources):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path, monkeypatch, (Decimal("18"), Decimal("20"), Decimal("12"), Decimal("40"))
+        tmp_path, monkeypatch, (Decimal("18"), Decimal("20"), Decimal("12"), Decimal("40")),
+        recovery_resources=capture_resources,
     )
     try:
         await _publish_ordinary_result(
@@ -354,12 +370,12 @@ async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path,
         owned.connection.close()
 
 
-async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path, monkeypatch):
+async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path, monkeypatch, capture_resources):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, monkeypatch,
         (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")),
         catalog=_Action6TaskScopeCatalog(),
-        fix_baseline=False,
+        fix_baseline=False, recovery_resources=capture_resources,
     )
     try:
         await _publish_ordinary_result(
@@ -368,7 +384,7 @@ async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path, monkey
         ref = SegmentRepository().read_active_set(action_id, owned)
         assert ref is not None
         decision = SegmentRepository().read_decision(ref, owned)
-        assert decision.status.value == "succeeded"
+        assert decision.status.value == "unconfirmed"
         assert decision.coverage_status.value == "unconfirmed"
         assert decision.confirmed == 0 and decision.checked_count == 0
         assert decision.reason == "start_unknown"
@@ -392,10 +408,11 @@ async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path, monkey
         owned.connection.close()
 
 
-async def test_action6_first_probe_unknown_keeps_known_start_as_empty_scope(tmp_path, monkeypatch):
+async def test_action6_first_probe_unknown_keeps_known_start_as_empty_scope(tmp_path, monkeypatch, capture_resources):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, monkeypatch,
         (RuntimeError("ffprobe unavailable"), Decimal("27"), Decimal("22")),
+        recovery_resources=capture_resources,
     )
     try:
         await _publish_ordinary_result(
@@ -404,7 +421,7 @@ async def test_action6_first_probe_unknown_keeps_known_start_as_empty_scope(tmp_
         ref = SegmentRepository().read_active_set(action_id, owned)
         assert ref is not None
         decision = SegmentRepository().read_decision(ref, owned)
-        assert decision.status.value == "succeeded"
+        assert decision.status.value == "unconfirmed"
         assert decision.coverage_status.value == "unconfirmed"
         assert decision.confirmed == 0 and decision.checked_count == 0
         assert decision.reason == "probe_failed"
