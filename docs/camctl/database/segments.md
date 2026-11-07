@@ -70,6 +70,10 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 
 `inspect_segment(flow, SegmentInspectionRequest(action_id, member_id, target, budget, occurred_at))` 只接受固定集合中由该动作拥有、完整写入且仍存在的实际 original 成员。它保存或恢复唯一检查责任，沿可靠读取机会取得整个输入副本，并在副本完成字节校验后调用受管主视频探测；帧数目标显式请求主流帧数，时长目标读取主流时长。返回 `SegmentInspectionStep`，阶段为 WAITING、COMPLETED、FAILED 或 UNCONFIRMED；已保存终态直接返回持久化指标和 probe 文档，不再次调用探测器。
 
+调用方可以使用正式拍摄工厂提供的媒体上下文，也可以通过公开的 `MediaFlow` 装配已有数据库、绑定目录、驱动读取会话、摘要端口及受管媒体工具。独立装配使用真实 `BusinessDatabase` 和共享 `FileTaskExecutor`；上下文本身不取得这些外部资源的关闭所有权。外层资源作用域负责等待实际文件任务收场，再关闭业务数据库；文件任务及取消接手遵守[文件执行契约](../file-runtime.md#文件处理接口契约)。
+
+同一会话的继续检查及原结果补保存复用原媒体上下文，保持其读取、检查结果和资格释放责任。调用方不通过注入、清空或交换内部集合来表达恢复。更换数据库连接不等于原内存责任已经交付；新会话仅根据持久化事实、原副本进度及适用的恢复依据重新装配，不能声称保留了旧上下文的未提交结果。来源动作已取消或终态时，检查入口停止新增普通读取，来源处理器负责接手续接、检查收场及占用释放；独立检查操作不代替整个来源动作的取消流程。
+
 `read_inspection_for_member(action_id, member_id, owned)` 返回 `InspectionMemberFacts(inspection, copy)`；其副本事实同时核对来源原片、集合、用途、固定路径、字节长度、完整写入及校验状态。`release_inspection_copy_pin(inspection_id, occurred_at, key, owned)` 只允许已结束的检查责任调用现有中间文件保留释放事务；调用者须在来源和依赖该副本的取回责任收场后释放。失败或未完成时，该副本仍保持原保留限制，不能由维护器清理。
 
 保存请求 `SegmentMemberInput(file_id, page_event_id, file_event_id, role, ownership, completion, pairing_identity=None, pairing_state=NOT_APPLICABLE)` 不接收大小或摘要。提交守卫独立读取原页、实际差集文件、固定文件历史和原动作/活动/流程/尝试，核对分类及配对。P1 的完整 `SegmentMember` 是读取和纯判断结果，不是另一份文件属性权威。
