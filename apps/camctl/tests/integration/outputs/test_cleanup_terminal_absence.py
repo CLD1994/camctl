@@ -167,6 +167,16 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
     )
 
     original = _facts(owned, item_id, action_id)
+    original_absence = saved_cleanup_absence(owned.connection, item_id)
+    availability, cleanup_status, cleanup_error = owned.connection.execute(
+        "SELECT availability,cleanup_status,cleanup_error_json FROM outputs WHERE id=?",
+        (output_id,)).fetchone()
+    event_before, watermark_before = owned.connection.execute(
+        "SELECT MAX(id),MAX(change_seq) FROM history_events").fetchone()
+    batch_id, released = owned.connection.execute(
+        "SELECT id,released_event_id FROM device_file_batches WHERE action_id=?",
+        (action_id,)).fetchone()
+    assert released is None
     sibling = owned.connection.execute(
         "SELECT * FROM outputs WHERE id<>?", (output_id,)
     ).fetchall()
@@ -180,7 +190,44 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
         occurred_at=lambda: _NOW + 4,
     )(context.database)
     await advance_cleanup(runtime)
-    assert _facts(owned, item_id, action_id) == original
+    current = _facts(owned, item_id, action_id)
+    assert current[0][:-2] == original[0][:-2]
+    assert current[1:] == original[1:]
+    assert saved_cleanup_absence(owned.connection, item_id) == original_absence
+    events = owned.connection.execute(
+        "SELECT id,transaction_id,event_type,change_seq,body_json FROM history_events"
+        " WHERE id>? ORDER BY id", (event_before,)).fetchall()
+    assert [event[2] for event in events] == [17, 20, 40]
+    file_event, output_event, release_event = events
+    assert file_event[1] == output_event[1] != release_event[1]
+    assert [event[3] for event in events] == [None, watermark_before + 1, None]
+    file_body, output_body, release_body = (json.loads(event[4]) for event in events)
+    file_id = owned.connection.execute(
+        "SELECT device_file_id FROM outputs WHERE id=?", (output_id,)).fetchone()[0]
+    assert file_body["rows"] == [{"table": "device_files", "id": file_id,
+        "before": {"exists": True, "values": {"presence_state": 2}},
+        "after": {"exists": True, "values": {"presence_state": 3}}}]
+    assert output_body["evidence"] == {"cleanup_result_source": {
+        "item_id": item_id, "result_event_id": original_absence.result_event_id}}
+    assert output_body["rows"][0]["table"] == "outputs"
+    assert output_body["rows"][0]["id"] == output_id
+    assert output_body["rows"][0]["before"]["values"] == {
+        "availability": availability, "cleanup_status": cleanup_status,
+        "cleanup_error_json": json.loads(cleanup_error)}
+    assert output_body["rows"][0]["after"]["values"] == {
+        "availability": 3, "cleanup_status": 4, "cleanup_error_json": None}
+    assert release_body["rows"] == [{"table": "device_file_batches", "id": batch_id,
+        "before": {"exists": True, "values": {"released_event_id": None}},
+        "after": {"exists": True, "values": {"released_event_id": release_event[0]}}}]
+    assert current[0][-2:] == (release_event[0], original[0][-1] + 1)
+    assert owned.connection.execute(
+        "SELECT entity_type,entity_id,event_id,change_count FROM entity_event_links"
+        " WHERE event_id=?", (release_event[0],)).fetchall() == [
+            (1, action_id, release_event[0], current[0][-1])]
+    assert owned.connection.execute(
+        "SELECT entity_type,entity_id,event_id,change_seq FROM report_entity_changes"
+        " WHERE event_id>? ORDER BY event_id", (event_before,)).fetchall() == [
+            (3, output_id, output_event[0], watermark_before + 1)]
     assert owned.connection.execute(
         "SELECT availability,cleanup_status,cleanup_error_json FROM outputs WHERE id=?",
         (output_id,),
@@ -196,6 +243,7 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
     history = tuple(owned.connection.execute("SELECT * FROM history_events"))
     await advance_cleanup(runtime)
     assert tuple(owned.connection.execute("SELECT * FROM history_events")) == history
+    assert _facts(owned, item_id, action_id) == current
     assert len(driver.deletes) == 1 and len(driver.queries) == int(query)
 
 
@@ -590,9 +638,9 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
     (_, _), (owned, _, _, _, item_id) = await _terminal(environment)
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.decoding import decode_event_row
-    from camctl.history.reads import ReadCoverage
     from camctl.history.validators import EventContext, EventValidationError, validate_event
     from camctl.persistence.transaction import row_facts
+    from ..support.output_planning import complete_reads
 
     request = _request(owned, item_id)
     file_before = row_facts(owned.connection, "device_files", request.device_file_id)
@@ -614,7 +662,7 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
     state["outputs"][output_id].update(event.rows[0].before.values)
     context = EventContext(TransactionRange(event.transaction_id, first, last),
         {("outputs", output_id): ("output", output_id)}, state,
-        read_coverage=ReadCoverage())
+        read_coverage=complete_reads(owned.connection, state, probe_ids=(item_id + 1,)))
     assert validate_event(event, context).envelope == event
     if fault == "source_item":
         event = replace(event, evidence={"cleanup_result_source": {
