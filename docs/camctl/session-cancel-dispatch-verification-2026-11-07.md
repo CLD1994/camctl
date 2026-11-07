@@ -1,5 +1,9 @@
 # 会话取消派发修复验证（2026-11-07）
 
+## 当前 PR 范围调整
+
+按维护者要求，已从 PR 移除新增的 `apps/camctl/tests/integration/session/test_cancel_dispatch.py`，保留生产修复和单元回归测试，未删除或修改仓库原有集成测试。下文集成结果仅保留为移除前的历史验证证据，不代表当前 PR 包含该测试。本轮不再运行集成测试。移除后以同一命令重跑 `apps/camctl/tests/unit/session -q`：269 passed，退出 0；`git diff --check` 通过，集成目录相对基线无差异。
+
 ## 范围与环境
 
 基线为 `2329dffd69ed90807162a5ae6a2d7f43a04dbd2e`，Linux x86_64，Python 3.11.17，SQLite 3.53.1。独立 worktree 的虚拟环境及包资源均独立。未连接真实设备，没有执行物理电机动作，也未验证 ARM64 或真实 SIGINT 进程组合。
