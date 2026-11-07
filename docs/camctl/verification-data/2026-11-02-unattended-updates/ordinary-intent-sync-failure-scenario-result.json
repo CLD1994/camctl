@@ -1,0 +1,14 @@
+{
+  "scenario": "ordinary-intent-published-sync-failed",
+  "status": "passed",
+  "checks": {
+    "intent_sync_fault_recovery_verified": true,
+    "ordinary_run_success": true,
+    "host_exit_zero": true
+  },
+  "exit": {
+    "pid": 45140,
+    "returncode": 0,
+    "exited_at_ns": 1793577593191661672
+  }
+}

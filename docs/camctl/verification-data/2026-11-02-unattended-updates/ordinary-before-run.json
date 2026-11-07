@@ -1,0 +1,95 @@
+{
+  "scenario": "ordinary-success-before-business-run",
+  "checked_at_ns": 1793574339923662017,
+  "version": "1.0.0",
+  "checks": {
+    "version_1_0_0": true,
+    "committed": true,
+    "database_identity_and_binding_retained": true,
+    "logical_database_unchanged_before_run": true,
+    "history_counts_retained": true,
+    "all_sentinel_files_retained": true,
+    "new_run_entered_gate": true,
+    "host_update_reported_success": true
+  },
+  "counts": {
+    "plans": 1,
+    "actions": 1
+  },
+  "metadata": {
+    "id": 1,
+    "application_id": "camctl",
+    "instance_id": "26e9f20b23994b74b010a90070de5d52",
+    "format_version": 9,
+    "staging_path": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/staging",
+    "ready_path": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/ready",
+    "processing_path": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/processing"
+  },
+  "gate_processes": [
+    {
+      "pid": 14308,
+      "argv": [
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/venv/bin/camctl",
+        "run",
+        "--config",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/config.toml",
+        "--host-notification-fd",
+        "4"
+      ],
+      "time_ns": 1793574309789630502
+    }
+  ],
+  "objects": {
+    "config.toml": {
+      "same": true,
+      "actual": {
+        "size": 528,
+        "sha256": "74c218f9224f7035fb97cd1f8631c965593b848096c567ddeb03025a7308d935",
+        "mode": 420,
+        "uid": 1002,
+        "gid": 1002
+      }
+    },
+    "venv/old-extra-environment-file.txt": {
+      "same": true,
+      "actual": {
+        "size": 79,
+        "sha256": "5bac7673b4a1c3b4f7d7fdf48382e6e0be7a0e6232b77ff150dd50859e4730bb",
+        "mode": 420,
+        "uid": 1002,
+        "gid": 1002
+      }
+    },
+    "staging/capture-originals/old-photo.bin": {
+      "same": true,
+      "actual": {
+        "size": 2031616,
+        "sha256": "43686e2fbb263cc42f444c6b44f28c78a07803b070d1ba25d10a420a7c5ffa8a",
+        "mode": 420,
+        "uid": 1002,
+        "gid": 1002
+      }
+    },
+    "ready/old-delivery.bin": {
+      "same": true,
+      "actual": {
+        "size": 2031616,
+        "sha256": "6bd0b59a0e09070486c3c93ce030f472327953ed7c304d6ab5f44cfffb5e1e21",
+        "mode": 420,
+        "uid": 1002,
+        "gid": 1002
+      }
+    },
+    "processing/already-owned-by-main.bin": {
+      "same": true,
+      "actual": {
+        "size": 39,
+        "sha256": "12c4479d3fec8c4168c05a5ab2b2b6f42fa8115fcf7451e4320f25e29a487d3c",
+        "mode": 420,
+        "uid": 1002,
+        "gid": 1002
+      }
+    }
+  },
+  "status": "passed"
+}

@@ -14,6 +14,7 @@ from pathlib import Path
 
 # 包内资源名（相对 camctl/_resources，使用 "/" 分隔）-> 仓库权威来源（相对仓库根）。
 RESOURCE_SOURCES: dict[str, str] = {
+    "protocol/software-update-result.schema.json": "protocol/schemas/software-update-result.schema.json",
     "protocol/plan.schema.json": "protocol/schemas/plan.schema.json",
     "protocol/status-report.schema.json": "protocol/schemas/status-report.schema.json",
     "protocol/capabilities.schema.json": "protocol/schemas/capabilities.schema.json",

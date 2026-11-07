@@ -15,6 +15,13 @@ PATH_DEFAULTS = {
 }
 
 
+def host_command(target, paths):
+    target = Path(target)
+    return [target / 'host/bin/host-demo', '--camctl', target / 'venv/bin/camctl',
+            '--config', target / 'config.toml', '--updater', target / 'maintenance/camctl-updater',
+            '--ready', paths['ready'], '--processing', paths['processing'], '--log', target / 'host.log']
+
+
 def absolute_path(value):
     path = Path(value)
     if not path.is_absolute() or "\0" in value:

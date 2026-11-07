@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "archived_old_config_exact": true,
+  "archived_database_integrity": "ok",
+  "archived_old_logical_database_matches": true,
+  "synced_capability_devices": [
+    "action6-01",
+    "hasselbla-01",
+    "osmo360ii-01"
+  ],
+  "manual_focus_input_toggle_present": true,
+  "normal_host_error_calls": 0,
+  "force_host_error_calls": 0,
+  "validation_elapsed_s": 35.655,
+  "all_hosts_exited": true,
+  "actual_device_operations": false
+}

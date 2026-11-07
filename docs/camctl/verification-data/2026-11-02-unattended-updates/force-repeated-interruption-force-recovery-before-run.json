@@ -1,0 +1,21 @@
+{
+  "scenario": "forced-update-and-rollback-repeated-interruption",
+  "status": "passed",
+  "checks": {
+    "rolled_back": true,
+    "old_version": true,
+    "old_run_arranged": true,
+    "no_success_archive": true,
+    "restored_all_recorded_object_contents_and_modes": true
+  },
+  "objects": {
+    "configuration": true,
+    "database": true,
+    "environment": true,
+    "staging": true,
+    "ready": true,
+    "wal": true,
+    "shm": true
+  },
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/updates/80eef7e0075f499ea7da00dbbd5d8f78"
+}

@@ -1,0 +1,13 @@
+{
+  "production_source_commit": "af199e70",
+  "checkpoint_fix_python_only_source": "131091b6",
+  "current_root_commit": "25da2adbf99e47c5011a1d2418286cf4e3202d6e",
+  "binary": "/workspaces/camctl/tmp/unattended-validation-20261102/host-build-finalize/host-demo",
+  "binary_sha256": "01035a89dd6b4fb61bec16f9824469fee01bfce0f112326bde288b8bebca9cfc",
+  "static_library_sha256": "82f14af356bc9f83c0fb88ed2de0564a845aa512c7ca9a2dcaf6d271c5e26da4",
+  "configuration_log": "/workspaces/camctl/tmp/unattended-validation-20261102/host-build-finalize-config.log",
+  "build_log": "/workspaces/camctl/tmp/unattended-validation-20261102/host-build-finalize.log",
+  "build_type": "Release",
+  "tests_built": false,
+  "actual_build_exit_code": 0
+}

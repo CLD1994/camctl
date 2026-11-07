@@ -36,6 +36,16 @@ def parse(argv):
 
 
 class DeploymentPaths(unittest.TestCase):
+    def test_host_launcher_uses_frozen_paths_without_python_or_toml(self):
+        paths = {'ready': '/external/ready with spaces', 'processing': '/external/processing'}
+        command = [str(item) for item in support.host_command(Path('/new/instance with spaces'), paths)]
+        self.assertEqual(shlex.split(shlex.join(command)), command)
+        self.assertEqual(command[0], '/new/instance with spaces/host/bin/host-demo')
+        self.assertEqual(command[command.index('--ready') + 1], paths['ready'])
+        self.assertEqual(command[command.index('--processing') + 1], paths['processing'])
+        self.assertEqual(command[command.index('--updater') + 1],
+                         '/new/instance with spaces/maintenance/camctl-updater')
+
     def test_defaults_keep_new_instance_isolated_and_preserve_devices(self):
         config = {"paths": {"ready": "/old/ready"}, "devices": {"camera": {"driver": "driver"}}}
         original = deepcopy(config["devices"])

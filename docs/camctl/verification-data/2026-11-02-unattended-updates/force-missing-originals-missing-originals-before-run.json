@@ -1,0 +1,17 @@
+{
+  "scenario": "forced-deployment-with-missing-old-env-config-database",
+  "status": "passed",
+  "checks": {
+    "committed": true,
+    "original_missing_facts_retained": true,
+    "old_absent_payload_not_fabricated": true,
+    "new_environment_version": true,
+    "new_empty_database": true,
+    "new_configuration_exact": true,
+    "new_run_arranged": true,
+    "archive_cleaned": true,
+    "launcher_contains_no_python_or_toml_reader": true
+  },
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-missing-originals/updates/7557c86e34124a5fa3ed006ee7aff841",
+  "archive": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-missing-originals/processing/camctl-force-diagnostic-7557c86e34124a5fa3ed006ee7aff841.tar.gz"
+}

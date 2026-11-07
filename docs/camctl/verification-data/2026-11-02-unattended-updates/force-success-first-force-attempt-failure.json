@@ -1,0 +1,26 @@
+{
+  "status": "force_success_attempt_failed",
+  "error": "ValueError: 新状态库仍有未检查点伴随文件: /workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success/updates/6ee6f8c8e8c84a76aeaf0636e77a5961/new-state.db-wal",
+  "restoration_checks": {
+    "old_version_restored": true,
+    "rolled_back": true,
+    "old_database_logical_restored": true,
+    "ordinary_run_arranged": true
+  },
+  "new_database_files_after_failure": {
+    "new-state.db-shm": {
+      "size": 32768,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+    },
+    "new-state.db-wal": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "new-state.db": {
+      "size": 909312,
+      "sha256": "3ad640916d912a04116304a202b344272348a6eae3bbf6190bc26351340d660c"
+    }
+  },
+  "source_commit": "af199e70",
+  "evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success/updates/6ee6f8c8e8c84a76aeaf0636e77a5961"
+}

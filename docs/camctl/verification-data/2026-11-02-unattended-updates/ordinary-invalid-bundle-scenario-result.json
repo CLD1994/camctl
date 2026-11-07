@@ -1,0 +1,15 @@
+{
+  "scenario": "invalid-package-preflight",
+  "status": "passed",
+  "checks": {
+    "invalid_package_preserved_deployment": true,
+    "resumed_run_success": true,
+    "subsequent_submit_success": true,
+    "host_exit_zero": true
+  },
+  "exit": {
+    "pid": 24756,
+    "returncode": 0,
+    "exited_at_ns": 1793575497159387507
+  }
+}

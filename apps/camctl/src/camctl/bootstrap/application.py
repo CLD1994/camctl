@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
+from camctl.config_paths import default_config_path
 from camctl.bootstrap.config import ConfigDefaults, ConfigError, ConfigSnapshot, load_config
 from camctl.persistence.runtime import DirectoryBindingError, configured_directory_binding
 
@@ -33,7 +34,7 @@ class ConfigAdapter:
         self._defaults = defaults if defaults is not None else ConfigDefaults()
 
     def default_config_path(self) -> Path:
-        return self._home / ".camctl" / "config.toml"
+        return default_config_path(self._home)
 
     def state_db_path(self, config: ConfigSnapshot) -> Path:
         return Path(self._expand(config.paths.state_db))

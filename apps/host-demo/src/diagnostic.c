@@ -161,12 +161,7 @@ static int write_all(int fd, const void *data, size_t length) {
     return 0;
 }
 
-typedef struct {
-    int error;
-    const char *step;
-    bool published;
-    char file_name[256];
-} publish_result;
+typedef host_diagnostic_publication publish_result;
 
 static void fail_at(publish_result *result, const char *step, int error) {
     if (!result->error) {
@@ -175,7 +170,8 @@ static void fail_at(publish_result *result, const char *step, int error) {
     }
 }
 
-static publish_result publish_diagnostic(host_diagnostic_writer *writer, host_child *child) {
+static publish_result publish_diagnostic(host_diagnostic_writer *writer, host_child *child,
+                                         int (*write_payload)(int, void *), void *context) {
     publish_result result = {.step = "none"};
     int processing = -1, preparation = -1, file = -1;
     char preparation_name[256] = "";
@@ -209,6 +205,7 @@ static publish_result publish_diagnostic(host_diagnostic_writer *writer, host_ch
         goto cleanup;
     }
     strcpy(preparation_name, base + 1);
+    strcpy(result.preparation_name, preparation_name);
     preparation = openat(processing, preparation_name,
                          O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     preparation = above_stdio(preparation);
@@ -231,20 +228,24 @@ static publish_result publish_diagnostic(host_diagnostic_writer *writer, host_ch
         fail_at(&result, "create_record", errno);
         goto cleanup;
     }
-    int e = host_diagnostic_format_header(child, writer->config, header, sizeof(header),
-                                          &header_length);
+    int e = write_payload ? 0 : host_diagnostic_format_header(child, writer->config, header, sizeof(header),
+                                                        &header_length);
     if (e) {
         fail_at(&result, "format_header", e);
         goto cleanup;
     }
-    e = write_all(file, header, header_length);
-    if (!e)
-        e = write_all(file, child->output, child->length);
-    static const char stderr_marker[] = "\nstderr_begin\n";
-    if (!e)
-        e = write_all(file, stderr_marker, sizeof(stderr_marker) - 1);
-    if (!e)
-        e = write_all(file, child->stderr_output, child->stderr_length);
+    if (write_payload) {
+        e = write_payload(file, context);
+    } else {
+        e = write_all(file, header, header_length);
+        if (!e)
+            e = write_all(file, child->output, child->length);
+        static const char stderr_marker[] = "\nstderr_begin\n";
+        if (!e)
+            e = write_all(file, stderr_marker, sizeof(stderr_marker) - 1);
+        if (!e)
+            e = write_all(file, child->stderr_output, child->stderr_length);
+    }
     if (!e && fsync(file))
         e = errno;
     if (e) {
@@ -257,6 +258,7 @@ static publish_result publish_diagnostic(host_diagnostic_writer *writer, host_ch
         goto cleanup;
     }
     file = -1;
+    result.complete = true;
     if (fsync(preparation)) {
         fail_at(&result, "sync_preparation", errno);
         goto cleanup;
@@ -286,16 +288,27 @@ cleanup:
     if (file >= 0 && close(file))
         fail_at(&result, "close_record", errno);
     if (preparation >= 0) {
-        if (!payload_published && unlinkat(preparation, "record.tmp", 0) && errno != ENOENT)
+        if (!write_payload && !payload_published && unlinkat(preparation, "record.tmp", 0) && errno != ENOENT)
             fail_at(&result, "remove_partial_record", errno);
         if (close(preparation))
             fail_at(&result, "close_preparation", errno);
     }
-    if (preparation_created && processing >= 0 &&
+    if ((!write_payload || payload_published) && preparation_created && processing >= 0 &&
         unlinkat(processing, preparation_name, AT_REMOVEDIR))
         fail_at(&result, "remove_preparation", errno);
     if (processing >= 0 && close(processing))
         fail_at(&result, "close_processing", errno);
+    return result;
+}
+
+host_diagnostic_publication host_diagnostic_publish_update(const char *processing_path,
+                                   int (*write_payload)(int, void *), void *context) {
+    static pthread_mutex_t publish_mutex = PTHREAD_MUTEX_INITIALIZER;
+    camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
+    config.processing_path = processing_path;
+    host_diagnostic_writer writer = {.config = &config, .publish_mutex = &publish_mutex};
+    host_child child = {0};
+    publish_result result = publish_diagnostic(&writer, &child, write_payload, context);
     return result;
 }
 
@@ -322,7 +335,7 @@ static void *diagnostic_main(void *context) {
         child->diagnostic_state = HOST_DIAGNOSTIC_WRITING;
         pthread_mutex_unlock(&writer->mutex);
 
-        publish_result result = publish_diagnostic(writer, child);
+        publish_result result = publish_diagnostic(writer, child, NULL, NULL);
         if (result.error) {
             host_log(writer->logger,
                      "call=%" PRIu64 " attempt=%" PRIu64
@@ -363,8 +376,8 @@ static void enqueue_if_room(host_diagnostic_writer *writer, host_child *child) {
 }
 
 int host_diagnostic_init(host_diagnostic_writer *writer, const camctl_host_config *config,
-                        host_logger *logger, pthread_mutex_t *publish_mutex, int wake_fd,
-                        host_child children[2]) {
+                         host_logger *logger, pthread_mutex_t *publish_mutex, int wake_fd,
+                         host_child children[2]) {
     memset(writer, 0, sizeof(*writer));
     writer->config = config;
     writer->logger = logger;
@@ -374,41 +387,57 @@ int host_diagnostic_init(host_diagnostic_writer *writer, const camctl_host_confi
     int e = pthread_mutex_init(&writer->mutex, NULL);
     if (e)
         return e;
+    writer->mutex_initialized = true;
     e = pthread_cond_init(&writer->ready, NULL);
-    if (e) {
-        pthread_mutex_destroy(&writer->mutex);
+    if (e)
         return e;
-    }
+    writer->cond_initialized = true;
     e = pthread_create(&writer->thread, NULL, diagnostic_main, writer);
-    if (e) {
-        pthread_cond_destroy(&writer->ready);
-        pthread_mutex_destroy(&writer->mutex);
-    }
+    if (!e)
+        writer->thread_started = true;
     return e;
 }
 
-void host_diagnostic_abort(host_diagnostic_writer *writer) {
+int host_diagnostic_join(host_diagnostic_writer *writer, bool drain) {
+    if (!writer->thread_started || writer->joined)
+        return 0;
     pthread_mutex_lock(&writer->mutex);
+    writer->drain = drain;
     writer->stop = true;
     pthread_cond_signal(&writer->ready);
     pthread_mutex_unlock(&writer->mutex);
-    pthread_join(writer->thread, NULL);
-    pthread_cond_destroy(&writer->ready);
-    pthread_mutex_destroy(&writer->mutex);
+    int error = pthread_join(writer->thread, NULL);
+    if (!error)
+        writer->joined = true;
+    return error;
+}
+void host_diagnostic_destroy(host_diagnostic_writer *writer) {
+    if (writer->cond_initialized && !writer->cond_destroyed) {
+        writer->cond_error = pthread_cond_destroy(&writer->ready);
+        writer->cond_destroyed = true;
+    }
+    if (writer->mutex_initialized && !writer->mutex_destroyed) {
+        writer->mutex_error = pthread_mutex_destroy(&writer->mutex);
+        writer->mutex_destroyed = true;
+    }
+    writer->closed = true;
 }
 int host_diagnostic_close(host_diagnostic_writer *writer) {
     if (writer->closed)
         return 0;
-    pthread_mutex_lock(&writer->mutex);
-    writer->drain = writer->stop = true;
-    pthread_cond_signal(&writer->ready);
-    pthread_mutex_unlock(&writer->mutex);
-    int error = pthread_join(writer->thread, NULL);
+    int error = host_diagnostic_join(writer, true);
     if (error)
         return error;
-    pthread_cond_destroy(&writer->ready);
-    pthread_mutex_destroy(&writer->mutex);
-    writer->closed = true;
+    host_diagnostic_destroy(writer);
+    return 0;
+}
+int host_diagnostic_abort(host_diagnostic_writer *writer) {
+    if (writer->closed)
+        return 0;
+    int error = host_diagnostic_join(writer, false);
+    if (error)
+        return error;
+    host_diagnostic_destroy(writer);
     return 0;
 }
 

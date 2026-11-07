@@ -1,0 +1,17 @@
+{
+  "scenario": "forced-deployment-from-invalid-old-environment-config-database",
+  "status": "passed",
+  "checks": {
+    "committed": true,
+    "new_config_exact": true,
+    "new_empty_database": true,
+    "new_version": true,
+    "unparseable_old_config_archived_exactly": true,
+    "invalid_old_database_archived_exactly": true,
+    "broken_old_cli_archived": true,
+    "archive_cleaned": true,
+    "new_run_arranged": true
+  },
+  "archive": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-invalid-originals/processing/camctl-force-diagnostic-3fd7aa82cc874d88aa4e0081a2c8d0e6.tar.gz",
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-invalid-originals/updates/3fd7aa82cc874d88aa4e0081a2c8d0e6"
+}

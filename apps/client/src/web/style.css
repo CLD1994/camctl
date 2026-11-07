@@ -728,6 +728,15 @@ fieldset {
 .field input:disabled {
   background: #f1f3ef;
 }
+.field .input-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field .input-toggle input {
+  width: auto;
+  margin: 0;
+}
 .select-trigger {
   display: inline-flex;
   align-items: center;

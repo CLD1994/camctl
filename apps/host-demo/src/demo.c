@@ -15,10 +15,11 @@ static void motor(int position) { printf("收到电机位置通知：position=%d
 static void usage(FILE *stream) {
     fputs(
         "用法：host-demo [--camctl <绝对路径>] [--ready <目录>] [--processing <目录>] [--log <日志路径>]\n"
-        "                 [--config <camctl配置路径>] [--initial-plan <计划路径>]\n"
+        "                 [--config <camctl配置路径>] [--updater <维护入口>] [--initial-plan <计划路径>]\n"
         "                 [--retry-limit <次数>] [--retry-delay-ms <毫秒>]\n"
+        "                 [--apply-update <更新 ZIP 或已解压目录> [--client-data <目录>]]\n"
         "省略路径时使用运行账户 home 下的 .camctl；先安装 CLI 并执行 camctl init。\n"
-        "终端命令：submit <绝对路径>、claim、logs、help、quit、exit。路径保留空格，不加引号。\n",
+        "终端命令：submit <绝对路径>、update <绝对路径>、claim、logs、help、quit、exit。路径保留空格，不加引号。\n",
         stream);
 }
 static int number(const char *text, uint32_t *value) {
@@ -66,14 +67,26 @@ static void show_logs(const char *path) {
     close(fd);
     puts("日志显示结束");
 }
+static int run_maintenance(const char *bundle, const char *client_data) {
+    if (camctl_host_update(bundle, client_data)) {
+        fprintf(stderr, "更新失败：%s\n", strerror(errno));
+        return 1;
+    }
+    puts("更新完成。");
+    return 0;
+}
 int main(int argc, char **argv) {
     camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
     const char *initial = NULL;
+    const char *update_bundle = NULL, *client_data = NULL;
     const struct option options[] = {{"camctl", required_argument, NULL, 'c'},
                                      {"ready", required_argument, NULL, 'r'},
                                      {"processing", required_argument, NULL, 'p'},
                                      {"log", required_argument, NULL, 'l'},
                                      {"config", required_argument, NULL, 'f'},
+                                     {"updater", required_argument, NULL, 'u'},
+                                     {"apply-update", required_argument, NULL, 'U'},
+                                     {"client-data", required_argument, NULL, 'D'},
                                      {"initial-plan", required_argument, NULL, 'i'},
                                      {"retry-limit", required_argument, NULL, 'n'},
                                      {"retry-delay-ms", required_argument, NULL, 'd'},
@@ -96,6 +109,15 @@ int main(int argc, char **argv) {
             break;
         case 'f':
             config.config_path = optarg;
+            break;
+        case 'u':
+            config.updater_path = optarg;
+            break;
+        case 'U':
+            update_bundle = optarg;
+            break;
+        case 'D':
+            client_data = optarg;
             break;
         case 'i':
             initial = optarg;
@@ -148,8 +170,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "模块初始化失败：%s\n", strerror(errno));
         return 1;
     }
+    if (update_bundle)
+        (void)run_maintenance(update_bundle, client_data);
     demo_stop_start(&stop);
-    puts("模块初始化完成；可输入 submit <绝对路径>、claim、logs、help、quit 或 exit。");
+    puts("模块初始化完成；可输入 submit <绝对路径>、update <绝对路径>、claim、logs、help、quit 或 exit。");
     char line[CAMCTL_HOST_PATH_MAX + 32];
     while (fgets(line, sizeof(line), stdin)) {
         size_t n = strlen(line);
@@ -169,6 +193,8 @@ int main(int argc, char **argv) {
                 printf("输入处理未确认完成：%s；请保留计划文件并查看日志。\n", strerror(errno));
             else
                 puts("输入处理已完成，原计划文件可删除；计划受理与执行结果请查看状态报告。");
+        } else if (!strncmp(line, "update ", 7)) {
+            (void)run_maintenance(line + 7, client_data);
         } else if (!strcmp(line, "claim")) {
             camctl_host_claim();
             puts("领取调用已返回；可按主程序流程处理 processing 内的文件。");

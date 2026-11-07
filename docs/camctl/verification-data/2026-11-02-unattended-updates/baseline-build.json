@@ -1,0 +1,21 @@
+{
+  "source_commit": "cd895697",
+  "purpose": "container validation only; baseline version changed from 1.0.0 to 0.9.0 in isolated source snapshot",
+  "base_python": "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11",
+  "command": [
+    "uv",
+    "build",
+    "--project",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/baseline-source/apps/camctl",
+    "--python",
+    "/home/cld/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11",
+    "--wheel",
+    "--out-dir",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/baseline-dist"
+  ],
+  "exit_code": 0,
+  "log": "/workspaces/camctl/tmp/unattended-validation-20261102/baseline-build.log",
+  "files": {
+    "baseline-dist/camctl-0.9.0-py3-none-any.whl": "33dfb061683e44b4d224d6a23549b81b6f046cca3a17a3e81e177986d984dc4b"
+  }
+}

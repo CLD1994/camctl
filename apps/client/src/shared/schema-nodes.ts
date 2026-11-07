@@ -10,6 +10,7 @@ export const SCHEMA_ANNOTATIONS = [
   "readOnly",
   "writeOnly",
   "deprecated",
+  "x-camctl-input-toggle",
 ] as const;
 
 /** 只访问实际 Schema 节点；属性与定义的名称、enum/const 数据不是节点。 */

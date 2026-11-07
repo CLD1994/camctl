@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from concurrent_log_handler import ConcurrentRotatingFileHandler
+from camctl.config_paths import rotated_log_names
 
 from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.service import LogRecord
@@ -314,14 +315,7 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
         self._sync_directory(Path(self.baseFilename).parent)
 
     def _archive_names(self):
-        path = Path(self.baseFilename)
-        prefix = path.name + "."
-        result = []
-        for candidate in path.parent.iterdir():
-            suffix = candidate.name[len(prefix):] if candidate.name.startswith(prefix) else ""
-            if suffix.isascii() and suffix.isdecimal() and int(suffix) > 0 and suffix == str(int(suffix)):
-                result.append((int(suffix), candidate))
-        return sorted(result)
+        return rotated_log_names(self.baseFilename)
 
     def _prepare_archives(self):
         path = Path(self.baseFilename)

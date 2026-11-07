@@ -1,0 +1,16 @@
+{
+  "scenario": "ordinary-success",
+  "checks": {
+    "before_run_receipt_passed": true,
+    "normal_run_completed_successfully": true,
+    "subsequent_submit_completed": true,
+    "host_stopped_after_quit": true
+  },
+  "stop_observed": "exited_reaped",
+  "raw_wait_status_if_observable": null,
+  "status": "passed",
+  "source_package": "/workspaces/camctl/tmp/unattended-validation-20261102/ordinary-update-candidate/camctl-update/RELEASE.json",
+  "host_launch": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/host-launch.json",
+  "data_evidence": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-success/ordinary-update-before-run.json",
+  "checked_at_ns": 1793574555660633488
+}

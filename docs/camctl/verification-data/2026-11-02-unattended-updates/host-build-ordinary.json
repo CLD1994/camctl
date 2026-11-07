@@ -1,0 +1,28 @@
+{
+  "source_commit": "19b874edf7ade254633aba782b95e10dcece36e9",
+  "steps": [
+    {
+      "argv": [
+        "cmake",
+        "-S",
+        "/workspaces/camctl/apps/host-demo",
+        "-B",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/host-build-ordinary",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DHOST_BUILD_TESTS=OFF"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/host-build-ordinary",
+        "--parallel",
+        "2"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "status": "built"
+}

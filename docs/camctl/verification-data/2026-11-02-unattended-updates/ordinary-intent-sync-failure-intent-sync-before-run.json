@@ -1,0 +1,16 @@
+{
+  "scenario": "mutation-intent-published-directory-sync-failed",
+  "status": "passed",
+  "checks": {
+    "actual_sync_fault_injected": true,
+    "original_error_is_intent_sync": true,
+    "immediate_rollback_confirmed": true,
+    "previous_installed_version_retained": true,
+    "ordinary_run_arranged": true,
+    "error_diagnostic_contains_original_stage": true
+  },
+  "diagnostic": [
+    "camctl-host-diagnostic-45140-0-XQVxRC.log"
+  ],
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-intent-sync-failure/updates/ecff11cc45e0499c91ee88bf98457b69"
+}

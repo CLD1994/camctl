@@ -46,7 +46,14 @@ export function isLocalScalarSchema(
 ): value is Record<string, unknown> {
   return (
     scalarShape(value) &&
-    Object.keys(value).every((key) => assertions.has(key) || key === "oneOf") &&
+    Object.keys(value).every(
+      (key) => assertions.has(key) || key === "oneOf" || key === "not",
+    ) &&
+    (!Object.hasOwn(value, "not") ||
+      (isObject(value.not) &&
+        Object.keys(value.not).length === 1 &&
+        Object.hasOwn(value.not, "const") &&
+        scalar(value.not.const))) &&
     (!Object.hasOwn(value, "oneOf") || namedConstants(value))
   );
 }

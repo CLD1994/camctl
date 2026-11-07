@@ -1,0 +1,21 @@
+{
+  "scenario": "forced-update-interrupted",
+  "argv": [
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/maintenance/camctl-updater",
+    "apply",
+    "--camctl-path",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/venv/bin/camctl",
+    "--config",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/config.toml",
+    "--bundle",
+    "/workspaces/camctl/tmp/unattended-validation-20261102/force-repeated-interruption-candidate/camctl-update.zip"
+  ],
+  "pid": 39999,
+  "pgid": 39999,
+  "returncode": -9,
+  "record_mode": "force",
+  "state": "updating",
+  "intent": true,
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-repeated-interruption/updates/80eef7e0075f499ea7da00dbbd5d8f78",
+  "physical_power_loss": false
+}

@@ -82,6 +82,8 @@ class PhotoFieldDefinition:
     minimum: int | None = None
     maximum: int | None = None
     description: str | None = None
+    exclude_zero: bool = False
+    input_toggle: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,8 +170,8 @@ PHOTO_FIELDS: Mapping[str, PhotoFieldDefinition] = MappingProxyType({
     ),
     "relative_move": PhotoFieldDefinition(
         "relative_move", "手动调焦相对移动量", "integer", command_field="focus",
-        options=_options(((-5, "-5"), (5, "5"))),
-        description="开发验证临时选项；未填写时不移动焦点；正值向无限远，负值向近处。单位为 CLI 调焦单位。",
+        description="关闭时保留相机执行当时的焦点位置；开启后填写非零整数，正值向无限远，负值向近处。单位为 CLI 调焦单位。",
+        exclude_zero=True, input_toggle=True,
     ),
 })
 
@@ -241,6 +243,10 @@ def _field_schema(field: PhotoFieldDefinition) -> dict[str, object]:
         schema["maximum"] = field.maximum
     if field.description is not None:
         schema["description"] = field.description
+    if field.exclude_zero:
+        schema["not"] = {"const": 0}
+    if field.input_toggle:
+        schema["x-camctl-input-toggle"] = True
     return schema
 
 

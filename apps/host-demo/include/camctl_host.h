@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,7 +46,11 @@ typedef struct camctl_host_config {
     size_t notification_line_capacity;
     /* 待调用记录；正值，不超过 CAMCTL_HOST_NOTIFICATION_QUEUE_MAX。 */
     size_t notification_queue_capacity;
+    const char *updater_path; /* NULL：不启用启动前维护资格检查。 */
 } camctl_host_config;
+
+/* 成功表示新包已提交且普通运行已安排；失败返回 -1 并设置 errno。 */
+int camctl_host_update(const char *bundle_path, const char *client_data_path);
 
 /* 路径补齐函数使用的调用方缓冲区；保持有效直至 camctl_host_init 返回。
  * config 中生成的指针指向该对象，不能通过复制该对象来迁移指针。 */
@@ -74,7 +79,8 @@ typedef void (*camctl_host_motor_control_callback)(int position);
      CAMCTL_HOST_LOG_FILE_SIZE_DEFAULT,                                                           \
      CAMCTL_HOST_LOG_FILE_COUNT_DEFAULT,                                                          \
      CAMCTL_HOST_NOTIFICATION_LINE_DEFAULT,                                                       \
-     CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT}
+     CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT,                                                       \
+     NULL}
 
 /* 以绝对 home 补齐四个为 NULL 的必填路径；已指定路径及其他配置保持。
  * 不读取环境、不创建目录；config_path 保持 NULL 时由 CLI 选择默认配置。

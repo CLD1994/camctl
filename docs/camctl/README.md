@@ -42,7 +42,11 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 | 文档 | 用途 |
 | --- | --- |
-| [自动迁移与失败回滚](../superpowers/plans/2026-10-31-transactional-camctl-update.md) | V9 维护基线、离线更新、环境与数据库恢复，以及更新中断后的恢复入口。 |
+| [camctl 更新能力与 C 接口](../superpowers/plans/2026-10-31-camctl-owned-update-api.md) | 当前组件维护引擎、Python 专用包、独立恢复引导及主程序更新接口的实施进度。 |
+| [更新接入规格](../architecture/software-update-interface.md) | 更新器归属、部署绑定、启动资格、请求结果及 C 生命周期边界。 |
+| [组件更新验证记录](owned-update-verification-2026-11-02.md) | 更新逻辑迁入组件后的源码复核、隔离单元及实际交付未验范围。 |
+| [自动迁移与失败回滚](../superpowers/plans/2026-10-31-transactional-camctl-update.md) | 事务备份、V9 维护基线与中断恢复的前期实现依据；当前组件交付由更新接入计划继续落实。 |
+| [自动更新验证记录](transactional-update-verification-2026-10-31.md) | 隔离单元、静态检查、独立复核及未运行的真实恢复范围。 |
 | [组件版本与启动记录](../superpowers/plans/2026-10-31-component-versioning-and-offline-update.md) | 三组件独立版本来源、启动日志及部署包的离线交付基础。 |
 | [错误日志内容与诊断责任修复](../superpowers/plans/2026-10-28-error-log-projection-and-ownership.md) | ERROR 内容投影、同记录和跨记录引用、会话收场诊断及隔离验证。 |
 | [拍摄结果保存与交付恢复修复](../superpowers/plans/2026-10-28-capture-result-and-publication-recovery.md) | 首次配对事务边界、调用结果消费者处置、普通交付发现及取消收场的修复与隔离单元验证。 |
@@ -67,6 +71,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 ## 运行与主程序对接
 
+- [版本发布与现场更新操作](software-updates.md)：版本来源与锁文件、更新包构建、维护入口准备、现场应用及内部自动恢复。
 - [配置项参考](configuration-reference.md)：集中查询 TOML 字段、类型、默认值、合法范围、设备配置及 C 接入路径对应关系。
 - [结果读取性能人工验证](../hardware/result-reading-performance-validation.md)：单次目录列举、新增候选查询、独立调度及阶段耗时的实机对照方法。
 - [CLI 命令与主程序调用](../architecture/cli-commands.md)：命令、输入路径、进程结果与退出。

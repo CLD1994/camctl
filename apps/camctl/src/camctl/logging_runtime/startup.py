@@ -69,3 +69,24 @@ def record_startup():
         _delivery_failed(context, delivery_error, "startup_delivery_failed")
         if message is not None:
             _fallback(context, message)
+
+
+def record_log_location(config, configuration_source):
+    """登记失败作为本次日志错误交付，不改变普通命令结果。"""
+    try:
+        from camctl.update_engine.log_registry import register
+        register(config.paths.log_file, configuration_source)
+    except Exception as error:
+        context = current_logging_context()
+        try:
+            diagnostic = encode_record(LogLevel.ERROR, {
+                **context.fields, 'stage': 'command', 'event': 'log_location_failed',
+                'message': '无法登记实际日志位置', 'exception': exception_diagnostic(error),
+            })
+            if context.channel is None:
+                _fallback(context, diagnostic)
+            else:
+                context.channel.slog(LogRecord(LogLevel.ERROR, diagnostic,
+                                               fallback=context.fallback, structured=True))
+        except Exception as delivery_error:
+            _delivery_failed(context, delivery_error, 'log_location_diagnostic_failed')

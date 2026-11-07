@@ -40,9 +40,6 @@ class BundleEntrypointTests(unittest.TestCase):
                     module.main()
         self.assertEqual(observed, [True])
 
-    def test_updater_disables_bytecode_before_bundle_import_on_each_start(self):
-        self.assert_bytecode_disabled_before_import('update-camctl.py', 'bundle_support', call_main=False)
-
     def test_installer_disables_bytecode_before_first_bundle_import(self):
         self.assert_bytecode_disabled_before_import('install-host.py', 'deploy_support', call_main=True)
 

@@ -424,6 +424,7 @@ export function parameterChoiceBlocked(
   content: DraftContent,
   path: Path,
   scope: "finite" | "independent" | ParameterOptions,
+  ignoreOwnInput = false,
 ): boolean {
   if (path.length !== 4 || path[0] !== "actions" || path[2] !== "params")
     return true;
@@ -466,6 +467,12 @@ export function parameterChoiceBlocked(
     } catch {
       return true;
     }
+    if (
+      ignoreOwnInput &&
+      pending.length === fieldPath.length &&
+      prefix(pending, fieldPath)
+    )
+      return false;
     if (
       pending[0] === "actions" &&
       pending.length > 1 &&

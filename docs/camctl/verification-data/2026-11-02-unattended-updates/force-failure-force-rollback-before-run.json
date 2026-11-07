@@ -1,0 +1,46 @@
+{
+  "scenario": "force-install-failure-raw-database-sidecars-restored",
+  "status": "passed",
+  "checks": {
+    "rolled_back": true,
+    "old_version": true,
+    "all_data_restored_exactly": true,
+    "old_run_arranged": true,
+    "no_success_archive": true,
+    "original_failure_diagnostic": true
+  },
+  "objects": {
+    "configuration": {
+      "sha256_same": true,
+      "metadata_same": true
+    },
+    "database": {
+      "sha256_same": true,
+      "metadata_same": true
+    },
+    "wal": {
+      "sha256_same": true,
+      "metadata_same": true
+    },
+    "shm": {
+      "sha256_same": true,
+      "metadata_same": true
+    },
+    "old-env": {
+      "sha256_same": true
+    },
+    "media": {
+      "sha256_same": true
+    },
+    "ready": {
+      "sha256_same": true
+    },
+    "processing": {
+      "sha256_same": true
+    }
+  },
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-failure/updates/1f6ea89846d641159ffda251f1be3cb7",
+  "diagnostic": [
+    "camctl-host-diagnostic-38376-0-gzw2mS.log"
+  ]
+}

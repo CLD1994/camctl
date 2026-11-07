@@ -1,0 +1,49 @@
+{
+  "components": {
+    "camctl": "1.0.0"
+  },
+  "format_version": 1,
+  "git_head": "3d1b8aeae33c7117a19a77baa424cecb362d6dd1",
+  "git_status": [],
+  "lock_sha256": "a924ea189aee4c35c31d157d294de3465d9c69a297c2454a2c5f906237e6fdfb",
+  "source_sha256": "a3abc3fb8edc1878daf6ad3d48a29cacde65fc9c401abc189fb3b59fd5a397d3",
+  "update": {
+    "force": false
+  },
+  "wheel_targets": {
+    "aarch64": {
+      "files": [
+        "attrs-26.1.0-py3-none-any.whl",
+        "concurrent_log_handler-0.9.29-py3-none-any.whl",
+        "janus-2.0.0-py3-none-any.whl",
+        "jsonschema-4.26.0-py3-none-any.whl",
+        "jsonschema_specifications-2025.9.1-py3-none-any.whl",
+        "portalocker-4.4.0-py3-none-any.whl",
+        "referencing-0.37.0-py3-none-any.whl",
+        "rpds_py-2026.6.3-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+        "typing_extensions-4.16.0-py3-none-any.whl"
+      ],
+      "platforms": [
+        "manylinux2014_aarch64",
+        "manylinux_2_17_aarch64"
+      ]
+    },
+    "x86_64": {
+      "files": [
+        "attrs-26.1.0-py3-none-any.whl",
+        "concurrent_log_handler-0.9.29-py3-none-any.whl",
+        "janus-2.0.0-py3-none-any.whl",
+        "jsonschema-4.26.0-py3-none-any.whl",
+        "jsonschema_specifications-2025.9.1-py3-none-any.whl",
+        "portalocker-4.4.0-py3-none-any.whl",
+        "referencing-0.37.0-py3-none-any.whl",
+        "rpds_py-2026.6.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "typing_extensions-4.16.0-py3-none-any.whl"
+      ],
+      "platforms": [
+        "manylinux2014_x86_64",
+        "manylinux_2_17_x86_64"
+      ]
+    }
+  }
+}

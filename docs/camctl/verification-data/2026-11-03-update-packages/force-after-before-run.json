@@ -1,0 +1,16 @@
+{
+  "metadata": {
+    "id": 1,
+    "application_id": "camctl",
+    "instance_id": "ffb71c7cd28d4103b53a7561576ae7de",
+    "format_version": 9,
+    "staging_path": "/root/.camctl/staging",
+    "ready_path": "/var/opt/SatService/dt_outbox",
+    "processing_path": "/var/opt/SatService/dt_sending"
+  },
+  "logical_sha256": "f7487d79be4166c357431622cdcde1abbae368910e369a38f87635d7e22ee591",
+  "counts": {
+    "plans": 0,
+    "actions": 0
+  }
+}

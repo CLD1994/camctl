@@ -4,6 +4,52 @@
 
 本记录对应 `apps/host-demo` 第一版源码、静态库和终端演示。组件不包含业务 CLI、设备驱动或文件传输实现。
 
+## glibc 2.27 电机通知写端继承修复（2026-11-02）
+
+C 接入模块 `1.0.1` 在子进程文件动作中，将通知写端复制到原读端的描述符编号并关闭原写端，再把目标编号交给 CLI。父进程继续持有原读端及 `FD_CLOEXEC`，无需额外分配描述符；启动行为不依赖同号 `adddup2` 清除关闭标记。公开接口、通知格式和动作恢复规则保持原契约。实施过程见[修复计划](../superpowers/plans/2026-11-02-host-glibc227-notification-fd.md)。
+
+生产及单元测试提交 `1a773557` 已经独立源码评审，并以 `b037f1bd` 合入主工作区。核对这两个提交的组件 CMake、生产源码和单元测试目录，内容一致。验证在 Linux x86_64 开发容器执行；工作区为 `/tmp/camctl-host-glibc227-20261102`，测试仅使用系统接口替身，不创建真实通知管道或业务子进程。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 原实现上的单元回归 | 文件动作替身模拟旧 glibc 的同号复制保留关闭标记，以及执行时关闭带标记的描述符。原实现的通知成功及 spawn 失败场景均因写端失效被检出：7 项通过、2 项失败，CTest 退出 8。 |
+| 修复后的启动单元 | `unit_spawn` 的 9 项全部通过，CTest 退出 0。检查 CLI 收到的描述符对应可写端、子进程无多余通知端点、父进程读端身份与关闭标记保留；覆盖不启用通知、submit、维护命令、准备及 spawn 失败。 |
+| 完整 C 单元验证 | 在 `/tmp/camctl-root-glibc227-unit-20261102` 配置独立 Debug 构建，只构建 CTest 登记的单元目标。执行 `ctest --test-dir /tmp/camctl-root-glibc227-unit-20261102 -L '^unit$' -V --output-on-failure`，19/19 单元入口通过，配置、构建和测试均退出 0。 |
+| Debug 和 Release 生产构建 | 分别构建 `camctl_host` 与 `host-demo`，最终配置及构建均退出 0。Release 使用 `HOST_BUILD_TESTS=OFF`。 |
+| 独立源码评审 | 核对预先准备的通知管道、标准流关闭、输出管道分配、父子描述符关闭及失败清理，没有阻止交付的问题。 |
+
+命令、源码身份、退出码和日志保存在 `.local/verification/host-glibc227-20261102/`，根单元验证的完整命令见 `unit-receipt.json`。首次测试编译使用了严格 C 不支持的 `typeof`，退出 2；改为标准 C 类型后通过。首次 Debug 生产构建误用了不存在的目标名，退出 2；改用登记的 `host-demo` 后通过。上述准备错误及原实现的回归失败均保留，没有删除或放宽断言。
+
+`git diff --check` 通过。全仓文档链接检查退出 1，原因是部署模板引用的三份生成文件尚不位于模板源码目录：`docs/camctl-configuration.md`、`docs/camctl_host.h`、`docs/host-configuration.md`。已经核对这些引用与变更前一致；新增计划中的本地文件链接可解析，部署脚本继续在交付包中生成这些文件。
+
+没有新增或运行集成测试，没有运行目标 glibc 2.27、ARM64、实际回调、电机或现场部署，也没有重新打完整部署包。单元替身证明文件动作满足旧行为下的继承要求，不能代替目标主机运行验收。修复部署须重新编译并链接 C 主程序，Python 专用更新包不替换静态链接的模块。
+
+## 公开更新结果精简（2026-11-02）
+
+公开结果已收敛为 `outcome`、`effect`、`eligibility`、`reason` 和 `diagnostic_path`。简短原因用于阅读，诊断路径完整可用才交付；原始输出、退出、截断和解析事实保留在私有结果中，由模块在必要收场和互斥释放后统一交给 stderr。Python 维护协议保持原状态分类。C 组件的公开结构布局发生变化，版本按唯一来源递增为 `2.0.0`。
+
+生产提交 `ef674fa0` 经独立 `gpt-6.1-sol` 源码及测试隔离复核接受，在根工作区以 `16665508` 集成。Linux x86_64、GCC 13.3.0 环境中，在根工作区执行：
+
+```sh
+cmake -S apps/host-demo -B /tmp/camctl-root-compact-update-unit-20261102 \
+  -DCMAKE_BUILD_TYPE=Debug -DHOST_BUILD_TESTS=ON \
+  -DHOST_TEST_PYTHON=/workspaces/camctl/apps/camctl/.venv311/bin/python
+cmake --build /tmp/camctl-root-compact-update-unit-20261102 \
+  --target test_stop test_update_result_isolated test_maintenance_isolated test_demo_update_isolated -j2
+ctest --test-dir /tmp/camctl-root-compact-update-unit-20261102 --output-on-failure \
+  -R '^unit_(stop|update_result_isolated|maintenance_isolated|demo_update_isolated)$'
+```
+
+配置、构建与执行均退出 0，4/4 单元入口通过，其中完整停止入口为 31 项。覆盖公开投影、原因缩短、路径不可交付、原始输出中的 NUL 字节、可信业务失败、stderr 输出失败、参数及内存不足早退、取消保护和维护资格释放顺序。stdio、线程、进程及等待均使用替身，不访问真实业务文件或创建业务进程。
+
+实现工作区 `/tmp/camctl-compact-update-result-20261102` 同时完成 Release 生产库和演示构建，退出 0；构建选项中的 `HOST_BUILD_TESTS` 为关闭。首次配置误传的 `BUILD_TESTING` 未生效，项目默认关闭测试，随后缓存与实际目标已经核对。首次单元构建因测试的 calloc 宏影响标准声明而失败，补充标准头后通过，没有删除或放宽断言。
+
+公开五字段调用示例在实现与根工作区分别编译通过；生成协议的 `--check` 和 `git diff --check` 均退出 0。没有修改公共协议源，也没有运行集成测试套件、真实 stderr/线程/进程组合、更新、数据库、设备或断电验证。本次未重新打部署包；此前交付的包仍对应其自身的 `1.2.0` C 接口。
+
+## 更新接入与同进程显式重启（2026-11-02）
+
+`camctl_host_update`、启动资格检查和 `camctl_host_restart` 已接通；维护结果与本次应用是否成功分别处理，更新后不自动恢复业务。同进程重启复用配置与回调、不重送首次计划，候选资源未确认收场时保留责任。独立源码复核与根工作区完整停止 30 项、写入器停止 5 项的隔离验证见[组件更新验证记录](../camctl/owned-update-verification-2026-11-02.md)。后续完整部署包的 Release 编译及独立安装也通过，取消清理参数的优化编译诊断修复后再次通过 30 项停止单元。没有执行真实线程、进程组、更新或设备组合，不能由这些结果推断目标部署已验收。
+
 ## 主程序主动停止验证（2026-10-26 UTC）
 
 Linux x86_64 开发容器，GCC 13.3.0、CMake 3.28.3，CTest 的 Python 协作者指定 CPython 3.11.17。生产实现合入主工作区的提交为 `c465ec25`；独立审查后，在主工作区重新执行完整 Debug 构建及全部单元测试。
@@ -217,3 +263,8 @@ Linux x86_64 开发容器，GCC 13.3.0、CMake 3.28.3、CPython 3.11.16、SQLite
 | 主机突然断电 | 尚未在目标存储上验证断电后的文件位置和 camctl 恢复；普通进程中断不证明物理断电持久性，见清单 E。 |
 
 上述状态是“尚无对应现场证据”，不表示软件接口或进程恢复实现未完成。步骤与通过判据见[目标环境联调清单](../superpowers/plans/2026-10-11-camctl-target-integration-runbook.md)。源码可在记录的目标机工具链构建；本地 x86_64 二进制不能作为 ARM64 交付物。
+
+
+## 无人值守更新接入（2026-11-02）
+
+普通初始化自动恢复、更新内部重建、失败 diagnostic 直接交付 processing 的源码已独立评审，五个 C 隔离单元入口通过。普通更新已在容器中通过真实 wheel、离线依赖、稳定维护入口和 C host 实际验证，包含失败与连续中断恢复。归档后台消费者、Python 生产者及实际容器组合已接通并通过归档和清理中断续做验证。详见[专项验证记录](../camctl/unattended-update-verification-2026-11-02.md)及[实施计划](../superpowers/plans/2026-11-02-unattended-updates.md)；本条不替代目标 ARM64、第三方主程序或物理断电验收。

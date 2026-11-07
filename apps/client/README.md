@@ -11,4 +11,6 @@
 
 客户端版本由 `package.json` 定义，服务成功监听后在启动日志中记录一次版本。
 
+版本递增与已有部署的更新步骤见[版本发布与现场更新操作](../../docs/camctl/software-updates.md)，数据备份与恢复按[运行说明](../../docs/client/running.md)执行。
+
 更新报告类型：在本目录执行 `node --import tsx src/domain/generate-report-types.ts`。Docker 构建使用仓库根上下文：`docker build -f apps/client/Dockerfile .`（在仓库根执行）。

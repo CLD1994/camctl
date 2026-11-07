@@ -1,0 +1,24 @@
+{
+  "source_commit": "f29553d152989ebae1a7244d27941510bd0ef1a9",
+  "platform": "Linux x86_64",
+  "python": "Python 3.11.17",
+  "host_source_version": "#ifndef CAMCTL_HOST_VERSION_H\n#define CAMCTL_HOST_VERSION_H\n\n#define CAMCTL_HOST_VERSION \"1.0.1\"\n\n#endif\n",
+  "artifacts": {
+    "/workspaces/camctl/tmp/deploy-package-20261102-glibc227-ac045cf9/camctl-deploy/camctl/camctl-1.0.0-py3-none-any.whl": {
+      "sha256": "ffc9f702d80e68d7d17cb5566f1cac580ceb56e9b49e945bd1c6dbe0aec3dac8",
+      "size_bytes": 2018796
+    },
+    "/workspaces/camctl/tmp/camctl-update-1.0.1-normal/camctl-update.zip": {
+      "sha256": "a1070d53cb927848d1d2993588c6cd5faac4b74192a7304e3079ec555c7e0f87",
+      "size_bytes": 3677216
+    },
+    "/workspaces/camctl/tmp/camctl-update-1.0.2-force/camctl-update.zip": {
+      "sha256": "b8b6007dbe83cb89e7575203c5d278afe41c0725f0dcbb366ecdde18330dcf48",
+      "size_bytes": 3677608
+    },
+    "/workspaces/camctl/tmp/update-validation-20261103-final/host-build/host-demo": {
+      "sha256": "6fbdb4953d5013224b1cffe58cde5455813babc35398366bc0db76251fd7d4fc",
+      "size_bytes": 386064
+    }
+  }
+}

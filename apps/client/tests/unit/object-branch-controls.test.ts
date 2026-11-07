@@ -103,6 +103,21 @@ it("合格对象回显判别字段且只提供当前分支成员", () => {
   expect(html).not.toContain('aria-label="compensation_ev (compensation_ev)"');
   expect(html).not.toContain('aria-label="exposure (exposure)"');
 });
+it("可选非零整数成员保持对象分支并按声明提供开关", () => {
+  const p = parameter();
+  const exposure = (p.schema.properties as any).exposure;
+  exposure.oneOf[0].properties.move = {
+    type: "integer",
+    not: { const: 0 },
+    "x-camctl-input-toggle": true,
+  };
+  const absent = render('{"mode":"manual","iso":800}', p);
+  expect(absent).toContain('aria-label="启用move (move)"');
+  expect(absent).not.toContain('aria-label="move (move)"');
+  const present = render('{"mode":"manual","iso":800,"move":7}', p);
+  expect(present).toContain('aria-label="move (move)"');
+  expect(present).toContain('value="7"');
+});
 it("首次曝光整段JSON替换后回切恢复导入的完整模式", () => {
   const content: DraftContent = {
     text: '{"actions":[{"type":"camera_record","device_id":"camera","params":{"type":"record","duration_s":10,"exposure":{"mode":"manual","iso":800}}}]}',

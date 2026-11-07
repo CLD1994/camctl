@@ -342,6 +342,7 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
         deps = build_runtime(
             CommandMode.SUBMIT if command.kind is CommandKind.SUBMIT else CommandMode.RUN,
             config,
+            configuration_source=_config_arg(command),
             host_notifications=writer,
             # 正式 run 的部署调用方须先完成旧进程组收场。
             recovery_boundary=(RecoveryBoundary.HOST_LOCAL_SETTLED
@@ -407,7 +408,7 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.config import ConfigError
     from camctl.logging_runtime.one_shot import stderr_logging
     from camctl.logging_runtime.events import measure_stage
-    from camctl.logging_runtime.startup import record_startup
+    from camctl.logging_runtime.startup import record_log_location, record_startup
 
     try:
         from camctl.devices.catalog import build_catalog, default_driver_definitions
@@ -418,6 +419,7 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
         with stderr_logging(config.log, err, command_name="describe",
                 on_error=lambda stage, error: _diagnose_error(err, stage, error)):
             record_startup()
+            record_log_location(config, _config_arg(command))
             with measure_stage("describe"):
                 register_builtin_drivers(config)
                 catalog = build_catalog(config, default_driver_definitions())
@@ -435,7 +437,7 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.config import ConfigError
     from camctl.logging_runtime.one_shot import stderr_logging
     from camctl.logging_runtime.events import measure_stage, record_event
-    from camctl.logging_runtime.startup import record_startup
+    from camctl.logging_runtime.startup import record_log_location, record_startup
     from camctl.persistence.initialization import (
         InitOutcome,
         initialize_state,
@@ -447,6 +449,7 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
         with stderr_logging(config.log, err, command_name="init",
                 on_error=lambda stage, error: _diagnose_error(err, stage, error)):
             record_startup()
+            record_log_location(config, _config_arg(command))
             with measure_stage("initialization"):
                 result = initialize_state(config, adapter.state_db_path(config),
                     upgrade_software_recovery=command.upgrade_software_recovery,

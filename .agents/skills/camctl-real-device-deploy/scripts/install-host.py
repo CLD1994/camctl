@@ -39,7 +39,7 @@ def main():
             parser.error(str(error))
 
     # 仅在 Python 3.11 中导入依赖新语法和 tomllib 的安装实现。
-    from deploy_support import configure_paths, install_host, require_new_state_db, write_config
+    from deploy_support import configure_paths, host_command, install_host, require_new_state_db, write_config
     from bundle_support import current_target
     from camera_discovery import format_report, resolve_hb_cli
 
@@ -124,9 +124,11 @@ def main():
             raise ValueError('C 源码包没有唯一构建入口')
         install_host(run, candidates[0], target)
         run('显式初始化新状态库', [target / 'venv/bin/camctl', 'init', '--config', config_path])
-        command = [target / 'host/bin/host-demo', '--camctl', target / 'venv/bin/camctl', '--config', config_path,
-                   '--ready', configuration['paths']['ready'], '--processing', configuration['paths']['processing'],
-                   '--log', target / 'host.log']
+        run('发布组件维护入口', [target / 'venv/bin/python', '-B', '-m', 'camctl.update_engine.publisher',
+            '--wheel', wheels[0], '--target', target, '--base-python', getattr(sys, '_base_executable', sys.executable),
+            '--camctl-path', target / 'venv/bin/camctl', '--config', config_path])
+        receipt['updater_path'] = str(target / 'maintenance/camctl-updater')
+        command = host_command(target, configuration['paths'])
         launcher = target / 'start-host-demo.sh'
         exports = ''.join('export ' + key + '=' + shlex.quote(value) + '\n'
             for key, value in discovery['environment'].items())

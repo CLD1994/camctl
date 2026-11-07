@@ -1,0 +1,18 @@
+{
+  "scenario": "forced-new-configuration-layout-mismatch",
+  "status": "passed",
+  "checks": {
+    "previous_commit_unchanged": true,
+    "previous_config_preserved": true,
+    "new_config_rejected_before_mutation": true,
+    "ordinary_run_resumed": true,
+    "update_reported_failure": true
+  },
+  "failed_preflight": [
+    {
+      "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-missing-originals/updates/228db38284874b63897a41f2bc1f370c",
+      "environment_may_have_changed": false,
+      "rollback": null
+    }
+  ]
+}

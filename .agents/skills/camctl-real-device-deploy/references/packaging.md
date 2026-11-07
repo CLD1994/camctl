@@ -26,9 +26,6 @@ camctl-deploy/
   source-manifest.json
   SHA256SUMS
   install-host.py
-  update-camctl.py
-  update-worker.py
-  update_transaction.py
   bundle_support.py
   deploy_support.py
   camera_discovery.py
@@ -60,7 +57,7 @@ camctl-deploy/
 
 README 与两种客户端启动脚本的权威来源在 `assets/bundle/`，逐字复制；源码版本和验证事实统一保存在 RELEASE.json。输出目录的 build.log、build-receipt.json、源快照、虚拟环境和构建目录用于诊断，不进入 ZIP。SHA256SUMS 精确覆盖包内除清单自身外的全部文件；最终 ZIP 的摘要在包外同名 `.sha256` 文件中。
 
-README 说明安装参数与产物、客户端默认及自定义数据目录、camctl 常用配置和日志、host-demo 的使用、自有 C 主程序的链接与调用、两端配置对应关系、声明同步及失败诊断。完整配置参考从 `docs/camctl/configuration-reference.md` 和 `apps/host-demo/README.md` 的配置章节导出，公开头文件直接复制；不另维护一套完整参数清单。导出时保留正文、内部锚点和外部链接，未交付的仓库链接转为原标签文本。构建验证检查 README 链接目标、C 示例的编译和 TOML 示例的正式加载，并验证客户端自定义数据目录。
+README 说明安装参数与产物、客户端默认及自定义数据目录、camctl 常用配置和日志、host-demo 的使用、自有 C 主程序的链接与调用、两端配置对应关系、声明同步及失败诊断。完整配置参考从 `docs/camctl/configuration-reference.md` 和 `apps/host-demo/README.md` 的配置章节导出，公开头文件从 `apps/host-demo/include/` 导出；不另维护一套完整参数清单。导出时保留正文、内部锚点和外部链接，未交付的仓库链接转为原标签文本。构建验证检查 README 链接目标、C 示例的编译和 TOML 示例的正式加载，并验证客户端自定义数据目录。
 
 ## 构建与验收步骤
 
@@ -76,12 +73,14 @@ README 说明安装参数与产物、客户端默认及自定义数据目录、c
 
 这些验收证明软件部署路径可执行。完整测试套件、最低 CMake 版本、Windows、ARM64 和真实相机操作分别保留证据，不能从当前构建机的安装成功推断。
 
-## 停机离线更新
+## 初次安装与已有实例更新
 
-包内 `update-camctl.py` 更新已有实例的原虚拟环境。操作者先停止 host 和全部 CLI，准备 Python 3.11、uv 并保留旧包，再将完整新包解压到新的空目录；更新所用的包目录须未安装客户端依赖、未运行客户端，原客户端数据和旧包保留在原位置。默认使用 `<target>/config.toml`，可通过 `--config` 指定原配置文件的绝对路径。
+发布版本与已有实例的操作流程见[版本发布与现场更新操作](../../../../docs/camctl/software-updates.md)；交付接收方仍按包内 README 操作，不要求目标机器具有源码仓库。
 
-更新器先恢复未完成更新，再校验本次完整摘要与发行记录，并持有同一环境的更新锁及原状态库稳定会话锁、接纳锁。可靠备份原环境和一致数据库后，以带哈希的锁定依赖及本包 wheel 离线安装。新发行物在独立副本上按登记路径迁移数据库，验证实例、目录绑定和业务数据后发布。自动维护从 V9 开始，当前 V9 只验证。每次执行保留日志、收据、原安装信息及恢复材料。
+完整部署包用于初次安装。安装器初始化 camctl 后，调用新 wheel 的发布器建立 `<target>/maintenance/camctl-updater`，将路径记录到收据并传给生成的 host-demo 启动入口。维护实现由组件提供，不在完整部署包顶层维护另一份更新程序。
 
-提交前失败时自动回滚环境与数据库；断电或强制终止后，下次调用先完成恢复。恢复不能核实时保留未完成责任并拒绝新更新。恢复入口须独立于被修改的环境和 Python 包，不能要求先人工修好原虚拟环境。可靠完成点和故障边界由[更新规格](../../../../docs/architecture/versioning-and-updates.md)定义。只有明确指定 `--client-data` 时才同步能力说明，并将该文件纳入回滚；客户端数据库和媒体保留。更新结束保持停机。
+已有实例使用 `apps/camctl/scripts/build_update.py` 构建的 Python 专用更新包。它与完整包共用 Python 构建和依赖收集能力，交付 `camctl-update.zip`、包外摘要及同结构目录。ZIP 只有 `camctl-update/` 顶层目录，包含 `RELEASE.json`、`source-manifest.json`、`SHA256SUMS` 和 `camctl/` 下的单个 wheel、锁定依赖与双架构离线 wheel；不携带 host 或客户端。`RELEASE.json.update` 包含更新模式；强制包还提供完整新配置，构建时使用 `--force --config`，普通包不接受配置替换。元数据及重建范围以组件更新规格为准。
 
-现有发行验证不证明更新入口、跨架构依赖安装、真实数据库迁移或中断恢复；这些真实组合须另行验证。
+主程序通过 `camctl_host_update` 直接传入更新 ZIP 的绝对路径及可选能力同步目标。接口使用已初始化实例的配置，组件停止本模块普通业务，先恢复旧事务，再核对当前包并完成备份、迁移或强制重建，失败时恢复原环境。核实允许后自动建立普通运行周期。返回值只表示本次更新成功或失败；诊断直接作为独立文件进入 processing。输入也可为已解压包目录。普通主程序启动自动恢复未完成更新。首次接入旧环境须先从新 wheel 准备稳定入口，并升级主程序所链接的 C 接入模块；Python 更新包不替换静态库。
+
+V9 起点、备份、可靠完成点和故障边界由[更新规格](../../../../docs/architecture/versioning-and-updates.md)定义；稳定入口、部署绑定和公共结果由[更新接入规格](../../../../docs/architecture/software-update-interface.md)定义。随包 README 提供接收方操作说明。现有发行验证不证明真实数据库迁移、中断恢复或目标架构更新；这些真实组合须另行验证。

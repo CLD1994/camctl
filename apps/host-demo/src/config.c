@@ -60,7 +60,7 @@ int host_config_validate(const camctl_host_config *c, const char *p) {
     if (!c)
         return EINVAL;
     const char *paths[] = {c->camctl_path, c->ready_path,  c->processing_path,
-                           c->log_path,    c->config_path, p};
+                           c->log_path,    c->config_path, p, c->updater_path};
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
         if (i >= 4 && !paths[i])
             continue;

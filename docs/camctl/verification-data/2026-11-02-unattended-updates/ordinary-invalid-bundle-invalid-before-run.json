@@ -1,0 +1,30 @@
+{
+  "scenario": "invalid-package-preflight",
+  "status": "passed",
+  "checks": {
+    "old_version_unchanged": true,
+    "database_logical_unchanged": true,
+    "all_original_files_unchanged": true,
+    "no_transaction_mutation_intent": true,
+    "old_run_automatically_resumed": true,
+    "bad_zip_fact_delivered_to_processing": true,
+    "update_reported_failure": true
+  },
+  "gate": [
+    {
+      "pid": 24778,
+      "argv": [
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-invalid-bundle/venv/bin/camctl",
+        "run",
+        "--config",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/ordinary-invalid-bundle/config.toml",
+        "--host-notification-fd",
+        "4"
+      ],
+      "time_ns": 1793575460508036520
+    }
+  ],
+  "diagnostic": [
+    "camctl-host-diagnostic-24756-0-EDHyQK.log"
+  ]
+}

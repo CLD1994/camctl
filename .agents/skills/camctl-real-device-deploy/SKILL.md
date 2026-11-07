@@ -1,6 +1,6 @@
 ---
 name: camctl-real-device-deploy
-description: 为 camctl 创建独立的真机验证环境，构建包含主机和客户端的 ZIP 测试部署包，或使用包内入口停机更新已有 camctl。更新自动迁移数据库，并在失败或中断后恢复原部署。
+description: 为 camctl 创建独立真机验证环境、构建包含主机和客户端的 ZIP 部署包，并接入 camctl 自身的停机维护能力。已有实例使用 Python 专用更新包，由组件负责迁移、失败恢复和普通运行重建；强制包在完整备份后重建部署内容。
 ---
 
 # 准备真机验证部署
@@ -109,10 +109,29 @@ python3 install-host.py \
   -s .agents/skills/camctl-real-device-deploy/tests/integration -v
 ```
 
-## 停机更新已有 camctl
+## 无人值守更新已有 camctl
 
-完整部署包中的 `update-camctl.py --target /absolute/path` 对原虚拟环境执行离线更新。先停止 host 和全部 CLI，保留旧部署包，将完整新包解压到新的空目录；更新所用包目录须未安装客户端依赖、未运行客户端。目标机须已有 Python 3.11 和 uv；原配置不在 `<target>/config.toml` 时用 `--config` 指定原配置的绝对路径。
+版本递增、交付物校验、首次接入、演示与 C 接口应用、恢复及重启的完整操作步骤见[版本发布与现场更新操作](../../../docs/camctl/software-updates.md)。现场命令使用同一实例的普通入口、维护入口和配置来源。
 
-更新器先恢复上次未完成更新，再校验本次交付内容，并保持更新锁及原状态库的会话锁和接纳锁。完整环境与数据库一致备份可靠保存后，才安装软件、在副本上执行已登记迁移并验证发布。数据库以 V9 为自动维护基线，当前 V9 只验证，后续格式变化登记迁移路径。提交前失败时自动恢复原环境和数据库；断电或强制终止后，下次调用先继续恢复。回滚失败时保留恢复责任，不能恢复 host 或开始新更新。
+更新实现和引导发布器归 camctl wheel。完整部署包用于初次安装，其安装器在初始化后调用组件发布器，建立 `<target>/maintenance/camctl-updater`，记录路径并传给 host-demo 的 `--updater`。已有环境首次接入也使用新 wheel 的发布能力，不能先替换原 wheel 来取得更新功能。
 
-能力说明保存在更新产物；仅显式传入 `--client-data` 才同步，并将该文件纳入回滚。原配置、媒体和客户端数据库保留。成功或回滚后均保持停机；检查实际结果后由操作者恢复 host。具体命令、收据和恢复诊断见随包 README、[打包契约](references/packaging.md)及[更新规格](../../../docs/architecture/versioning-and-updates.md)。
+已有实例使用 Python 专用更新包。构建入口只需 Python 3.11、uv、Git 和下载条件，不构建 host 或客户端：
+
+```bash
+python3.11 apps/camctl/scripts/build_update.py \
+  --repo "$(pwd)" \
+  --output "$(pwd)/tmp/camctl-update-new"
+```
+
+输出目录必须不存在；失败保留日志和收据，使用新目录重试。生成的 `camctl-update.zip` 只含 wheel、双架构离线依赖、锁定依赖和元数据，另有摘要文件。该构建不代表真实升级和恢复已经验证。
+
+主程序在普通初始化配置中提供显式 `updater_path`，更新时调用 `camctl_host_update(bundle_path, client_data_path)`。组件停止本模块普通工作，完成更新或失败恢复，并在核实允许后自动建立普通运行周期。主程序只判断返回成功或失败，普通启动也会先自动恢复未完成事务。配置来源沿用普通 CLI 的显式或默认语义。V9 普通迁移起点、完整备份和强制重建见[更新规格](../../../docs/architecture/versioning-and-updates.md)，生命周期及 processing 诊断见[更新接入规格](../../../docs/architecture/software-update-interface.md)。
+
+强制包使用 `build_update.py --force --config /absolute/new-config.toml` 构建。完整 TOML 和强制标志进入经过摘要校验的包元数据；普通包不接受 `--config`。强制模式完整备份后，在同一登记路径重建 Python 环境、配置、状态库、staging 和 ready，失败恢复原环境与原数据。processing、日志、维护与恢复材料、host、客户端数据库及相机存储保留。普通模式保留配置和媒体，在副本上迁移已有库。两种模式都支持更新及回滚中断后的内部恢复。
+
+维护部署的路径登记由组件发布入口维护，完整布局只保存一份；已登记部署的初始化拒绝改变这些路径。同一布局重复初始化保持原行为。新部署和本地验证部署均须发布维护入口并让普通启动器携带其路径。
+
+能力说明只在显式指定同步目标时更新并纳入恢复。部署 skill 只调用组件能力，不维护另一套恢复程序。完整交付与操作说明见[打包契约](references/packaging.md)及随包 README。集成测试、容器实际更新、真实设备和物理断电的执行授权与验证结论分别记录。
+
+
+强制更新成功后，组件在普通运行已安排后准备旧环境诊断压缩包，直接发布到 processing。旧配置、状态库、Python 环境、冻结日志和清单保留；staging、ready 中的照片、视频及工作文件仅保留清单。完整回滚备份在可靠提交前不删减，归档可靠发布后才释放展开备份。归档失败或中断不回滚新部署，下次普通启动继续。

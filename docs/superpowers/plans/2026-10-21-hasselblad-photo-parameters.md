@@ -25,7 +25,7 @@
 ## 全局约束
 
 - 驱动为 `hasselblad_cfv100c`，动作为 `camera_take_photo`，参数类型为 `hasselblad_photo`，能力名称为“Hasselblad 单张拍照”，`preview_supported=true`。
-- 完整参数的五个顶层字段全部必填；互斥分支封闭，MF 的 `relative_move` 可省略且仅允许 `-5`、`5`。域、标题和命令映射由驱动同源生成，完整档位表只在其权威定义维护。
+- 完整参数的五个顶层字段全部必填；互斥分支封闭，MF 的 `relative_move` 可省略，开启手动调焦后由用户填写非零整数。域、标题和命令映射由驱动同源生成，完整档位表只在其权威定义维护。
 - 快门在参数、Schema、预设、计划、历史、报告及工具参数中使用相同的规范分数字符串；其他数值保持精确数字。执行时直接使用已保存值。
 - 设置、对焦和拍摄共用一次 START；完整调用预算为首次受理保存的 `180` 秒，正式源位置也使用原执行定义。每次派发仍检查窗口、剩余预算和普通资格。
 - 实际进入整次 START 后拒绝取消。照片采集 `NO_EFFECT` 与整次 START 尚未进入分别判断；步骤副作用随原尝试保存，恢复消费原事实。
@@ -104,7 +104,7 @@ camctl_pytest() {
 - [x] **步骤 1：增加允许域及分支测试。** 建议用 `test_photo_schema_has_closed_independent_branches` 验证五字段、四种曝光、八种白平衡及两种对焦；以独立的合法／非法样例断言缺项、`null`、错误类型、额外 `tint`、不适用字段均失败。`test_photo_domains_are_exact_and_positive` 核对 10 档 ISO、13 档光圈、34 档快门的目录数量、独立代表值、全部候选可通过及相邻域外值失败；不在测试另抄完整生产表。
 - [x] **步骤 2：增加表示及缺省边界测试。** 快门覆盖规范字符串、非法类型与目录外值；手动白平衡覆盖 2000、10000、区间整数及 1999、10001、小数、缺项；手动调焦覆盖省略、`-5`、`5`、`0` 和 AF-S 错带字段。快门格式切换后的具体回归结果由 [H6](2026-10-28-hasselblad-availability-recovery.md#h6-部署交接与目标设备验收) 跟踪，阶段原完成证据保留其原源码及范围。
 - [x] **步骤 3：确认当前测试失败。** 执行 `camctl_pytest apps/camctl/tests/unit/devices/test_hasselblad_definitions.py apps/camctl/tests/unit/devices/test_hasselblad_parameters.py -q`，确认失败指向缺少完整参数契约。
-- [x] **步骤 4：实现同源定义及真实任务校验。** 用一份字段目录生成各曝光分支的共享节点、标题和说明；图片格式、快门及其他数值档位使用各自类型的带标题常量表示。将同一校验用于 `parse_photo_settings` 与真实任务工厂；`capability()` 从固定任务事实生成说明，离线导出完整能力。手动调焦说明标明临时选项及省略语义。
+- [x] **步骤 4：实现同源定义及真实任务校验。** 用一份字段目录生成各曝光分支的共享节点、标题和说明；图片格式、快门及其他数值档位使用各自类型的带标题常量表示。将同一校验用于 `parse_photo_settings` 与真实任务工厂；`capability()` 从固定任务事实生成说明，离线导出完整能力。手动调焦说明标明数值输入及省略语义。
 - [x] **步骤 5：验证受理和保存。** 扩展 `test_photo_acceptance_saves_explicit_params_and_call_budget`：完整参数按原始／生效输入保存，源模式和 180 秒进入执行定义；修改当前配置不改变原动作。`describe` 在无设备及无可执行工具的测试环境仍成功。运行上述单元及 `camctl_pytest apps/camctl/tests/integration/acceptance -q`。
 - [x] **步骤 6：审查并形成阶段提交。** 建议提交名为“定义 Hasselblad 完整单张参数与同源能力”；交接实际字段类型、Schema、格式描述及 task factory 行为。
 

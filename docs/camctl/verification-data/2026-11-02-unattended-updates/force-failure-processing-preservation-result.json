@@ -1,0 +1,12 @@
+{
+  "scenario": "processing-main-changes-survive-force-rollback",
+  "status": "passed",
+  "checks": {
+    "rolled_back": true,
+    "deleted_processing_file_not_replayed": true,
+    "new_processing_file_preserved": true,
+    "old_work_file_restored": true,
+    "ordinary_old_run_arranged": true
+  },
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-failure/updates/049310353f00499c82450ba4f6cdc5c9"
+}

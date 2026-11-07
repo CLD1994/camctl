@@ -1,0 +1,58 @@
+{
+  "scenario": "force-fresh-deployment-and-diagnostic-archive",
+  "status": "passed",
+  "checks": {
+    "committed": true,
+    "version_1_0_0": true,
+    "new_config_exact": true,
+    "new_database_instance": true,
+    "fresh_database_no_business": true,
+    "old_extra_environment_file_removed": true,
+    "old_staging_media_removed": true,
+    "ready_empty": true,
+    "processing_original_preserved": true,
+    "new_run_arranged": true,
+    "archive_completed_and_backups_released": true,
+    "archive_one": true,
+    "old_config_present": true,
+    "old_database_present": true,
+    "old_environment_extra_present": true,
+    "manifest_record_present": true,
+    "old_logs_present": true,
+    "staging_and_ready_payload_absent": true,
+    "processing_never_archived": true,
+    "media_inventory_retained": true
+  },
+  "new_metadata": {
+    "id": 1,
+    "application_id": "camctl",
+    "instance_id": "7bc42404e056482392061bd84c497da6",
+    "format_version": 9,
+    "staging_path": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/staging",
+    "ready_path": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/ready",
+    "processing_path": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/processing"
+  },
+  "business_counts": {
+    "plans": 0,
+    "actions": 0
+  },
+  "archive": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/processing/camctl-force-diagnostic-a7e663f39b704eac9c1dc5876d399fc1.tar.gz",
+  "archive_size": 6181661,
+  "archive_member_count": 1093,
+  "job_state": "cleaned",
+  "output": "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/updates/a7e663f39b704eac9c1dc5876d399fc1",
+  "gate": [
+    {
+      "pid": 37883,
+      "argv": [
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/venv/bin/camctl",
+        "run",
+        "--config",
+        "/workspaces/camctl/tmp/unattended-validation-20261102/worlds/force-success-v2/config.toml",
+        "--host-notification-fd",
+        "4"
+      ],
+      "time_ns": 1793576836796655785
+    }
+  ]
+}

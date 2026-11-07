@@ -1,6 +1,12 @@
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Application } from "../../src/server/application";
@@ -99,6 +105,94 @@ async function setup(
   await page.getByTestId("draft-open-button").click();
   return { app, page, draft, directory, close };
 }
+
+it("可选数值开关保留未完成输入并按当前模式导出", async () => {
+  const parameter = titledParameter();
+  const capabilities = {
+    devices: [
+      {
+        device_id: "generic",
+        driver_id: "test",
+        actions: [{ type: "camera_take_photo", parameter_types: [parameter] }],
+      },
+    ],
+  };
+  const { app, page, draft } = await setup("10", false, {
+    capabilities: stringifyJson(capabilities),
+    draftText:
+      '{"name":"调焦","actions":[{"name":"照片","type":"camera_take_photo","device_id":"generic","scheduled_at":"2026-10-21 12:00:00","policy":{"max_delay_ms":0},"params":{"type":"titled_photo","capture_format":"raw","exposure":{"mode":"P","iso":100},"white_balance":{"mode":"auto"},"focus":{"mode":"MF"}}}]}',
+  });
+  const path = "/actions/0/params/focus/relative_move";
+  const toggle = page.getByRole("switch", {
+    name: "启用手动调焦相对移动量 (relative_move)",
+  });
+  const input = page.getByLabel("手动调焦相对移动量 (relative_move)", {
+    exact: true,
+  });
+  const mode = page.getByRole("combobox", {
+    name: "对焦模式 (mode)",
+    exact: true,
+  });
+  await check(toggle).not.toBeChecked();
+  await check(input).toHaveCount(0);
+  await toggle.check();
+  await check
+    .poll(() => app.draft(draft.id).content.pending?.[path]?.text)
+    .toBe("");
+  let saved = app.draft(draft.id);
+  expect(() =>
+    app.exportDraft(draft.id, saved.revision, saved.content),
+  ).toThrow();
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(toggle).toBeChecked();
+  await check(input).toHaveValue("");
+  await choose(mode, "branch:1");
+  await choose(mode, "branch:0");
+  await check(toggle).toBeChecked();
+  await check(input).toHaveValue("");
+  await input.fill("17");
+  await check
+    .poll(
+      () =>
+        (parseJson(app.draft(draft.id).content.text) as any).actions[0].params
+          .focus.relative_move,
+    )
+    .toBe(17);
+  await input.fill("-19");
+  await check
+    .poll(
+      () =>
+        (parseJson(app.draft(draft.id).content.text) as any).actions[0].params
+          .focus.relative_move,
+    )
+    .toBe(-19);
+  await input.fill("0");
+  await check
+    .poll(
+      () =>
+        (parseJson(app.draft(draft.id).content.text) as any).actions[0].params
+          .focus.relative_move,
+    )
+    .toBe(0);
+  saved = app.draft(draft.id);
+  expect(() =>
+    app.exportDraft(draft.id, saved.revision, saved.content),
+  ).toThrow();
+  await input.fill("");
+  await check
+    .poll(() => app.draft(draft.id).content.pending?.[path]?.text)
+    .toBe("");
+  await toggle.uncheck();
+  await check
+    .poll(() => app.draft(draft.id).content.pending?.[path])
+    .toBeUndefined();
+  saved = app.draft(draft.id);
+  const exported = app.exportDraft(draft.id, saved.revision, saved.content);
+  expect((exported.body as any).actions[0].params.focus).toEqual({
+    mode: "MF",
+  });
+}, 60000);
 
 it("曝光缺省时先选择模式，浏览页面不自动填写任何选项", async () => {
   const { app, page, draft } = await setup("10", false, { omit: true });
@@ -474,8 +568,7 @@ function schemaSample(schema: Record<string, any>, path: string): unknown {
   }
   if (schema.type === "object" || schema.properties) {
     const properties = schema.properties as
-      | Record<string, Record<string, any>>
-      | undefined;
+      Record<string, Record<string, any>> | undefined;
     const required = (schema.required ?? []) as string[];
     return Object.fromEntries(
       required.map((name) => {
@@ -519,9 +612,14 @@ it("能力源的 Action6 光圈和码率必填规则驱动表单与导出校验"
   if (!parameter) return;
 
   const schema = parameter.schema;
-  expect(schema.required).toEqual(expect.arrayContaining(["aperture", "bitrate"]));
+  expect(schema.required).toEqual(
+    expect.arrayContaining(["aperture", "bitrate"]),
+  );
   const params: Record<string, unknown> = { type: parameter.type };
-  for (const [name, field] of Object.entries(schema.properties) as [string, any][]) {
+  for (const [name, field] of Object.entries(schema.properties) as [
+    string,
+    any,
+  ][]) {
     if (name === "type") continue;
     if (Array.isArray(field.oneOf)) {
       const branch = field.oneOf[0];
@@ -541,14 +639,16 @@ it("能力源的 Action6 光圈和码率必填规则驱动表单与导出校验"
   delete params.bitrate;
   const draftText = JSON.stringify({
     name: "能力源 Action6 必填规则",
-    actions: [{
-      name: parameter.name,
-      type: action.type,
-      device_id: device.device_id,
-      scheduled_at: "2026-10-11 12:00:00",
-      policy: { max_delay_ms: 0 },
-      params,
-    }],
+    actions: [
+      {
+        name: parameter.name,
+        type: action.type,
+        device_id: device.device_id,
+        scheduled_at: "2026-10-11 12:00:00",
+        policy: { max_delay_ms: 0 },
+        params,
+      },
+    ],
   });
   const { app, page, draft } = await setup("10", false, {
     capabilities: clientTestCapabilitiesText(),
@@ -562,8 +662,9 @@ it("能力源的 Action6 光圈和码率必填规则驱动表单与导出校验"
       { exact: true },
     );
     await check(control).toBeVisible();
-    await check(page.locator(".field").filter({ has: control }).locator(".required"))
-      .toHaveText("必填");
+    await check(
+      page.locator(".field").filter({ has: control }).locator(".required"),
+    ).toHaveText("必填");
   }
   const saved = app.draft(draft.id);
   let failure: any;
@@ -1502,18 +1603,31 @@ it("能力源的 Action6 延时参数、预览与三种输出经真实表单和�
     expect(action.type).toBe("camera_timelapse");
     expect(parameter.preview_supported).toBe(true);
     const schema = parameter.schema as any;
-    expect(schema.required).toEqual(expect.arrayContaining([
-      "interval_s", "duration_s", "outputs", "exposure",
-    ]));
+    expect(schema.required).toEqual(
+      expect.arrayContaining([
+        "interval_s",
+        "duration_s",
+        "outputs",
+        "exposure",
+      ]),
+    );
     expect(schema.properties).not.toHaveProperty("aperture");
     expect(schema.properties).not.toHaveProperty("bitrate");
     const params: Record<string, unknown> = { type: parameter.type };
-    for (const [name, field] of Object.entries(schema.properties) as [string, any][]) {
+    for (const [name, field] of Object.entries(schema.properties) as [
+      string,
+      any,
+    ][]) {
       if (name === "type") continue;
       if (Array.isArray(field.oneOf)) {
-        params[name] = Object.fromEntries(Object.entries(
-          field.oneOf[0].properties as Record<string, any>,
-        ).map(([key, value]) => [key, Object.hasOwn(value, "const") ? value.const : value.enum[0]]));
+        params[name] = Object.fromEntries(
+          Object.entries(field.oneOf[0].properties as Record<string, any>).map(
+            ([key, value]) => [
+              key,
+              Object.hasOwn(value, "const") ? value.const : value.enum[0],
+            ],
+          ),
+        );
       } else if (Array.isArray(field.enum)) params[name] = field.enum[0];
       else if (Object.hasOwn(field, "const")) params[name] = field.const;
     }
@@ -1521,19 +1635,35 @@ it("能力源的 Action6 延时参数、预览与三种输出经真实表单和�
     for (const output of ["video", "video_raw", "video_jpeg"]) {
       const { app, page, draft, close } = await setup("10", false, {
         capabilities: clientTestCapabilitiesText(),
-        draftText: JSON.stringify({ name: "Action6延时表单", actions: [{
-          name: parameter.name, type: action.type, device_id: device.device_id,
-          scheduled_at: "2026-10-11 12:00:00", policy: { max_delay_ms: 0 }, params,
-        }] }),
+        draftText: JSON.stringify({
+          name: "Action6延时表单",
+          actions: [
+            {
+              name: parameter.name,
+              type: action.type,
+              device_id: device.device_id,
+              scheduled_at: "2026-10-11 12:00:00",
+              policy: { max_delay_ms: 0 },
+              params,
+            },
+          ],
+        }),
       });
-      const control = page.getByLabel(`${field.title ?? "outputs"} (outputs)`, { exact: true });
+      const control = page.getByLabel(`${field.title ?? "outputs"} (outputs)`, {
+        exact: true,
+      });
       await check(control).toBeVisible();
       const options = await readOptions(control);
       const value = String(field.enum.indexOf(output));
-      expect(options.some(option => option.value === value)).toBe(true);
+      expect(options.some((option) => option.value === value)).toBe(true);
       await choose(control, value);
-      await check.poll(() => (parseJson(app.draft(draft.id).content.text) as any)
-        .actions[0].params.outputs).toBe(output);
+      await check
+        .poll(
+          () =>
+            (parseJson(app.draft(draft.id).content.text) as any).actions[0]
+              .params.outputs,
+        )
+        .toBe(output);
       const saved = app.draft(draft.id);
       const request = app.exportDraft(draft.id, saved.revision, saved.content);
       expect((request.body as any).actions[0].params.outputs).toBe(output);
@@ -1576,10 +1706,14 @@ it.each([
         .filter((item) => item.value !== "")
         .map((item) => item.text),
     ).toEqual(["手动曝光", "光圈优先", "快门优先", "程序曝光"]);
-    await check(control("手动调焦相对移动量 (relative_move)")).toHaveAttribute(
-      "data-value",
-      "",
-    );
+    const focusToggle = page.getByRole("switch", {
+      name: "启用手动调焦相对移动量 (relative_move)",
+      exact: true,
+    });
+    const focusMove = page.getByLabel("手动调焦相对移动量 (relative_move)", {
+      exact: true,
+    });
+    await check(focusToggle).not.toBeChecked();
     expect(current().focus).toEqual({ mode: "MF" });
     const temperature = page.getByLabel("色温 (temperature_k)", {
       exact: true,
@@ -1603,19 +1737,13 @@ it.each([
     await choose(control("白平衡模式 (mode)"), "branch:1");
     await check(temperature).toHaveValue("5e");
     await temperature.fill("5500");
-    await choose(control("手动调焦相对移动量 (relative_move)"), "1");
+    await focusToggle.check();
+    await focusMove.fill("5");
     await choose(control("对焦模式 (mode)"), "branch:1");
     await choose(control("对焦模式 (mode)"), "branch:0");
-    await check(control("手动调焦相对移动量 (relative_move)")).toHaveAttribute(
-      "data-value",
-      "1",
-    );
-    await page
-      .getByRole("button", {
-        name: "清空手动调焦相对移动量 (relative_move)",
-        exact: true,
-      })
-      .click();
+    await check(focusToggle).toBeChecked();
+    await check(focusMove).toHaveValue("5");
+    await focusToggle.uncheck();
     await choose(exposure(), "branch:1");
     await choose(control("ISO 感光度 (iso)"), "0");
     await choose(exposure(), "branch:2");
