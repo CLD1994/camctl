@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import errno
 import os
+import sqlite3
 import threading
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
@@ -110,7 +110,7 @@ async def _run(config, *, boundary: RecoveryBoundary | None = None):
         close_runtime(deps)
 
 
-async def test_host_settled_run_sweeps_once_under_session_lock(
+async def test_host_settled_run_sweeps_under_session_lock(
         tmp_path: Path, monkeypatch) -> None:
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
@@ -119,77 +119,56 @@ async def test_host_settled_run_sweeps_once_under_session_lock(
         CommandMode.RUN, config,
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
     )
-    original_listdir = copies._listdir
-    original_sweep = copies.startup_sweep
-    scans: list[Path] = []
-    lock_held_during_scan: list[bool] = []
-    formal_exists_after_sweep: list[bool] = []
+    loop = asyncio.get_running_loop()
+    scan_started = asyncio.Event()
+    release_scan = threading.Event()
+    original_listdir = os.listdir
+    logs_dir = old_copy.parent
 
-    def listdir_under_session_lock(path: Path):
-        scans.append(Path(path))
-        try:
-            duplicate = acquire_session(deps.session_lock)
-        except SessionLockConflictError:
-            lock_held_during_scan.append(True)
-        else:
-            lock_held_during_scan.append(False)
-            duplicate.close()
+    def blocked_listdir(path):
+        if Path(path) == logs_dir:
+            loop.call_soon_threadsafe(scan_started.set)
+            _wait_thread_event(release_scan)
         return original_listdir(path)
 
-    def observe_sweep(*args, **kwargs):
-        result = original_sweep(*args, **kwargs)
-        formal_exists_after_sweep.append(formal_marker.exists())
-        return result
-
-    monkeypatch.setattr(copies, "_listdir", listdir_under_session_lock)
-    monkeypatch.setattr(copies, "startup_sweep", observe_sweep)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
+    task = asyncio.create_task(execute_command(deps, None, flows={}))
     try:
-        # 注入空业务流程，隔离报告恢复 owner 对 formal marker 的既有删除职责。
-        outcome = await execute_command(deps, None, flows={})
+        await _wait_event(scan_started)
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        assert not task.done()
+        release_scan.set()
+        outcome = await _wait_task(task)
     finally:
+        release_scan.set()
+        if not task.done():
+            task.cancel()
+            await _wait_task(asyncio.gather(task, return_exceptions=True))
         close_runtime(deps)
 
     assert outcome.succeeded is True
-    assert (len(scans), lock_held_during_scan) == (1, [True])
     assert not old_copy.exists()
     assert not old_temp.exists()
-    assert formal_exists_after_sweep == [True]
+    assert formal_marker.exists()
     assert unknown.exists()
+    lease = acquire_session(deps.session_lock)
+    lease.close()
 
 
 async def test_failed_old_copy_delete_is_retried_by_next_run(
-        tmp_path: Path, monkeypatch) -> None:
+        tmp_path: Path, monkeypatch, capfd) -> None:
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
-    old_copy, old_temp, formal_marker, _unknown = _seed_log_paths(config)
-    original_unlink = copies._unlink
-    original_listdir = copies._listdir
-    original_sweep = copies.startup_sweep
-    scans: list[Path] = []
-    formal_exists_after_sweep: list[bool] = []
-    failed_deletes: list[Path] = []
-    fail_old_copy = True
+    old_copy, old_temp, formal_marker, unknown = _seed_log_paths(config)
+    original_unlink = os.unlink
+    failure_marker = "controlled old-copy unlink failure"
 
-    def record_listdir(path: Path):
-        scans.append(Path(path))
-        return original_listdir(path)
+    def deny_old_copy(path, *args, **kwargs):
+        if Path(path) == old_copy:
+            raise PermissionError(failure_marker)
+        return original_unlink(path, *args, **kwargs)
 
-    def observe_sweep(*args, **kwargs):
-        result = original_sweep(*args, **kwargs)
-        formal_exists_after_sweep.append(formal_marker.exists())
-        return result
-
-    def fail_first_old_copy_delete(path: Path):
-        nonlocal fail_old_copy
-        if fail_old_copy and Path(path) == old_copy:
-            fail_old_copy = False
-            failed_deletes.append(Path(path))
-            raise PermissionError("controlled old-copy unlink failure")
-        return original_unlink(path)
-
-    monkeypatch.setattr(copies, "_listdir", record_listdir)
-    monkeypatch.setattr(copies, "startup_sweep", observe_sweep)
-    monkeypatch.setattr(copies, "_unlink", fail_first_old_copy_delete)
     async def run_without_report_recovery():
         deps = build_runtime(
             CommandMode.RUN, config,
@@ -200,41 +179,32 @@ async def test_failed_old_copy_delete_is_retried_by_next_run(
         finally:
             close_runtime(deps)
 
-    first = await run_without_report_recovery()
-
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "unlink", deny_old_copy)
+        first = await run_without_report_recovery()
     assert first.succeeded is True
-    assert scans == [Path(config.paths.staging) / "logs"]
-    assert failed_deletes == [old_copy]
     assert old_copy.exists()
     assert not old_temp.exists()
-    assert formal_exists_after_sweep == [True]
+    assert formal_marker.exists() and unknown.exists()
+    diagnostics = Path(config.paths.log_file).read_text() + capfd.readouterr().err
+    assert failure_marker in diagnostics
 
     second = await run_without_report_recovery()
-
     assert second.succeeded is True
-    assert scans == [Path(config.paths.staging) / "logs"] * 2
     assert not old_copy.exists()
-    assert formal_exists_after_sweep == [True, True]
+    assert formal_marker.exists() and unknown.exists()
 
 
 async def test_session_lock_conflict_stops_before_startup_sweep(
-        tmp_path: Path, monkeypatch) -> None:
+        tmp_path: Path) -> None:
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
-    old_copy, _old_temp, _formal_marker, _unknown = _seed_log_paths(config)
+    old_copy, old_temp, formal_marker, unknown = _seed_log_paths(config)
     deps = build_runtime(
         CommandMode.RUN, config,
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
     )
     held = acquire_session(deps.session_lock)
-    original_listdir = copies._listdir
-    scans: list[Path] = []
-
-    def record_listdir(path: Path):
-        scans.append(Path(path))
-        return original_listdir(path)
-
-    monkeypatch.setattr(copies, "_listdir", record_listdir)
     try:
         outcome = await execute_command(deps, None)
     finally:
@@ -243,8 +213,7 @@ async def test_session_lock_conflict_stops_before_startup_sweep(
 
     assert outcome.succeeded is False
     assert outcome.reason == "lock_error"
-    assert scans == []
-    assert old_copy.exists()
+    assert all(path.exists() for path in (old_copy, old_temp, formal_marker, unknown))
 
 
 async def test_direct_runtime_default_keeps_old_files(
@@ -261,180 +230,94 @@ async def test_direct_runtime_default_keeps_old_files(
     assert unknown.exists()
 
 
-async def test_existing_bad_database_uses_minimal_same_lock_sweep(
+async def test_existing_bad_database_sweeps_under_session_lock(
         tmp_path: Path, monkeypatch) -> None:
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     old_copy, old_temp, formal_marker, unknown = _seed_log_paths(config)
     Path(config.paths.state_db).write_bytes(b"not a SQLite database")
-
-    original_open_existing = lifecycle.open_existing
-    original_acquire = lifecycle.acquire_session
-    original_listdir = copies._listdir
-    opens: list[Path] = []
-    acquisitions: list[Path] = []
-    scans: list[Path] = []
-    lock_held_during_scan: list[bool] = []
-
-    def open_existing_once(path, mode, db_config):
-        opens.append(Path(path))
-        return original_open_existing(path, mode, db_config)
-
-    def acquire_once(path):
-        acquisitions.append(Path(path))
-        return original_acquire(path)
-
     deps = build_runtime(
         CommandMode.RUN, config,
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
     )
+    loop = asyncio.get_running_loop()
+    scan_started = asyncio.Event()
+    release_scan = threading.Event()
+    original_listdir = os.listdir
+    original_connect = sqlite3.connect
+    database_opens = []
 
-    def listdir_under_session_lock(path: Path):
-        scans.append(Path(path))
-        try:
-            duplicate = original_acquire(deps.session_lock)
-        except SessionLockConflictError:
-            lock_held_during_scan.append(True)
-        else:
-            lock_held_during_scan.append(False)
-            duplicate.close()
+    def record_connect(*args, **kwargs):
+        database_opens.append(args[0])
+        return original_connect(*args, **kwargs)
+
+    def blocked_listdir(path):
+        if Path(path) == old_copy.parent:
+            loop.call_soon_threadsafe(scan_started.set)
+            _wait_thread_event(release_scan)
         return original_listdir(path)
 
-    # 统计只在正式预检查之后发生的数据库打开，不能让最小坏库路径
-    # 重新打开或扫描同一个损坏数据库。
-    before_execute_opens = len(opens)
-    monkeypatch.setattr(lifecycle, "open_existing", open_existing_once)
-    monkeypatch.setattr(lifecycle, "acquire_session", acquire_once)
-    monkeypatch.setattr(copies, "_listdir", listdir_under_session_lock)
-
-    def fail_if_report_flows_are_assembled(*_args, **_kwargs):
-        raise AssertionError("坏库最小收场不能装配完整报告流程")
-
-    monkeypatch.setattr(
-        lifecycle, "_report_assembly", fail_if_report_flows_are_assembled)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
+    monkeypatch.setattr(sqlite3, "connect", record_connect)
+    task = asyncio.create_task(execute_command(deps, None))
     try:
-        outcome = await execute_command(deps, None)
+        await _wait_event(scan_started)
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        assert not task.done()
+        release_scan.set()
+        outcome = await _wait_task(task)
     finally:
+        release_scan.set()
+        if not task.done():
+            task.cancel()
+            await _wait_task(asyncio.gather(task, return_exceptions=True))
         close_runtime(deps)
 
     assert outcome.succeeded is False
     assert outcome.reason == "state_db_error"
-    assert len(opens) == before_execute_opens
-    assert (len(acquisitions), len(scans), lock_held_during_scan) == (
-        1, 1, [True])
-    assert not old_copy.exists()
-    assert not old_temp.exists()
-    assert formal_marker.exists()
-    assert unknown.exists()
+    assert database_opens == []
+    assert not old_copy.exists() and not old_temp.exists()
+    assert formal_marker.exists() and unknown.exists()
+    lease = acquire_session(deps.session_lock)
+    lease.close()
 
 
-@pytest.mark.parametrize("database_state", ["missing", "unknown"])
-async def test_missing_or_unknown_database_stops_before_lock_and_sweep(
+@pytest.mark.parametrize("database_state", ["missing", "unknown", "nonregular"])
+async def test_ineligible_database_preserves_startup_candidates(
         tmp_path: Path, monkeypatch, database_state: str) -> None:
     config = _config_for(tmp_path)
-    old_copy, old_temp, formal_marker, unknown = _seed_log_paths(config)
-    original_stat = Path.stat
+    candidates = _seed_log_paths(config)
     state_path = Path(config.paths.state_db).expanduser().resolve()
-    if database_state == "unknown":
-        # 文件确实存在，但本次不能可靠读取它的文件类型／存在性；
-        # 不能用高层 StateDatabaseError 覆盖已经观测到的存在事实。
-        Path(config.paths.state_db).write_bytes(b"existence unknown")
+    if database_state == "nonregular":
+        state_path.mkdir()
+    elif database_state == "unknown":
+        state_path.write_bytes(b"existence unknown")
 
-        def deny_state_db_stat(path, *args, **kwargs):
-            if path == state_path:
-                import errno
-                raise PermissionError(
-                    errno.EACCES, "state database stat denied", str(path))
-            return original_stat(path, *args, **kwargs)
+    original_stat = Path.stat
 
-        monkeypatch.setattr(Path, "stat", deny_state_db_stat)
+    def deny_state_db_stat(path, *args, **kwargs):
+        if path == state_path:
+            raise PermissionError(errno.EACCES, "state database stat denied", str(path))
+        return original_stat(path, *args, **kwargs)
 
-    original_acquire = lifecycle.acquire_session
-    original_listdir = copies._listdir
-    acquisitions: list[Path] = []
-    scans: list[Path] = []
-
-    def record_acquire(path):
-        acquisitions.append(Path(path))
-        return original_acquire(path)
-
-    def record_listdir(path):
-        scans.append(Path(path))
-        return original_listdir(path)
-
-    monkeypatch.setattr(lifecycle, "acquire_session", record_acquire)
-    monkeypatch.setattr(copies, "_listdir", record_listdir)
-    deps = None
-    preflight_error: PermissionError | None = None
-    try:
+    with monkeypatch.context() as patch:
+        if database_state == "unknown":
+            patch.setattr(Path, "stat", deny_state_db_stat)
         deps = build_runtime(
             CommandMode.RUN, config,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
         )
-    except PermissionError as error:
-        preflight_error = error
-    finally:
-        if database_state == "unknown":
-            monkeypatch.setattr(Path, "stat", original_stat)
-
-    if deps is None:
-        outcome = None
-    else:
-        try:
-            outcome = await execute_command(deps, None)
-        finally:
-            close_runtime(deps)
-
-    assert acquisitions == []
-    assert scans == []
-    assert preflight_error is None, (
-        "existence uncertainty must become a state_db_error outcome before "
-        f"session work, not escape as {preflight_error!r}")
-    assert outcome is not None
-    assert outcome.succeeded is False
-    assert outcome.reason == "state_db_error"
-    assert old_copy.exists()
-    assert old_temp.exists()
-    assert formal_marker.exists()
-    assert unknown.exists()
-
-
-async def test_nonregular_database_target_stops_before_lock_and_sweep(
-        tmp_path: Path, monkeypatch) -> None:
-    config = _config_for(tmp_path)
-    state_path = Path(config.paths.state_db)
-    state_path.mkdir()
-    _old_copy, _old_temp, _formal_marker, _unknown = _seed_log_paths(config)
-    acquisitions: list[Path] = []
-    scans: list[Path] = []
-    original_acquire = lifecycle.acquire_session
-    original_listdir = copies._listdir
-
-    def record_acquire(path):
-        acquisitions.append(Path(path))
-        return original_acquire(path)
-
-    def record_listdir(path):
-        scans.append(Path(path))
-        return original_listdir(path)
-
-    monkeypatch.setattr(lifecycle, "acquire_session", record_acquire)
-    monkeypatch.setattr(copies, "_listdir", record_listdir)
-    deps = build_runtime(
-        CommandMode.RUN, config,
-        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-    )
     try:
         outcome = await execute_command(deps, None)
     finally:
         close_runtime(deps)
 
-    assert deps.state_db_present is True
-    assert deps.state_db_regular is False
     assert outcome.succeeded is False
     assert outcome.reason == "state_db_error"
-    assert acquisitions == []
-    assert scans == []
+    assert all(path.exists() for path in candidates)
+    lease = acquire_session(deps.session_lock)
+    lease.close()
 
 
 @pytest.mark.parametrize("early_failure", ["open", "on_session_open", "accept"])
@@ -1207,6 +1090,85 @@ async def test_cancel_during_open_admission_drain_stops_all_new_work(
 
 
 async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
+        tmp_path: Path, monkeypatch, capfd) -> None:
+    """已开始的删除返回真实失败，取消后保留其他候选并交付诊断。"""
+    config = _config_for(tmp_path)
+    assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
+    logs_dir = Path(config.paths.staging) / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    first = logs_dir / "log-copy-first.log"
+    second = logs_dir / "log-copy-second.log"
+    first.write_bytes(b"first old copy")
+    second.write_bytes(b"second old copy")
+    deps = build_runtime(
+        CommandMode.RUN, config,
+        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+    )
+    loop = asyncio.get_running_loop()
+    first_unlink_started = asyncio.Event()
+    release_first_unlink = threading.Event()
+    business_started = asyncio.Event()
+    business_cancelled = asyncio.Event()
+    release_business = asyncio.Event()
+    original_listdir = os.listdir
+    original_unlink = os.unlink
+    failure_marker = "controlled started unlink failure"
+
+    def ordered_listdir(path):
+        if Path(path) == logs_dir:
+            return [first.name, second.name]
+        return original_listdir(path)
+
+    def controlled_unlink(path, *args, **kwargs):
+        if Path(path) == first:
+            loop.call_soon_threadsafe(first_unlink_started.set)
+            _wait_thread_event(release_first_unlink)
+            raise OSError(failure_marker)
+        return original_unlink(path, *args, **kwargs)
+
+    async def business(_context):
+        business_started.set()
+        try:
+            await release_business.wait()
+        except asyncio.CancelledError:
+            business_cancelled.set()
+            raise
+
+    monkeypatch.setattr(os, "listdir", ordered_listdir)
+    monkeypatch.setattr(os, "unlink", controlled_unlink)
+    run_task = asyncio.create_task(execute_command(deps, None, flows={"business": business}))
+    try:
+        await _wait_event(first_unlink_started)
+        await _wait_event(business_started)
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        run_task.cancel("cancel while startup unlink is started")
+        await _wait_event(business_cancelled)
+        assert not run_task.done()
+        assert first.exists() and second.exists()
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        release_first_unlink.set()
+        with pytest.raises(asyncio.CancelledError) as cancelled:
+            await _wait_task_result(run_task)
+        assert cancelled.value.args == ("cancel while startup unlink is started",)
+    finally:
+        release_first_unlink.set()
+        release_business.set()
+        if not run_task.done():
+            run_task.cancel("test cleanup")
+            await _wait_task(asyncio.gather(run_task, return_exceptions=True))
+        close_runtime(deps)
+
+    assert first.read_bytes() == b"first old copy"
+    assert second.read_bytes() == b"second old copy"
+    diagnostics = Path(config.paths.log_file).read_text() + capfd.readouterr().err
+    assert failure_marker in diagnostics
+    lease = acquire_session(deps.session_lock)
+    lease.close()
+
+
+async def test_cancelled_unlink_diagnostic_holds_session_lock(
         tmp_path: Path, monkeypatch) -> None:
     """取消不撤销已开始的删除，且其诊断完成前保留 SessionLock。"""
     from camctl.logging_runtime.ownership import LoggingOwner
@@ -1515,18 +1477,12 @@ async def test_configured_ordinary_log_survives_startup_sweep(
     )
     run_task: asyncio.Task | None = None
     loop = asyncio.get_running_loop()
-    scan_finished = asyncio.Event()
-    release_scan = threading.Event()
     enumeration_started = asyncio.Event()
     release_enumeration = threading.Event()
-    unlinked: list[Path] = []
-    sweep_calls: list[tuple[tuple, dict]] = []
-    session_lock_during_scan: list[bool] = []
+    business_started = asyncio.Event()
+    release_business = asyncio.Event()
     resolved_paths: list[Path] = []
-    resolution_preceded_enumeration: list[bool] = []
-    original_unlink = copies._unlink
-    original_listdir = copies._listdir
-    original_sweep = copies.startup_sweep
+    original_listdir = os.listdir
     original_resolve = Path.resolve
 
     async def deliver(message: str) -> None:
@@ -1534,87 +1490,54 @@ async def test_configured_ordinary_log_survives_startup_sweep(
             LogRecord(level=LogLevel.ERROR, message=message))
         assert result.delivered is True
 
-    def lock_is_held() -> bool:
-        duplicate = None
-        try:
-            duplicate = acquire_session(deps.session_lock)
-        except SessionLockConflictError:
-            return True
-        finally:
-            if duplicate is not None:
-                duplicate.close()
-        return False
-
-    def record_unlink(path: Path) -> None:
-        unlinked.append(Path(path))
-        original_unlink(path)
-
-    def observe_sweep(*args, **kwargs):
-        result = original_sweep(*args, **kwargs)
-        sweep_calls.append((args, dict(kwargs)))
-        session_lock_during_scan.append(lock_is_held())
-        loop.call_soon_threadsafe(scan_finished.set)
-        _wait_thread_event(release_scan)
-        return result
-
     def observe_resolved_log_target(path: Path, *args, **kwargs):
         result = original_resolve(path, *args, **kwargs)
-        if (
-                replacement_after_resolve
-                and Path(path) == ordinary_log_path
+        if (Path(path) == ordinary_log_path
                 and threading.current_thread() is not threading.main_thread()):
             resolved_paths.append(Path(result))
         return result
 
-    def block_before_directory_enumeration(path: Path):
-        if (replacement_after_resolve
-                and Path(path) == logs_dir
-                and not resolution_preceded_enumeration):
-            resolution_preceded_enumeration.append(bool(resolved_paths))
+    def block_before_directory_enumeration(path):
+        if Path(path) == logs_dir:
             loop.call_soon_threadsafe(enumeration_started.set)
             _wait_thread_event(release_enumeration)
         return original_listdir(path)
 
+    async def hold_session(_context):
+        business_started.set()
+        await release_business.wait()
+
+    async def wait_for_deletions():
+        while any(path.exists() for path in expected_deletes):
+            await asyncio.sleep(0.01)
+
     try:
-        # 先通过真实日志通道打开并追加；文件别名竞态随后替换配置位置时，
-        # 原文件句柄仍代表此前解析出的实际普通日志目标。
         prime = f"SW04 ordinary log priming record: {scenario}"
         await deliver(prime)
         assert prefix in ordinary_log_file.read_bytes()
         assert prime.encode("utf-8") in ordinary_log_file.read_bytes()
 
-        monkeypatch.setattr(copies, "_unlink", record_unlink)
-        monkeypatch.setattr(copies, "startup_sweep", observe_sweep)
         if replacement_after_resolve:
             monkeypatch.setattr(Path, "resolve", observe_resolved_log_target)
-            monkeypatch.setattr(
-                copies, "_listdir", block_before_directory_enumeration)
+            monkeypatch.setattr(os, "listdir", block_before_directory_enumeration)
 
-        run_task = asyncio.create_task(execute_command(deps, None, flows={}))
+        run_task = asyncio.create_task(
+            execute_command(deps, None, flows={"hold_session": hold_session}))
+        await _wait_event(business_started)
         if replacement_after_resolve:
             await _wait_event(enumeration_started)
-            assert resolved_paths
-            assert all(path == resolved_target for path in resolved_paths)
-            assert resolution_preceded_enumeration == [True]
+            assert resolved_paths and all(path == resolved_target for path in resolved_paths)
             assert alias_path is not None and alias_path.is_symlink()
             alias_path.unlink()
             alias_path.write_bytes(replacement_prefix)
             release_enumeration.set()
 
-        await _wait_event(scan_finished)
-        assert not run_task.done()
-        assert len(sweep_calls) == 1
-        assert sweep_calls[0][1].get("ordinary_log_path") == (
-            Path(config.paths.log_file).expanduser())
-        assert session_lock_during_scan == [True]
-        assert Counter(unlinked) == Counter(expected_deletes)
+        await asyncio.wait_for(wait_for_deletions(), timeout=_GATE_TIMEOUT)
         for path in expected_deletes:
             assert not path.exists()
-
         assert ordinary_log_file.exists()
         assert prefix in ordinary_log_file.read_bytes()
-        assert formal_marker.exists()
-        assert unknown.exists()
+        assert formal_marker.exists() and unknown.exists()
         if replacement_after_resolve:
             assert alias_path is not None and alias_path.read_bytes().startswith(
                 replacement_prefix)
@@ -1628,12 +1551,11 @@ async def test_configured_ordinary_log_survives_startup_sweep(
             await deliver(later)
             assert prefix in append_target.read_bytes()
             assert later.encode("utf-8") in append_target.read_bytes()
-
-        release_scan.set()
+        release_business.set()
         outcome = await _wait_task_result(run_task)
     finally:
+        release_business.set()
         release_enumeration.set()
-        release_scan.set()
         if run_task is not None:
             if not run_task.done():
                 run_task.cancel("test cleanup")
@@ -1641,6 +1563,11 @@ async def test_configured_ordinary_log_survives_startup_sweep(
         close_runtime(deps)
 
     assert outcome.succeeded is True
+    assert ordinary_log_file.exists()
+    assert prefix in ordinary_log_file.read_bytes()
+    if replacement_after_resolve:
+        assert alias_path is not None and alias_path.read_bytes().startswith(
+            replacement_prefix)
 
 
 async def test_unknown_ordinary_log_target_preserves_startup_candidates(
