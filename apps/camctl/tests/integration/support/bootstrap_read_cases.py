@@ -44,10 +44,10 @@ def assert_read_ends(streams, sessions):
 class InspectionCase(ConsumerWorld):
     """检查副本由正式拍摄工厂创建，READ及工具结果经真实端口取得。"""
 
-    def __init__(self, pipeline, resources, *, digest=None, digest_supported=True):
+    def __init__(self, source, resources, *, digest=None, digest_supported=True):
         from ..bootstrap.test_media_assembly import _EVIDENCE, _tool
-        from ..capture.test_input_copy import _CONTENT, _NOW
-        from ..capture.test_segment_inspections import _fixed_member
+        from .segment_inspection_cases import CONTENT as _CONTENT
+        from camctl.host_files.models import BoundDirectories
         from camctl.capture.segment_inspections import SegmentInspectionRequest
         from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
         from camctl.devices.evidence import DeviceObservation
@@ -55,10 +55,11 @@ class InspectionCase(ConsumerWorld):
         from camctl.host_files.media import ProbeRequest
         from camctl.outputs.qualification import OperationConfig
 
-        owned, roots = pipeline[:2]
-        _fixed_member(owned)
-        super().__init__((owned, roots, 11), resources, duration="1.5", evidence=_EVIDENCE)
-        self.wall[0] = _NOW + 10
+        owned, source_runtime, ref, members = source
+        roots = BoundDirectories(Path(owned.connection.execute("PRAGMA database_list").fetchone()[2]).parent / "staging")
+        self.ref, self.member = ref, members[0]
+        super().__init__((owned, roots, self.member.file_id), resources, duration="1.5", evidence=_EVIDENCE)
+        self.wall[0] = source_runtime.wall_us() + 10
         self.digests = []
 
         async def digest_call(request):
@@ -76,9 +77,9 @@ class InspectionCase(ConsumerWorld):
         body += f"with Path({str(self.tool_log)!r}).open('a') as log: log.write('probe\\n')\n"
         body += "print(json.dumps({'format':{'duration':'1.5'},'streams':[{'index':0,'codec_type':'video','codec_name':'h264','width':1920,'height':1080,'duration':'1.5','nb_frames':'45','avg_frame_rate':'30/1','disposition':{'attached_pic':0}}]}))\n"
         self.probe_request = ProbeRequest(ffprobe=_tool(self.path.parent, "inspection-probe", body))
-        self.request = SegmentInspectionRequest(1, 1,
+        self.request = SegmentInspectionRequest(ref.action_id, self.member.member_id,
             CoverageTarget(CoverageMetric.DURATION_S, 60),
-            OperationConfig(3, Decimal("10"), Decimal("0")), _NOW + 10)
+            OperationConfig(3, Decimal("10"), Decimal("0")), self.wall[0])
         self.factory = self.new_factory()
 
     def new_factory(self, *, restricted=False, drivers=None):
@@ -107,25 +108,24 @@ class InspectionCase(ConsumerWorld):
         return ticket
 
 
-async def inspection_case(pipeline, resources, **options):
-    return await InspectionCase(pipeline, resources, **options).start()
+async def inspection_case(source, resources, **options):
+    return await InspectionCase(source, resources, **options).start()
 
 
-async def held_inspection_case(pipeline, resources, monkeypatch, digest_state="required"):
+async def held_inspection_case(source, resources, monkeypatch, digest_state="required"):
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.outputs import OutputsRepository
     from .bootstrap_consumers import TransactionFault
 
-    world = await inspection_case(pipeline, resources, digest_supported=digest_state != "unsupported")
-    if digest_state == "unsupported":
-        world.owned.connection.execute("UPDATE device_files SET checksum_support=3 WHERE id=11")
-        world.owned.connection.commit()
+    world = await inspection_case(source, resources, digest_supported=digest_state != "unsupported")
     world.completions = []
     if digest_state == "saved":
         actual_save = OutputsRepository.save_prepared
 
         def save(repository, request, key, owned):
+            if world.completions:
+                return actual_save(repository, request, key, owned)
             world.completions.append(request)
             fault = TransactionFault(owned.connection, after_commit=True)
             outcome = actual_save(repository, request, key, replace(owned, connection=fault))
@@ -516,7 +516,7 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
     from ..capture.test_input_copy import _CONTENT
     from ..capture.test_record_file_completion_wait import _completed_result, _stop_context, _REGISTRY
     evidence = _EVIDENCE.with_contract(_REGISTRY.contract("results_returned", 1))
-    from ..capture.test_segment_inspections import _Stream
+    from .segment_inspection_cases import Stream
     from camctl.devices.read_session import ReadSession
 
     class Catalog(Action6RecordCatalog):
@@ -544,7 +544,7 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
 
     class Driver(_SessionDriver):
         async def open_read(self, source, offset, ticket, *, idle_timeout_s):
-            stream = ObservedReadStream(_Stream(_CONTENT[offset:], fail_after=4 if partial else None))
+            stream = ObservedReadStream(Stream(_CONTENT[offset:], fail_after=4 if partial else None))
             session = ReadSession(source, offset, stream, idle_timeout_s)
             world.reader.streams.append(stream)
             world.reader.sessions.append(session)

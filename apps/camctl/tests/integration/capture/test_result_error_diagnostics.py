@@ -348,14 +348,16 @@ async def test_failed_result_page_and_final_attempt_share_one_diagnostic(tmp_pat
 
 @pytest.mark.parametrize('kind', ['exception', 'tool', 'invalid', 'probe'])
 async def test_handled_segment_probe_errors_keep_actual_diagnostic_when_save_is_unknown(
-        pipeline, capture_resources, monkeypatch, kind):
+        tmp_path, capture_resources, monkeypatch, kind):
     from dataclasses import replace
     from camctl.persistence.repositories.segment_inspections import SegmentInspectionRepository
     from ..support.bootstrap_read_cases import inspection_case
     from ..support.capture_diagnostic_cases import segment_probe_port
     from ..bootstrap.test_binding_transactions import _CommitFailure
     calls = segment_probe_port(monkeypatch, kind)
-    world = await inspection_case(pipeline, capture_resources)
+    from ..support.segment_inspection_cases import inspection_source
+    source = await inspection_source(tmp_path)
+    world = await inspection_case(source, capture_resources)
     from camctl.outputs.qualification import OperationConfig
     from decimal import Decimal
     world.request = replace(world.request, budget=OperationConfig(3, Decimal(3), Decimal(0)))
@@ -378,7 +380,7 @@ async def test_handled_segment_probe_errors_keep_actual_diagnostic_when_save_is_
         assert len(documents) == 2
         probe, = [doc for doc in documents if doc['stage'] == 'capture.segment_probe']
         storage, = [doc for doc in documents if doc['stage'] == 'capture.segment_save']
-        assert probe['context']['action_id'] == 1
+        assert probe['context']['action_id'] == world.ref.action_id
         assert probe['context']['inspection_id'] == result.inspection_id
         assert storage['context']['inspection_id'] == result.inspection_id
         assert probe['level'] == storage['level'] == 'ERROR'
@@ -389,16 +391,16 @@ async def test_handled_segment_probe_errors_keep_actual_diagnostic_when_save_is_
         assert requests == [requests[0], requests[0]]
         request, key = requests[0]
         assert saved.reason != 'result_save_unknown'
-        row, = pipeline[0].connection.execute(
+        row, = world.owned.connection.execute(
             'SELECT s.result_json,s.result_event_id,e.occurred_at,t.operation_key'
             ' FROM segment_inspections s JOIN history_events e ON e.id=s.result_event_id'
             ' JOIN history_transactions t ON t.id=e.transaction_id WHERE s.id=?', (result.inspection_id,)).fetchall()
         saved_json, event_id, occurred_at, transaction_key = row
         assert json.loads(saved_json) == request.result_json
         assert occurred_at == request.occurred_at and transaction_key == str(key)
-        assert pipeline[0].connection.execute(
+        assert world.owned.connection.execute(
             'SELECT COUNT(*) FROM history_transactions WHERE operation_key=?', (str(key),)).fetchone() == (1,)
-        assert pipeline[0].connection.execute(
+        assert world.owned.connection.execute(
             "SELECT e.id FROM history_events e, json_each(e.body_json, '$.rows') r"
             " WHERE json_extract(r.value, '$.table')='segment_inspections'"
             " AND json_extract(r.value, '$.id')=?"
@@ -425,7 +427,7 @@ async def test_handled_segment_probe_errors_keep_actual_diagnostic_when_save_is_
             assert data['probe']['error'] == 'invalid_structure: wrong streams'
     finally:
         await world.close()
-        pipeline[0].connection.close()
+        world.owned.connection.close()
 
 
 @pytest.mark.parametrize('later_failed', [False, True])
@@ -500,8 +502,22 @@ async def test_tolerated_action6_setting_error_is_logged_with_the_outer_result(
         document, = _documents(records)
         outcome = document.get('outcome') or document['details']['outcome']
         calls = outcome['settlement']['evidence']['data']['calls']
+
+        def resolve_call(call):
+            if '$ref' not in call:
+                return call
+            # 同一调用事实已在诊断中出现时，序列化器用文档内引用保留它。
+            pointer = call['$ref']
+            assert pointer.startswith('#/')
+            value = document
+            for part in pointer[2:].split('/'):
+                part = part.replace('~1', '/').replace('~0', '~')
+                value = value[int(part)] if isinstance(value, list) else value[part]
+            return value
+
+        assert outcome['status'] == ('failed' if later_failed else 'succeeded')
         assert any(call['error'] is not None and call['error']['details'].get('response_payload') == 'e3'
-            for call in calls)
+            for call in map(resolve_call, calls))
         if later_failed:
             assert document['error']['details']['reason'] == 'exit_nonzero'
         assert transport.aperture_seen
@@ -574,14 +590,16 @@ async def test_uncompleted_media_tool_logs_actual_failure_and_keeps_cancel_contr
 
 
 async def test_handled_segment_save_error_keeps_secondary_errors_in_public_diagnostic(
-        pipeline, capture_resources, monkeypatch):
+        tmp_path, capture_resources, monkeypatch):
     from camctl.persistence.repositories.segment_inspections import SegmentInspectionRepository
     from ..support.bootstrap_read_cases import inspection_case
     from ..support.capture_diagnostic_cases import ActualStorageFault, diagnostic_database
     from ..support.database import database_path
     secondary = OSError('database notification failed')
     fault = ActualStorageFault(secondary=secondary)
-    world = await inspection_case(pipeline, capture_resources)
+    from ..support.segment_inspection_cases import inspection_source
+    source = await inspection_source(tmp_path)
+    world = await inspection_case(source, capture_resources)
     actual = SegmentInspectionRepository.save_result
     def save(repository, request, key, current):
         fault.armed = True
@@ -590,7 +608,7 @@ async def test_handled_segment_save_error_keeps_secondary_errors_in_public_diagn
     await capture_resources.close()
     records = []
     try:
-        async with diagnostic_database(database_path(pipeline[0]), fault) as database:
+        async with diagnostic_database(database_path(world.owned), fault) as database:
             world.database = database
             await world.rebuild()
             with error_diagnostics_context(None, records.append):
@@ -606,7 +624,7 @@ async def test_handled_segment_save_error_keeps_secondary_errors_in_public_diagn
             world.held_ticket()
     finally:
         await world.close()
-        pipeline[0].connection.close()
+        world.owned.connection.close()
 
 
 async def test_invalid_call_diagnostic_preserves_original_outcome_before_fatal_handling(tmp_path, diagnostic_case):

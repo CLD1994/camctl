@@ -243,7 +243,7 @@ class ConsumerWorld:
             args = {name: self.collections[name] for name in (
                 "pending_read_results", "pending_read_business", "pending_read_ends",
                 "continuing_read_tickets", "pending_segment_inspection_results")}
-            await resume_prepared_internal_reads(database, **args)
+            await resume_prepared_internal_reads(database, **args, occurred_at=lambda: self.wall[0])
             if binding is not None:
                 from camctl.capture.media_flow import resume_binding_internal_read_ends
                 await resume_binding_internal_read_ends(database, **args,

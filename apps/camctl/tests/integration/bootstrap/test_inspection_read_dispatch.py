@@ -19,7 +19,7 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.segment_inspections import SegmentInspectionRepository
 from camctl.persistence.transaction import saved_transaction_events
 
-from ..capture.test_input_copy import _CONTENT, pipeline as input_pipeline
+from ..support.segment_inspection_cases import CONTENT as _CONTENT, inspection_source
 from ..support.bootstrap_consumers import TransactionFault
 from ..support.bootstrap_read_cases import inspection_case, held_inspection_case
 
@@ -27,11 +27,12 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def pipeline(input_pipeline):
+async def source(tmp_path):
+    data = await inspection_source(tmp_path)
     try:
-        yield input_pipeline
+        yield data
     finally:
-        input_pipeline[0].connection.close()
+        data[0].connection.close()
 
 
 class _DigestGate:
@@ -58,9 +59,9 @@ def _copy(owned, copy_id):
 
 
 @pytest.mark.parametrize("entry", ["ordinary", "residual"])
-async def test_clean_inspection_end_remains_with_owner_during_digest(pipeline, capture_resources, entry):
+async def test_clean_inspection_end_remains_with_owner_during_digest(source, capture_resources, entry):
     digest = _DigestGate()
-    world = await inspection_case(pipeline, capture_resources, digest=digest)
+    world = await inspection_case(source, capture_resources, digest=digest)
     task = asyncio.create_task(world.inspect())
     try:
         await asyncio.wait_for(digest.entered.wait(), 5)
@@ -93,8 +94,8 @@ async def test_clean_inspection_end_remains_with_owner_during_digest(pipeline, c
 
 @pytest.mark.parametrize("entry,change", [("ordinary", "missing"), ("residual", "mismatch")])
 async def test_inspection_missing_required_digest_saves_actual_read_then_check_failure(
-        pipeline, capture_resources, monkeypatch, entry, change):
-    world, ticket = await held_inspection_case(pipeline, capture_resources, monkeypatch)
+        source, capture_resources, monkeypatch, entry, change):
+    world, ticket = await held_inspection_case(source, capture_resources, monkeypatch)
     copy_id = int(ticket.target_id)
     before = _copy(world.owned, copy_id)
     try:
@@ -123,8 +124,8 @@ async def test_inspection_missing_required_digest_saves_actual_read_then_check_f
 @pytest.mark.parametrize("digest_state", ["saved", "unsupported"])
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
 async def test_inspection_reliable_or_unsupported_digest_finishes_locally(
-        pipeline, capture_resources, monkeypatch, digest_state, change):
-    world, ticket = await held_inspection_case(pipeline, capture_resources, monkeypatch, digest_state)
+        source, capture_resources, monkeypatch, digest_state, change):
+    world, ticket = await held_inspection_case(source, capture_resources, monkeypatch, digest_state)
     try:
         before = _copy(world.owned, int(ticket.target_id))
         await world.replay("normal", binding=_binding(change))
@@ -140,8 +141,8 @@ async def test_inspection_reliable_or_unsupported_digest_finishes_locally(
 
 
 @pytest.mark.parametrize("damage", ["copy", "ticket", "attempt", "action", "member", "set", "source", "observer"])
-async def test_inspection_dispatch_rejects_broken_owner_relations(pipeline, capture_resources, monkeypatch, damage):
-    world, ticket = await held_inspection_case(pipeline, capture_resources, monkeypatch)
+async def test_inspection_dispatch_rejects_broken_owner_relations(source, capture_resources, monkeypatch, damage):
+    world, ticket = await held_inspection_case(source, capture_resources, monkeypatch)
     connection, copy_id = world.owned.connection, int(ticket.target_id)
     try:
         # 在规定存储格式模拟原关系损坏，实际READ票据与End保持原值。
@@ -152,9 +153,9 @@ async def test_inspection_dispatch_rejects_broken_owner_relations(pipeline, capt
             "attempt": ("UPDATE operation_attempts SET attempt_no=attempt_no+100 WHERE run_id=?", (ticket.run_id,)),
             "action": ("UPDATE operation_runs SET action_id=99 WHERE copy_id=?", (copy_id,)),
             "member": ("UPDATE segment_inspections SET member_id=99 WHERE id=1", ()),
-            "set": ("UPDATE segment_members SET set_id=99 WHERE id=1", ()),
+            "set": ("UPDATE segment_members SET set_id=99 WHERE id=?", (world.member.member_id,)),
             "source": ("UPDATE segment_inspections SET source_device_file_id=99 WHERE id=1", ()),
-            "observer": ("UPDATE device_files SET observer_action_id=99 WHERE id=11", ()),
+            "observer": ("UPDATE device_files SET observer_action_id=99 WHERE id=?", (world.member.file_id,)),
         }[damage]
         connection.execute(statement, values)
         connection.commit()
@@ -170,22 +171,22 @@ async def test_inspection_dispatch_rejects_broken_owner_relations(pipeline, capt
 @pytest.mark.parametrize("boundary", ["read", "inspection"])
 @pytest.mark.parametrize("after_commit", [False, True])
 async def test_inspection_binding_failure_unknown_reuses_original_requests(
-        pipeline, capture_resources, monkeypatch, boundary, after_commit):
-    world, ticket = await held_inspection_case(pipeline, capture_resources, monkeypatch)
+        source, capture_resources, monkeypatch, boundary, after_commit):
+    world, ticket = await held_inspection_case(source, capture_resources, monkeypatch)
     calls, receipts = [], []
-    repository_type, method = ((OperationRepository, "finish_attempt") if boundary == "read" else
+    repository_type, method = ((OperationRepository, "finish_binding_read") if boundary == "read" else
                               (SegmentInspectionRepository, "save_result"))
     original = getattr(repository_type, method)
 
-    def save(repository, request, key, owned):
+    def save(repository, request, key, owned, **options):
         calls.append((request, key))
         if len(calls) == 1:
             fault = TransactionFault(owned.connection, after_commit=after_commit)
-            outcome = original(repository, request, key, replace(owned, connection=fault))
+            outcome = original(repository, request, key, replace(owned, connection=fault), **options)
             assert fault.commit_calls == 1 and outcome.kind is DbOutcomeKind.UNKNOWN, outcome.error
             receipts.append(outcome)
             return outcome
-        return original(repository, request, key, owned)
+        return original(repository, request, key, owned, **options)
 
     monkeypatch.setattr(repository_type, method, save)
     try:
@@ -216,17 +217,41 @@ async def test_inspection_binding_failure_unknown_reuses_original_requests(
 
 
 @pytest.mark.parametrize("priority", ["action_terminal", "read_terminal", "canceled"])
-async def test_inspection_end_dispatch_preserves_existing_terminal_or_cancel(pipeline, capture_resources, monkeypatch, priority):
-    world, ticket = await held_inspection_case(pipeline, capture_resources, monkeypatch)
+async def test_inspection_end_dispatch_preserves_existing_terminal_or_cancel(source, capture_resources, monkeypatch, priority):
+    world, ticket = await held_inspection_case(source, capture_resources, monkeypatch)
     connection, copy_id = world.owned.connection, int(ticket.target_id)
     try:
-        statement, values = {
-            "action_terminal": ("UPDATE actions SET status=3 WHERE id=1", ()),
-            "read_terminal": ("UPDATE operation_runs SET status=3 WHERE copy_id=?", (copy_id,)),
-            "canceled": ("UPDATE actions SET cancel_requested=1 WHERE id=1", ()),
-        }[priority]
-        connection.execute(statement, values)
-        connection.commit()
+        if priority in ("action_terminal", "read_terminal"):
+            from camctl.contracts.values import new_operation_key
+            from camctl.devices.bindings import DeviceBinding, binding_failure_details
+            from camctl.operations.attempts import AttemptFinish, RunFinish, RunOutcome
+            from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
+            from camctl.operations.validation import validate_outcome
+
+            actual = validate_outcome(ticket, CallOutcome(status=AttemptStatus.SUCCEEDED,
+                effect=EffectState.UNKNOWN, settlement=Settlement(SettlementBasis.OBSERVED,
+                    EvidenceValue("read_returned", 1, {}))), world.entry.evidence)
+            binding = _binding("missing")(DeviceBinding("cam-1", "camctl-adb"))
+            failure = ErrorValue("device_binding_unavailable", "execution", binding_failure_details(binding))
+            key = new_operation_key()
+            receipt = await world.database.write(lambda owned: OperationRepository().finish_binding_read(
+                AttemptFinish(ticket, actual, world.wall[0], run_finish=RunFinish(RunOutcome.FAILED, failure)),
+                key, owned), key=key)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        if priority in ("action_terminal", "canceled"):
+            from camctl.bootstrap.flows import cancel_flow
+            from camctl.capture.handlers import capture_handler
+            from ..support.bootstrap_consumers import accept_cancellation
+
+            await accept_cancellation(world, occurred_at=world.wall[0])
+            await cancel_flow(staging=world.config.paths.staging,
+                ready=world.config.paths.ready, processing=world.config.paths.processing)(
+                    SimpleNamespace(database=world.database,
+                        clock=SimpleNamespace(utc_micros=lambda: world.wall[0])))
+            if priority == "action_terminal":
+                await capture_handler("camera_record")(world.ref.action_id, world.runtime)
+                assert connection.execute("SELECT status FROM actions WHERE id=?",
+                    (world.ref.action_id,)).fetchone() == (6,)
         before = tuple(connection.iterdump())
         await world.replay("normal", binding=_binding("missing"))
         assert tuple(connection.iterdump()) == before and not connection.in_transaction
@@ -236,8 +261,8 @@ async def test_inspection_end_dispatch_preserves_existing_terminal_or_cancel(pip
         await world.close()
 
 
-async def test_original_inspection_result_survives_recreated_capture_runtime(pipeline, capture_resources, monkeypatch):
-    world = await inspection_case(pipeline, capture_resources)
+async def test_original_inspection_result_survives_recreated_capture_runtime(source, capture_resources, monkeypatch):
+    world = await inspection_case(source, capture_resources)
     original = SegmentInspectionRepository.save_result
     saves = []
 
