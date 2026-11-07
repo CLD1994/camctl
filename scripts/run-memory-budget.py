@@ -24,7 +24,9 @@ from camctl_memory import (
 
 _GRACE_SECONDS = 20
 _KILL_WAIT_SECONDS = 5
+_TRACKER_GRACE_SECONDS = 1
 _NAME = re.compile(r"camctl-budget-[0-9]+-[0-9a-f]{32}")
+_TRACKER_COMMAND = re.compile(rb"from multiprocessing\.resource_tracker import main;main\([0-9]+\)")
 
 
 def _controller(path: Path, *, parent: bool = False) -> int:
@@ -145,10 +147,70 @@ def _wait(process: subprocess.Popen, interrupted: list[int], evidence: dict[str,
 
 
 def _settle_command_group(process: subprocess.Popen, evidence: dict[str, Any]) -> None:
-    try:
-        os.killpg(process.pid, 0)
-    except ProcessLookupError:
+    def exists() -> bool:
+        try:
+            os.killpg(process.pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    if not exists():
         return
+    record: dict[str, Any] = {"observations": [], "outcome": "observing"}
+    evidence["command_group_settlement"] = record
+    started = time.monotonic()
+    while True:
+        members: list[dict[str, Any]] = []
+        try:
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                member = None
+                try:
+                    # comm 可以包含空格或括号；从最后的右括号之后读取固定字段。
+                    stat = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+                    if int(stat[2]) != process.pid:
+                        continue
+                    member: dict[str, Any] = {"pid": int(entry.name), "state": stat[0],
+                                              "start_time": stat[19], "type": "unknown"}
+                    members.append(member)
+                    if stat[0] != "Z":
+                        argv = (entry / "cmdline").read_bytes().split(b"\0")[:-1]
+                        member["argv"] = [os.fsdecode(value) for value in argv]
+                        current = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+                        member["state"] = current[0]
+                        if (len(argv) == 3 and os.path.realpath(os.fsdecode(argv[0])) ==
+                                os.path.realpath(sys.executable) and argv[1] == b"-c" and
+                                _TRACKER_COMMAND.fullmatch(argv[2]) and current[0] != "Z" and
+                                current[2] == stat[2] and current[19] == stat[19]):
+                            member["type"] = "resource_tracker"
+                except FileNotFoundError:
+                    # 扫描期间进程可能退出；下面重新检查进程组。
+                    if member is not None:
+                        members.remove(member)
+                    continue
+                except (OSError, ValueError, IndexError) as error:
+                    if member is None:
+                        members.append({"pid": int(entry.name), "type": "unknown", "error": str(error)})
+                    else:
+                        member["error"] = str(error)
+        except OSError as error:
+            members.append({"type": "unknown", "error": str(error)})
+        record["observations"].append({"elapsed_seconds": time.monotonic() - started,
+                                       "members": members})
+        if any(member["type"] != "resource_tracker" for member in members):
+            record["outcome"] = "unrecognized_member"
+            break
+        if not exists():
+            record["outcome"] = "exited"
+            return
+        if not members:
+            record["outcome"] = "members_unavailable"
+            break
+        if time.monotonic() - started >= _TRACKER_GRACE_SECONDS:
+            record["outcome"] = "tracker_timeout"
+            break
+        time.sleep(.02)
     evidence["errors"].append("原测试命令退出后，其持有的进程组仍有后代进程")
     evidence["command_group_remaining"] = True
     _signal_group(process, signal.SIGTERM)

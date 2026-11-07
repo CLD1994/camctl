@@ -10,6 +10,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -108,6 +110,86 @@ class BudgetLauncherTest(unittest.TestCase):
             self.assertEqual(receipt["command_exit_code"], 7)
             self.assertTrue(receipt["removal"]["ok"])
             self.assertFalse(calls[0][1].exists())
+
+    def test_resource_tracker_gets_bounded_time_to_exit(self):
+        for timeout in (False, True):
+            with self.subTest(timeout=timeout), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                parent, _, _, privileged = self.fixture(root)
+                marker = root / "tracker.json"
+                body = (
+                    'import json, multiprocessing, os, signal\nfrom pathlib import Path\n'
+                    'semaphore = multiprocessing.get_context("spawn").Semaphore()\n'
+                    'children = Path(f"/proc/{os.getpid()}/task/{os.getpid()}/children")\n'
+                    'tracker = int(children.read_text().split()[0])\n'
+                    'os.kill(tracker, signal.SIGSTOP)\n'
+                    f'marker = Path({str(marker)!r})\n'
+                    'marker.with_suffix(".tmp").write_text(json.dumps([os.getpid(), tracker]))\n'
+                    'marker.with_suffix(".tmp").replace(marker)\n'
+                    'os._exit(0)\n'
+                )
+                def resume_tracker():
+                    deadline = time.monotonic() + 10
+                    while not marker.exists() and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    if not marker.exists():
+                        return
+                    worker_pid, tracker_pid = json.loads(marker.read_text())
+                    while Path(f"/proc/{worker_pid}").exists() and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    time.sleep(1.3 if timeout else .3)
+                    try:
+                        os.kill(tracker_pid, signal.SIGCONT)
+                    except ProcessLookupError:
+                        pass
+
+                resume = threading.Thread(target=resume_tracker)
+                resume.start()
+                try:
+                    code, receipt = self.run_command(root, parent, privileged, body)
+                finally:
+                    resume.join(timeout=12)
+                    if marker.exists():
+                        tracker_pid = json.loads(marker.read_text())[1]
+                        try:
+                            os.kill(tracker_pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                settlement = receipt["command_group_settlement"]
+                members = settlement["observations"][0]["members"]
+                self.assertTrue(any(member["type"] == "resource_tracker" and
+                                    member["state"] == "T" for member in members))
+                self.assertEqual(receipt["command_exit_code"], 0)
+                if timeout:
+                    self.assertNotEqual(code, 0)
+                    self.assertEqual(settlement["outcome"], "tracker_timeout")
+                else:
+                    self.assertEqual(code, 0)
+                    self.assertEqual(settlement["outcome"], "exited")
+
+    def test_live_command_child_is_rejected_and_stopped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent, _, _, privileged = self.fixture(root)
+            marker = root / "child"
+            body = ('import subprocess, sys\nfrom pathlib import Path\n'
+                    'child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])\n'
+                    f'Path({str(marker)!r}).write_text(str(child.pid))\n')
+            try:
+                code, receipt = self.run_command(root, parent, privileged, body)
+                child_pid = int(marker.read_text())
+                self.assertNotEqual(code, 0)
+                self.assertEqual(receipt["command_exit_code"], 0)
+                settlement = receipt["command_group_settlement"]
+                self.assertEqual(settlement["outcome"], "unrecognized_member")
+                self.assertTrue(any(member["pid"] == child_pid and member["type"] == "unknown"
+                                    for member in settlement["observations"][0]["members"]))
+            finally:
+                if marker.exists():
+                    try:
+                        os.kill(int(marker.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_delegation_failure_never_starts_command(self):
         with tempfile.TemporaryDirectory() as temporary:
