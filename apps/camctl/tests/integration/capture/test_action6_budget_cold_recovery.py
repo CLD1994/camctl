@@ -23,7 +23,7 @@ from .test_action6_segmented_recovery import (
 )
 from .test_capture_contract import _NOW
 from .test_input_copy import _CONTENT
-from ..support.segment_inspection_cases import ReadDriver as _ReadDriver
+from ..support.segment_inspection_doubles import ReadDriver as _ReadDriver
 
 pytestmark = pytest.mark.asyncio
 

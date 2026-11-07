@@ -24,7 +24,7 @@ from camctl.outputs.qualification import OperationConfig
 from camctl.session.supervision import Supervisor
 
 from .database import business_database
-from .segment_inspection_cases import Digest, FailedDigest, ReadDriver, CONTENT, SegmentTools
+from .segment_inspection_doubles import Digest, FailedDigest, ReadDriver, CONTENT, SegmentTools
 
 
 class BlockingStream:
