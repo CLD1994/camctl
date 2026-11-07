@@ -1,0 +1,625 @@
+{
+  "date": "2026-11-08",
+  "scope": "用户批准的交付撤回模块边界调整、九项公开接口迁移及相关完整文件回归",
+  "source_commit": "7d4048e4b04ad1a9726baaf50153f6dd047e8ea1",
+  "baseline_commit": "4a42c1610e4c938968b535cad1304e36edd1ba46",
+  "production_changes": {
+    "authorized": true,
+    "authorization": "用户确认撤回模块私有管理原申请、一次run共享实例和正式撤回/补保存操作；其他生产缺陷不在范围内。",
+    "paths": [
+      "apps/camctl/src/camctl/bootstrap/flows.py",
+      "apps/camctl/src/camctl/bootstrap/lifecycle.py",
+      "apps/camctl/src/camctl/bootstrap/work_file_assembly.py",
+      "apps/camctl/src/camctl/cancellation/settlement.py",
+      "apps/camctl/src/camctl/outputs/canceled_publication.py",
+      "apps/camctl/src/camctl/outputs/withdrawal.py"
+    ],
+    "unchanged_contracts": "仓储事务、数据库格式、文件交接权限、默认state_db_error退出和跨进程可能未知的边界保持。"
+  },
+  "integrated_commits": [
+    {
+      "author": "2a21e0d08f973cdf2f9a929eed9106e76a7f950b",
+      "integrated": "29adc71d",
+      "purpose": "状态归属、具名结果、动作命名、正式调用接线和测试迁移"
+    },
+    {
+      "author": "5f8033cd0aedfc4e519e3181de8a727a032eaa47",
+      "integrated": "38776402",
+      "purpose": "完整撤回错误及取消明细登记详情的分别核对"
+    },
+    {
+      "author": "55d9473adc08d3da6b87be0a01a026d8b3c8bfdf",
+      "integrated": "7d4048e4",
+      "purpose": "真实取消流程沿同一对象接续原UNKNOWN申请的见证"
+    }
+  ],
+  "verification": {
+    "integration": {
+      "source": {
+        "root": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "head": "7d4048e4b04ad1a9726baaf50153f6dd047e8ea1",
+        "status": "",
+        "snapshot_sha256": "fa750bea359de29335fa9852b76e0e6e41259aee52f6e96a6b12ca813366e275"
+      },
+      "selection": [
+        "apps/camctl/tests/integration/bootstrap/test_cancel_ready_runtime.py",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_ready_transactions.py",
+        "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py",
+        "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py",
+        "apps/camctl/tests/integration/cancellation/test_target_types.py"
+      ],
+      "jobs": 2,
+      "passed": 75,
+      "failed": 0,
+      "wall_seconds_including_isolated_preparation": 58.005827979999594,
+      "exit_code": 0,
+      "tasks": [
+        {
+          "id": "camctl/bootstrap",
+          "status": "passed",
+          "exit_code": 0,
+          "collected": 65,
+          "outcomes": {
+            "passed": 65
+          },
+          "wall_seconds_including_preparation": 55.280354943999555
+        },
+        {
+          "id": "camctl/cancellation",
+          "status": "passed",
+          "exit_code": 0,
+          "collected": 10,
+          "outcomes": {
+            "passed": 10
+          },
+          "wall_seconds_including_preparation": 10.53182637799182
+        }
+      ]
+    },
+    "local": {
+      "source_commit": "7d4048e4b04ad1a9726baaf50153f6dd047e8ea1",
+      "passed": 73,
+      "subchecks_passed": 15,
+      "runs": [
+        {
+          "name": "public",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "-p",
+            "pytest_asyncio.plugin",
+            "-p",
+            "pytest_mock",
+            "-p",
+            "no:cacheprovider",
+            "apps/camctl/tests/unit/outputs/test_withdrawal_session.py",
+            "apps/camctl/tests/unit/outputs/test_copy_handoff_database.py",
+            "apps/camctl/tests/unit/bootstrap/test_flow_events.py",
+            "apps/camctl/tests/unit/bootstrap/test_withdrawal_assembly.py",
+            "apps/camctl/tests/unit/cancellation/test_capture_preparation_settlement.py",
+            "-q",
+            "--tb=short",
+            "--basetemp=/tmp/camctl-withdrawal-session-local-final-20261108/pytest-public",
+            "--junitxml=/tmp/camctl-withdrawal-session-local-final-20261108/public.xml"
+          ],
+          "exit_code": 0,
+          "wall_seconds": 2.4696655739971902,
+          "passed": 25,
+          "subchecks_passed": 0
+        },
+        {
+          "name": "isolated-publication",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "-p",
+            "pytest_asyncio.plugin",
+            "-p",
+            "pytest_mock",
+            "-p",
+            "no:cacheprovider",
+            "apps/camctl/tests/unit/outputs/test_canceled_publication_isolated.py",
+            "-q",
+            "--tb=short",
+            "--basetemp=/tmp/camctl-withdrawal-session-local-final-20261108/pytest-isolated-publication",
+            "--junitxml=/tmp/camctl-withdrawal-session-local-final-20261108/isolated-publication.xml"
+          ],
+          "exit_code": 0,
+          "wall_seconds": 1.1615776469989214,
+          "passed": 48,
+          "subchecks_passed": 15
+        }
+      ]
+    },
+    "resources": {
+      "launcher_exit_code": 0,
+      "wall_seconds": 58.242603063583374,
+      "errors": [],
+      "remaining_processes": [
+        []
+      ],
+      "delegation_removed": true,
+      "capacity_acceptance": false
+    },
+    "timing": {
+      "nine_module_cases": 9,
+      "nine_module_cases_seconds": 5.905631377972895,
+      "bridge_case_seconds": 0.6800066330033587,
+      "slowest_case": {
+        "nodeid": "tests/integration/bootstrap/test_cancel_ready_runtime.py::test_default_session_cancel_waits_for_actual_withdrawal_and_saves_it",
+        "seconds": 4.729976409988012
+      },
+      "cases_over_nine_seconds": []
+    }
+  },
+  "coverage": {
+    "module": "成功、明确失败、未知三类文件结果与投影更新、提交前、提交后三类保存故障组成九项；沿同对象和可靠新连接补交完整原请求、键、时刻与错误，不重复文件操作，重复推进不变。",
+    "bridge": "两份取消明细均已结束后，cancel_flow仍补交已提交但回执未知的原UNKNOWN申请；核对原键、最终汇总和幂等。",
+    "wiring": "普通与受限取消使用同一对象由局部装配测试见证；发布对账相关隔离局部文件单独进程运行。",
+    "remaining": "16项独立分段检查、6个机内读取候选、其他已登记生产缺陷及核心内存增长目标仍未关闭。"
+  },
+  "development_failures": {
+    "red": "新类型尚不存在，新增局部测试收集错误退出2；不计为产品功能失败。",
+    "bootstrap-files": "首次31通过6失败，受限流程误用普通流程局部变量；存入RuntimeDeps共享后37通过，最终统一源码相关文件全部通过。",
+    "baseline-unit": "旧替身缺少当前保存/文件资格/交付/取消发起状态，在基线复现8项失败；仅修合法测试输入，最终相关完整文件通过。",
+    "publication-unit": "初步适配和标名final的中间输出仍有失败，均原样保留；基线cleaned-photo-cache用例复现4个失败子检查，补齐隔离；publication-unit-repaired为作者成功复验，最终统一源码另有48通过及15子检查。",
+    "matrix-error": "补充错误断言首次3通过6失败；错误地要求取消明细保存交付错误全部字段，依既有登记详情契约修正后9通过。",
+    "source_scope": "author/source.patch冻结于作者最终55d9473a；开发中间日志没有逐轮完整源码快照，只用于保留失败过程。最终验收以integrated与local内的干净7d4048e4运行记录为准。"
+  },
+  "review": {
+    "agent": "/root/sol_high_review_withdrawal_boundary",
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "high",
+    "status": "接受三项作者提交及最终统一源码收据，无剩余阻断；只读评审未重跑测试。"
+  },
+  "limitations": [
+    "本次为五个选定集成文件及六个局部文件，不是全量camctl、根Python/Node、安装包、真实设备或新增容量验收。",
+    "显式复用原WithdrawalSession并换可靠连接的接续不代表默认run自动恢复数据库错误或新进程保留旧内存申请。",
+    "普通组件测试经合计预算启动器运行只证明该次资源收场；严格无交换及核心数据量增长验收另行执行。",
+    "本次以空uv下载缓存作为隔离复制种子；目标不构建发行物，沿用既有解释器依赖。入口含准备，不能与范围和缓存不同的旧运行计算加速比。"
+  ],
+  "archive": {
+    "file": "runs.tar.gz",
+    "bytes": 604406,
+    "sha256": "add5a752ef2c60497bbf56624f65779213e6d4355b75d50b9b65a9d51345ab33",
+    "members": [
+      {
+        "path": "author/assembly.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/assembly.log",
+        "bytes": 98,
+        "sha256": "2826a5e72c9f873a0370a41fe46a67989c4a682af951a8514eeb48dfd0b0e61b"
+      },
+      {
+        "path": "author/assembly.xml",
+        "bytes": 408,
+        "sha256": "36a58195aeb85524353df1a1830f02f2ea3d4bbafcc7d93c7dac85dd00ab2b8a"
+      },
+      {
+        "path": "author/baseline-unit.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "author/baseline-unit.log",
+        "bytes": 26193,
+        "sha256": "db9951037c8c8efe87b82d3216fead37b3a37502c8263f0e1321bfb2c57e00bc"
+      },
+      {
+        "path": "author/baseline-unrelated.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "author/baseline-unrelated.log",
+        "bytes": 33215,
+        "sha256": "70bc59a6484ff28902756fc1f7b2a9aac7ddc50f92acbb76ab440df7e07b405f"
+      },
+      {
+        "path": "author/bootstrap-files-final.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/bootstrap-files-final.log",
+        "bytes": 100,
+        "sha256": "d1f37c30e6cb049d2ba1860d863a104a025ccf180c1c6534abf372a8e89e2964"
+      },
+      {
+        "path": "author/bootstrap-files-final.xml",
+        "bytes": 7088,
+        "sha256": "25a4ae5b7c1c12b26afb7275876cf7efb81096eb4dc58ee1dfa13e76152737b2"
+      },
+      {
+        "path": "author/bootstrap-files.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "author/bootstrap-files.log",
+        "bytes": 85458,
+        "sha256": "6a73b59649a98de21ab9a5959f83e3d1b876782f2fa533a79099124ba8c10a81"
+      },
+      {
+        "path": "author/bootstrap-files.xml",
+        "bytes": 91768,
+        "sha256": "512a2dac6fd01c58796972ee0bbcc0a215220520910cff5f951536814a85a9f1"
+      },
+      {
+        "path": "author/bridge-file.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/bridge-file.log",
+        "bytes": 100,
+        "sha256": "bbd7a0f17383178552202d928301eb1595b5d06b71e1f8edd6b2ed675d2a16e5"
+      },
+      {
+        "path": "author/bridge-file.xml",
+        "bytes": 4641,
+        "sha256": "887c5fb09491b1630512aff8cfcc3e3550f2113ef6ee109de90c443645f2dbd1"
+      },
+      {
+        "path": "author/bridge.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/bridge.log",
+        "bytes": 98,
+        "sha256": "715350d922d91d1576f4ff287fdba6b0fe276c6f2c553d54b8408148cde0c83e"
+      },
+      {
+        "path": "author/bridge.xml",
+        "bytes": 419,
+        "sha256": "adc846075c0fcdcde8dd0fe2333f9ee17ad018d6699e87ae497fcecdfc1fcb22"
+      },
+      {
+        "path": "author/cancellation-files.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/cancellation-files.log",
+        "bytes": 99,
+        "sha256": "a3cfb8e50cc1215502fa4625e0376ce899b39965002c98c91ed5613b954d2cf3"
+      },
+      {
+        "path": "author/cancellation-files.xml",
+        "bytes": 1895,
+        "sha256": "f23cf0e953097814c76a44ad425c71827407ca9a32c0dad9c9b543ae56163db8"
+      },
+      {
+        "path": "author/commands.md",
+        "bytes": 5888,
+        "sha256": "a8274ae78fb3ebc31a45b1dbb64bdb47aa3286d92aae0f4bc30aff897d5fa380"
+      },
+      {
+        "path": "author/commit.txt",
+        "bytes": 1896,
+        "sha256": "139a1551699aa167d3b58fb73c357f375d40916c67468046c04b50404415c5a2"
+      },
+      {
+        "path": "author/green.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/green.log",
+        "bytes": 98,
+        "sha256": "718af798eb1450a812074f301573c1f498edd3575a2450f85ee649d7e03c3c72"
+      },
+      {
+        "path": "author/green.xml",
+        "bytes": 397,
+        "sha256": "9dc8c1a4351ecbac7dff4d6fa3824f770562bba24a53abd93194853c74694bcb"
+      },
+      {
+        "path": "author/matrix-error-final.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/matrix-error-final.log",
+        "bytes": 98,
+        "sha256": "423a90d2882ea84f066a1f4da7df67a74ea3689d06dc773b416f02c3b94bef54"
+      },
+      {
+        "path": "author/matrix-error-final.xml",
+        "bytes": 1823,
+        "sha256": "d8a7691f7ea1716d7af326717a3a315e11aeeffd14479fc948f13ddeca1b6c8c"
+      },
+      {
+        "path": "author/matrix-error.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "author/matrix-error.log",
+        "bytes": 43323,
+        "sha256": "2805edf3b9b529d6cf25c16fa2eb8d4a4923ff7cdf549577f384d97e868569a4"
+      },
+      {
+        "path": "author/matrix-error.xml",
+        "bytes": 45336,
+        "sha256": "a114be14cbafc7f3799e8d36beeb012687f87ef298e65532157d303682ad5f48"
+      },
+      {
+        "path": "author/matrix-first.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/matrix-first.log",
+        "bytes": 98,
+        "sha256": "4e655a0fe6a349fa9be9206f28ce906b1391cba21398314106d336575ac6635d"
+      },
+      {
+        "path": "author/matrix-first.xml",
+        "bytes": 1823,
+        "sha256": "967943a08bfe12744d674a4a1093632fd4b95ae0027dfc6519303f07de170f29"
+      },
+      {
+        "path": "author/publication-unit-final.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "author/publication-unit-final.log",
+        "bytes": 35272,
+        "sha256": "8ef21b9f3e0ae02c4fbe3e33a92c8a4b10509d43094a3ae15646844db1ab6d23"
+      },
+      {
+        "path": "author/publication-unit-final.xml",
+        "bytes": 43090,
+        "sha256": "38be6076d3faed2119b4fda46ba1548b87c3a5747b68509a3f8c0542aa175232"
+      },
+      {
+        "path": "author/publication-unit-repaired.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/publication-unit-repaired.log",
+        "bytes": 104,
+        "sha256": "bd211dc7ae6f07c9d7523b085aef4e82cc9f5cbfd1a5766c2fbf3d2f465ee5e9"
+      },
+      {
+        "path": "author/publication-unit-repaired.xml",
+        "bytes": 8966,
+        "sha256": "f8a96be1b716168a62f2496d8271aad8777f9abb6a8eb638484f8843c9f5dfcd"
+      },
+      {
+        "path": "author/publication-unit.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "author/publication-unit.log",
+        "bytes": 39037,
+        "sha256": "6902b3ad5588df91a06bbfd6437732bc7e4f55f7f1460a90a63f847cdaa586a8"
+      },
+      {
+        "path": "author/python.txt",
+        "bytes": 15,
+        "sha256": "686560bcd94a5a3fe8187b7c4fc49beaff41c87eccb79908cd3da863ec30e52e"
+      },
+      {
+        "path": "author/red.exit",
+        "bytes": 2,
+        "sha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3"
+      },
+      {
+        "path": "author/red.log",
+        "bytes": 1209,
+        "sha256": "450f47d2447fe2540349195e72613bfbe1ec86347d7848be2c1d28bb304fa992"
+      },
+      {
+        "path": "author/red.xml",
+        "bytes": 1197,
+        "sha256": "f1745c145de38401646facd11ba40ebe18ccb330c95f330386bb93d8240b619f"
+      },
+      {
+        "path": "author/source.patch",
+        "bytes": 71832,
+        "sha256": "4a9614bc7a6f434d7a4b1018865bfb5c244d80c557a56575d4c627e62666fc88"
+      },
+      {
+        "path": "author/source.sha256",
+        "bytes": 128,
+        "sha256": "ab034575f219d737f4ba7a3d6abf1091c04c6bfdadefedbc427585b9c7dbde4f"
+      },
+      {
+        "path": "author/status.txt",
+        "bytes": 35,
+        "sha256": "61a2f4e406dac72ff0acd46ad2112edaf51302a3d36d9d0f7e729f914e5379ee"
+      },
+      {
+        "path": "author/unit-files-repaired.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "author/unit-files-repaired.log",
+        "bytes": 99,
+        "sha256": "73380277094448b4928e0d69fb799d67b1bbc999c68ec9f31438388ecbeefe93"
+      },
+      {
+        "path": "author/unit-files-repaired.xml",
+        "bytes": 3542,
+        "sha256": "9e9aad07b3c415b966747e25615900c334835a027491040de10a93b7baace5ba"
+      },
+      {
+        "path": "author/unit-files.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "author/unit-files.log",
+        "bytes": 26193,
+        "sha256": "05a25e450e6ac16e62508da5f778f80d54bb4220ce5d47a9a3b58c9cb3bf9d6c"
+      },
+      {
+        "path": "author/unit-files.xml",
+        "bytes": 28766,
+        "sha256": "21767480261d16f04d6771bcfb7d4dd06bb87af73f7a5b5ed8321ae3a081ef20"
+      },
+      {
+        "path": "integrated/budget/launcher.json",
+        "bytes": 3349,
+        "sha256": "5c0d76611f0ed4d90a38513c8d1d69cc92395277df6719d43d96a7553d521e6f"
+      },
+      {
+        "path": "integrated/integration/plan.json",
+        "bytes": 766,
+        "sha256": "7266303fcccd48e5b069690e03de21022759392e54b506f253f634aed919e73f"
+      },
+      {
+        "path": "integrated/integration/source.json",
+        "bytes": 2457474,
+        "sha256": "2784776b84a3270f566d0309dea150c5bfdeb312c2fd1d516f14299bb117dd18"
+      },
+      {
+        "path": "integrated/integration/summary.json",
+        "bytes": 8671,
+        "sha256": "228db3372dd0579379fe452fa63654920e48e91dc811863952f6d42d92fcfb3a"
+      },
+      {
+        "path": "integrated/run.json",
+        "bytes": 1565,
+        "sha256": "7cf99a4b3bdae985611e2dd3a0dc9b2327b33bbd274ab600cb492eedc6790b13"
+      },
+      {
+        "path": "integrated/run.log",
+        "bytes": 1184,
+        "sha256": "517ecb8671ca6db669ee2b76d759a39ffb30d917893709d303684977b6118f5a"
+      },
+      {
+        "path": "integrated/source.patch",
+        "bytes": 71832,
+        "sha256": "4a9614bc7a6f434d7a4b1018865bfb5c244d80c557a56575d4c627e62666fc88"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/cases.json",
+        "bytes": 36569,
+        "sha256": "1db458ec7f6115bfc74b076ec834fb2267a586f005ed97e962d7f7d1a0287ded"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/command.json",
+        "bytes": 3642,
+        "sha256": "5fa926344f5078edcc7bc3053fbd041dd89ea4528eaab79b78d24702e5caf827"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/events.jsonl",
+        "bytes": 128034,
+        "sha256": "8744faef68a9aad8bd26bdae3b86c6e07f5a86ecafcce0df5ceafd5405fcd50c"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/inventory.json",
+        "bytes": 9027,
+        "sha256": "b02c4e8ed5ea2449b1bade0a6a677b1671f3aa09ea31e71d1bb0ddaf86943911"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/output.log",
+        "bytes": 20474,
+        "sha256": "1e9fd17d5d4069c025ac9e409815e2fdab3c5e7a4f79cd314610b91453cc349f"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/preparations.json",
+        "bytes": 564,
+        "sha256": "dd7ab60335773a3215c3f457215a3aff53d80a58aec9cb3535e9f96a365d9d56"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/prepare.log",
+        "bytes": 26,
+        "sha256": "329a68c4cf5ca284752fd6a17d0f2780f6f5976989043242e67d3ff18d6bc6cc"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/progress.json",
+        "bytes": 222,
+        "sha256": "159a4e8e9d52b48044d828b7ead9f27e0d5e2405c6f53f8325e35d5f8ed41d0c"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/result.json",
+        "bytes": 3374,
+        "sha256": "de4a1f340f4967e8dc91968213efc5731b017fb59960d3f2b3c323838cbc6820"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/cases.json",
+        "bytes": 5545,
+        "sha256": "85dbf9df4ce5f69e344ff5a1b7510c2f480edb18e5fd9d08eee53c297f5f50e9"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/command.json",
+        "bytes": 3518,
+        "sha256": "2cbdcba7623de0f02d24668639a5dfd8bdb0dde2274af8e1840a90b2b3d51759"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/events.jsonl",
+        "bytes": 19841,
+        "sha256": "c55d5fea0911663192b216698e3bcf20afb727c30567dd1e759888a892116b18"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/inventory.json",
+        "bytes": 1309,
+        "sha256": "46895fb2619776222323624ecf0821e2ccc65cb76d1b4397a7c45b8fe896dd6e"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/output.log",
+        "bytes": 4035,
+        "sha256": "61da42288b16e5eb3b7637e723c956752fd613bb74a67547a685e879906a6a02"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/preparations.json",
+        "bytes": 569,
+        "sha256": "2d78c12cf5278d318fcbbdbd1e6b31cb631904185f9a8091366eef120ae12626"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/prepare.log",
+        "bytes": 26,
+        "sha256": "329a68c4cf5ca284752fd6a17d0f2780f6f5976989043242e67d3ff18d6bc6cc"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/progress.json",
+        "bytes": 222,
+        "sha256": "f442630c03985cca0ea436fd3effaffcdecd41529f1995f51328b6a87558a6dc"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-cancellation/artifacts/result.json",
+        "bytes": 3246,
+        "sha256": "513528ba1f28e10c366c03e0a4878d61119871dfd1a4e1faf5fdf7c6e64c857c"
+      },
+      {
+        "path": "local/isolated-publication.log",
+        "bytes": 104,
+        "sha256": "07d9dcb545341da267e162ca5d2735ba51f858cb60622c23789889c034eb19bf"
+      },
+      {
+        "path": "local/isolated-publication.xml",
+        "bytes": 8966,
+        "sha256": "9e4a99b6ae4d56035997d3a19aca6e85e0c829d2e3730f974756031c4eea898e"
+      },
+      {
+        "path": "local/public.log",
+        "bytes": 99,
+        "sha256": "b878d5e78650f7ca702c07383d933ba298e06756dd61707ea01951a436773c1c"
+      },
+      {
+        "path": "local/public.xml",
+        "bytes": 4215,
+        "sha256": "b58b6d4bb5901e795582ee44b465c9d3dc2bd3b98bf78ace0495995357d9f9e2"
+      },
+      {
+        "path": "local/runs.json",
+        "bytes": 1976,
+        "sha256": "fa363160da0f9fc368e6d27181d3add248169ea75c51bbf7dd19575620a7cff6"
+      }
+    ]
+  }
+}
