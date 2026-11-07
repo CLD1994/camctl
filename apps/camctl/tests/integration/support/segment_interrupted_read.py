@@ -14,7 +14,10 @@ from camctl.capture.segment_inspections import SegmentInspectionRequest, inspect
 from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.devices.read_session import ReadSession
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
+from camctl.persistence.repositories.capture import register_capture_guards
+from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.segments import register_segment_guards
 from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.outputs.qualification import OperationConfig
@@ -50,6 +53,10 @@ class BlockingDriver:
 
 
 async def run(path, staging, action_id, member_id, occurred_at, marker, mode):
+    register_capture_guards()
+    register_operation_guards()
+    register_outputs_guards()
+    register_segment_guards()
     driver = BlockingDriver(marker)
     digest = Digest('0' * 64)
     if mode in ('finished', 'eof'):
