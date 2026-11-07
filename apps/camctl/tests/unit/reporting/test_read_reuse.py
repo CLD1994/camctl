@@ -247,9 +247,13 @@ def _writer(monkeypatch, *, kind):
     return repo, handle, plan, gate, stream, project
 
 
-@pytest.mark.parametrize("target_type", [1, 3])
-def test_cancel_writer_uses_first_target_and_preserves_withdrawals(monkeypatch, target_type):
+@pytest.mark.parametrize("target_type,expected_count", [(1, 0), (3, 0), (4, 1)])
+def test_cancel_writer_uses_first_target_and_preserves_withdrawals(
+    monkeypatch, target_type, expected_count
+):
     repo, handle, plan, gate, stream, project = _writer(monkeypatch, kind="cancel_task")
+    monkeypatch.setattr(generation, "enum_for", create_autospec(
+        generation.enum_for, return_value=SimpleNamespace(OBTAIN_ACTION_OUTPUTS=4)))
     repo.restore_primary_at_h.return_value = {"id": 7, "type": target_type}
     row = _row("cancel_items", 4, target_action_id=7)
     withdrawal = _row("cancel_delivery_items", 5, cancel_item_id=4)
@@ -260,7 +264,7 @@ def test_cancel_writer_uses_first_target_and_preserves_withdrawals(monkeypatch, 
 
     repo.restore_primary_at_h.assert_called_once_with("action", 7, H)
     withdrawals = [call for call in project.call_args_list if call.args[0] == "withdrawal"]
-    assert len(withdrawals) == (target_type == 3)
+    assert len(withdrawals) == expected_count
     handle.__exit__.assert_called_once()
 
 

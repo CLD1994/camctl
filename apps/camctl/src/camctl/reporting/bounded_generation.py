@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import islice, chain
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.segment_errors import public_gap
 from camctl.contracts.report_reads import report_expansion_request
 from camctl.contracts.segment_values import (
@@ -795,7 +796,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                     if pointer == "/cancel_item":
                         withdrawals = ("withdrawals",)
                         target = value.target
-                        if target["type"] == 3:
+                        if target["type"] == enum_for("actions.type").OBTAIN_ACTION_OUTPUTS:
 
                             def members():
                                 for item in handle.related_rows(
