@@ -355,6 +355,7 @@ async def test_locked_early_database_failure_settles_started_sweep(
     loop = asyncio.get_running_loop()
     listdir_started = asyncio.Event()
     release_listdir = threading.Event()
+    recovery_read_denied = asyncio.Event()
     original_listdir = os.listdir
     calls: list[Path] = []
 
@@ -373,11 +374,22 @@ async def test_locked_early_database_failure_settles_started_sweep(
 
         monkeypatch.setattr(sqlite3, "connect", fail_open)
     elif early_failure == "on_session_open":
-        monkeypatch.setattr(
-            lifecycle, "_initialize_recovery",
-            lambda *_args: (_ for _ in ()).throw(
-                StateDatabaseError("controlled session-open failure")),
-        )
+        original_connect = sqlite3.connect
+        database_uri = Path(config.paths.state_db).resolve().as_uri()
+
+        def connect_with_recovery_read_denied(database, *args, **kwargs):
+            connection = original_connect(database, *args, **kwargs)
+            if str(database).partition("?")[0] == database_uri:
+                def authorize(action, table, _column, _database, _trigger):
+                    if action == sqlite3.SQLITE_READ and table == "software_recoveries":
+                        loop.call_soon_threadsafe(recovery_read_denied.set)
+                        return sqlite3.SQLITE_DENY
+                    return sqlite3.SQLITE_OK
+
+                connection.set_authorizer(authorize)
+            return connection
+
+        monkeypatch.setattr(sqlite3, "connect", connect_with_recovery_read_denied)
     else:
         from camctl.session import service as session_service
 
@@ -398,6 +410,8 @@ async def test_locked_early_database_failure_settles_started_sweep(
     run_task = asyncio.create_task(execute_command(deps, source))
     try:
         await _wait_event(listdir_started)
+        if early_failure == "on_session_open":
+            await _wait_event(recovery_read_denied)
         assert calls == [Path(config.paths.staging) / "logs"]
         duplicate = None
         try:
