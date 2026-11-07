@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-07",
+  "scope": "状态库故障时日志副本交付的单节点同负载计时",
+  "baseline_commit": "64d90808",
+  "test_commit": "635b30244f807b2370f89899207332c494e1b848",
+  "integrated_commit": "4f98a67c",
+  "production_changed": false,
+  "results": {
+    "before": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "suite_seconds": 86.652,
+      "case_seconds": 86.379,
+      "pytest_call_seconds": 76.86,
+      "pytest_setup_seconds": 9.51,
+      "exit_code": 0,
+      "launcher_wall_seconds": 87.06730818748474
+    },
+    "after": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "suite_seconds": 22.784,
+      "case_seconds": 22.524,
+      "pytest_call_seconds": 13.2,
+      "pytest_setup_seconds": 9.31,
+      "exit_code": 0,
+      "launcher_wall_seconds": 23.169002532958984
+    }
+  },
+  "phase_seconds": {
+    "before": {
+      "submit": [
+        1.68,
+        1.02
+      ],
+      "wait_real_report_temp": [
+        1.65,
+        1.54
+      ],
+      "after_database_rename_to_run_exit": [
+        9.08,
+        57.93
+      ],
+      "recovery_run": 3.48,
+      "host_claim": 0.14
+    },
+    "after": {
+      "after_database_rename_to_run_exit": [
+        1.94,
+        1.95
+      ],
+      "recovery_run": 3.45
+    }
+  },
+  "timing_scope": "临时sys.settrace仅记录目标测试及其局部故障函数，源文件和原始行事件归档；pytest call含Deployment初始化，不等于报告或数据库耗时。前后单节点各一次通过，不作长期稳定性承诺。",
+  "coverage": "两轮均在实际报告.tmp出现且真实os.rename移走状态库后才推进业务时钟到原12/60秒排期；中间恢复原库并完成报告清除marker，新轮次/新副本、实际报告错误异常链及C主程序领取两份完整字节断言保持。",
+  "environment": "Python3.11.17，UV_OFFLINE；普通用户业务和测试，sudo仅专属委派；2GiB内存与交换合计预算。",
+  "review": {
+    "agent": "/root/sol_high_review_startup_path",
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "high",
+    "result": "accepted",
+    "scope": "核实际提交、before/after源码、命令/XML/日志/trace/预算，报告2和5均保留StateDbFailure到DatabaseMissingError及traceback；未重跑测试。"
+  },
+  "limitations": [
+    "全文件及全量未运行",
+    "既有.tmp观察同步点的长期稳定性未另行验证",
+    "严格无交换及真实设备未验证"
+  ],
+  "archive": {
+    "file": "runs.tar.gz",
+    "bytes": 31007,
+    "sha256": "adb73b39ad03732fd4b70c544e5d444ce2685e6c3a5e976a3606114db63b6405",
+    "members": [
+      "after/__pycache__/report_trace.cpython-311-pytest-9.1.1.pyc",
+      "after/budget/launcher.json",
+      "after/business-clock.jsonl",
+      "after/camctl.log",
+      "after/command.json",
+      "after/report_trace.py",
+      "after/result.xml",
+      "after/run.log",
+      "after/test_camctl_report_roundtrip.py",
+      "after/trace.json",
+      "before/__pycache__/report_trace.cpython-311-pytest-9.1.1.pyc",
+      "before/budget/launcher.json",
+      "before/camctl.log",
+      "before/command.json",
+      "before/report_trace.py",
+      "before/result.xml",
+      "before/run.log",
+      "before/test_camctl_report_roundtrip.py",
+      "before/trace.json",
+      "change.patch"
+    ]
+  }
+}
