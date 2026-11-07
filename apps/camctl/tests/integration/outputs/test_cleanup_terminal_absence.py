@@ -636,20 +636,41 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
 async def test_pending_companion_precondition_is_checked_before_terminal_file_save(
     environment,
 ):
-    (_, _), (owned, _, runtime, _, item_id) = await _terminal(environment)
-    from camctl.outputs.cleanup_flow import PendingCleanupCompanion
-    from camctl.operations.attempts import StaleRunFinish, RunOutcome
+    (_, _), (owned, _, runtime, driver, item_id) = await _terminal(environment)
     from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories.operations import OperationRepository
+    from .test_cleanup_delete_save_recovery import _FaultCompanion
 
-    runtime.pending_companions[item_id] = PendingCleanupCompanion(
-        owned.metadata.instance_id,
-        StaleRunFinish((f"delete/{item_id}",), RunOutcome.SUCCEEDED, _NOW),
-        new_operation_key(),
-    )
-    before = tuple(owned.connection.iterdump())
-    with pytest.raises(ConsistencyError, match="伴随流程收场"):
-        await delete_source_file(runtime, item_id)
-    assert tuple(owned.connection.iterdump()) == before
+    companion = _FaultCompanion()
+    with repository_port(OperationRepository, companion, ("finish_stale_runs",),
+            matches=lambda name, args, kwargs: f"delete/{item_id}" in args[0].responsibility_keys):
+        assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
+        assert len(companion.calls) == 1
+        # 实际失败终态的伴随保存被拒绝后，破坏成员投影，使它变为无错误取消。
+        owned.connection.execute(
+            "UPDATE cleanup_items SET status=6,restriction_state=1,error_code=NULL,error_details_json=NULL WHERE id=?",
+            (item_id,),
+        )
+        owned.connection.commit()
+        before = tuple(owned.connection.iterdump())
+        calls_before = len(driver.deletes), len(driver.queries)
+        class ObserveHandoff(OutputsRepository):
+            calls = 0
+
+            def handoff_cleanup_absence(self, request, key, current):
+                self.calls += 1
+                return super().handoff_cleanup_absence(request, key, current)
+
+        handoff = ObserveHandoff()
+        companion.enabled = False
+        with repository_port(OutputsRepository, handoff, ("handoff_cleanup_absence",),
+                matches=lambda name, args, kwargs: args[0].item_id == item_id):
+            with pytest.raises(ConsistencyError, match="伴随流程收场"):
+                await delete_source_file(runtime, item_id)
+        assert handoff.calls == 0
+        assert len(companion.calls) == 1
+        assert tuple(owned.connection.iterdump()) == before
+        assert (len(driver.deletes), len(driver.queries)) == calls_before
 
 
 async def test_saved_unknown_then_late_absence_does_not_grant_terminal_file_handoff(

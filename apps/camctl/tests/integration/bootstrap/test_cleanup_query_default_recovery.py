@@ -25,11 +25,10 @@ from camctl.bootstrap.cleanup_assembly import (
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.session.supervision import Supervisor
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.attempts import FinishDisposition, RunOutcome, StaleRunFinish
-from camctl.outputs.cleanup_flow import PendingCleanupCompanion, delete_source_file
+from camctl.operations.attempts import FinishDisposition
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 
@@ -306,8 +305,8 @@ async def test_default_round_settles_companion_after_member_result(
     assert _history(owned.connection)[:len(history_before)] == history_before
 
 
-async def test_default_round_diagnoses_companion_without_terminal_member(environment):
-    """伴随责任存在而成员缺可靠终态：默认轮次诊断，不造终态继续。"""
+async def test_default_round_diagnoses_companion_without_terminal_member(environment, monkeypatch):
+    """真实伴随保存受阻后，成员投影损坏时默认轮次诊断并停止。"""
     cfg, owned, context, capture_driver = environment
     await _save_photos(cfg, owned, context, capture_driver)
     output_id = owned.connection.execute(
@@ -315,21 +314,35 @@ async def test_default_round_diagnoses_companion_without_terminal_member(environ
         " WHERE a.device_id='cam-a'").fetchone()[0]
     driver = _DefaultDriver(owned)
     _action_id, item_id = _start_cleanup(owned, output_id, "2")
-    database_before = tuple(owned.connection.iterdump())
+    fault = _DefaultCompanionFault(OperationRepository.finish_stale_runs, item_id)
+    monkeypatch.setattr(
+        OperationRepository, "finish_stale_runs",
+        lambda repository, request, key, current_owned:
+            fault.save(repository, request, key, current_owned))
+    driver.matrix_enabled, driver.present = True, False
     session_factory = session_cleanup_assembly(
         devices={device: dict(declaration) for device, declaration in cfg.devices.items()},
         drivers=_registry(driver), max_delete_attempts=3, max_query_attempts=3,
-        staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0,
-        pending_companions={item_id: PendingCleanupCompanion(
-            owned.metadata.instance_id,
-            StaleRunFinish((f"exists/{item_id}",), RunOutcome.CANCELED, _NOW),
-            new_operation_key())})
+        staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
+    flow = cleanup_flow(session_factory)
+
+    with cleanup_failure(ConsistencyError):
+        await finish_cleanup_round(flow, context)
+    assert fault.calls == 1 and fault.fault.commit_calls == 1
+    assert _member_facts(owned, item_id)[:4] == (4, 4, 3, None)
+    owned.connection.execute(
+        "UPDATE cleanup_items SET status=1,restriction_state=1,outcome=NULL,final_event_id=NULL WHERE id=?",
+        (item_id,))
+    owned.connection.commit()
+    database_before = tuple(owned.connection.iterdump())
+    calls_before = len(driver.deletes), len(driver.queries)
 
     with cleanup_failure(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
-        await finish_cleanup_round(cleanup_flow(session_factory), context)
+        await finish_cleanup_round(flow, context)
 
+    assert fault.calls == 1
     assert tuple(owned.connection.iterdump()) == database_before
-    assert (len(driver.deletes), len(driver.queries)) == (0, 0)
+    assert (len(driver.deletes), len(driver.queries)) == calls_before
 
 
 class _GatedQueryDriver(_DefaultDriver):
