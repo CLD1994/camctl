@@ -1,7 +1,7 @@
 """延时完成链的会话级组件集成测试。
 
-真实 run 会话装配（execute_command 与拍摄流程）同契约驱动与结果
-列举替身组合：延时任务发送成功后按发送锚点安排等待，到达预计检
+真实 run 会话（execute_command 或 run_session 与拍摄流程）同契约
+驱动与结果列举替身组合：延时任务发送成功后按发送锚点安排等待，到达预计检
 查时间先保存等待完成事实，再核实结果集合。完整集合满足时按时间
 与产物完成判定保存采集结论并解除占用，动作成功终态与正式产物共
 同登记；必需类别缺失保存已知失败，动作失败终态且不补造设备结束
@@ -15,7 +15,6 @@ from __future__ import annotations
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
-import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -24,6 +23,7 @@ import pytest
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.flows import cancel_flow, capture_flow
+from camctl.bootstrap.background_flow import CombinedLocalWork
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.workflow_errors import registered_error
@@ -58,8 +58,9 @@ from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.cancellation import (
     register_cancellation_guards,
 )
+from camctl.session.service import run_session
 
-from ..support.session import capture_factory
+from ..support.session import capture_factory, session_context
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from .test_recording_stop import (
     _await_query,
@@ -72,6 +73,7 @@ from .test_recording_stop import (
     _submit_plan,
 )
 from .test_run_dispatch import _ActivityDriver
+from .session_clock import SessionClock
 
 register_operation_guards()
 register_capture_guards()
@@ -171,10 +173,13 @@ def _timelapse_plan(request_id: str, scheduled_at: str) -> dict:
 
 
 def _timelapse_factory(cfg, driver, results, *, check_config: AttemptConfig | None = None,
-                       stopper=None, wait_ms: int = 2_000, extra_ms: int = 0):
+                       stopper=None, wait_ms: int = 2_000, extra_ms: int = 0,
+                       clock=None):
     return capture_factory(
         cfg, driver, results, _EVIDENCE, stopper=stopper,
         check_config=check_config, extra_wait_ms=extra_ms,
+        wall_us=None if clock is None else clock.utc_micros,
+        monotonic_ns=None if clock is None else clock.monotonic_ns,
         wait_config=lambda params: CaptureWaitConfig(
             target_duration_ms=wait_ms, driver_margin_ms=0, extra_wait_ms=extra_ms))
 
@@ -195,6 +200,26 @@ def _run_session(deps, driver, results, *,
         flows=flows,
         poll_interval_s=0.1,
     ))
+
+
+def _run_clocked_session(cfg, catalog, driver, results, clock, *,
+                         wait_ms=2_000, extra_ms=0, check_config=None):
+    scheduling = capture_flow(_timelapse_factory(
+        cfg, driver, results, wait_ms=wait_ms, extra_ms=extra_ms, clock=clock,
+        check_config=check_config))
+    context = session_context(
+        cfg.paths.state_db, catalog=catalog, clock=clock,
+        flows={"scheduling": scheduling},
+        local_work=CombinedLocalWork((scheduling,)), poll_interval_s=0.1)
+    return asyncio.create_task(run_session(context, None))
+
+
+async def _reach_check(db, clock, due, *, action_id=1, wait_s=2):
+    clock.reach(due)
+    await _await_query(
+        db, "SELECT expected_check_at IS NOT NULL FROM device_activities"
+        f" WHERE action_id = {action_id}", (1,))
+    clock.advance(wait_s)
 
 
 class TestTimelapseSatisfiedFinish:
@@ -259,14 +284,16 @@ class TestTimelapseUnmetFinish:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
-        task = _run_session(deps, driver, ResultsDouble({}))
+        clock = SessionClock()
+        task = _run_clocked_session(cfg, catalog, driver, ResultsDouble({}), clock)
         try:
             # 必需类别始终缺失：到检查时间保存明确不满足的已知失败。
+            await _reach_check(db, clock, due)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (4,))
             row = _scalar(
                 db,
@@ -280,7 +307,6 @@ class TestTimelapseUnmetFinish:
                 db, "SELECT status FROM plans WHERE id = 1") == (3,)
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
 
 class TestTimelapseCheckRounds:
@@ -292,15 +318,17 @@ class TestTimelapseCheckRounds:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
         # 第一轮：必需类别已在设备上但写入尚未完成，属于暂不齐备。
         results = ResultsDouble({1: (_entry("sequence-1", complete=False),)})
-        task = _run_session(deps, driver, results)
+        clock = SessionClock()
+        task = _run_clocked_session(cfg, catalog, driver, results, clock)
         try:
+            await _reach_check(db, clock, due)
             await _await_query(
                 db,
                 "SELECT status, attempts_used, retry_wait_required"
@@ -318,6 +346,7 @@ class TestTimelapseCheckRounds:
                 " WHERE id = 1") == (1,)
             # 下一轮文件写完：新轮次尝试后结论、流程结束与终态同链保存。
             results.files_by_action[1] = (_entry("sequence-1"),)
+            clock.advance(3)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
             run = _scalar(
                 db,
@@ -339,7 +368,6 @@ class TestTimelapseCheckRounds:
                 ) == (1,)
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
     async def test_exhausted_rounds_close_unconfirmed(
             self, tmp_path: Path) -> None:
@@ -349,20 +377,22 @@ class TestTimelapseCheckRounds:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
         results = ResultsDouble({1: (_entry("sequence-1", complete=False),)})
-        task = _run_session(
-            deps, driver, results,
+        clock = SessionClock()
+        task = _run_clocked_session(
+            cfg, catalog, driver, results, clock,
             check_config=AttemptConfig(
                 max_attempts=1, timeout_s=Decimal("10"),
                 retry_interval_s=Decimal("3")))
         try:
             # 单轮预算用尽后不再列举：核实流程与集合结论同事务收场为
             # 无法确认，动作按登记的公共错误失败，占用保持等待残留收场。
+            await _reach_check(db, clock, due)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (4,))
             row = _scalar(
                 db,
@@ -381,7 +411,6 @@ class TestTimelapseCheckRounds:
             assert failure == (12, "outputs_unknown")
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
     async def test_listing_failure_consumes_round_then_recovers(
             self, tmp_path: Path) -> None:
@@ -391,10 +420,10 @@ class TestTimelapseCheckRounds:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
 
         class _FlakyResults(ResultsDouble):
@@ -411,9 +440,16 @@ class TestTimelapseCheckRounds:
                 return (_entry("sequence-1"),)
 
         flaky = _FlakyResults()
-        task = _run_session(deps, driver, flaky)
+        clock = SessionClock()
+        task = _run_clocked_session(cfg, catalog, driver, flaky, clock)
         try:
             # 失败轮次保存失败尝试并建立重试等待；下一轮新尝试后成功。
+            await _reach_check(db, clock, due)
+            await _await_query(
+                db, "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'",
+                (2, 1, 1))
+            clock.advance(3)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
             run = _scalar(
                 db,
@@ -433,7 +469,6 @@ class TestTimelapseCheckRounds:
                 " FROM device_activities WHERE id = 1") == (3, 3)
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
 
 class TestTimelapseCancel:
@@ -541,15 +576,17 @@ class TestTimelapseSatisfiedFinishMultiple:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
         results = ResultsDouble(
             {1: (_entry("sequence-1"), _entry("sequence-2", size=8192))})
-        task = _run_session(deps, driver, results)
+        clock = SessionClock()
+        task = _run_clocked_session(cfg, catalog, driver, results, clock)
         try:
+            await _reach_check(db, clock, due)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
             # 每份观察到的完整文件各自登记为正式产物，不折叠也不遗漏。
             assert _scalar(
@@ -567,7 +604,6 @@ class TestTimelapseSatisfiedFinishMultiple:
                 ) == (3,)
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
 
 class TestTimelapseUnfinalizedSet:
@@ -579,15 +615,17 @@ class TestTimelapseUnfinalizedSet:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
         # 集合尚未确定：必需类别已观察且文件写完，但驱动尚未声明集合齐备。
         results = ResultsDouble({1: (_entry("sequence-1"),)}, set_finalized=False)
-        task = _run_session(deps, driver, results)
+        clock = SessionClock()
+        task = _run_clocked_session(cfg, catalog, driver, results, clock)
         try:
+            await _reach_check(db, clock, due)
             await _await_query(
                 db,
                 "SELECT status, attempts_used, retry_wait_required"
@@ -600,6 +638,7 @@ class TestTimelapseUnfinalizedSet:
             assert _scalar(db, "SELECT status FROM actions WHERE id = 1") == (2,)
             assert _scalar(db, "SELECT COUNT(*) FROM outputs") == (0,)
             results.set_finalized = True
+            clock.advance(3)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
             assert _scalar(
                 db,
@@ -610,7 +649,6 @@ class TestTimelapseUnfinalizedSet:
                 ) == (1,)
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
 
 class TestTimelapseCrossRunBudget:
@@ -693,20 +731,25 @@ class TestTimelapseReportRebuild:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        first_due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", first_due))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        clock = SessionClock()
         driver = _ActivityDriver()
         results = ResultsDouble({})
-        task = _run_session(deps, driver, results)
+        task = _run_clocked_session(cfg, catalog, driver, results, clock)
         try:
             results.files_by_action[1] = (_entry("sequence-1"),)
+            clock.reach(first_due)
+            await _await_query(
+                db, "SELECT expected_check_at IS NOT NULL FROM device_activities"
+                " WHERE action_id = 1", (1,))
+            clock.advance(2)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
             assert driver.calls == ["start_timelapse"]
         finally:
             await _cancel(task)
-        close_runtime(deps)
         # 第一运行的等待采用值按当时配置保存（额外等待为零）。
         assert _scalar(
             db, "SELECT extra_wait_ms_used FROM device_activities"
@@ -730,20 +773,25 @@ class TestTimelapseReportRebuild:
         # 第二运行采用新等待配置并完成新计划：等待按新目标时长与
         # 额外等待安排，旧报告按原冻结依据重建，字节不变。
         second_catalog = _TimelapseCatalog(duration_s=Decimal("5"))
+        second_due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, second_catalog, _timelapse_plan("2", _future_schedule(2)))
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=second_catalog)
+            tmp_path, cfg, second_catalog, _timelapse_plan("2", second_due))
         second_driver = _ActivityDriver(activity_target="2")
         second_results = ResultsDouble({})
-        task = _run_session(
-            deps, second_driver, second_results, wait_ms=5_000, extra_ms=3_000)
+        task = _run_clocked_session(
+            cfg, second_catalog, second_driver, second_results, clock,
+            wait_ms=5_000, extra_ms=3_000)
         try:
             second_results.files_by_action[2] = (_entry("sequence-2"),)
+            clock.reach(second_due)
+            await _await_query(
+                db, "SELECT expected_check_at IS NOT NULL FROM device_activities"
+                " WHERE action_id = 2", (1,))
+            clock.advance(8)
             await _await_query(db, "SELECT status FROM actions WHERE id = 2", (3,))
             assert second_driver.calls == ["start_timelapse"]
         finally:
             await _cancel(task)
-        close_runtime(deps)
         sent_at, extra_used, check_at = _scalar(
             db,
             "SELECT sent_at, extra_wait_ms_used, expected_check_at"
