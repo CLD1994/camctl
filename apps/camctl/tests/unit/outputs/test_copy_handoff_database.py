@@ -18,7 +18,7 @@ from camctl.outputs.handoff import (
     AdvanceWithdrawal, DeliveryDecision, DeliveryHandoffOutcome, DeliveryPhase,
     PublicationDisposition, PublicationSaveOutcome, WithdrawalChoice, publish_delivery,
 )
-from camctl.outputs.withdrawal import PendingWithdrawal, _save
+from camctl.outputs.withdrawal import WithdrawalProgress, WithdrawalSession
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -39,8 +39,8 @@ async def owned_file_task(task):
 def context_for(repository):
     return SimpleNamespace(database=inline_business_database(OwnedConnection(Mock(spec=sqlite3.Connection),
         DatabaseMetadata("camctl", "a" * 32, 3, "/staging", "/ready", "/processing"))),
-        repository=repository, segment_size=10, key=KEY, occurred_at=1000,
-        executor=SimpleNamespace(run_owned_async_file_task=owned_file_task))
+        repository=repository, segment_size=10, key=KEY, occurred_at=1000, save_business=None,
+        executor=SimpleNamespace(run_owned_async_file_task=owned_file_task, unfinished_files=lambda: ()))
 
 
 async def test_completed_segment_uses_database_facts_before_file_owner():
@@ -95,7 +95,9 @@ async def test_saved_verification_result_redelivery_has_no_new_file_stage(state)
 
 async def test_known_handoff_result_is_saved_before_publication_returns(monkeypatch):
     repository = Mock(spec=OutputsRepository)
-    repository.load_delivery_state.return_value = SimpleNamespace(target=SimpleNamespace(file_id=3))
+    repository.load_delivery_state.return_value = SimpleNamespace(action_id=1, file_name="delivery.bin",
+        target=SimpleNamespace(file_id=3, relative_path="target/3"),
+        facts=SimpleNamespace(status=int(enum_for("deliveries.status").PUBLISHING), withdrawal_requested=False))
     repository.save_publication.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
         PublicationSaveOutcome(PublicationDisposition.SAVED))
     context = context_for(repository)
@@ -113,43 +115,58 @@ async def test_known_handoff_result_is_saved_before_publication_returns(monkeypa
     assert repository.save_publication.call_args.args[0].delivery_id == 2
 
 
-def pending_withdrawal():
-    return PendingWithdrawal(1, 3, "delivery.bin",
-        AdvanceWithdrawal(2, WithdrawalChoice.WITHDRAWN, 1000), KEY)
+
+def withdrawal_test_session(monkeypatch, repository):
+    monkeypatch.setattr("camctl.outputs.withdrawal.OutputsRepository", lambda: repository)
+    class Cursor:
+        def fetchall(self): return [(1, "delivery.bin", 5, 1, None, 3, 2)]
+        def close(self): pass
+    class Database:
+        metadata = SimpleNamespace(instance_id="db", ready_path="/ready", processing_path="/processing")
+        async def read(self, callback, **kwargs):
+            return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda *args: Cursor())))
+        async def write(self, callback, **kwargs):
+            return callback(None)
+    executor = SimpleNamespace(unfinished_files=lambda: (), run_owned_async_file_task=owned_file_task)
+    return WithdrawalSession(ready=Path("/ready"), processing=Path("/processing"), executor=executor), Database()
 
 
-async def test_cancel_during_withdrawal_save_still_removes_confirmed_pending():
+async def test_cancel_during_withdrawal_save_still_delivers_saved_request(monkeypatch):
     repository = Mock(spec=OutputsRepository)
     repository.advance_withdrawal.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
-    context = context_for(repository)
-    pending = pending_withdrawal()
-    context.pending = {2: pending}
+    session, database = withdrawal_test_session(monkeypatch, repository)
     started, release = asyncio.Event(), asyncio.Event()
-    original_write = context.database.write
+    original_write = database.write
 
-    async def paused_write(callback, *, key, description):
+    async def paused_write(callback, **kwargs):
         started.set()
         await release.wait()
-        return await original_write(callback, key=key, description=description)
+        return await original_write(callback, **kwargs)
 
-    context.database.write = paused_write
-    task = asyncio.create_task(_save(pending, context))
+    database.write = paused_write
+    task = asyncio.create_task(session.withdraw_delivery(2, database=database, occurred_at=lambda: 1000))
     await started.wait()
     task.cancel()
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert context.pending == {}
-    assert repository.advance_withdrawal.call_args.args[:2] == (pending.request, KEY)
+    assert await session.resume_pending_saves(1, database=database) is WithdrawalProgress.STEP_FINISHED
+    assert repository.advance_withdrawal.call_count == 1
+    request, _key, _owned = repository.advance_withdrawal.call_args.args
+    assert (request.delivery_id, request.choice, request.occurred_at) == (2, WithdrawalChoice.REQUESTED, 1000)
 
 
 @pytest.mark.parametrize("kind", (DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.UNKNOWN))
-async def test_unconfirmed_withdrawal_keeps_original_save_responsibility(kind):
+async def test_unconfirmed_withdrawal_reuses_original_save_responsibility(monkeypatch, kind):
     repository = Mock(spec=OutputsRepository)
-    repository.advance_withdrawal.return_value = DbOutcome(kind, error=OSError("database"))
-    context = context_for(repository)
-    pending = pending_withdrawal()
-    context.pending = {2: pending}
-    with pytest.raises(ConsistencyError):
-        await _save(pending, context)
-    assert context.pending == {2: pending}
+    original_error = OSError("database")
+    repository.advance_withdrawal.side_effect = [DbOutcome(kind, error=original_error), DbOutcome(DbOutcomeKind.COMPLETED)]
+    session, database = withdrawal_test_session(monkeypatch, repository)
+    with pytest.raises(ConsistencyError) as caught:
+        await session.withdraw_delivery(2, database=database, occurred_at=lambda: 1000)
+    assert caught.value.__cause__ is original_error
+    assert await session.resume_pending_saves(1, database=database) is WithdrawalProgress.STEP_FINISHED
+    first, second = repository.advance_withdrawal.call_args_list
+    assert first.args[:2] == second.args[:2]
+    request = first.args[0]
+    assert (request.delivery_id, request.choice, request.occurred_at) == (2, WithdrawalChoice.REQUESTED, 1000)

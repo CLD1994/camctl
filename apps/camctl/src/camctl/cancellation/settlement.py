@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from camctl.persistence.models import db_failure
+from camctl.outputs.withdrawal import WithdrawalProgress
 
 from contextlib import closing
 from typing import Any, Awaitable, Callable
@@ -52,8 +53,8 @@ class TargetSettlement:
                  cancellations: Any,
                  withdrawal_positions: Callable[[int], Awaitable[str]],
                  occurred_at: Callable[[], int], work_files: Any = None,
-                 withdrawal_execute: Callable[[int], Awaitable[bool]] | None = None,
-                 withdrawal_resume: Callable[[int], Awaitable[bool]] | None = None,
+                 withdrawal_execute: Callable[[int], Awaitable[WithdrawalProgress]] | None = None,
+                 withdrawal_resume: Callable[[int], Awaitable[WithdrawalProgress]] | None = None,
                  reconcile_publications: Callable[[int], Awaitable[Any]] | None = None,
                  cleanup_pending: Callable[
                      [BusinessDatabase, int], Awaitable[bool]] | None = None,
@@ -226,9 +227,12 @@ class TargetSettlement:
         """分别消费未发布副本首清与已发布交付的实际撤回责任。"""
         database = self._database
         first = SettlementOutcome(complete=True)
-        if (self._withdrawal_resume is not None
-                and not await self._withdrawal_resume(target_action_id)):
-            return SettlementOutcome(complete=False)
+        if self._withdrawal_resume is not None:
+            progress = await self._withdrawal_resume(target_action_id)
+            if progress is WithdrawalProgress.WAITING_FOR_FILE:
+                return SettlementOutcome(complete=False)
+            if progress is not WithdrawalProgress.STEP_FINISHED:
+                raise TypeError("撤回接续返回了未知进度")
         if self._work_files is not None:
             # 资格查询和文件占用查询分处各自的拥有者。
             file_ids = await database.read(
@@ -293,7 +297,11 @@ class TargetSettlement:
         if pending and self._withdrawal_execute is None:
             raise TypeError("交付撤回未装配实际文件操作及原保存协作者")
         for delivery_id in pending:
-            waiting = not await self._withdrawal_execute(delivery_id) or waiting
+            progress = await self._withdrawal_execute(delivery_id)
+            if progress is WithdrawalProgress.WAITING_FOR_FILE:
+                waiting = True
+            elif progress is not WithdrawalProgress.STEP_FINISHED:
+                raise TypeError("交付撤回返回了未知进度")
         if waiting:
             return SettlementOutcome(complete=False)
         statuses = await database.read(

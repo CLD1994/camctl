@@ -8,10 +8,7 @@ import pytest
 
 from camctl.bootstrap.flows import cancel_flow
 from camctl.bootstrap.obtain_assembly import obtain_flow, session_obtain_assembly
-from camctl.bootstrap.work_file_assembly import WorkFileRuntime
 from camctl.contracts.workflow_errors import item_error_id
-from camctl.host_files import handoff
-from camctl.outputs.work_files import WorkFileLimits
 
 from .test_output_binding_changes import (
     _NOW, _accept, _registry, _save_photos, environment,  # noqa: F401
@@ -38,14 +35,10 @@ async def _published(environment, *, direct_session=False):
     ready = Path(cfg.paths.ready)
     files = {row[0]: (ready / row[0]).read_bytes() for row in owned.connection.execute("SELECT file_name FROM deliveries ORDER BY id")}
     assert len(files) == 2
-    runtime = None
-    if not direct_session:
-        runtime = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 1))
-        await runtime.initialize(context.database)
     await _accept(owned, "3", [{"name": "撤回已发布取回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
-    return target, files, runtime
+    return target, files, None
 
 
 @pytest.mark.parametrize("position", ["ready", "processing", "unlink_failed"])
@@ -99,51 +92,6 @@ async def test_cancel_published_delivery_uses_actual_withdrawal_result(environme
     assert owned.connection.execute("SELECT cleanup_cursor_file_id FROM runtime_state").fetchone() == (None,)
 
 
-@pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
-async def test_actual_withdrawal_result_is_held_with_original_key_after_save_failure(environment, monkeypatch, phase):
-    from dataclasses import replace
-    from camctl.outputs.handoff import WithdrawalChoice
-    from camctl.persistence.repositories.outputs import OutputsRepository
-    from camctl.session.service import StateDbFailure
-    from .test_binding_transactions import _CommitFailure
-    from ..operations.test_result_reuse import _FaultConnection
-
-    cfg, owned, context, _driver = environment
-    _target, contents, runtime = await _published(environment)
-    ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)
-    original_remove, original_save = handoff._remove, OutputsRepository.advance_withdrawal
-    removed, inputs = [], []
-    fault_pending = True
-
-    def remove(path):
-        removed.append(path.name)
-        original_remove(path)
-
-    def save(repository, command, key, operation_owned):
-        nonlocal fault_pending
-        if command.choice is WithdrawalChoice.WITHDRAWN:
-            inputs.append((command, key))
-            if fault_pending:
-                fault_pending = False
-                faulty = (_FaultConnection(operation_owned.connection, "UPDATE cancel_delivery_items")
-                          if phase == "projection" else _CommitFailure(operation_owned.connection, phase == "commit_after"))
-                return original_save(repository, command, key, replace(operation_owned, connection=faulty))
-        return original_save(repository, command, key, operation_owned)
-
-    monkeypatch.setattr(handoff, "_remove", remove)
-    monkeypatch.setattr(OutputsRepository, "advance_withdrawal", save)
-    with pytest.raises(StateDbFailure):
-        await cancel_flow(staging=Path(cfg.paths.staging),
-            ready=ready, processing=processing, work_files=runtime)(context)
-    assert len(removed) == 1 and not (ready / removed[0]).exists()
-    assert owned.connection.execute("SELECT status FROM actions WHERE type=6").fetchone() == (2,)
-    # cancel_flow 已关闭原独立连接；下一实际装配以新连接核实原输入，不能再 unlink。
-    await cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing, work_files=runtime)(context)
-    assert inputs[0] == inputs[1]
-    assert sorted(removed) == sorted(contents)
-    assert len(removed) == len(set(removed)) == 2
-    assert owned.connection.execute("SELECT status,withdrawal_state FROM deliveries ORDER BY id").fetchall() == [(8,3),(8,3)]
-    assert owned.connection.execute("SELECT status FROM actions WHERE type=6").fetchone() == (3,)
 
 
 async def test_default_session_cancel_waits_for_actual_withdrawal_and_saves_it(environment, monkeypatch):
@@ -285,31 +233,54 @@ async def test_ready_disappears_during_actual_withdrawal_uses_new_reliable_posit
         assert {name: (processing / name).read_bytes() for name in contents} == contents
 
 
-@pytest.mark.parametrize("actual_state", ["failed", "unknown"])
+@pytest.mark.parametrize("actual_state", ["withdrawn", "failed", "unknown"])
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
-async def test_held_actual_withdrawal_failure_remains_cancel_failure_after_save_recovery(environment, monkeypatch, actual_state, phase):
-    from dataclasses import replace
-    from camctl.outputs.handoff import WithdrawalChoice
+async def test_original_withdrawal_result_is_saved_after_failure(environment, monkeypatch, actual_state, phase):
+    from camctl.cancellation.models import CancelApplyMode
+    from camctl.contracts.values import ConsistencyError, new_operation_key
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
+    from camctl.outputs.withdrawal import WithdrawalProgress, WithdrawalSession
+    from camctl.persistence.models import DbOutcomeKind, db_outcome_for
     from camctl.persistence.repositories.outputs import OutputsRepository
-    from camctl.session.service import StateDbFailure
+    from camctl.session.supervision import Supervisor
     from .test_binding_transactions import _CommitFailure
     from ..operations.test_result_reuse import _FaultConnection
+    from ..support.bootstrap_cleanup_cases import apply_direct_cancel
+    from ..support.database import business_database, database_path
 
     cfg, owned, context, _driver = environment
-    target, contents, runtime = await _published(environment)
+    target, contents, _ = await _published(environment, direct_session=True)
+    origin = owned.connection.execute("SELECT id FROM actions WHERE type=6").fetchone()[0]
+    apply_direct_cancel(owned, origin, _NOW, mode=CancelApplyMode.TERMINAL)
+    delivery_id, name = owned.connection.execute(
+        "SELECT id,file_name FROM deliveries ORDER BY id LIMIT 1").fetchone()
+    saved = OutputsRepository().advance_withdrawal(
+        AdvanceWithdrawal(delivery_id, WithdrawalChoice.REQUESTED, _NOW), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)
-    expected_choice = WithdrawalChoice.FAILED if actual_state == "failed" else WithdrawalChoice.UNKNOWN
-    original_save, attempted, inputs = OutputsRepository.advance_withdrawal, [], []
+    session = WithdrawalSession(ready=ready, processing=processing,
+                                executor=FileTaskExecutor(Supervisor()))
+    expected_choice = {"withdrawn": WithdrawalChoice.WITHDRAWN,
+                       "failed": WithdrawalChoice.FAILED,
+                       "unknown": WithdrawalChoice.UNKNOWN}[actual_state]
+    original_remove, original_save = os.remove, OutputsRepository.advance_withdrawal
+    attempted, inputs = [], []
     first = True
-    fault_delivery = owned.connection.execute("SELECT MAX(id) FROM deliveries").fetchone()[0]
-    def remove(path):
-        attempted.append(path.name)
+
+    def remove(path, *args, **kwargs):
+        if Path(path) != ready / name:
+            return original_remove(path, *args, **kwargs)
+        attempted.append(Path(path).name)
         if actual_state == "failed":
             raise OSError("ready unlink refused")
-        raise InterruptedError("ready unlink result unknown")
+        if actual_state == "unknown":
+            raise InterruptedError("ready unlink result unknown")
+        return original_remove(path, *args, **kwargs)
+
     def save(repository, command, key, operation_owned):
         nonlocal first
-        if command.choice is expected_choice and command.delivery_id == fault_delivery:
+        if command.choice is expected_choice and command.delivery_id == delivery_id:
             inputs.append((command, key))
             if first:
                 first = False
@@ -317,24 +288,32 @@ async def test_held_actual_withdrawal_failure_remains_cancel_failure_after_save_
                           if phase == "projection" else _CommitFailure(operation_owned.connection, phase == "commit_after"))
                 return original_save(repository, command, key, replace(operation_owned, connection=faulty))
         return original_save(repository, command, key, operation_owned)
-    monkeypatch.setattr(handoff, "_remove", remove)
+
+    monkeypatch.setattr(os, "remove", remove)
     monkeypatch.setattr(OutputsRepository, "advance_withdrawal", save)
-    with pytest.raises(StateDbFailure):
-        await cancel_flow(staging=Path(cfg.paths.staging),
-            ready=ready, processing=processing, work_files=runtime)(context)
-    assert len(attempted) == 2
-    assert owned.connection.execute("SELECT status FROM actions WHERE type=6").fetchone() == (2,)
-    # 最后一份实际失败结果保存不确定；恢复后没有其余 pending 可掩盖汇总。
-    await cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing, work_files=runtime)(context)
+    with pytest.raises(ConsistencyError) as caught:
+        await session.withdraw_delivery(delivery_id, database=context.database, occurred_at=lambda: _NOW + 9)
+    assert db_outcome_for(caught.value).error is not None
+    assert caught.value.__cause__ is not None
+    assert attempted == [name]
+    assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (origin,)).fetchone() == (2,)
+
+    async with business_database(database_path(owned)) as reopened:
+        assert await session.resume_pending_saves(target, database=reopened) is WithdrawalProgress.STEP_FINISHED
+        saved_state = tuple(owned.connection.iterdump())
+        assert await session.resume_pending_saves(target, database=reopened) is WithdrawalProgress.STEP_FINISHED
+        assert tuple(owned.connection.iterdump()) == saved_state
     assert inputs[0] == inputs[1]
-    assert sorted(attempted) == sorted(contents) and len(set(attempted)) == 2
-    state = 5 if actual_state == "failed" else 6
-    assert owned.connection.execute("SELECT status,withdrawal_state FROM deliveries ORDER BY id").fetchall() == [(5,state),(5,state)]
-    assert owned.connection.execute("SELECT status,error_code FROM cancel_delivery_items ORDER BY id").fetchall() == [
-        (4,item_error_id("cancel_delivery_items", "delivery_withdrawal_failed" if actual_state == "failed" else "delivery_position_unconfirmed"))] * 2
-    assert owned.connection.execute("SELECT status FROM actions WHERE type=6").fetchone() == (4,)
-    assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (3,0)
-    assert {name: (ready/name).read_bytes() for name in contents} == contents
-    before = tuple(owned.connection.iterdump())
-    await cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing, work_files=runtime)(context)
-    assert tuple(owned.connection.iterdump()) == before and len(attempted) == 2
+    assert inputs[0][0].occurred_at == _NOW + 9
+    assert attempted == [name]
+    expected_state = {"withdrawn": (8, 3), "failed": (5, 5), "unknown": (5, 6)}[actual_state]
+    assert owned.connection.execute("SELECT status,withdrawal_state FROM deliveries WHERE id=?", (delivery_id,)).fetchone() == expected_state
+    item = owned.connection.execute("SELECT status,error_code FROM cancel_delivery_items WHERE delivery_id=?", (delivery_id,)).fetchone()
+    if actual_state == "withdrawn":
+        assert item == (2, None)
+        assert not (ready / name).exists()
+    else:
+        code = "delivery_withdrawal_failed" if actual_state == "failed" else "delivery_position_unconfirmed"
+        assert item == (4, item_error_id("cancel_delivery_items", code))
+        assert (ready / name).read_bytes() == contents[name]
+    assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (3, 0)

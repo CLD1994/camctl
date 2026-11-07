@@ -157,6 +157,7 @@ async def test_cancel_action_records_only_first_saved_start_and_finish(mocker, d
     mocker.patch("camctl.bootstrap.flows._due_cancel_actions", autospec=True,
         return_value=[(3, 1, "{}")])
     mocker.patch("camctl.bootstrap.flows._fixed_cancel_items", autospec=True, return_value=None)
+    mocker.patch("camctl.bootstrap.flows._current_cancel_origin", autospec=True, return_value=(1, False))
     mocker.patch("camctl.bootstrap.flows._resolve_and_fix", autospec=True, return_value=(1,))
     mocker.patch("camctl.cancellation.service.apply_cancel", autospec=True,
         return_value=CancelProgress(items=(CancelItemProgress(item_id=1, target_action_id=2, status=3),)))
@@ -205,6 +206,7 @@ async def test_cancel_target_fix_records_only_first_save(mocker, disposition):
     mocker.patch("camctl.bootstrap.flows._due_cancel_actions", autospec=True,
         return_value=[(3, 2, json.dumps({"params": {"target": {"action_instance_id": "7"}}}))])
     mocker.patch("camctl.bootstrap.flows._fixed_cancel_items", autospec=True, return_value=None)
+    mocker.patch("camctl.bootstrap.flows._current_cancel_origin", autospec=True, return_value=(2, False))
     mocker.patch("camctl.cancellation.targets.resolve_cancel_target", autospec=True,
         return_value=TargetResolution(action_ids=(7,)))
     mocker.patch("camctl.cancellation.rules.load_eligibility_inputs", autospec=True,

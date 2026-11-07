@@ -658,6 +658,7 @@ def cancel_flow(
     motor_permits: dict | None = None,
     start_entries=None,
     work_files: Any = None,
+    withdrawal_session=None,
     resume_media_results=None,
     resume_file_observations=None,
     resume_capture_completions=None,
@@ -669,10 +670,11 @@ def cancel_flow(
     """推进原取消集合；设备及文件等待不占用数据库线程。"""
     from camctl.host_files.tasks import FileTaskExecutor
     from camctl.session.supervision import Supervisor
-    from camctl.outputs.withdrawal import WithdrawalContext, resume_withdrawals, withdraw_delivery
+    from camctl.outputs.withdrawal import WithdrawalSession
 
     executor = work_files.executor if work_files is not None else FileTaskExecutor(Supervisor())
-    pending_withdrawals = work_files.pending_withdrawals if work_files is not None else {}
+    if withdrawal_session is None:
+        withdrawal_session = WithdrawalSession(ready=ready, processing=processing, executor=executor)
     pending_origin_settlements = {}
     pending_canceled_publications = {}
     canceled_publication_scans = {}
@@ -717,18 +719,16 @@ def cancel_flow(
                 if resumed.kind is not DbOutcomeKind.COMPLETED:
                     raise db_failure(StateDbFailure, f"原入口取消复合申请仍未完成: {resumed.error}", resumed)
         occurred = context.clock.utc_micros
-        withdrawal_context = WithdrawalContext(database, OutputsRepository(), ready,
-            processing, occurred, executor, pending_withdrawals)
 
         async def execute_withdrawal(delivery_id):
             try:
-                return await withdraw_delivery(delivery_id, withdrawal_context)
+                return await withdrawal_session.withdraw_delivery(delivery_id, database=database, occurred_at=occurred)
             except ConsistencyError as error:
                 raise StateDbFailure(str(error)) from error
 
         async def resume_withdrawal(action_id):
             try:
-                return await resume_withdrawals(action_id, withdrawal_context)
+                return await withdrawal_session.resume_pending_saves(action_id, database=database)
             except ConsistencyError as error:
                 raise StateDbFailure(str(error)) from error
 
@@ -744,7 +744,7 @@ def cancel_flow(
                 notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
 
         publication_context = CanceledPublicationContext(database, OutputsRepository(),
-            DeliveryDirectories(staging, ready, processing), withdrawal_context,
+            DeliveryDirectories(staging, ready, processing), withdrawal_session,
             executor, occurred, pending_canceled_publications, canceled_publication_scans,
             canceled_publication_diagnostics, batch_size=discovery_limit, wake=wake_publication)
 

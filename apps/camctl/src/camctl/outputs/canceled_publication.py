@@ -15,7 +15,7 @@ from camctl.outputs.handoff import (
     AdvanceWithdrawal, DeliveryDirectories, PublicationSaveRequest,
     WithdrawalChoice, _observe_locations, reconcile_canceled_publication,
 )
-from camctl.outputs.withdrawal import _failure, withdraw_delivery
+from camctl.outputs.withdrawal import build_withdrawal_error, WithdrawalProgress
 from camctl.operations.models import ErrorValue
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
 from camctl.persistence.models import DbOutcomeKind, db_failure
@@ -173,7 +173,7 @@ async def reconcile_canceled_obtain(action_id: int, context: CanceledPublication
                 detail.append("三个交接位置均无副本")
             if not detail:
                 detail.append("原撤回结果尚未可靠保存")
-            error = _failure(identity, "; ".join(detail), unknown=True)
+            error = build_withdrawal_error(identity, "; ".join(detail), unknown=True)
             diagnostic = context.diagnostics.setdefault(identity, DiagnosticState())
             record_error(ErrorValue(error["code"], error["stage"], error["details"]),
                 stage="delivery_observation", context={"delivery_id": identity,
@@ -247,8 +247,12 @@ async def reconcile_canceled_obtain(action_id: int, context: CanceledPublication
         if result is not None:
             scan.staging[int(delivery_id)] = result
         for identity in withdrawal_needed:
-            if not await withdraw_delivery(identity, context.withdrawal):
+            progress = await context.withdrawal.withdraw_delivery(
+                identity, database=context.database, occurred_at=context.occurred_at)
+            if progress is WithdrawalProgress.WAITING_FOR_FILE:
                 return None
+            if progress is not WithdrawalProgress.STEP_FINISHED:
+                raise TypeError("交付撤回返回了未知进度")
         scan.after = int(delivery_id)
     if len(rows) == limit:
         if context.wake is not None:

@@ -45,7 +45,6 @@ class WorkFileRuntime:
         self.history = WorkFileHistory()
         self.processed: dict = {}
         self.pending_results: dict = {}
-        self.pending_withdrawals: dict = {}
         self.pending_media_results = {} if pending_media_results is None else pending_media_results
         self._task: asyncio.Task | None = None
         self._token = self.supervisor.register(self)

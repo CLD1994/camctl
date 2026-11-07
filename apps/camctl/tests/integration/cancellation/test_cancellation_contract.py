@@ -212,7 +212,8 @@ def _settlement(database, owned):
             # 后到的请求采用原可靠结果，不再次执行 ready 删除。
             assert state == int(states.WITHDRAWN), state
         await save(delivery_id, WithdrawalChoice.WITHDRAWN)
-        return True
+        from camctl.outputs.withdrawal import WithdrawalProgress
+        return WithdrawalProgress.STEP_FINISHED
 
     return TargetSettlement(
         database=database, outputs=outputs,

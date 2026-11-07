@@ -136,6 +136,8 @@ class RuntimeDeps:
     cleanup_saves: dict = field(default_factory=dict)
     cleanup_consumed_queries: dict = field(default_factory=dict)
     cleanup_active_calls: set = field(default_factory=set)
+    #: 普通和受限取消共用一次运行的撤回申请。
+    withdrawal_session: Any = None
 
 
 async def _resume_read_requests(deps: RuntimeDeps, database) -> None:
@@ -924,6 +926,8 @@ def _report_assembly(
         limits=WorkFileLimits(
             batch_size=deps.config.cleanup.work_file_batch_size,
             limit_per_run=deps.config.cleanup.work_file_limit_per_run))
+    from camctl.outputs.withdrawal import WithdrawalSession
+    deps.withdrawal_session = WithdrawalSession(ready=ready, processing=processing, executor=deps.work_files.executor)
     resume_files = partial(resume_file_observations,
         pending_file_observations=deps.capture_file_observations,
         pending_call_results=deps.capture_call_results)
@@ -963,6 +967,7 @@ def _report_assembly(
             start_entries=deps.start_entries,
             motor_permits=deps.motor_permits,
             work_files=deps.work_files,
+            withdrawal_session=deps.withdrawal_session,
             resume_media_results=deps.work_files.resume_media_results,
             resume_file_observations=resume_files,
             resume_capture_completions=partial(_resume_capture_requests, deps),
@@ -1266,6 +1271,7 @@ async def _execute_command(
                     unscheduled_only=True,
                     motor_permits=deps.motor_permits,
                     work_files=deps.work_files,
+                    withdrawal_session=deps.withdrawal_session,
                     resume_media_results=deps.work_files.resume_media_results,
                     resume_file_observations=resume_files,
                     resume_capture_completions=partial(_resume_capture_requests, deps),

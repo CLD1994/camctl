@@ -337,7 +337,9 @@ class CancelSettlementTests(unittest.TestCase):
                                          (29, 7, 9))
                         return None if cache_id is None else SimpleNamespace(intermediate_file_id=cache_id)
                     cache.read_bound_photo_cache = read_bound
-                    with patch.dict(sys.modules, {cache.__name__: cache}):
+                    segment = ModuleType('camctl.outputs.segment_copy_reuse')
+                    segment.read_bound_check_copy_identity = lambda **kwargs: None
+                    with patch.dict(sys.modules, {cache.__name__: cache, segment.__name__: segment}):
                         request = repo.SettleCanceledObtain(7, 100 if replay else 200, (10,))
                         owned = SimpleNamespace(connection=Connection(), max_txn_id=2, max_event_id=20)
                         if cache_id == 31:
@@ -461,7 +463,8 @@ class CancelSettlementTests(unittest.TestCase):
 def load_settlement():
     names = ('camctl.persistence.models', 'camctl.cancellation.service', 'camctl.cancellation.ports',
         'camctl.contracts.enums', 'camctl.contracts.values', 'camctl.persistence.business',
-        'camctl.persistence.repositories.capture_facts', 'camctl.persistence.transaction')
+        'camctl.persistence.repositories.capture_facts', 'camctl.persistence.transaction',
+        'camctl.outputs.withdrawal')
     modules = {}
     for name in names:
         module = ModuleType(name)
@@ -616,7 +619,8 @@ class CancelWaiterTests(unittest.IsolatedAsyncioTestCase):
 def load_withdrawal():
     names = ('camctl.contracts.enums', 'camctl.contracts.values', 'camctl.host_files.handoff',
              'camctl.host_files.tasks', 'camctl.outputs.handoff', 'camctl.persistence.business',
-             'camctl.persistence.models', 'camctl.logging_runtime.models')
+             'camctl.persistence.models', 'camctl.logging_runtime.models',
+             'camctl.persistence.repositories.outputs', 'camctl.persistence.runtime')
     modules = {}
     for name in names:
         module = ModuleType(name)
@@ -625,6 +629,7 @@ def load_withdrawal():
     modules['camctl.contracts.enums'].enum_for = lambda name: (
         Status if name == 'deliveries.status' else SimpleNamespace(UNKNOWN=6))
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
+    modules['camctl.persistence.runtime'].canonical_directory_binding = str
     name = 'camctl.outputs._isolated_withdrawal'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/withdrawal.py')
     module = importlib.util.module_from_spec(spec)
@@ -636,14 +641,22 @@ def load_withdrawal():
 class UnknownWithdrawalTests(unittest.IsolatedAsyncioTestCase):
     async def test_canceled_unknown_retains_original_result_without_implying_publication(self):
         module = load_withdrawal()
-        module._identity_rows = lambda identity, owned: [(7, 'file', 7, 6, '{}', 23, 19)]
+        rows = [(7, 'file', 7, 6, '{}', 23, 19)]
+        class Cursor:
+            def fetchall(self): return rows
+            def close(self): pass
         class Database:
-            async def read(self, callback, **kwargs): return callback(None)
-        context = SimpleNamespace(database=Database(), ready='ready', processing='processing')
-        self.assertEqual((await module._identity(19, context))[2:4], (7, 6))
-        module._identity_rows = lambda identity, owned: [(7, 'file', 7, 1, None, 23, 19)]
+            metadata = SimpleNamespace(instance_id='db', ready_path='ready', processing_path='processing')
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda *args: Cursor())))
+        session = module.WithdrawalSession(ready='ready', processing='processing',
+            executor=SimpleNamespace(unfinished_files=lambda: {23}))
+        self.assertIs(await session.withdraw_delivery(19, database=Database(), occurred_at=lambda: 1),
+                      module.WithdrawalProgress.WAITING_FOR_FILE)
+        rows[:] = [(7, 'file', 7, 1, None, 23, 19)]
         with self.assertRaises(module.ConsistencyError):
-            await module._identity(19, context)
+            await session.withdraw_delivery(19, database=Database(), occurred_at=lambda: 1)
+
 
 
 class CancelReconciliationTests(unittest.IsolatedAsyncioTestCase):
@@ -730,7 +743,8 @@ def load_canceled_runtime():
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
     modules['camctl.contracts.values'].new_operation_key = lambda: 'key'
     modules['camctl.persistence.models'].DbOutcomeKind = SimpleNamespace(COMPLETED='completed')
-    modules['camctl.outputs.withdrawal']._failure = lambda identity, detail, **kwargs: {
+    modules['camctl.outputs.withdrawal'].WithdrawalProgress = SimpleNamespace(WAITING_FOR_FILE=object(), STEP_FINISHED=object())
+    modules['camctl.outputs.withdrawal'].build_withdrawal_error = lambda identity, detail, **kwargs: {
         'code': 'withdrawal_unconfirmed', 'stage': 'publication',
         'details': {'delivery_id': str(identity), 'error': detail}}
     modules['camctl.operations.models'].ErrorValue = lambda code, stage, details: SimpleNamespace(code=code, stage=stage, details=details)
@@ -767,12 +781,11 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(locked)
             calls.append('observe')
             return handoff.DeliveryLocations(absent, present, absent)
-        async def withdraw(identity, context):
+        async def withdraw(identity, *, database, occurred_at):
             self.assertFalse(locked)
             calls.append('withdraw')
-            return True
+            return module.WithdrawalProgress.STEP_FINISHED
         module.asyncio = SimpleNamespace(to_thread=observe)
-        module.withdraw_delivery = withdraw
         class Repository:
             def load_delivery_state(self, identity, owned): return state
             def save_publication(self, request, key, owned):
@@ -790,7 +803,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             async def read(self, callback, **kwargs):
                 return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
             async def write(self, callback, **kwargs): return callback(None)
-        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), SimpleNamespace(withdraw_delivery=withdraw), Executor(), lambda: 100, {})
         with patch.dict(sys.modules, modules):
             self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
         self.assertEqual(calls, ['observe', 'save', 'withdraw'])
@@ -815,11 +828,11 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 locked = False
                 return result
         async def observe(function, *args): return handoff.DeliveryLocations(absent, failed, absent)
-        async def withdraw(identity, context):
+        async def withdraw(identity, *, database, occurred_at):
             self.assertFalse(locked)
             calls.append('withdraw')
-            return True
-        module.asyncio, module.withdraw_delivery = SimpleNamespace(to_thread=observe), withdraw
+            return module.WithdrawalProgress.STEP_FINISHED
+        module.asyncio = SimpleNamespace(to_thread=observe)
         class Repository:
             def load_delivery_state(self, identity, owned): return state
             def advance_withdrawal(self, request, key, owned):
@@ -837,7 +850,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             async def read(self, callback, **kwargs):
                 return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
             async def write(self, callback, **kwargs): return callback(None)
-        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), SimpleNamespace(withdraw_delivery=withdraw), Executor(), lambda: 100, {})
         with patch.dict(sys.modules, modules):
             self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
         self.assertEqual(calls, ['requested', 'unknown', 'withdraw'])
@@ -976,10 +989,9 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             def load_delivery_state(self, identity, owned):
                 self.count += 1
                 return old if self.count == 1 else current
-        async def withdraw(identity, context):
+        async def withdraw(identity, *, database, occurred_at):
             calls.append(identity)
-            return True
-        module.withdraw_delivery = withdraw
+            return module.WithdrawalProgress.STEP_FINISHED
         class Cursor:
             def __init__(self, sql): self.sql = sql
             def fetchall(self): return [(19, 21, 23, 1, 4)] if 'SELECT d.id' in self.sql else []
@@ -988,7 +1000,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         class Database:
             async def read(self, callback, **kwargs):
                 return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
-        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), SimpleNamespace(withdraw_delivery=withdraw), Executor(), lambda: 100, {})
         with patch.dict(sys.modules, modules):
             self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
         self.assertEqual(calls, [19])
@@ -1103,8 +1115,8 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         absent = handoff.LocationObservation(True, False)
         failed = handoff.LocationObservation(False, error=original_error)
         async def observe(function, *args): return handoff.DeliveryLocations(absent, failed, absent)
-        async def withdraw(identity, context): return True
-        module.asyncio, module.withdraw_delivery = SimpleNamespace(to_thread=observe), withdraw
+        async def withdraw(identity, *, database, occurred_at): return module.WithdrawalProgress.STEP_FINISHED
+        module.asyncio = SimpleNamespace(to_thread=observe)
         records, states, saved_keys = [], set(), []
         def record(error, **kwargs):
             identity = id(kwargs['state'])
@@ -1138,7 +1150,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             async def read(self, callback, **kwargs):
                 return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
             async def write(self, callback, **kwargs): return callback(None)
-        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), SimpleNamespace(withdraw_delivery=withdraw), Executor(), lambda: 100, {})
         with patch.dict(sys.modules, modules):
             with self.assertRaises(RuntimeError):
                 await module.reconcile_canceled_obtain(7, context)
