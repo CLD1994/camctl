@@ -313,7 +313,18 @@ async def test_original_withdrawal_result_is_saved_after_failure(environment, mo
         assert item == (2, None)
         assert not (ready / name).exists()
     else:
+        import json
         code = "delivery_withdrawal_failed" if actual_state == "failed" else "delivery_position_unconfirmed"
         assert item == (4, item_error_id("cancel_delivery_items", code))
+        request_error = inputs[0][0].error
+        expected_error = ("ready unlink refused" if actual_state == "failed" else
+                          "remove_unknown: InterruptedError")
+        assert expected_error in request_error["details"]["error"]
+        saved_error = owned.connection.execute(
+            "SELECT withdrawal_error_json FROM deliveries WHERE id=?", (delivery_id,)).fetchone()[0]
+        item_error = owned.connection.execute(
+            "SELECT error_details_json FROM cancel_delivery_items WHERE delivery_id=?", (delivery_id,)).fetchone()[0]
+        assert json.loads(saved_error) == request_error
+        assert json.loads(item_error) == {"delivery_id": str(delivery_id)}
         assert (ready / name).read_bytes() == contents[name]
     assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (3, 0)
