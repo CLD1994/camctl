@@ -16,6 +16,7 @@ import pytest
 
 pytestmark = pytest.mark.asyncio
 
+from camctl.acceptance.input import FileInputReader, ParsedInput, parse_input, read_input
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap import lifecycle
@@ -385,7 +386,14 @@ async def test_locked_early_database_failure_settles_started_sweep(
             lambda *_args: (_ for _ in ()).throw(
                 StateDatabaseError("controlled acceptance failure")),
         )
-        source = object()
+        input_path = tmp_path / "plan.json"
+        input_path.write_bytes(
+            b'{"request_id":"1","created_at":"2026-01-15 08:00:00",'
+            b'"name":"status","actions":[{"name":"full status",'
+            b'"type":"report_status","params":{"scope":"full"}}]}'
+        )
+        source = parse_input(await read_input(str(input_path), FileInputReader()))
+        assert isinstance(source, ParsedInput)
 
     run_task = asyncio.create_task(execute_command(deps, source))
     try:
