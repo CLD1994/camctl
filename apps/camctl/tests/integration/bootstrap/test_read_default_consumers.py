@@ -30,34 +30,37 @@ def _snapshot(owned, table, row_id):
     return {name: facts[name] for name in business_columns(table)}
 
 
-def _read_saved(owned, ticket, finishes, slots, stage):
-    assert len(finishes) == (2 if stage == "finish" else 1), "原 READ Finish 必须先按原 key 核实"
-    if stage == "finish":
-        assert finishes[1] == finishes[0]
-    assert len(slots) == (1 if stage == "finish" else 2), "原 slot 申请必须沿原完整输入核实"
-    if stage == "slot":
-        assert slots[1] == slots[0]
-    assert slots[0][0].occurred_at == finishes[0][0].occurred_at
+def _read_saved(owned, ticket, ends, finishes, stage):
+    from camctl.persistence.repositories.read_end import load_read_end
+
+    inputs = finishes if stage == "finish" else ends
+    assert len(inputs) == 2 and inputs[1] == inputs[0]
+    assert len(ends) == (2 if stage == "end" else 1)
+    assert len(finishes) == (2 if stage == "finish" else 0)
+    if stage == "end":
+        end = load_read_end(int(ticket.target_id), owned)
+        assert end[0] == ticket and end[1] == ends[0][0].end
+        assert end[2:] == (ends[0][0].occurred_at, None)
     assert owned.connection.execute(
         "SELECT t.status,t.error_json,r.status,r.attempts_used FROM operation_attempts t"
         " JOIN operation_runs r ON r.id=t.run_id WHERE r.id=? AND t.attempt_no=?",
         (ticket.run_id, ticket.attempt_id)).fetchone() == (
-            int(enum_for("operation_attempts.status").SUCCEEDED), None,
-            int(enum_for("operation_runs.status").SUCCEEDED), ticket.attempt_id)
+            int(enum_for("operation_attempts.status").SUCCEEDED if stage == "finish" else enum_for("operation_attempts.status").RUNNING), None,
+            int(enum_for("operation_runs.status").SUCCEEDED if stage == "finish" else enum_for("operation_runs.status").ACTIVE), ticket.attempt_id)
     assert owned.connection.execute("SELECT slot_device_id FROM file_copies WHERE id=?",
         (int(ticket.target_id),)).fetchone() == (None,)
-    for _command, key in (finishes[0], slots[0]):
+    for _command, key in (ends[0], *finishes[:1]):
         assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
             (str(key),)).fetchone() == (1,)
 
 
 @pytest.mark.parametrize("entrance", ["normal", "residual", "restricted"])
 @pytest.mark.parametrize("after_commit", [False, True])
-@pytest.mark.parametrize("stage", ["finish", "slot"])
+@pytest.mark.parametrize("stage", ["finish", "end"])
 async def test_default_entry_saves_read_before_business_candidates(pipeline, capture_resources, monkeypatch, entrance, after_commit, stage):
-    from ..support.bootstrap_consumers import held_read
+    from ..support.bootstrap_consumers import held_default_read
 
-    world, ticket, finishes, slots = await held_read(pipeline, capture_resources, monkeypatch, stage, after_commit)
+    world, ticket, ends, finishes = await held_default_read(pipeline, capture_resources, monkeypatch, stage, after_commit)
     owned = world.owned
     before_action = _snapshot(owned, "actions", 1)
     before_processing = _snapshot(owned, "recording_processing", 1)
@@ -65,13 +68,14 @@ async def test_default_entry_saves_read_before_business_candidates(pipeline, cap
     before_calls = tuple(world.driver.calls)
     try:
         await world.replay(entrance)
-        _read_saved(owned, ticket, finishes, slots, stage)
+        _read_saved(owned, ticket, ends, finishes, stage)
         assert len(world.reader.requests) == 1 and tuple(world.driver.calls) == before_calls
         assert world.tools() == []
         assert _snapshot(owned, "actions", 1) == before_action
         assert _snapshot(owned, "recording_processing", 1) == before_processing
         after_copy = _snapshot(owned, "file_copies", int(ticket.target_id))
-        assert {**after_copy, "slot_device_id": before_copy["slot_device_id"]} == before_copy
+        assert {**after_copy, "slot_device_id": before_copy["slot_device_id"],
+            "read_end_event_id": before_copy["read_end_event_id"]} == before_copy
     finally:
         await world.close()
         owned.connection.close()
@@ -79,9 +83,9 @@ async def test_default_entry_saves_read_before_business_candidates(pipeline, cap
 
 @pytest.mark.parametrize("entrance", ["normal", "residual", "restricted"])
 async def test_default_entry_confirms_committed_read_child_after_canceled_terminal(pipeline, capture_resources, monkeypatch, entrance):
-    from ..support.bootstrap_consumers import held_read, cancel_original
+    from ..support.bootstrap_consumers import held_default_read, cancel_original
 
-    world, ticket, finishes, slots = await held_read(pipeline, capture_resources, monkeypatch, "slot", True)
+    world, ticket, ends, finishes = await held_default_read(pipeline, capture_resources, monkeypatch, "end", True)
     owned = world.owned
     try:
         await cancel_original(world)
@@ -91,7 +95,7 @@ async def test_default_entry_confirms_committed_read_child_after_canceled_termin
         history_count = owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()
         before_calls = tuple(world.driver.calls)
         await world.replay(entrance)
-        _read_saved(owned, ticket, finishes, slots, "slot")
+        _read_saved(owned, ticket, ends, finishes, "end")
         assert len(world.reader.requests) == 1 and tuple(world.driver.calls) == before_calls
         assert world.tools() == []
         assert before == {table: _snapshot(owned, table, identity) for table, identity in (
