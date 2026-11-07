@@ -131,3 +131,73 @@ async def test_discovery_applies_new_file_identity_outside_database_callback(mon
     await runtime._discover(database)
     assert runtime._first_files == {3}
     assert runtime._discovery_after == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("maintenance_failure", [False, True], ids=["media", "maintenance-and-media"])
+async def test_local_work_settlement_reports_each_unconfirmed_media_save(monkeypatch, maintenance_failure):
+    """本地责任收场保留每份原申请，维护故障不能覆盖媒体故障。"""
+    import asyncio
+    from decimal import Decimal
+
+    from camctl.capture import media_flow
+    from camctl.capture.media import SaveDisposition
+    from camctl.capture.media_flow import CaptureProcessingSaves
+    from camctl.capture.processing import CheckPhase, CheckResultSave, MediaObservation
+    from camctl.persistence.business import BusinessDatabase
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.session.service import StateDbFailure
+    from camctl.session.supervision import OwnedTask
+
+    database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
+    owned = create_autospec(OwnedConnection, instance=True, spec_set=True)
+    repository = create_autospec(CaptureRepository, instance=True, spec_set=True)
+    errors = [sqlite3.OperationalError("first save unknown"),
+              sqlite3.OperationalError("second save unknown")]
+    repository.save_check_result.side_effect = [
+        DbOutcome(DbOutcomeKind.UNKNOWN, error=error) for error in errors]
+    database.read.side_effect = [(21,), (22,)]
+    database.write.side_effect = lambda callback, **_kwargs: callback(owned)
+    monkeypatch.setattr(media_flow, "CaptureRepository", lambda: repository)
+    pending = {}
+    saves = CaptureProcessingSaves(database, pending)
+    work = WorkFileRuntime(staging=Path("/staging"), limits=WorkFileLimits(1, 2),
+                           pending_media_results=pending)
+    commands = [CheckResultSave(identity, MediaObservation(CheckPhase.COMPLETED, Decimal("200")), 100)
+                for identity in (1, 2)]
+    for command in commands:
+        assert (await saves.save_check_result(command)).disposition is SaveDisposition.UNKNOWN
+    calls = repository.save_check_result.call_args_list
+    keys = [call.args[1] for call in calls]
+    assert [call.args[0] for call in calls] == commands
+    assert keys[0] != keys[1]
+    assert work.required_settlements() == 2
+
+    if maintenance_failure:
+        async def maintenance():
+            raise OSError("maintenance failed")
+
+        token = work.supervisor.register(work)
+        work.supervisor.handoff(token, OwnedTask(
+            "cleanup/9", "delete", "维护清理", ("state_db",),
+            asyncio.create_task(maintenance())))
+
+    with pytest.raises(StateDbFailure) as failed:
+        await work.settle()
+    message = str(failed.value)
+    for command, key, error in zip(commands, keys, errors):
+        assert (f"processing_id={command.processing_id}, stage=save_check_result, "
+                f"key={key}: {error}") in message
+    assert ("maintenance failed" in message) is maintenance_failure
+    assert failed.value.__cause__ is errors[0]
+    assert work.required_settlements() == 2
+
+    # 收场不能把未核实的原结果当作成功，也不能再次读取或保存。
+    with pytest.raises(StateDbFailure) as repeated:
+        await work.settle()
+    assert repeated.value.__cause__ is errors[0]
+    assert work.required_settlements() == 2
+    assert database.read.await_count == 2
+    assert database.write.await_count == 2
+    assert repository.save_check_result.call_args_list == calls
