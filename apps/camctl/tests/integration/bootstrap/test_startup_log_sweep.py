@@ -893,158 +893,102 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         close_runtime(deps)
 
 
-async def test_cancel_during_open_admission_drain_stops_all_new_work(
-        tmp_path: Path, monkeypatch) -> None:
-    """取消开放收场时先停止业务 owner，再等待 queued 日志扫描收场。"""
+async def test_cancel_during_open_settlement_stops_new_work_and_waits(
+        tmp_path: Path) -> None:
+    """正常业务结束后取消，先停新工作，再完成已开始的本地收场。"""
     from camctl.bootstrap.background_flow import CombinedLocalWork
-    from camctl.logging_runtime.copies import MarkerStore
-    from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.bootstrap.clocks import SystemClock
+    from camctl.session.locks import probe_admission
     from camctl.session.service import run_session
+    from ..session.support import assert_database_closed
     from ..support.session import session_context
-    from camctl.session.supervision import Supervisor
 
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
-    old_copy, _old_temp, _formal_marker, _unknown = _seed_log_paths(config)
-    deps = build_runtime(
-        CommandMode.RUN, config,
-        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-    )
+    flow_completed = asyncio.Event()
+    release_settlement = asyncio.Event()
 
-    loop = asyncio.get_running_loop()
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="open-drain-cancel")
-    loop.set_default_executor(pool)
-    release_worker = threading.Event()
-    worker_entered = asyncio.Event()
-    startup_queued = asyncio.Event()
-    scans: list[Path] = []
+    class Owner:
+        def __init__(self, *, gated: bool = False) -> None:
+            self.gated = gated
+            self.stopped = asyncio.Event()
+            self.settle_started = asyncio.Event()
+            self.settle_finished = asyncio.Event()
+            self.settle_calls = 0
 
-    def occupy_worker():
-        loop.call_soon_threadsafe(worker_entered.set)
-        _wait_thread_event(release_worker)
-
-    blocker = loop.run_in_executor(pool, occupy_worker)
-    original_run_in_executor = loop.run_in_executor
-
-    def observe_submission(executor, function, *args):
-        future = original_run_in_executor(executor, function, *args)
-        startup_queued.set()
-        return future
-
-    monkeypatch.setattr(loop, "run_in_executor", observe_submission)
-    original_listdir = os.listdir
-
-    def record_listdir(path: Path):
-        if Path(path) == Path(config.paths.staging) / "logs":
-            scans.append(Path(path))
-        return original_listdir(path)
-
-    monkeypatch.setattr(os, "listdir", record_listdir)
-
-    business_settle_started = asyncio.Event()
-    release_business_settle = asyncio.Event()
-    business_stop_delivered = asyncio.Event()
-    ordinary_stop_delivered = asyncio.Event()
-    startup_stop_delivered = asyncio.Event()
-    log_settle_started = asyncio.Event()
-    order: list[str] = []
-
-    class ControlledOwner:
         def required_settlements(self) -> int:
             return 0
 
         def stop_new_work(self) -> None:
-            order.append("business_stop")
-            business_stop_delivered.set()
+            self.stopped.set()
 
         async def settle(self) -> None:
-            business_settle_started.set()
-            await _wait_event(release_business_settle)
+            self.settle_calls += 1
+            self.settle_started.set()
+            if self.gated:
+                await _wait_event(release_settlement)
+            self.settle_finished.set()
 
-    marker = MarkerStore(Path(config.paths.staging) / "logs")
-    owner = LoggingOwner(
-        logs_dir=marker.directory, ownership=marker.ownership,
-        supervisor=Supervisor(), owner_settled=True,
-        diagnose=lambda _message: asyncio.sleep(0),
+    class LoggingOwner(Owner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.startup_cancelled = asyncio.Event()
+
+        def cancel_startup_sweep(self) -> None:
+            self.startup_cancelled.set()
+
+    business = Owner(gated=True)
+    logging = LoggingOwner()
+
+    async def business_flow(_context) -> None:
+        flow_completed.set()
+
+    context = session_context(
+        Path(config.paths.state_db), clock=SystemClock(),
+        flows={"business": business_flow},
+        local_work=CombinedLocalWork((business, logging)),
+        logging_owner=logging,
     )
-    local_work = CombinedLocalWork((ControlledOwner(), owner))
-    context = session_context(Path(config.paths.state_db), clock=SystemClock(),
-        on_session_locked=owner.start_session, logging_owner=owner,
-        local_work=local_work)
-    original_stop_new = LoggingOwner.stop_new_work
-    original_cancel_sweep = LoggingOwner.cancel_startup_sweep
-    original_log_settle = LoggingOwner.settle
-
-    def observe_ordinary_stop(owner):
-        original_stop_new(owner)
-        order.append("logging_stop")
-        ordinary_stop_delivered.set()
-
-    def observe_startup_stop(owner):
-        original_cancel_sweep(owner)
-        order.append("startup_stop")
-        startup_stop_delivered.set()
-
-    async def observe_log_settle(owner):
-        order.append("log_settle")
-        log_settle_started.set()
-        await original_log_settle(owner)
-
-    monkeypatch.setattr(LoggingOwner, "stop_new_work", observe_ordinary_stop)
-    monkeypatch.setattr(
-        LoggingOwner, "cancel_startup_sweep", observe_startup_stop)
-    monkeypatch.setattr(LoggingOwner, "settle", observe_log_settle)
-
-    settle_task = asyncio.create_task(run_session(context, None))
+    task = asyncio.create_task(run_session(context, None))
     try:
-        await _wait_event(worker_entered)
-        await _wait_event(startup_queued)
-        await _wait_event(business_settle_started)
-        assert scans == []
-        assert not settle_task.done()
-
-        settle_task.cancel("cancel while open local-work drain is waiting")
-        await _wait_event(startup_stop_delivered)
-        assert business_stop_delivered.is_set()
-        assert ordinary_stop_delivered.is_set()
-        assert not log_settle_started.is_set()
-        assert order == ["business_stop", "logging_stop", "startup_stop"]
+        await _wait_event(business.settle_started)
+        assert flow_completed.is_set()
+        assert not business.settle_finished.is_set()
+        assert not task.done()
         with pytest.raises(SessionLockConflictError):
-            acquire_session(deps.session_lock)
-        settle_task.cancel("repeated cancel while business settlement waits")
+            acquire_session(context.paths.session_lock)
+        assert not probe_admission(context.paths.admission_lock).is_free
+
+        task.cancel("cancel while open local-work settlement is waiting")
+        await asyncio.wait_for(asyncio.gather(
+            business.stopped.wait(), logging.stopped.wait(),
+            logging.startup_cancelled.wait()), timeout=_GATE_TIMEOUT)
+        assert not business.settle_finished.is_set()
+        assert not task.done()
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(context.paths.session_lock)
+        assert not probe_admission(context.paths.admission_lock).is_free
+
+        task.cancel("repeated cancel while settlement waits")
         await asyncio.sleep(0)
-        assert order == ["business_stop", "logging_stop", "startup_stop"]
-        assert not settle_task.done()
-
-        # 受控业务收场仍未完成时，日志拥有者尚未进入最终 drain。
-        release_business_settle.set()
-        await _wait_event(log_settle_started)
-        assert order == [
-            "business_stop", "logging_stop", "startup_stop", "log_settle"]
-        with pytest.raises(SessionLockConflictError):
-            acquire_session(deps.session_lock)
-
-        release_worker.set()
-        await _wait_task(blocker)
+        assert business.settle_calls == 1
+        assert not task.done()
+        release_settlement.set()
         with pytest.raises(asyncio.CancelledError) as cancelled:
-            await _wait_task_result(settle_task)
+            await _wait_task_result(task)
         assert cancelled.value.args == (
-            "cancel while open local-work drain is waiting",)
-        assert scans == []
-        assert old_copy.exists()
+            "cancel while open local-work settlement is waiting",)
+        assert business.settle_finished.is_set()
+        assert logging.settle_finished.is_set()
+        await assert_database_closed(context.database)
+        lease = acquire_session(context.paths.session_lock)
+        lease.close()
+        assert probe_admission(context.paths.admission_lock).is_free
     finally:
-        release_worker.set()
-        release_business_settle.set()
-        owner.stop_new_work()
-        owner.cancel_startup_sweep()
-        if not blocker.done():
-            await _wait_task(blocker)
-        if not settle_task.done():
-            settle_task.cancel("test cleanup")
-            await _wait_task(asyncio.gather(settle_task, return_exceptions=True))
-        await _wait_task(owner.settle())
-        close_runtime(deps)
+        release_settlement.set()
+        if not task.done():
+            task.cancel("test cleanup")
+            await _wait_task(asyncio.gather(task, return_exceptions=True))
 
 
 async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
