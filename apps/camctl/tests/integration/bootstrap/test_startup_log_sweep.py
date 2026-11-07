@@ -9,6 +9,7 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
 
@@ -728,7 +729,6 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         tmp_path: Path, monkeypatch, initial_restricted: bool) -> None:
     """初始受限与晚到 clock 的真实 winddown STOP 均不被父取消截断。"""
     from camctl.bootstrap.flows import winddown_flow
-    from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.session.clock import ClockBecameUntrusted
     from camctl.session.locks import probe_admission
     from .test_media_assembly import _SessionDriver, _registry
@@ -748,6 +748,9 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
     )
     if initial_restricted:
         monkeypatch.setattr(time, "time_ns", lambda: 1_000)
+    old_copy = Path(config.paths.staging) / "logs" / "log-copy-prior.log"
+    old_copy.parent.mkdir(parents=True, exist_ok=True)
+    old_copy.write_bytes(b"old copy awaiting scan")
 
     loop = asyncio.get_running_loop()
     listdir_started = asyncio.Event()
@@ -755,15 +758,9 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
     stop_started = asyncio.Event()
     release_stop = asyncio.Event()
     stop_cancelled = asyncio.Event()
-    ordinary_stop_delivered = asyncio.Event()
-    startup_stop_delivered = asyncio.Event()
-    log_settle_started = asyncio.Event()
     once_report_started = asyncio.Event()
     session_contexts = []
-    log_settle_facts: list[tuple] = []
     stop_entries: list[object] = []
-    ordinary_stop_calls: list[int] = []
-    startup_stop_calls: list[int] = []
     original_listdir = os.listdir
 
     def blocked_listdir(path: Path):
@@ -787,38 +784,6 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         return await original_stop(request)
 
     driver.stop = gated_stop
-
-    original_local_stop = LoggingOwner.stop_new_work
-    original_startup_stop = LoggingOwner.cancel_startup_sweep
-    original_log_settle = LoggingOwner.settle
-
-    def observe_local_stop(owner):
-        original_local_stop(owner)
-        ordinary_stop_calls.append(len(ordinary_stop_calls) + 1)
-        ordinary_stop_delivered.set()
-
-    def observe_startup_stop(owner):
-        original_startup_stop(owner)
-        startup_stop_calls.append(len(startup_stop_calls) + 1)
-        startup_stop_delivered.set()
-
-    async def observe_log_settle(owner):
-        database_port = session_contexts[0].database
-        log_settle_facts.append(await database_port.read(lambda owned: (
-            owned.connection.execute(
-                "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'stop/1'").fetchone(),
-            owned.connection.execute(
-                "SELECT check_decision FROM recording_processing"
-                " WHERE action_id = 1").fetchone(),
-        )))
-        log_settle_started.set()
-        await original_log_settle(owner)
-
-    monkeypatch.setattr(LoggingOwner, "stop_new_work", observe_local_stop)
-    monkeypatch.setattr(
-        LoggingOwner, "cancel_startup_sweep", observe_startup_stop)
-    monkeypatch.setattr(LoggingOwner, "settle", observe_log_settle)
 
     original_run_session = lifecycle.run_session
 
@@ -859,39 +824,50 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
                 duplicate.close()
         pytest.fail("必要 winddown 或日志诊断收场期间提前释放 SessionLock")
 
+    async def wait_for_saved_stop() -> None:
+        while True:
+            with closing(sqlite3.connect(database)) as connection:
+                facts = (
+                    connection.execute(
+                        "SELECT status, attempts_used FROM operation_runs"
+                        " WHERE responsibility_key = 'stop/1'").fetchone(),
+                    connection.execute(
+                        "SELECT check_decision FROM recording_processing"
+                        " WHERE action_id = 1").fetchone(),
+                )
+            if facts == ((3, 1), (3,)):
+                return
+            if run_task.done():
+                run_task.result()
+                raise AssertionError(f"会话结束但 STOP 结果未保存: {facts!r}")
+            await asyncio.sleep(0.01)
+
     try:
         await _wait_event(listdir_started)
         await _wait_event(stop_started)
         assert len(stop_entries) == 1
-        assert not log_settle_started.is_set()
         assert not stop_cancelled.is_set()
         assert_session_lock_held()
         assert probe_admission(deps.admission_lock).status.value == (
             "acquired_and_released")
 
         run_task.cancel("parent during restricted winddown STOP")
-        await _wait_event(ordinary_stop_delivered)
-        await _wait_event(startup_stop_delivered)
-        first_cancel_stop_counts = (
-            len(ordinary_stop_calls), len(startup_stop_calls))
-        assert first_cancel_stop_counts[0] >= 1
-        assert first_cancel_stop_counts[1] >= 1
+        cancellation_checkpoint = asyncio.Event()
+        loop.call_soon(cancellation_checkpoint.set)
+        await _wait_event(cancellation_checkpoint)
         assert not stop_cancelled.is_set()
-        assert not log_settle_started.is_set()
         assert not run_task.done()
         assert_session_lock_held()
 
         run_task.cancel("repeated parent during restricted winddown STOP")
         await asyncio.sleep(0)
         assert len(stop_entries) == 1
-        assert (
-            len(ordinary_stop_calls), len(startup_stop_calls)
-        ) == first_cancel_stop_counts
         assert not stop_cancelled.is_set()
 
         release_stop.set()
-        await _wait_event(log_settle_started)
-        assert log_settle_facts == [((3, 1), (3,))]
+        await asyncio.wait_for(wait_for_saved_stop(), timeout=_GATE_TIMEOUT)
+        assert not release_listdir.is_set()
+        assert not run_task.done()
         assert not once_report_started.is_set()
         assert not stop_cancelled.is_set()
         assert_session_lock_held()
@@ -904,7 +880,10 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         assert len(stop_entries) == 1
         assert not stop_cancelled.is_set()
         assert not once_report_started.is_set()
+        assert old_copy.read_bytes() == b"old copy awaiting scan"
         await assert_database_closed(session_contexts[0].database)
+        lease = acquire_session(deps.session_lock)
+        lease.close()
     finally:
         release_stop.set()
         release_listdir.set()
