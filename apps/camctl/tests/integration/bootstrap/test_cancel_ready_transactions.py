@@ -228,3 +228,80 @@ async def test_original_withdrawal_key_excludes_member_created_after_original_bo
     assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
     assert tuple(owned.connection.iterdump()) == baseline
     assert len(saved_transaction_events(owned.connection, key)[0]["body"]["rows"]) == 2
+
+
+async def test_cancel_flow_resumes_committed_unknown_with_original_withdrawal(environment, monkeypatch):
+    """取消明细均已结束时，取消流程仍核实同一次撤回的原保存申请。"""
+    from camctl.bootstrap.flows import cancel_flow
+    from camctl.contracts.values import ConsistencyError
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.outputs.withdrawal import WithdrawalProgress, WithdrawalSession
+    from camctl.persistence.models import db_outcome_for
+    from camctl.session.supervision import Supervisor
+    from ..support.database import business_database, database_path
+
+    cfg, owned, context, _driver = environment
+    target, delivery_ids, _ = await _pending(environment)
+    first_id, second_id = delivery_ids
+    origin = owned.connection.execute("SELECT id FROM actions WHERE type=6").fetchone()[0]
+    names = dict(owned.connection.execute("SELECT id,file_name FROM deliveries ORDER BY id"))
+    ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)
+    second_contents = (ready / names[second_id]).read_bytes()
+    session = WithdrawalSession(ready=ready, processing=processing,
+                                executor=FileTaskExecutor(Supervisor()))
+    original_remove, original_save = os.remove, OutputsRepository.advance_withdrawal
+    attempts, original_requests = [], []
+
+    def remove(path, *args, **kwargs):
+        path = Path(path)
+        if path.parent == ready and path.name in names.values():
+            attempts.append(path.name)
+            if path.name == names[second_id]:
+                raise InterruptedError("second withdrawal outcome unknown")
+        return original_remove(path, *args, **kwargs)
+
+    def save(repository, command, key, operation_owned):
+        if command.delivery_id == second_id and command.choice is WithdrawalChoice.UNKNOWN:
+            original_requests.append((command, key))
+            if len(original_requests) == 1:
+                faulty = _CommitFailure(operation_owned.connection, True)
+                return original_save(repository, command, key, replace(operation_owned, connection=faulty))
+        return original_save(repository, command, key, operation_owned)
+
+    monkeypatch.setattr(os, "remove", remove)
+    monkeypatch.setattr(OutputsRepository, "advance_withdrawal", save)
+    assert await session.withdraw_delivery(first_id, database=context.database,
+        occurred_at=lambda: _NOW + 1) is WithdrawalProgress.STEP_FINISHED
+    with pytest.raises(ConsistencyError) as failure:
+        await session.withdraw_delivery(second_id, database=context.database, occurred_at=lambda: _NOW + 2)
+    assert db_outcome_for(failure.value).kind is DbOutcomeKind.UNKNOWN
+    assert failure.value.__cause__ is not None
+    assert attempts == [names[first_id], names[second_id]]
+    assert owned.connection.execute(
+        "SELECT status FROM cancel_delivery_items ORDER BY delivery_id").fetchall() == [(2,), (4,)]
+    assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (origin,)).fetchone() == (2,)
+    assert original_requests[0][0].occurred_at == _NOW + 2
+    assert "remove_unknown: InterruptedError" in original_requests[0][0].error["details"]["error"]
+
+    async with business_database(database_path(owned)) as reopened:
+        original_database = context.database
+        context.database = reopened
+        try:
+            flow = cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing,
+                               withdrawal_session=session)
+            await flow(context)
+            assert len(original_requests) == 2 and original_requests[0] == original_requests[1]
+            assert attempts == [names[first_id], names[second_id]]
+            assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (origin,)).fetchone() == (4,)
+            assert owned.connection.execute(
+                "SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (3, 0)
+            assert not (ready / names[first_id]).exists()
+            assert (ready / names[second_id]).read_bytes() == second_contents
+            saved = tuple(owned.connection.iterdump())
+            await flow(context)
+            assert tuple(owned.connection.iterdump()) == saved
+            assert len(original_requests) == 2 and attempts == [names[first_id], names[second_id]]
+            assert not (ready / names[first_id]).exists()
+            assert (ready / names[second_id]).read_bytes() == second_contents
+        finally:
+            context.database = original_database
