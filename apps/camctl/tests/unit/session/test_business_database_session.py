@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sqlite3
+from dataclasses import replace
 from unittest.mock import AsyncMock, create_autospec
 
 import pytest
@@ -116,33 +117,30 @@ async def test_acquire_parent_cancel_settles_lease_without_dispatching_new_work(
     context.flows = {"ordinary": flow}
     snapshot = create_autospec(SnapshotOwnerPort, instance=True, spec_set=True)
     context.snapshot_owner = snapshot
-    started, release = asyncio.Event(), asyncio.Event()
-    original_write = database.write
-    async def delayed_write(callback, **kwargs):
-        if kwargs.get("description") == "取得接纳资格":
-            result = await original_write(callback, **kwargs)
-            started.set()
-            await release.wait()
-            return result
-        return await original_write(callback, **kwargs)
-    database.write = delayed_write
+    started, release = _pause_operation_receipt(database, repository.acquire_admission)
     task = asyncio.create_task(run_session(context, None))
-    await started.wait()
-    task.cancel("stop after actual acquire")
-    await asyncio.sleep(0)
-    admission.close.assert_not_called()
-    assert not task.done()
-    release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    admission.close.assert_called_once()
-    repository.close_admission.assert_not_called()
-    database.executor.close.assert_awaited_once()
-    flow.assert_not_awaited()
-    snapshot.start.assert_not_awaited()
-    snapshot.discover.assert_not_awaited()
-    snapshot.settle.assert_awaited_once()
-    session.close.assert_called_once()
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        task.cancel("stop after actual acquire")
+        await asyncio.sleep(0)
+        admission.close.assert_not_called()
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError, match="stop after actual acquire"):
+            await asyncio.wait_for(task, 2)
+        admission.close.assert_called_once()
+        repository.close_admission.assert_not_called()
+        database.executor.close.assert_awaited_once()
+        flow.assert_not_awaited()
+        snapshot.start.assert_not_awaited()
+        snapshot.discover.assert_not_awaited()
+        snapshot.settle.assert_awaited_once()
+        session.close.assert_called_once()
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
 
 
 @pytest.mark.parametrize("kind", [DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.UNKNOWN])
@@ -275,28 +273,23 @@ async def test_close_parent_cancel_with_new_work_does_not_resume_dispatch():
         calls.append("dispatch")
 
     context.flows = {"ordinary": flow}
-    context.poll_interval_s = 0.001
+    # 只提供空查询结果，不匹配 SQL；让旧实现也能正常经过等待路径。
     owned.connection.execute.return_value.fetchone.return_value = None
-    started, release = asyncio.Event(), asyncio.Event()
-    original_write = database.write
+    no_work = context.facts_query(owned.connection)
     original_close = repository.close_admission.side_effect
+    work_arrived = False
 
-    def close(command, key, current):
-        if repository.close_admission.call_count == 1:
-            # 原子关闭重新检查时发现新责任，接纳资格仍由本会话持有。
-            work = classify_work(WorkFacts(1, 0, False, False, False, False, False, False))
-            return DbOutcome(DbOutcomeKind.COMPLETED, CloseDecision(False, work))
-        return original_close(command, key, current)
+    def new_work_during_close(command, key, current):
+        nonlocal work_arrived
+        if work_arrived:
+            return original_close(command, key, current)
+        work_arrived = True
+        # 仅一次新责任到达；后续正常关闭仍遵循已有夹具契约。
+        work = classify_work(replace(no_work, unfinished_actions=1))
+        return DbOutcome(DbOutcomeKind.COMPLETED, CloseDecision(False, work))
 
-    async def delayed_write(callback, **kwargs):
-        result = await original_write(callback, **kwargs)
-        if kwargs.get("description") == "原子关闭接纳" and not started.is_set():
-            started.set()
-            await release.wait()
-        return result
-
-    repository.close_admission.side_effect = close
-    database.write = delayed_write
+    repository.close_admission.side_effect = new_work_during_close
+    started, release = _pause_operation_receipt(database, repository.close_admission)
     task = asyncio.create_task(run_session(context, None))
     try:
         await asyncio.wait_for(started.wait(), 2)
@@ -318,4 +311,28 @@ async def test_close_parent_cancel_with_new_work_does_not_resume_dispatch():
         release.set()
         if not task.done():
             task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
+
+
+def _pause_operation_receipt(database, operation):
+    """完成指定 repository 操作后暂停其回执，不依赖描述文案或调用序号。"""
+    started, release = asyncio.Event(), asyncio.Event()
+    completed_keys = set()
+    original_operation = operation.side_effect
+    original_write = database.write
+
+    def complete(command, key, owned):
+        result = original_operation(command, key, owned)
+        completed_keys.add(key)
+        return result
+
+    async def deliver(callback, **kwargs):
+        result = await original_write(callback, **kwargs)
+        if kwargs.get("key") in completed_keys:
+            started.set()
+            await release.wait()
+        return result
+
+    operation.side_effect = complete
+    database.write = deliver
+    return started, release

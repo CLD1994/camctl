@@ -4,6 +4,14 @@
 
 按维护者要求，已从 PR 移除新增的 `apps/camctl/tests/integration/session/test_cancel_dispatch.py`，保留生产修复和单元回归测试，未删除或修改仓库原有集成测试。下文集成结果仅保留为移除前的历史验证证据，不代表当前 PR 包含该测试。本轮不再运行集成测试。移除后以同一命令重跑 `apps/camctl/tests/unit/session -q`：269 passed，退出 0；`git diff --check` 通过，集成目录相对基线无差异。
 
+## 单元测试可维护性调整
+
+两个取消回归仍从 `run_session` 进入。暂停回执改为由指定 `SessionRepositoryPort` 操作的 `OperationKey` 关联，不匹配事务描述文案，也不依据 mock 调用序号选择阶段。两个用例均在 `finally` 放行回执、回收任务，阶段等待及回收使用 2 秒故障上限；该上限不是业务性能断言。新工作事实以 `replace(..., unfinished_actions=1)` 表达，保留首次取消及必要收场断言。
+
+没有新增生产接口或测试钩子，没有新增集成测试。既有内联数据库夹具仍依赖 executor 私有实现，本次不扩大重构；关闭反例仍需为模拟 SQLite 游标提供空结果，避免旧实现在普通等待中因无效 mock 数据提前退出而掩盖再次派发。尝试删除该配置时旧实现的关闭反例误通过，故保留该合法输入准备，不匹配具体 SQL。
+
+优化后对照原始生产代码：2 failed、12 passed，均失败于取消后实际多派发；修复后 session 单元 269 passed。没有以只在新实现上通过代替反例检验。完整套件限制仍如下文所述。
+
 ## 范围与环境
 
 基线为 `2329dffd69ed90807162a5ae6a2d7f43a04dbd2e`，Linux x86_64，Python 3.11.17，SQLite 3.53.1。独立 worktree 的虚拟环境及包资源均独立。未连接真实设备，没有执行物理电机动作，也未验证 ARM64 或真实 SIGINT 进程组合。
