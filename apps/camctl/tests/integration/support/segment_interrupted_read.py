@@ -1,6 +1,7 @@
 """独立进程在真实 READ 进行中等待，供父进程验证中断后的恢复边界。"""
 import asyncio
 import json
+import hashlib
 import os
 from decimal import Decimal
 from pathlib import Path
@@ -51,15 +52,22 @@ class BlockingDriver:
 async def run(path, staging, action_id, member_id, occurred_at, marker, mode):
     driver = BlockingDriver(marker)
     digest = Digest('0' * 64)
-    if mode == 'finished':
+    if mode in ('finished', 'eof'):
         original = OperationRepository.finish_attempt
         def unavailable(repository, command, key, owned):
             if command.ticket.operation == 'read':
                 return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=OSError('read finish unavailable'))
             return original(repository, command, key, owned)
-        OperationRepository.finish_attempt = unavailable
+        if mode == 'finished':
+            OperationRepository.finish_attempt = unavailable
+            digest = FailedDigest()
+        else:
+            from camctl.persistence.repositories import read_end
+            def unavailable_end(request, key, owned):
+                return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=OSError('read end unavailable'))
+            read_end.save_read_end = unavailable_end
+            digest = Digest(hashlib.sha256(CONTENT).hexdigest())
         driver = ReadDriver(CONTENT)
-        digest = FailedDigest()
     async with business_database(path) as database:
         flow = MediaFlow(database=database, roots=BoundDirectories(staging=staging),
             sessions=DriverReadSessions(database, driver, ticket=None),
@@ -73,7 +81,7 @@ async def run(path, staging, action_id, member_id, occurred_at, marker, mode):
         try:
             await inspect_segment(flow, request)
         except Exception as error:
-            if mode != 'finished':
+            if mode not in ('finished', 'eof'):
                 raise
             marker.write_text(json.dumps({'error': str(error), 'offsets': driver.offsets,
                 'digest_calls': digest.calls}))

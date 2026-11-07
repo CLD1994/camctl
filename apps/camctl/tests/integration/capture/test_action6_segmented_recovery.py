@@ -39,7 +39,7 @@ from .test_action6_segmented_normal import (
 )
 from .test_capture_contract import _NOW
 from .test_input_copy import _CONTENT
-from .test_segment_inspections import _ReadDriver
+from ..support.segment_inspection_cases import ReadDriver as _ReadDriver
 from .test_record_file_completion_wait import (
     _completed_result,
     _result_port,

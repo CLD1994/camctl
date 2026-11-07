@@ -27,42 +27,49 @@ async def inspection_source(tmp_path, count=2):
     owned, runtime, action_id, _ = await consumer_world(
         tmp_path, 'record', catalog=Action6RecordCatalog(), record_control_elapsed_ns=60_000_000_000)
     try:
-        ticket = begin_result_check(owned, runtime, action_id).ticket
-        entries = []
-        for index in range(1, count + 1):
-            name = f'/DCIM/CAM_001/CAM_20261021090000_{index:04d}_D.MP4'
-            entries.append({'identity': name, 'locator': {'path': name}, 'complete': True,
-                'size_bytes': len(CONTENT), 'kind': 'video', 'format_id': 'mp4'})
-        context = _stop_context(owned, action_id)
-        actual_page = replace(_actual(ticket, entries=entries, finalized=True),
-            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('results_returned', 1,
-                {'file_completion': _completion(context), 'file_completion_source_page_event_id': None})))
-        saved = _ok(runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
-            validate_outcome(ticket, actual_page, _REGISTRY), runtime.wall_us()), new_operation_key(), owned))
-        page = runtime.capture.read_result_page(saved, owned)
-        files = dict(page.file_ids)
-        for entry in page.page.entries:
-            file_id = files[entry.identity]
-            for method, command in (
-                (runtime.capture.save_ownership_from_result_page, OwnershipFromResultPageSave(saved, file_id, runtime.wall_us())),
-                (runtime.capture.save_file_completion, FileCompletionSave(file_id, 3, runtime.wall_us(), basis=3,
-                    observation=entry.evidence, size_bytes=entry.size_bytes, activity_id=int(context['activity_id']),
-                    result_page_event_id=saved.event_id, stop_result_event_id=context['stop_result_event_id'])),
-                (runtime.capture.save_file_presence, FilePresenceSave(file_id, 2, runtime.wall_us())),
-            ):
-                _ok(method(command, new_operation_key(), owned))
-        _finish_scan(owned, runtime, page)
-        repo = SegmentRepository()
-        request = repo.prepare_result_set(action_id, runtime.wall_us(), owned)
-        ref = _ok(repo.create_result_set(request, new_operation_key(), owned))
-        actual = repo.read_result_member_inputs(ref, None, 128, owned)
-        assert actual.next_cursor is None and len(actual.items) == count
-        _ok(repo.append_result_members(ref, actual.items, runtime.wall_us(), new_operation_key(), owned))
-        _ok(repo.fix_result_members(ref, runtime.wall_us(), new_operation_key(), owned))
-        return owned, runtime, ref, repo.read_members(ref, None, 128, owned).items
+        ref, members = await prepare_action_segments(owned, runtime, action_id, count)
+        return owned, runtime, ref, members
     except BaseException:
         owned.connection.close()
         raise
+
+
+async def prepare_action_segments(owned, runtime, action_id, count):
+    """对已有拍摄结果执行正式扫描、文件事实保存及固定集合。"""
+    ticket = begin_result_check(owned, runtime, action_id).ticket
+    entries = []
+    for index in range(1, count + 1):
+        name = f'/DCIM/CAM_001/CAM_20261021{90000 + action_id:06d}_{index:04d}_D.MP4'
+        entries.append({'identity': name, 'locator': {'path': name}, 'complete': True,
+            'size_bytes': len(CONTENT), 'kind': 'video', 'format_id': 'mp4'})
+    context = _stop_context(owned, action_id)
+    actual_page = replace(_actual(ticket, entries=entries, finalized=True),
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('results_returned', 1,
+            {'file_completion': _completion(context), 'file_completion_source_page_event_id': None})))
+    saved = _ok(runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
+        validate_outcome(ticket, actual_page, _REGISTRY), runtime.wall_us()), new_operation_key(), owned))
+    page = runtime.capture.read_result_page(saved, owned)
+    files = dict(page.file_ids)
+    for entry in page.page.entries:
+        file_id = files[entry.identity]
+        for method, command in (
+            (runtime.capture.save_ownership_from_result_page, OwnershipFromResultPageSave(saved, file_id, runtime.wall_us())),
+            (runtime.capture.save_file_completion, FileCompletionSave(file_id, 3, runtime.wall_us(), basis=3,
+                observation=entry.evidence, size_bytes=entry.size_bytes, activity_id=int(context['activity_id']),
+                result_page_event_id=saved.event_id, stop_result_event_id=context['stop_result_event_id'])),
+            (runtime.capture.save_file_presence, FilePresenceSave(file_id, 2, runtime.wall_us())),
+        ):
+            _ok(method(command, new_operation_key(), owned))
+    _finish_scan(owned, runtime, page)
+    repo = SegmentRepository()
+    request = repo.prepare_result_set(action_id, runtime.wall_us(), owned)
+    ref = _ok(repo.create_result_set(request, new_operation_key(), owned))
+    actual = repo.read_result_member_inputs(ref, None, 128, owned)
+    assert actual.next_cursor is None and len(actual.items) == count
+    _ok(repo.append_result_members(ref, actual.items, runtime.wall_us(), new_operation_key(), owned))
+    _ok(repo.fix_result_members(ref, runtime.wall_us(), new_operation_key(), owned))
+    return ref, repo.read_members(ref, None, 128, owned).items
+
 
 
 class Digest:
@@ -164,3 +171,116 @@ class SegmentTools:
 
     async def repair(self, input, output, *, trim_s):
         raise AssertionError("逐段检查不调用修复工具")
+
+
+class InspectionDriver:
+    """正式会话装配使用的驱动端口，记录读取与摘要调用。"""
+    def __init__(self, capture_runtime):
+        self.capture_runtime = capture_runtime
+        self.reads = ReadDriver(CONTENT)
+        self.digest_calls = 0
+
+    async def control(self, request):
+        return await self.capture_runtime.driver.control(request)
+
+    async def stop(self, request):
+        return await self.capture_runtime.stopper.stop(request)
+
+    async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+        return await self.reads.open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)
+
+    async def digest(self, request):
+        from camctl.devices.ports import DeviceCallResult
+        self.digest_calls += 1
+        return DeviceCallResult(observations=(), error={'code': 'device_error'})
+
+
+async def assembled_inspections(session, owned, roots, source_runtime, *, batch_size=2):
+    """由正式拍摄工厂创建共享保存责任的媒体与拍摄入口。"""
+    from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
+    from camctl.devices.ports import DriverDeclaration
+    from ..capture.media_retry_fixtures import _EVIDENCE
+
+    driver = InspectionDriver(source_runtime)
+    declaration = DriverDeclaration(control_supported=True, stop_supported=True,
+        query_supported=False, result_supported=False, read_supported=True,
+        digest_supported=True, delete_supported=False)
+    registry = DriverRegistry((DriverEntry('camctl-adb', driver, declaration,
+        _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
+    runtime = await session.runtime(owned, driver=driver, evidence=_EVIDENCE,
+        drivers=registry, staging=roots.staging, wall_us=source_runtime.wall_us,
+        monotonic_ns=source_runtime.monotonic_ns, segment_size=4,
+        read_discovery_batch_size=batch_size)
+    assert runtime.media is not None
+    return runtime, driver
+
+
+async def prepare_other_inspection(session, owned, roots, source_runtime):
+    """通过独立设备的受理和实际拍摄，在同库建立另一来源检查。"""
+    from datetime import datetime, timezone
+    from unittest.mock import create_autospec
+    from camctl.acceptance.input import ParsedInput
+    from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
+    from camctl.capture.handlers import capture_handler
+    from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
+    from camctl.contracts.pages import Page
+    from camctl.devices.directory import DirectoryRead
+    from camctl.devices.ports import ControlDriver, DeviceCallResult, StopDriver
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.persistence.repositories.scheduling import ObserveWindowRequest, StartActionRequest, SchedulingRepository
+    from camctl.persistence.repositories.segment_inspections import InspectionCreate, SegmentInspectionRepository
+    from ..capture.result_consumer_fixtures import _prepare_through_handler, RESULT_EVIDENCE, returned
+    from ..capture.test_baseline_prepare import Directory
+    from ..capture.test_capture_contract import ResultsDouble
+    from .result_cases import CaseClock
+
+    class SecondCameraCatalog(Action6RecordCatalog):
+        def device_exists(self, device_id):
+            return device_id in ('cam-1', 'cam-2')
+        def driver_id(self, device_id):
+            return 'camctl-adb' if self.device_exists(device_id) else None
+
+    now = source_runtime.wall_us()
+    clock = CaseClock(now, 65_000_000_000)
+    instant = datetime.fromtimestamp(now / 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    class AcceptanceClock:
+        def utc_micros(self):
+            return now
+
+    accepted = await accept_input(ParsedInput('other-source.json', {
+        'request_id': '100', 'created_at': instant, 'name': '另一来源',
+        'actions': [{'name': '另一录像', 'type': 'camera_record', 'device_id': 'cam-2',
+            'scheduled_at': instant, 'params': {'type': 'video'}, 'policy': {'max_delay_ms': 5000}}],
+    }), AcceptanceContext(CommandMode.RUN, SecondCameraCatalog(), AcceptanceRepository(),
+        clock=AcceptanceClock()), new_operation_key(), source_runtime.database)
+    assert accepted.plan_id is not None
+    action_id, = owned.connection.execute('SELECT id FROM actions WHERE plan_id=?', (accepted.plan_id,)).fetchone()
+    scheduling = SchedulingRepository()
+    for method, command in ((scheduling.observe_window, ObserveWindowRequest(action_id, now, now)),
+                            (scheduling.start_action, StartActionRequest(action_id, now, now))):
+        outcome = method(command, new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    activity_id, = owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()
+    control = create_autospec(ControlDriver, instance=True)
+    control.control.return_value = DeviceCallResult.from_outcome(returned('operation', 'start_confirmed', activity_id))
+    stopper = create_autospec(StopDriver, instance=True)
+    stopper.stop.return_value = DeviceCallResult.from_outcome(returned('stop', 'stop_confirmed', activity_id))
+    runtime = await session.runtime(owned, driver=control, evidence=RESULT_EVIDENCE, stopper=stopper, results=ResultsDouble({}),
+        device_id='cam-2', devices={'cam-2': {'driver': 'camctl-adb'}}, staging=roots.staging,
+        wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns,
+        directory=Directory([lambda request: DirectoryRead(None, None, Page((), None))]))
+    await capture_handler('camera_record')(action_id, runtime)
+    clock.wall += 60_000_000
+    clock.monotonic += 60_000_000_000
+    await _prepare_through_handler(runtime, action_id, 'camera_record', 'conclude')
+    processing_id, = owned.connection.execute('SELECT id FROM recording_processing WHERE action_id=?', (action_id,)).fetchone()
+    outcome = runtime.capture.save_check_decision(CheckDecisionSave(processing_id, CheckDecisionChoice.NOT_NEEDED,
+        CheckBasis(CheckReason.CONTINUOUS_CONTROL_COMPLETE, 60000, control_elapsed_ns=60_000_000_000), clock.wall_us()), new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    ref, members = await prepare_action_segments(owned, runtime, action_id, 1)
+    command = InspectionCreate(action_id, members[0].member_id, {'metric': 'duration_s', 'value': 60},
+        {'max_attempts': 3, 'timeout_s': Decimal('10'), 'retry_interval_s': Decimal('0')}, clock.wall_us())
+    outcome = SegmentInspectionRepository().create(command, new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    return action_id, members[0].member_id

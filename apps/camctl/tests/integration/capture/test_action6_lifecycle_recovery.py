@@ -284,7 +284,7 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
 ):
     from camctl.contracts.enums import enum_for
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
-    from .test_segment_inspections import _CONTENT, _ReadDriver
+    from ..support.segment_inspection_cases import CONTENT as _CONTENT, ReadDriver as _ReadDriver
 
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22")),
