@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from functools import lru_cache
+from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from camctl.resources import resource_bytes
@@ -30,6 +31,9 @@ __all__ = [
     "projection_structure",
     "projection_read_tables",
     "project_public",
+    "project_bounded",
+    "BoundedProjection",
+    "ArrayEmission",
     "public_changed",
 ]
 
@@ -58,6 +62,59 @@ class ProjectionInput:
 
 
 PublicFragment = dict[str, Any]
+
+
+class ArrayEmission(Enum):
+    """延迟数组的出现决定；空时省略须由读取者证实集合已耗尽。"""
+
+    OMIT = "omit"
+    KEEP_EMPTY = "keep_empty"
+    OMIT_EMPTY = "omit_empty"
+
+
+@dataclass(frozen=True)
+class BoundedProjection:
+    """有限公开字段及延迟数组决定，不持有读取器或数组成员。"""
+
+    finite: PublicFragment
+    deferred: Mapping[tuple[str, ...], ArrayEmission]
+
+
+def project_bounded(facts: ProjectionInput) -> BoundedProjection:
+    """解释出现条件而不展开指定数组；路径相对于当前公开对象。
+
+    延迟字段必须位于当前对象或有限嵌套对象中；数组成员须逐项调用
+    本入口，不能先物化父数组再在其成员中保留延迟标记。
+    """
+    value = _project_public(facts, bounded=True)
+    if value is OMIT:
+        return OMIT
+    decisions = {}
+
+    def separate(fragment, path=()):
+        finite = {}
+        for name, child in fragment.items():
+            current = path + (name,)
+            if isinstance(child, ArrayEmission):
+                decisions[current] = child
+            elif isinstance(child, dict):
+                finite[name] = separate(child, current)
+            else:
+                reject_array_markers(child)
+                finite[name] = child
+        return finite
+
+    def reject_array_markers(value):
+        if isinstance(value, ArrayEmission):
+            raise PublicProjectionError("延迟数组必须按所属对象逐项投影，不能穿过已物化数组")
+        if isinstance(value, list):
+            for item in value:
+                reject_array_markers(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                reject_array_markers(item)
+
+    return BoundedProjection(separate(value), decisions)
 
 
 @dataclass(frozen=True)
@@ -208,12 +265,13 @@ class _Context:
     row_id: int
     #: 当前投影声明的关联；跨表列沿这些关联解析到唯一关联行。
     relations: tuple[str, ...] = ()
+    bounded: bool = False
 
     def with_row(self, table: str, row_id: int) -> "_Context":
         row = self.input.tables.get(table, {}).get(row_id)
         if row is None:
             raise PublicProjectionError(f"缺少 {table}#{row_id} 的 H 事实")
-        return _Context(self.input, row, table, row_id, self.relations)
+        return _Context(self.input, row, table, row_id, self.relations, self.bounded)
 
     def column(self, column: str) -> Any:
         table, _, name = column.rpartition(".")
@@ -324,6 +382,10 @@ class _Context:
 
 def project_public(facts: ProjectionInput) -> PublicFragment:
     """计算一个对象的完整公开字段（出现条件参与字段级省略）。"""
+    return _project_public(facts)
+
+
+def _project_public(facts: ProjectionInput, *, bounded=False):
     projection = _dependencies()["projections"].get(facts.entity)
     if projection is None:
         raise PublicProjectionError(f"未登记的公开实体投影: {facts.entity}")
@@ -339,16 +401,28 @@ def project_public(facts: ProjectionInput) -> PublicFragment:
         except (ConsistencyError, JsonParseError, KeyError, ValueError) as error:
             raise PublicProjectionError(str(error)) from error
     context = _Context(facts, root, root_table, facts.root_id,
-                       tuple(projection.get("relations", ())))
+                       tuple(projection.get("relations", ())), bounded)
     if not _truthy(projection.get("when", {"op": "literal", "value": True}), context):
         return OMIT  # 类型检查器友好的省略标记
     fragment: PublicFragment = {}
     for field_name, spec in projection["fields"].items():
-        if field_name in facts.deferred_fields.get(facts.entity, ()):
+        deferred = field_name in facts.deferred_fields.get(facts.entity, ())
+        if deferred and not bounded:
             continue
         when = spec.get("when", {"op": "literal", "value": True})
         try:
             if not _truthy(when, context):
+                if deferred:
+                    fragment[field_name] = ArrayEmission.OMIT
+                continue
+            if deferred:
+                node = spec["value"]
+                if node["op"] not in ("rows", "entities", "failure_union") and not (
+                    node["op"] == "literal" and node.get("value") == []
+                ):
+                    raise PublicProjectionError("延迟字段不是登记的数组")
+                fragment[field_name] = (ArrayEmission.OMIT_EMPTY
+                    if node.get("empty") == "omit" else ArrayEmission.KEEP_EMPTY)
                 continue
             value = _eval(spec["value"], context)
         except PublicProjectionError as error:
@@ -533,7 +607,7 @@ def _project(projection_name: str, context: _Context) -> Any:
         raise PublicProjectionError(
             f"嵌套投影 {projection_name} 需要恰好一行关联事实，实际 {len(positions)} 行"
         )
-    return project_public(
+    return _project_public(
         ProjectionInput(
             entity=projection_name,
             root_id=positions[0][1],
@@ -541,7 +615,7 @@ def _project(projection_name: str, context: _Context) -> Any:
             selected_entities=context.input.selected_entities,
             deferred_fields=context.input.deferred_fields,
             status_histories=context.input.status_histories,
-        )
+        ), bounded=context.bounded
     )
 
 
@@ -559,7 +633,7 @@ def _entities(node: Mapping[str, Any], context: _Context) -> Any:
         if not isinstance(subtree, Mapping):
             raise PublicProjectionError(f"实体 {entity}#{child_id} 的入选子树必须是映射")
         fragments.append(
-            project_public(
+            _project_public(
                 ProjectionInput(
                     entity=entity,
                     root_id=child_id,
@@ -567,7 +641,7 @@ def _entities(node: Mapping[str, Any], context: _Context) -> Any:
                     selected_entities=subtree,
                     deferred_fields=context.input.deferred_fields,
                     status_histories=context.input.status_histories,
-                )
+                ), bounded=context.bounded
             )
         )
     return fragments
@@ -578,7 +652,7 @@ def _rows(node: Mapping[str, Any], context: _Context) -> Any:
     if not matched and node.get("empty") == "omit":
         return OMIT
     return [
-        project_public(
+        _project_public(
             ProjectionInput(
                 entity=node["projection"],
                 root_id=row_id,
@@ -586,7 +660,7 @@ def _rows(node: Mapping[str, Any], context: _Context) -> Any:
                 selected_entities=context.input.selected_entities,
                 deferred_fields=context.input.deferred_fields,
                 status_histories=context.input.status_histories,
-            )
+            ), bounded=context.bounded
         )
         for _table, row_id in matched
     ]

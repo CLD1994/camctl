@@ -6,6 +6,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from camctl.contracts.public_projection import BoundedProjection, ArrayEmission
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ConsistencyError
 from camctl.history.bounded import SegmentHistoryHandle
@@ -35,14 +36,13 @@ def test_cancel_result_carries_the_first_target_fact(monkeypatch, target_type):
     handle = create_autospec(SegmentHistoryHandle, instance=True)
     row = _row("cancel_items", 4, target_action_id=7)
     handle.related_rows.return_value = iter((row,))
-    monkeypatch.setattr(generation, "_project", lambda *args: {"status": "completed"})
+    monkeypatch.setattr(generation, "project_bounded", lambda facts: BoundedProjection({"status": "completed"}, {}))
 
     [(identity, result)] = generation._result_rows(repo, handle, H, "cancel_task")
 
     assert identity == 4
-    assert result.target is target
     assert result.row is row
-    assert result.fragment == {"status": "completed"}
+    assert result.fragment.finite == {"status": "completed"}
     repo.restore_primary_at_h.assert_called_once_with("action", 7, H)
 
 
@@ -223,7 +223,7 @@ def test_failure_union_rejects_broken_h_associations(failures, damage):
         list(generation._failure_rows(repo, handle, H, _memory_failures()))
 
 
-def _writer(monkeypatch, *, kind):
+def _writer(monkeypatch, *, kind, withdrawals=ArrayEmission.OMIT):
     repo = create_autospec(HistoryRepository, instance=True)
     handle = create_autospec(ReportHistoryHandle, instance=True)
     handle.action_id = 8
@@ -240,17 +240,23 @@ def _writer(monkeypatch, *, kind):
     monkeypatch.setattr(generation, "_coverage_arrays", lambda *args: {})
     monkeypatch.setattr(generation, "projection_structure", lambda *args:
                         SimpleNamespace(entity_fields=()))
-    project = create_autospec(generation._project)
-    project.side_effect = lambda name, identity, facts, **kwargs: (
-        {"type": kind, "result": {}} if name == "action" else {"status": "completed"})
-    monkeypatch.setattr(generation, "_project", project)
+    project = create_autospec(generation.project_bounded)
+    def projected(facts):
+        if facts.entity == "action":
+            field = "failures" if kind == "obtain_action_outputs" else "items"
+            return BoundedProjection({"type": kind, "result": {}},
+                                     {("result", field): ArrayEmission.KEEP_EMPTY})
+        return BoundedProjection({"status": "completed"}, {("withdrawals",): withdrawals})
+    project.side_effect = projected
+    monkeypatch.setattr(generation, "project_bounded", project)
     return repo, handle, plan, gate, stream, project
 
 
-@pytest.mark.parametrize("target_type", [1, 3])
-def test_cancel_writer_uses_first_target_and_preserves_withdrawals(monkeypatch, target_type):
-    repo, handle, plan, gate, stream, project = _writer(monkeypatch, kind="cancel_task")
-    repo.restore_primary_at_h.return_value = {"id": 7, "type": target_type}
+@pytest.mark.parametrize("decision", [ArrayEmission.OMIT, ArrayEmission.KEEP_EMPTY])
+def test_cancel_writer_consumes_projection_decision(monkeypatch, decision):
+    repo, handle, plan, gate, stream, project = _writer(
+        monkeypatch, kind="cancel_task", withdrawals=decision)
+    repo.restore_primary_at_h.return_value = {"id": 7, "type": 3}
     row = _row("cancel_items", 4, target_action_id=7)
     withdrawal = _row("cancel_delivery_items", 5, cancel_item_id=4)
     handle.related_rows.side_effect = lambda table, *args: iter(
@@ -259,8 +265,8 @@ def test_cancel_writer_uses_first_target_and_preserves_withdrawals(monkeypatch, 
     list(generation._write_action(repo, object(), stream, plan, object(), 8, H))
 
     repo.restore_primary_at_h.assert_called_once_with("action", 7, H)
-    withdrawals = [call for call in project.call_args_list if call.args[0] == "withdrawal"]
-    assert len(withdrawals) == (target_type == 3)
+    withdrawals = [call for call in project.call_args_list if call.args[0].entity == "withdrawal"]
+    assert len(withdrawals) == (decision is ArrayEmission.KEEP_EMPTY)
     handle.__exit__.assert_called_once()
 
 
@@ -328,9 +334,9 @@ def test_action_writer_reuses_the_open_source_for_segment_error(monkeypatch):
     handle.boundary = H
     handle.primary.return_value = {"type": 2, "execution_started": True, "status": 3}
     handle.active_result_ref.return_value = object()
-    project.side_effect = lambda *args, **kwargs: {
+    project.side_effect = lambda facts: BoundedProjection({
         "type": "record_video", "error": {
-            "code": "default_segment_scope_empty", "details": {}}}
+            "code": "default_segment_scope_empty", "details": {}}}, {})
     header = SegmentErrorHeader(8, 0, DefaultScopeState.UNKNOWN, None, 0)
     monkeypatch.setattr(generation, "report_expansion_request", lambda kind, value, **kwargs:
                         ReportExpansionRequest('segment_error', 8, header) if value else None)

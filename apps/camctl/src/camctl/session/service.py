@@ -1022,6 +1022,10 @@ async def _run_session(
                 stage="locking" if lock_failure else "handoff",
             )
 
+        if waiter.parent_cancel is not None:
+            # 接纳的实际结果及句柄已接回；取消后不启动普通维护或派发。
+            raise waiter.parent_cancel
+
         if context.snapshot_owner is not None:
             try:
                 await context.snapshot_owner.start()
@@ -1128,7 +1132,10 @@ async def _run_session(
                     release_admission=release_admission))
                 if outcome is not None:
                     return outcome
-                # 关闭事务观察到新工作：继续推进，不释放接纳。
+                # 关闭事务观察到新工作；取消后仍由最终收场释放接纳，
+                # 不恢复普通等待或下一轮派发。
+                if waiter.parent_cancel is not None:
+                    raise waiter.parent_cancel
             try:
                 await _wait_for_more_work(context, database, observed=observed_wake)
             except Exception as error:

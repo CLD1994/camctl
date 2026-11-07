@@ -15,7 +15,8 @@ from camctl.contracts.segment_values import (
 from camctl.contracts.public_projection import (
     OMIT,
     ProjectionInput,
-    project_public,
+    project_bounded,
+    ArrayEmission,
     projection_structure,
 )
 from camctl.contracts.values import ConsistencyError
@@ -207,11 +208,12 @@ def _action_facts(repo, handle, boundary):
     return facts
 
 
-def _project(entity, identity, facts, *, status_histories=None):
-    return project_public(
+def _project(entity, identity, facts, *, status_histories=None, with_decisions=False):
+    result = project_bounded(
         ProjectionInput(entity, identity, facts, deferred_fields=_DEFERRED,
                         status_histories=status_histories or {})
     )
+    return result if with_decisions or result is OMIT else result.finite
 
 
 @dataclass
@@ -537,10 +539,10 @@ class _CoverageExpansion:
                 raise ConsistencyError("同 H 覆盖增长数组与有限判断头不同")
 
 
-def _coverage_arrays(expansion, stream, gate):
+def _coverage_arrays(expansion, stream, gate, decisions):
     arrays = {}
     for path in _COVERAGE_PATHS:
-        if expansion.decision is None:
+        if decisions.get(path, ArrayEmission.OMIT) is ArrayEmission.OMIT:
             if gate.state(path).value == "undecided":
                 gate.omit(path)
         else:
@@ -559,7 +561,15 @@ def _end(gate, path, last, count):
     return end
 
 
-def _array(stream, gate, path, members, emit):
+def _array(stream, gate, path, members, emit, decision=ArrayEmission.KEEP_EMPTY):
+    if decision is ArrayEmission.OMIT_EMPTY:
+        members = iter(members)
+        first = next(members, None)
+        if first is None:
+            end = ReadEnd(gate.binding, path, 0, None)
+            gate.omit(path, authority_end=end)
+            return end
+        members = chain((first,), members)
     gate.open_array(path)
     count, last = 0, None
     yield from stream.open_array(path[-1])
@@ -583,15 +593,17 @@ def _finite_object(stream, value, *, identity=None):
     yield from stream.close_object()
 
 
-def _write_fields(stream, gate, value, *, path=(), arrays=None):
+def _write_fields(stream, gate, value, *, path=(), arrays=None, decisions=None):
     """字段按词典序写出，增长数组只在它所属的对象位置展开。"""
     arrays = {} if arrays is None else arrays
+    decisions = {} if decisions is None else decisions
     names = set(value) | {p[len(path)] for p in arrays if p[: len(path)] == path}
     for name in sorted(names):
         current = path + (name,)
         if current in arrays:
             members, emit, done = arrays[current]
-            end = yield from _array(stream, gate, current, members, emit)
+            end = yield from _array(stream, gate, current, members, emit,
+                decisions.get(current, ArrayEmission.KEEP_EMPTY))
             if done is not None:
                 done(end)
         elif isinstance(value.get(name), dict) and any(
@@ -599,7 +611,7 @@ def _write_fields(stream, gate, value, *, path=(), arrays=None):
         ):
             yield from stream.open_object(name)
             yield from _write_fields(
-                stream, gate, value[name], path=current, arrays=arrays
+                stream, gate, value[name], path=current, arrays=arrays, decisions=decisions
             )
             yield from stream.close_object()
         else:
@@ -694,7 +706,6 @@ def _failure_rows(repo, handle, boundary, index):
 class _ResultRow:
     row: object
     fragment: object
-    target: dict | None = None
 
 
 def _result_rows(repo, handle, boundary, kind):
@@ -715,7 +726,7 @@ def _result_rows(repo, handle, boundary, kind):
                 target,
                 target_values,
             )
-        yield row.row_id, _ResultRow(row, _project(projection, row.row_id, facts), target_values)
+        yield row.row_id, _ResultRow(row, _project(projection, row.row_id, facts, with_decisions=True))
 
 
 def _write_action(repo, selection, stream, plan, binding, identity, boundary):
@@ -726,7 +737,9 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
         facts = _action_facts(repo, handle, boundary)
         histories = {("action", identity): repo.status_history(
             "action", identity, boundary, facts["actions"][identity]["status"])}
-        finite = _project("action", identity, facts, status_histories=histories)
+        projected = _project("action", identity, facts, status_histories=histories,
+                             with_decisions=True)
+        finite = projected.finite
         expansion = _SegmentExpansion(
             repo, boundary, binding, finite.get("error"), stack, source_handle=handle
         )
@@ -740,11 +753,9 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
         )
         gate = plan.begin(binding, finite)
         arrays = _expansion_arrays(expansion, stream, gate)
-        arrays.update(_coverage_arrays(coverage, stream, gate))
+        arrays.update(_coverage_arrays(coverage, stream, gate, projected.deferred))
         for path in (("result", "failures"), ("result", "items")):
-            if path[:-1][0] not in finite or (
-                (path[-1] == "failures") != (finite["type"] == "obtain_action_outputs")
-            ):
+            if projected.deferred.get(path, ArrayEmission.OMIT) is ArrayEmission.OMIT:
                 if gate.state(path).value == "undecided":
                     gate.omit(path)
                 continue
@@ -778,10 +789,10 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                     emit_failure,
                     None,
                 )
-            elif finite["type"] in ("delete_action_outputs", "cancel_task"):
+            else:
 
                 def emit_result(position, value, path=path):
-                    row, fragment = value.row, value.fragment
+                    row, fragment = value.row, value.fragment.finite
                     pointer = (
                         "/cancel_item"
                         if finite["type"] == "cancel_task"
@@ -794,8 +805,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                     nested = {}
                     if pointer == "/cancel_item":
                         withdrawals = ("withdrawals",)
-                        target = value.target
-                        if target["type"] == 3:
+                        if value.fragment.deferred[withdrawals] is not ArrayEmission.OMIT:
 
                             def members():
                                 for item in handle.related_rows(
@@ -824,7 +834,8 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                         else:
                             sub.omit(withdrawals)
                     yield from stream.open_object()
-                    yield from _write_fields(stream, sub, fragment, arrays=nested)
+                    yield from _write_fields(stream, sub, fragment, arrays=nested,
+                                             decisions=value.fragment.deferred)
                     yield from stream.close_object()
                     return sub.close_node()
 
@@ -833,21 +844,24 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                     emit_result,
                     None,
                 )
-            else:
-                gate.omit(path)
         yield from stream.open_object(identity=identity)
-        yield from _write_fields(stream, gate, finite, arrays=arrays)
+        yield from _write_fields(stream, gate, finite, arrays=arrays,
+                                 decisions=projected.deferred)
         for name, entity in projection_structure("action").entity_fields:
             path = (name,)
+            decision = projected.deferred[path]
+            if decision is ArrayEmission.OMIT:
+                gate.omit(path, projection_decision=decision)
+                continue
             identities = iter(_pages(selection, entity, identity))
             first = next(identities, None)
-            if first is None:
+            if first is None and decision is ArrayEmission.OMIT_EMPTY:
                 gate.omit(path, authority_end=ReadEnd(gate.binding, path, 0, None))
                 continue
             gate.open_array(path)
             yield from stream.open_array(name)
             count, last = 0, None
-            for child_id in chain((first,), identities):
+            for child_id in chain(() if first is None else (first,), identities):
                 facts = {}
                 (_merge_output if entity == "output" else _merge_delivery)(
                     repo, facts, child_id, boundary
@@ -908,7 +922,9 @@ def report_tokens(repo, spec, boundary, stream):
                 if entity == "plan":
                     histories[(entity, identity)] = repo.status_history(
                         entity, identity, boundary, facts["plans"][identity]["status"])
-                finite = _project(entity, identity, facts, status_histories=histories)
+                projected = _project(entity, identity, facts, status_histories=histories,
+                                     with_decisions=True)
+                finite = projected.finite
                 if entity == "plan":
                     node = gate.item_plan(path).begin(
                         gate.child_binding(path, identity), finite
@@ -916,9 +932,13 @@ def report_tokens(repo, spec, boundary, stream):
                     yield from stream.open_object(identity=identity)
                     yield from _write_fields(stream, node, finite)
                     action_path = ("actions",)
-                    actions = iter(_pages(selection, "action", identity))
+                    decision = projected.deferred[action_path]
+                    actions = iter(()) if decision is ArrayEmission.OMIT else iter(
+                        _pages(selection, "action", identity))
                     first_action = next(actions, None)
-                    if first_action is None:
+                    if decision is ArrayEmission.OMIT:
+                        node.omit(action_path, projection_decision=decision)
+                    elif first_action is None and decision is ArrayEmission.OMIT_EMPTY:
                         node.omit(
                             action_path,
                             authority_end=ReadEnd(node.binding, action_path, 0, None),
@@ -927,7 +947,7 @@ def report_tokens(repo, spec, boundary, stream):
                         node.open_array(action_path)
                         yield from stream.open_array("actions")
                         n, position = 0, None
-                        for action_id in chain((first_action,), actions):
+                        for action_id in chain(() if first_action is None else (first_action,), actions):
                             action_plan = node.item_plan(action_path)
                             receipt = yield from _write_action(
                                 repo,
