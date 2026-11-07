@@ -34,7 +34,7 @@ def _apply_origin(owned, origin):
 
 
 async def _pending(environment, *, second_origin=False):
-    target, _contents, runtime = await _published(environment)
+    target, _contents, runtime = await _published(environment, direct_session=True)
     owned = environment[1]
     if second_origin:
         await _accept(owned, "4", [{"name": "第二个撤回请求", "type": "cancel_task",
@@ -75,7 +75,7 @@ async def test_withdrawal_original_key_rejects_changed_full_input(environment, c
 
 
 async def test_withdrawal_result_cannot_reuse_requested_only_key(environment):
-    target, _contents, _runtime = await _published(environment)
+    target, _contents, _runtime = await _published(environment, direct_session=True)
     owned, repository = environment[1], OutputsRepository()
     _apply_origin(owned, owned.connection.execute("SELECT id FROM actions WHERE type=6").fetchone()[0])
     delivery_id = owned.connection.execute("SELECT id FROM deliveries ORDER BY id LIMIT 1").fetchone()[0]
@@ -122,11 +122,16 @@ async def test_one_withdrawal_result_finishes_all_existing_request_waiters(envir
 
 
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
-async def test_withdrawal_whole_waiter_group_recovers_original_key(environment, phase, capture_resources):
+@pytest.mark.parametrize("choice", [WithdrawalChoice.WITHDRAWN, WithdrawalChoice.FAILED, WithdrawalChoice.UNKNOWN])
+async def test_withdrawal_whole_waiter_group_recovers_original_key(environment, phase, choice, capture_resources):
     _target, ids, _runtime = await _pending(environment, second_origin=True)
     cfg, owned, _context, _driver = environment
     repository, key = OutputsRepository(), new_operation_key()
-    command = AdvanceWithdrawal(ids[0], WithdrawalChoice.WITHDRAWN, _NOW)
+    command = AdvanceWithdrawal(ids[0], choice, _NOW,
+        _error(ids[0]) if choice in (WithdrawalChoice.FAILED, WithdrawalChoice.UNKNOWN) else None)
+    waiter_ids = [row[0] for row in owned.connection.execute(
+        "SELECT id FROM cancel_delivery_items WHERE delivery_id=? ORDER BY id", (ids[0],))]
+    assert len(waiter_ids) == 2
     baseline = tuple(owned.connection.iterdump())
     faulty = (SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, "cancel_delivery_items") if phase == "projection" else
               _CommitFailure(owned.connection, phase == "commit_after"))
@@ -144,9 +149,20 @@ async def test_withdrawal_whole_waiter_group_recovers_original_key(environment, 
             assert tuple(reopened.connection.iterdump()) == baseline
         confirmed = repository.advance_withdrawal(command, key, reopened)
         assert confirmed.kind is DbOutcomeKind.COMPLETED, confirmed.error
-        assert reopened.connection.execute("SELECT status,error_code FROM cancel_delivery_items WHERE delivery_id=? ORDER BY id", (ids[0],)).fetchall() == [(2,None),(2,None)]
+        expected = (2, None) if choice is WithdrawalChoice.WITHDRAWN else (
+            4, item_error_id("cancel_delivery_items", "delivery_withdrawal_failed"
+                if choice is WithdrawalChoice.FAILED else "delivery_position_unconfirmed"))
+        assert reopened.connection.execute("SELECT status,error_code FROM cancel_delivery_items WHERE delivery_id=? ORDER BY id", (ids[0],)).fetchall() == [expected, expected]
+        if command.error is not None:
+            details = reopened.connection.execute("SELECT error_details_json FROM cancel_delivery_items WHERE delivery_id=? ORDER BY id", (ids[0],)).fetchall()
+            assert [json.loads(row[0]) for row in details] == [{"delivery_id": str(ids[0])}] * 2
+            assert json.loads(reopened.connection.execute("SELECT withdrawal_error_json FROM deliveries WHERE id=?", (ids[0],)).fetchone()[0]) == command.error
         events = saved_transaction_events(reopened.connection, key)
-        assert len(events) == 1 and len(events[0]["body"]["rows"]) == 3
+        assert len(events) == 1
+        assert events[0]["occurred_at"] == _NOW
+        assert (events[0]["type"], events[0]["reason"]) == (23, 7)
+        assert [(row["table"], row["id"]) for row in events[0]["body"]["rows"]] == [
+            ("deliveries", ids[0]), *[("cancel_delivery_items", waiter_id) for waiter_id in waiter_ids]]
         after = tuple(reopened.connection.iterdump())
         assert repository.advance_withdrawal(command, key, reopened).kind is DbOutcomeKind.COMPLETED
         assert tuple(reopened.connection.iterdump()) == after
