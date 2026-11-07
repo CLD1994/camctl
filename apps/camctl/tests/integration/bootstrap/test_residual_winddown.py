@@ -827,27 +827,40 @@ class TestResidualWinddown:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         due = _future_schedule(2)
+        first_due = datetime.strptime(due, "%Y-%m-%d %H:%M:%S") + timedelta(seconds=11)
+        next_due = first_due + timedelta(seconds=3)
         await _submit_plan(
             tmp_path, cfg, _WinddownCatalog(),
             _plan("1", _record_action("residue", due),
-                  _photo_action("first", due, max_delay_ms=2000),
-                  _photo_action("next", _future_schedule(6))))
+                  _photo_action("first", first_due.strftime("%Y-%m-%d %H:%M:%S"),
+                                max_delay_ms=2000),
+                  _photo_action("next", next_due.strftime("%Y-%m-%d %H:%M:%S"))))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
         driver = _ControlDouble(photo_activity_id=3)
         stopper = _StopDouble(failures=3, unconfirmed=1)
         query = _QueryDouble((1, 1, "idle"), paused=True)
-        clock = {"ns": time.monotonic_ns()}
+        clock = SessionClock()
         files = {3: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
         task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
+            None, cfg, _winddown_factory(driver, stopper, query, clock, files),
+            clock=clock)
         try:
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,), task=task)
-            await _exhaust_original_stop(db, clock, task=task)
+            clock.reach(due)
+
+            async def start_first():
+                clock.reach(first_due.strftime("%Y-%m-%d %H:%M:%S"))
+                await _await_query(
+                    db, "SELECT status FROM actions WHERE id = 2", (2,), task=task)
+
+            await _exhaust_original_stop(db, clock, task=task, after_second=start_first)
+            await asyncio.wait_for(query.entered.wait(), timeout=20.0)
             query.release.set()
             await _await_query(
-                db, "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'query/residual/2/1'", (2, 1), task=task)
+                db, "SELECT r.status, r.attempts_used, EXISTS(SELECT 1"
+                " FROM operation_attempts t WHERE t.run_id=r.id AND t.attempt_no=1"
+                " AND t.result_event_id IS NOT NULL) FROM operation_runs r"
+                " WHERE r.responsibility_key = 'query/residual/2/1'", (2, 1, 1), task=task)
+            clock.reach(next_due.strftime("%Y-%m-%d %H:%M:%S"))
             await _await_query(db, "SELECT status FROM actions WHERE id = 2", (5,), task=task)
             await _await_query(
                 db, "SELECT first_window_observed_at IS NOT NULL"
@@ -874,7 +887,6 @@ class TestResidualWinddown:
                            " WHERE responsibility_key = 'stop/1'") == (6, 3)
         finally:
             await _cancel_task(task)
-        close_runtime(deps)
 
     async def test_unconfirmed_stop_confirmed_by_query_releases(
             self, tmp_path: Path) -> None:

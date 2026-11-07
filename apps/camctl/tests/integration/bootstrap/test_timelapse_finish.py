@@ -15,6 +15,7 @@ from __future__ import annotations
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -203,13 +204,24 @@ def _run_session(deps, driver, results, *,
 
 
 def _run_clocked_session(cfg, catalog, driver, results, clock, *,
-                         wait_ms=2_000, extra_ms=0, check_config=None):
+                         wait_ms=2_000, extra_ms=0, check_config=None,
+                         stopper=None, cancel_flow_paths=None, settled_round=None):
     scheduling = capture_flow(_timelapse_factory(
         cfg, driver, results, wait_ms=wait_ms, extra_ms=extra_ms, clock=clock,
-        check_config=check_config))
+        check_config=check_config, stopper=stopper))
+    flows = {"scheduling": scheduling}
+    if cancel_flow_paths is not None:
+        flows["cancel"] = cancel_flow(
+            staging=Path(cfg.paths.staging), ready=Path(cancel_flow_paths[0]),
+            processing=Path(cancel_flow_paths[1]))
+    if settled_round is not None:
+        async def observe_round(_context):
+            await scheduling.settle()
+            settled_round.set()
+        flows["observed_round"] = observe_round
     context = session_context(
         cfg.paths.state_db, catalog=catalog, clock=clock,
-        flows={"scheduling": scheduling},
+        flows=flows,
         local_work=CombinedLocalWork((scheduling,)), poll_interval_s=0.1)
     return asyncio.create_task(run_session(context, None))
 
@@ -482,23 +494,31 @@ class TestTimelapseCancel:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog(stop_supported=True, duration_s=Decimal("600"))
+        due = _future_schedule(2)
+        cancel_due = (datetime.strptime(due, "%Y-%m-%d %H:%M:%S")
+                      + timedelta(seconds=3)).strftime("%Y-%m-%d %H:%M:%S")
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
         # 取消排期在发送之后、预计检查时间之前：停止由取消触发。
         await _submit_plan(
-            tmp_path, cfg, catalog, _cancel_plan("2", 1, _future_schedule(5)))
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+            tmp_path, cfg, catalog, _cancel_plan("2", 1, cancel_due))
         driver = _ActivityDriver()
         stopper = _StopDouble()
         # 已拍完文件在设备上：取消收尾的核实把它登记为正式产物。
         results = ResultsDouble({1: (_entry("sequence-1"),)})
-        task = _run_session(
-            deps, driver, results, stopper=stopper, wait_ms=600_000,
+        clock = SessionClock()
+        task = _run_clocked_session(
+            cfg, catalog, driver, results, clock, stopper=stopper, wait_ms=600_000,
             cancel_flow_paths=(cfg.paths.ready, cfg.paths.processing))
         try:
             # 等待中取消生效：不经目标时长立即停止，取消终态与已拍
             # 完产物同事务登记。
+            clock.reach(due)
+            await _await_query(
+                db, "SELECT expected_check_at IS NOT NULL FROM device_activities"
+                " WHERE action_id = 1", (1,))
+            clock.reach(cancel_due)
             await _await_query(
                 db, "SELECT status, cancel_requested FROM actions WHERE id = 1",
                 (6, 1))
@@ -520,7 +540,6 @@ class TestTimelapseCancel:
                 db, "SELECT status FROM cancel_items") == (3,)
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
     async def test_unstoppable_cancel_fails_and_task_completes(
             self, tmp_path: Path) -> None:
@@ -530,20 +549,28 @@ class TestTimelapseCancel:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
+        cancel_due = (datetime.strptime(due, "%Y-%m-%d %H:%M:%S")
+                      + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
         # 取消落在发送之后、预计检查时间之前：无停止能力被拒绝。
         await _submit_plan(
-            tmp_path, cfg, catalog, _cancel_plan("2", 1, _future_schedule(3)))
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+            tmp_path, cfg, catalog, _cancel_plan("2", 1, cancel_due))
         driver = _ActivityDriver()
         results = ResultsDouble({1: (_entry("sequence-1"),)})
-        task = _run_session(
-            deps, driver, results,
+        clock = SessionClock()
+        task = _run_clocked_session(
+            cfg, catalog, driver, results, clock,
             cancel_flow_paths=(cfg.paths.ready, cfg.paths.processing))
         try:
             # 拒绝取消是本次取消项的失败，不标记目标。
+            clock.reach(due)
+            await _await_query(
+                db, "SELECT expected_check_at IS NOT NULL FROM device_activities"
+                " WHERE action_id = 1", (1,))
+            clock.reach(cancel_due)
             await _await_query(
                 db, "SELECT status FROM actions WHERE name = 'cancel'", (4,))
             assert _scalar(
@@ -557,6 +584,7 @@ class TestTimelapseCancel:
             assert _scalar(
                 db, "SELECT cancel_requested FROM actions WHERE id = 1") == (0,)
             # 原任务继续等待、核实产物并登记正常结果。
+            clock.advance(1)
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
             assert _scalar(
                 db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1"
@@ -565,7 +593,6 @@ class TestTimelapseCancel:
                 db, "SELECT status FROM plans WHERE id = 1") == (3,)
         finally:
             await _cancel(task)
-        close_runtime(deps)
 
 
 class TestTimelapseSatisfiedFinishMultiple:
@@ -666,19 +693,21 @@ class TestTimelapseCrossRunBudget:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         catalog = _TimelapseCatalog()
+        due = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
         db = Path(cfg.paths.state_db)
         # 第一会话：长间隔保证观察窗口内只有一轮列举，随后可靠停止。
         results = ResultsDouble({1: (_entry("sequence-1"),)}, set_finalized=False)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
-        task = _run_session(
-            deps, driver, results,
+        clock = SessionClock()
+        task = _run_clocked_session(
+            cfg, catalog, driver, results, clock,
             check_config=AttemptConfig(
                 max_attempts=3, timeout_s=Decimal("10"),
                 retry_interval_s=Decimal("30")))
         try:
+            await _reach_check(db, clock, due)
             await _await_query(
                 db,
                 "SELECT status, attempts_used, retry_wait_required"
@@ -686,7 +715,6 @@ class TestTimelapseCrossRunBudget:
                 (2, 1, 1))
         finally:
             await _cancel(task)
-        close_runtime(deps)
         assert results.calls == [1]
         # 第一会话留下的责任事实固定：一轮已用、处于重试等待、无集合结论。
         assert _scalar(
@@ -698,18 +726,19 @@ class TestTimelapseCrossRunBudget:
         # 第二会话：本次上限生效。上调可继续尝试并按齐备集合成功；
         # 下调后无剩余名额，不再列举，按无法核实关闭。
         results.set_finalized = True
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        settled_round = asyncio.Event()
+        task = _run_clocked_session(
+            cfg, catalog, driver, results, clock, settled_round=settled_round,
             check_config=AttemptConfig(
                 max_attempts=new_limit, timeout_s=Decimal("10"),
                 retry_interval_s=Decimal("0.2")))
         try:
+            await asyncio.wait_for(settled_round.wait(), timeout=15.0)
+            clock.advance_ns(200_000_000)
             await _await_query(
                 db, "SELECT status FROM actions WHERE id = 1", (final_action,))
         finally:
             await _cancel(task)
-        close_runtime(deps)
         assert _scalar(
             db,
             "SELECT status, attempts_used FROM operation_runs"
