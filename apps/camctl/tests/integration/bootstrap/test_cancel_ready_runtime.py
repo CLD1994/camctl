@@ -1,6 +1,7 @@
 """真实默认取消消费者必须采用 ready 撤回实际结果。"""
 
 from dataclasses import replace
+import os
 from pathlib import Path
 
 import pytest
@@ -56,12 +57,13 @@ async def test_cancel_published_delivery_uses_actual_withdrawal_result(environme
         for name in contents:
             (ready / name).rename(processing / name)
     elif position == "unlink_failed":
-        original_remove = handoff._remove
-        def refused(path):
-            if path.name in contents:
+        original_remove = os.remove
+        def refused(path, *args, **kwargs):
+            target = Path(path)
+            if target.parent == ready and target.name in contents:
                 raise OSError("withdraw unlink refused")
-            return original_remove(path)
-        monkeypatch.setattr(handoff, "_remove", refused)
+            return original_remove(path, *args, **kwargs)
+        monkeypatch.setattr(os, "remove", refused)
 
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime
@@ -175,18 +177,19 @@ async def test_default_session_cancel_waits_for_actual_withdrawal_and_saves_it(e
     monkeypatch.setattr(BusinessDatabase, "open", classmethod(track_open))
     monkeypatch.setattr(FileTaskExecutor, "run_owned_async_file_task", track_task)
     entered, release = threading.Event(), threading.Event()
-    original_remove = handoff._remove
+    original_remove = os.remove
     removed = []
 
-    def remove(path):
-        if path.name not in contents:
-            return original_remove(path)
+    def remove(path, *args, **kwargs):
+        target = Path(path)
+        if target.parent != ready or target.name not in contents:
+            return original_remove(path, *args, **kwargs)
         entered.set()
         assert release.wait(10), "actual withdrawal was never released"
-        removed.append(path.name)
-        original_remove(path)
+        removed.append(target.name)
+        original_remove(path, *args, **kwargs)
 
-    monkeypatch.setattr(handoff, "_remove", remove)
+    monkeypatch.setattr(os, "remove", remove)
     deps = build_runtime(CommandMode.RUN, session_cfg, catalog=Catalog())
     task = asyncio.create_task(run_default_session(
         deps, None, _registry(driver).entry("camctl-adb"), poll_interval_s=0.001))
@@ -248,18 +251,19 @@ async def test_ready_disappears_during_actual_withdrawal_uses_new_reliable_posit
     cfg, owned, context, driver = environment
     _target, contents, _ = await _published(environment, direct_session=True)
     ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)
-    original_remove = handoff._remove
+    original_remove = os.remove
 
-    def taken(path):
-        if path.name not in contents:
-            return original_remove(path)
+    def taken(path, *args, **kwargs):
+        target = Path(path)
+        if target.parent != ready or target.name not in contents:
+            return original_remove(path, *args, **kwargs)
         if after_missing == "processing":
-            path.rename(processing / path.name)
+            target.rename(processing / target.name)
         else:
-            original_remove(path)
+            original_remove(path, *args, **kwargs)
         raise FileNotFoundError("host already took ready file")
 
-    monkeypatch.setattr(handoff, "_remove", taken)
+    monkeypatch.setattr(os, "remove", taken)
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime
     from .test_output_binding_changes import Catalog
