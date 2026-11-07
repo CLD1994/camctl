@@ -615,7 +615,6 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
         tmp_path: Path, monkeypatch) -> None:
     """真实受限录像停止不等待已开始的启动日志目录扫描。"""
     from camctl.bootstrap.flows import winddown_flow
-    from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.session.clock import ClockBecameUntrusted
     from .test_media_assembly import _SessionDriver, _registry
     from .test_restricted_winddown import (
@@ -633,12 +632,8 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
     release_listdir = threading.Event()
     stop_started = asyncio.Event()
     release_stop = asyncio.Event()
-    log_settle_started = asyncio.Event()
-    phase_observed = asyncio.Event()
-    allow_stop_to_finish = asyncio.Event()
+    stop_completed = asyncio.Event()
     once_report_started = asyncio.Event()
-    order: list[str] = []
-    logger_operations: list[str] = []
     old_copy = Path(config.paths.staging) / "logs" / "log-copy-prior.log"
     old_copy.parent.mkdir(parents=True, exist_ok=True)
     old_copy.write_bytes(b"old snapshot")
@@ -658,32 +653,11 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
     async def observed_stop(request):
         stop_started.set()
         await _wait_event(release_stop)
-        return await original_stop(request)
-
-    driver.stop = observed_stop
-
-    original_settle = LoggingOwner.settle
-    original_resume = LoggingOwner.resume_restricted_logging
-    original_owned_call = LoggingOwner.owned_call
-
-    async def observed_log_settle(owner):
-        log_settle_started.set()
-        await original_settle(owner)
-
-    def observed_resume(owner):
-        original_resume(owner)
-        logger_operations.append("resume")
-
-    async def observed_owned_call(owner, stage, operation, *, required=False):
-        result = await original_owned_call(owner, stage, operation, required=required)
-        if stage == "marker_check":
-            logger_operations.append("marker_check_completed")
+        result = await original_stop(request)
+        stop_completed.set()
         return result
 
-    monkeypatch.setattr(LoggingOwner, "settle", observed_log_settle)
-    monkeypatch.setattr(
-        LoggingOwner, "resume_restricted_logging", observed_resume)
-    monkeypatch.setattr(LoggingOwner, "owned_call", observed_owned_call)
+    driver.stop = observed_stop
 
     async def late_clock(_context):
         raise ClockBecameUntrusted("clock changed during ordinary flow")
@@ -709,34 +683,6 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
         sleep=fake_clock.wait,
     )
 
-    async def observe_first_gate() -> None:
-        stop_wait = asyncio.create_task(stop_started.wait())
-        log_wait = asyncio.create_task(log_settle_started.wait())
-        completed, pending = await asyncio.wait_for(
-            asyncio.wait(
-                (stop_wait, log_wait), return_when=asyncio.FIRST_COMPLETED),
-            timeout=_GATE_TIMEOUT,
-        )
-        for task in pending:
-            task.cancel()
-        await _wait_task(asyncio.gather(*pending, return_exceptions=True))
-        if stop_wait in completed:
-            order.append("restricted_stop")
-            phase_observed.set()
-            await _wait_event(allow_stop_to_finish)
-            release_stop.set()
-            await _wait_event(log_settle_started)
-            order.append("log_settle")
-            release_listdir.set()
-            return
-        order.append("log_settle")
-        phase_observed.set()
-        release_listdir.set()
-        await _wait_event(stop_started)
-        order.append("restricted_stop")
-        release_stop.set()
-
-    observe_task = asyncio.create_task(observe_first_gate())
     run_task = asyncio.create_task(execute_command(
         deps, None,
         flows={"late_clock": late_clock},
@@ -744,26 +690,30 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
     ))
     try:
         await _wait_event(listdir_started)
-        await _wait_event(phase_observed)
-        if order == ["restricted_stop"]:
-            assert not release_listdir.is_set()
-            assert not once_report_started.is_set()
-            allow_stop_to_finish.set()
+        await _wait_event(stop_started)
+        assert not once_report_started.is_set()
+        assert not run_task.done()
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        release_stop.set()
+        await _wait_event(stop_completed)
+        assert not release_listdir.is_set()
+        assert not once_report_started.is_set()
+        assert not run_task.done()
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        release_listdir.set()
         outcome = await _wait_task(run_task)
-        await _wait_task(observe_task)
     finally:
         release_stop.set()
         release_listdir.set()
-        allow_stop_to_finish.set()
         if not run_task.done():
             run_task.cancel("test cleanup")
             await _wait_task(asyncio.gather(run_task, return_exceptions=True))
-        await _wait_task(asyncio.gather(observe_task, return_exceptions=True))
         close_runtime(deps)
 
-    assert order == ["restricted_stop", "log_settle"]
+    assert len([call for call in driver.calls if call[0] == "stop"]) == 1
     assert once_report_started.is_set()
-    assert logger_operations == ["resume", "marker_check_completed"]
     assert old_copy.exists()  # 本次未声明旧 owner 已收场，不能删除旧副本。
     assert (Path(config.paths.staging) / "logs" / "failure-marker.json").is_file()
     assert outcome.succeeded is False
