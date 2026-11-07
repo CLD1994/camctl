@@ -550,7 +550,7 @@ async def test_cancel_capture_takes_over_the_actual_completed_read(inspection_wo
         _cancel(owned, runtime, original.action_id)
     finally:
         release.set()
-    await task
+        await asyncio.wait_for(task, timeout=10)
     await capture_handler('camera_record')(original.action_id, runtime)
     facts = read_inspection_for_member(original.action_id, original.member_id, owned)
     assert facts.inspection.state == int(enum_for('segment_inspections.state').FAILED)
@@ -616,3 +616,47 @@ async def test_host_local_recovers_original_ticket_at_eof_after_uncommitted_read
     assert digest.calls == 1 and tools.requests == [False]
     assert owned.connection.execute('SELECT id,attempt_no,intent_event_id FROM operation_attempts WHERE run_id=?', (run[0],)).fetchall() == [original_attempt]
     assert owned.connection.execute('SELECT slot_device_id FROM file_copies WHERE id=?', (copy_id,)).fetchone()[0] is None
+
+
+async def test_cancel_after_read_end_before_result_is_taken_over(inspection_world, capture_resources, monkeypatch):
+    import asyncio
+    from threading import Event
+    from camctl.capture.handlers import capture_handler
+    from camctl.contracts.enums import enum_for
+    from camctl.persistence.repositories import read_end
+    from ..persistence.test_segment_result_versions import _cancel
+    owned, roots, _, build, _, source_runtime = inspection_world
+    _, request, _, _, _ = build()
+    runtime, driver = await assembled_inspections(capture_resources, owned, roots, source_runtime)
+    original = request()
+    save = read_end.save_read_end
+    reached, release = Event(), Event()
+    observed = []
+
+    def wait_at_read_end(command, key, connection):
+        observed.append((command, key))
+        reached.set()
+        if not release.wait(10):
+            raise TimeoutError('测试没有释放原读取结束保存')
+        return save(command, key, connection)
+
+    monkeypatch.setattr(read_end, 'save_read_end', wait_at_read_end)
+    task = asyncio.create_task(inspect_segment(runtime.media, original))
+    try:
+        assert await asyncio.to_thread(reached.wait, 10), '实际读取未到达结束依据保存'
+        assert driver.reads.offsets == [0] and driver.digest_calls == 0
+        _cancel(owned, runtime, original.action_id)
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=10)
+    await capture_handler('camera_record')(original.action_id, runtime)
+    facts = read_inspection_for_member(original.action_id, original.member_id, owned)
+    assert facts.inspection.state == int(enum_for('segment_inspections.state').UNCONFIRMED)
+    assert facts.inspection.result_json['failure'] == {'code': 'inspection_unconfirmed', 'reason': 'source_canceled'}
+    assert facts.copy.committed_bytes == len(_CONTENT)
+    assert owned.connection.execute('SELECT slot_device_id FROM file_copies WHERE id=?', (facts.copy.copy_id,)).fetchone()[0] is None
+    run = owned.connection.execute('SELECT id,status,attempts_used FROM operation_runs WHERE copy_id=?', (facts.copy.copy_id,)).fetchone()
+    assert run[1:] == (int(enum_for('operation_runs.status').CANCELED), 1)
+    assert owned.connection.execute('SELECT status FROM operation_attempts WHERE run_id=?', (run[0],)).fetchone() == (int(enum_for('operation_attempts.status').SUCCEEDED),)
+    assert len(observed) == 1 and observed[0][0].ticket.run_id == run[0]
+    assert driver.reads.offsets == [0] and driver.digest_calls == 1
