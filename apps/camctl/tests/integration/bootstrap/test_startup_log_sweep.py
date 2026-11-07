@@ -101,6 +101,19 @@ def _seed_log_paths(config) -> tuple[Path, Path, Path, Path]:
     return old_copy, old_temp, formal_marker, unknown
 
 
+def _record_directory_scans(monkeypatch, logs_dir: Path) -> list[Path]:
+    scans: list[Path] = []
+    original_listdir = os.listdir
+
+    def record_listdir(path):
+        if Path(path) == logs_dir:
+            scans.append(Path(path))
+        return original_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", record_listdir)
+    return scans
+
+
 async def _run(config, *, boundary: RecoveryBoundary | None = None):
     kwargs = {} if boundary is None else {"recovery_boundary": boundary}
     deps = build_runtime(CommandMode.RUN, config, **kwargs)
@@ -163,10 +176,13 @@ async def test_failed_old_copy_delete_is_retried_by_next_run(
     old_copy, old_temp, formal_marker, unknown = _seed_log_paths(config)
     original_unlink = os.unlink
     failure_marker = "controlled old-copy unlink failure"
+    attempts: list[Path] = []
 
     def deny_old_copy(path, *args, **kwargs):
         if Path(path) == old_copy:
-            raise PermissionError(failure_marker)
+            attempts.append(Path(path))
+            if len(attempts) == 1:
+                raise PermissionError(failure_marker)
         return original_unlink(path, *args, **kwargs)
 
     async def run_without_report_recovery():
@@ -183,6 +199,7 @@ async def test_failed_old_copy_delete_is_retried_by_next_run(
         patch.setattr(os, "unlink", deny_old_copy)
         first = await run_without_report_recovery()
     assert first.succeeded is True
+    assert attempts == [old_copy]
     assert old_copy.exists()
     assert not old_temp.exists()
     assert formal_marker.exists() and unknown.exists()
@@ -196,10 +213,11 @@ async def test_failed_old_copy_delete_is_retried_by_next_run(
 
 
 async def test_session_lock_conflict_stops_before_startup_sweep(
-        tmp_path: Path) -> None:
+        tmp_path: Path, monkeypatch) -> None:
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     old_copy, old_temp, formal_marker, unknown = _seed_log_paths(config)
+    scans = _record_directory_scans(monkeypatch, old_copy.parent)
     deps = build_runtime(
         CommandMode.RUN, config,
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
@@ -213,6 +231,7 @@ async def test_session_lock_conflict_stops_before_startup_sweep(
 
     assert outcome.succeeded is False
     assert outcome.reason == "lock_error"
+    assert scans == []
     assert all(path.exists() for path in (old_copy, old_temp, formal_marker, unknown))
 
 
@@ -288,6 +307,7 @@ async def test_ineligible_database_preserves_startup_candidates(
         tmp_path: Path, monkeypatch, database_state: str) -> None:
     config = _config_for(tmp_path)
     candidates = _seed_log_paths(config)
+    scans = _record_directory_scans(monkeypatch, candidates[0].parent)
     state_path = Path(config.paths.state_db).expanduser().resolve()
     if database_state == "nonregular":
         state_path.mkdir()
@@ -315,6 +335,7 @@ async def test_ineligible_database_preserves_startup_candidates(
 
     assert outcome.succeeded is False
     assert outcome.reason == "state_db_error"
+    assert scans == []
     assert all(path.exists() for path in candidates)
     lease = acquire_session(deps.session_lock)
     lease.close()
