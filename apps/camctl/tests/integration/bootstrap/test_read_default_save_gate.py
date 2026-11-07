@@ -1,4 +1,4 @@
-"""原 Finish 核实持续未知或原 slot 保存回滚时，默认入口保留责任并停止筛选。"""
+"""原 Finish 核实未知或摘要校验保存回滚时，入口保留原责任。"""
 
 import pytest
 
@@ -13,14 +13,14 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.parametrize("entrance", ["normal", "residual", "restricted"])
-@pytest.mark.parametrize("branch", ["finish_unknown", "slot_rollback"])
+@pytest.mark.parametrize("branch", ["finish_unknown", "verification_rollback"])
 async def test_default_read_save_failure_keeps_original_responsibility(pipeline, capture_resources, monkeypatch, entrance, branch):
-    from ..support.bootstrap_consumers import StorageGate, held_read
+    from ..support.bootstrap_consumers import StorageGate, held_default_read
 
-    stage, committed = ("finish", True) if branch == "finish_unknown" else ("slot", False)
-    world, ticket, finishes, slots = await held_read(pipeline, capture_resources, monkeypatch, stage, committed)
+    stage, committed = ("finish", True) if branch == "finish_unknown" else ("verification", False)
+    world, ticket, ends, finishes, verifications = await held_default_read(pipeline, capture_resources, monkeypatch, stage, committed)
     owned = world.owned
-    inputs = finishes if stage == "finish" else slots
+    inputs = finishes if stage == "finish" else verifications
     request, key = inputs[0]
     gate = StorageGate(original_key=stage == "finish", unknown=stage == "finish",
         table="file_copies", column="slot_device_id")
@@ -36,10 +36,8 @@ async def test_default_read_save_failure_keeps_original_responsibility(pipeline,
         expected = DbOutcomeKind.UNKNOWN if stage == "finish" else DbOutcomeKind.ROLLED_BACK
         assert len(gate.receipts) == 1 and gate.receipts[0].kind is expected
         assert gate.hits == gate.rollbacks == 1
-        if stage == "finish":
-            assert len(slots) == 0
-        else:
-            assert len(finishes) == 1
+        assert len(ends) == 1
+        assert len(finishes) == (2 if stage == "finish" else 0)
         assert (saved_transaction_events(owned.connection, key) is not None) is committed
         assert before == {table: _snapshot(owned, table, identity) for table, identity in (
             ("actions", 1), ("recording_processing", 1),

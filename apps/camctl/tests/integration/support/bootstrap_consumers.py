@@ -451,69 +451,6 @@ def save_legacy_capture_cancel(world, *, occurred_at):
     return key
 
 
-async def held_read(pipeline, resources, monkeypatch, stage, after_commit):
-    """实际 READ 完整结束后，在原 Finish 或释放读取机会的真实提交处中断。"""
-    from camctl.capture.media_flow import run_recording_media
-    from camctl.contracts.values import ConsistencyError
-    from camctl.persistence.repositories.operations import OperationRepository
-    from camctl.persistence.repositories.outputs import OutputsRepository
-    from camctl.persistence.transaction import saved_transaction_events
-
-    world = await consumer_world(pipeline, resources)
-    finishes, slots = [], []
-    actual_finish, actual_slot = OperationRepository.finish_attempt, OutputsRepository.release_read_slot
-
-    def submit(method, command, key, current, inputs, operation):
-        inputs.append((command, key))
-        if stage == operation and len(inputs) == 1:
-            fault = TransactionFault(current.connection, after_commit=after_commit)
-            result = method(command, key, replace(current, connection=fault))
-            assert result.kind is DbOutcomeKind.UNKNOWN, result
-            assert fault.commit_calls == 1
-            assert current.connection.in_transaction is not after_commit
-            return result
-        return method(command, key, current)
-
-    def finish(repository, command, key, current):
-        if command.ticket.operation != "read":
-            return actual_finish(repository, command, key, current)
-        return submit(lambda *args: actual_finish(repository, *args), command, key,
-            current, finishes, "finish")
-
-    def slot(repository, command, key, current):
-        return submit(lambda *args: actual_slot(repository, *args), command, key,
-            current, slots, "slot")
-
-    monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
-    monkeypatch.setattr(OutputsRepository, "release_read_slot", slot)
-    with pytest.raises(ConsistencyError):
-        await run_recording_media(world.runtime.media, 1, 1, world.source_id)
-    assert len(world.reader.requests) == len(finishes) == 1
-    ticket = world.reader.requests[0][0]
-    assert world.reader.requests[0][2][:3] == (1, None, 1)
-    assert world.ends and all(end.stopped and end.error is None and end.bytes_read == len(_CONTENT)
-                              for end in world.ends)
-    assert finishes[0][0].ticket == ticket and finishes[0][0].occurred_at == world.wall[0]
-    assert world.owned.connection.execute(
-        "SELECT committed_bytes,source_size,verification_state FROM file_copies WHERE id=?",
-        (int(ticket.target_id),)).fetchone() == (len(_CONTENT), len(_CONTENT),
-            int(enum_for("file_copies.verification_state").MATCHED))
-    assert world.tools() == []
-    inputs = finishes if stage == "finish" else slots
-    assert len(inputs) == 1
-    await world.reconnect()
-    assert (saved_transaction_events(world.owned.connection, inputs[0][1]) is not None) is after_commit
-    assert world.owned.connection.execute(
-        "SELECT status FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-        (ticket.run_id, ticket.attempt_id)).fetchone() == (
-            1 if stage == "finish" and not after_commit else 2,)
-    assert world.owned.connection.execute("SELECT slot_device_id FROM file_copies WHERE id=?",
-        (int(ticket.target_id),)).fetchone() == (None if stage == "slot" and after_commit else "cam-1",)
-    world.wall[0] += 1000
-    world.prime_clock()
-    return world, ticket, finishes, slots
-
-
 async def held_default_read(pipeline, resources, monkeypatch, stage, after_commit):
     """在完整读取结束依据或原尝试结果的真实事务处中断。"""
     from camctl.capture.media_flow import run_recording_media
@@ -523,11 +460,15 @@ async def held_default_read(pipeline, resources, monkeypatch, stage, after_commi
     from camctl.persistence.transaction import saved_transaction_events
 
     world = ConsumerWorld(pipeline, resources)
-    world.entry = replace(world.entry, declaration=replace(world.entry.declaration, digest_supported=False))
+    if stage == "end":
+        world.entry = replace(world.entry, declaration=replace(world.entry.declaration, digest_supported=False))
     world.factory = world.new_factory()
     await world.start()
-    ends, finishes = [], []
+    from camctl.persistence.repositories.outputs import OutputsRepository
+
+    ends, finishes, verifications = [], [], []
     actual_end, actual_finish = read_end.save_read_end, OperationRepository.finish_attempt
+    actual_verification = OutputsRepository.save_verification
 
     def submit(method, request, key, owned, inputs, target):
         inputs.append((request, key))
@@ -546,21 +487,35 @@ async def held_default_read(pipeline, resources, monkeypatch, stage, after_commi
             return actual_finish(repository, request, key, owned)
         return submit(lambda *args: actual_finish(repository, *args), request, key, owned, finishes, "finish")
 
+    def verification(repository, request, key, owned):
+        if stage == "verification" and not verifications:
+            state = owned.connection.execute(
+                "SELECT read_end_event_id,source_sha256,slot_device_id FROM file_copies WHERE id=?",
+                (request.copy_id,)).fetchone()
+            assert state[0] is not None and state[1:] == (None, "cam-1")
+            assert saved_transaction_events(owned.connection, ends[0][1]) is not None
+        return submit(lambda *args: actual_verification(repository, *args), request, key, owned,
+            verifications, "verification")
+
     monkeypatch.setattr(read_end, "save_read_end", save_end)
     monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
+    monkeypatch.setattr(OutputsRepository, "save_verification", verification)
     with pytest.raises(ConsistencyError):
         await run_recording_media(world.runtime.media, 1, 1, world.source_id)
     assert len(world.reader.requests) == len(world.ends) == 1
     ticket = world.reader.requests[0][0]
     assert world.ends[0].stopped and world.ends[0].error is None and world.ends[0].bytes_read == len(_CONTENT)
-    inputs = ends if stage == "end" else finishes
-    assert len(inputs) == 1 and inputs[0][0].ticket == ticket
+    assert [name for name, _ in world.driver.calls] == ([] if stage == "end" else ["digest"])
+    inputs = {"end": ends, "finish": finishes, "verification": verifications}[stage]
+    assert len(inputs) == 1
+    assert (inputs[0][0].copy_id == int(ticket.target_id) if stage == "verification"
+            else inputs[0][0].ticket == ticket)
     assert inputs[0][0].occurred_at == world.wall[0]
     await world.reconnect()
     assert (saved_transaction_events(world.owned.connection, inputs[0][1]) is not None) is after_commit
-    expected_slot = "cam-1" if stage == "end" and not after_commit else None
+    expected_slot = "cam-1" if stage in ("end", "verification") and not after_commit else None
     assert world.owned.connection.execute("SELECT slot_device_id FROM file_copies WHERE id=?",
         (int(ticket.target_id),)).fetchone() == (expected_slot,)
     world.wall[0] += 1000
     world.prime_clock()
-    return world, ticket, ends, finishes
+    return world, ticket, ends, finishes, verifications
