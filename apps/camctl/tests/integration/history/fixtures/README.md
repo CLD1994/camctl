@@ -21,7 +21,13 @@ PYTHONPATH="$PWD/apps/camctl/src:$PWD/apps/camctl/tests" /workspaces/camctl/apps
 
 真实来源见证另行生成 1000 个成员，验证 128 项写批，以及第 999、1000 个成员跨越两个设备目录，并核对完整成员、缺口和快照。固定样本仍保留 256 和 2048 项，后者的规模不因真实来源见证调整而改变。
 
-读取测试将样本解压为独立副本，以只读连接核对格式、完整性及数量，关闭该连接后启动独立受限业务进程。业务进程按每页最多 7 项读取全部成员和缺口，并逐块写出快照；组外核对全部分页与快照行、数据库身份集合和成员顺序。预算测试与开启 `tracemalloc` 的增长诊断分别启动业务进程；诊断数据用于分析，不作为整组预算峰值或增长验收结论。
+读取测试将样本解压为独立副本，以只读连接核对格式、完整性及数量，关闭该连接后启动独立受限业务进程。业务进程按每页最多 7 项读取全部成员和缺口，并逐块写出快照；组外核对全部分页与快照行、数据库身份集合和成员顺序。默认预算测试不启用 `tracemalloc`；按需启用增长诊断时，测试在独立受限业务进程中记录观测值。诊断数据用于分析，不作为增长验收结论，诊断耗时不能代表普通读取耗时。
+
+在仓库根目录使用已准备的 Python 3.11，可按需对两个固定规模运行增长诊断。该命令仍执行相同的 2 GiB 合计预算和完整结果核对，并在结果与计时收据中标明诊断已启用：
+
+```bash
+CAMCTL_HISTORY_GROWTH_DIAGNOSTICS=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH="$PWD/apps/camctl/src:$PWD/apps/camctl/tests" /workspaces/camctl/apps/camctl/.venv311/bin/python scripts/run-memory-budget.py --camctl-memory-limit 2GiB -- /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p pytest_asyncio.plugin -p no:cacheprovider apps/camctl/tests/integration/history/test_record_segment_history.py::test_large_segment_history_budget -q -s
+```
 
 使用 Python 3.11 并同步资源后，可分别生成一个尚不存在的输出目录：
 

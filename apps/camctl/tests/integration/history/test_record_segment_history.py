@@ -632,13 +632,13 @@ async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
 
 
 @pytest.mark.parametrize('size',[256,2048])
-@pytest.mark.parametrize('diagnostics',[False,True],ids=['budget','growth-diagnostic'])
-def test_large_segment_history_budget(tmp_path,size,diagnostics):
+def test_large_segment_history_budget(tmp_path,size):
     """独立进程在合计预算内消费全部分页和快照，组外核对输出。"""
     import json, os, sys, time
     from pathlib import Path
     from ..support.source_capacity import memory_budget_backend
     from ..support.segment_history_corpus import prepare_copy, verify_output
+    diagnostics=os.environ.get('CAMCTL_HISTORY_GROWTH_DIAGNOSTICS')=='1'
     backend=memory_budget_backend()
     budget=backend.get_budget_config()
     backend.ensure_memory_budget_available(budget)
@@ -665,7 +665,10 @@ def test_large_segment_history_budget(tmp_path,size,diagnostics):
     assert evidence['limit_bytes']==evidence['combined_limit_bytes']==budget.limit_bytes
     assert evidence['combined_peak_bytes']<=budget.limit_bytes
     assert evidence['events'].get('oom_kill',evidence['events'].get('oom',0))==0
-    print('SEGMENT_HISTORY_BUDGET',json.dumps({'count':size,'prepare_seconds':prepare_seconds,
+    result=json.loads((directory/'result.json').read_text())
+    assert result['diagnostics_enabled'] is diagnostics
+    timing={'count':size,'diagnostics_enabled':diagnostics,'prepare_seconds':prepare_seconds,
         'run_seconds':run_seconds,'verify_seconds':time.perf_counter()-started,
-        'diagnostics':json.loads((directory/'result.json').read_text())['diagnostics'],
-        'evidence':evidence}),flush=True)
+        'diagnostics':result['diagnostics'],'evidence':evidence}
+    (tmp_path/'capacity-timing.json').write_text(json.dumps(timing,ensure_ascii=False,indent=2))
+    print('SEGMENT_HISTORY_BUDGET',json.dumps(timing,ensure_ascii=False),flush=True)

@@ -57,7 +57,7 @@ def main():
         finally:prepared.close()
     sample('closed')
     (directory/'result.json').write_text(json.dumps({'counts':counts,'snapshot_length':length,
-        'diagnostics':measurements}))
+        'diagnostics_enabled':diagnostics,'diagnostics':measurements}))
 
 
 if __name__ == '__main__':
