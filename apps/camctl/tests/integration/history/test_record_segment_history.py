@@ -360,20 +360,29 @@ async def test_member_pages_use_device_order_when_rows_were_saved_in_reverse_ord
     finally:owned.connection.close()
 
 
+def _finish_recording(owned, repo, ref):
+    """通过正式分段收场仓储发布已固定的集合。"""
+    from camctl.outputs.catalog import OutputKind
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from ..persistence.test_segment_storage import _candidate_drafts
+    from ..persistence.test_segment_transaction_batches import _request_for
+    row=repo.read_set(ref,owned)
+    original_count=sum(item.kind is OutputKind.ORIGINAL for item in _candidate_drafts(repo,ref,owned))
+    request=_request_for(ref,row,_RESULT_TIME,repo.read_assessment(ref,owned),original_count)
+    _ok(CaptureRepository().finish_segment_recording(request,new_operation_key(),owned))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('scope',['UNKNOWN','EMPTY','NONEMPTY'])
 async def test_published_marker_scope_and_independent_files_remain_at_same_h(tmp_path,scope):
-    from ..persistence.test_segment_storage import _assessed_world,_completion_command
+    from ..persistence.test_segment_storage import _assessed_world
     from camctl.capture.segment_models import DefaultScopeState
     from camctl.capture.files import FilePresenceSave,FileChecksumSave
     from camctl.persistence.repositories.capture import CaptureRepository
-    from camctl.persistence.transaction import commit_operation
     from camctl.history.snapshots import prepare_snapshot
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState[scope])
     try:
-        key=new_operation_key()
-        receipt=commit_operation(_completion_command(owned,ref,members,_RESULT_TIME,key),key,owned)
-        assert receipt.kind == 'completed', receipt.error
+        _finish_recording(owned,repo,ref)
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         boundary=history.current_boundary()
         with history.open_segment_history(ref.action_id,boundary,batch_size=1) as handle:
@@ -546,18 +555,15 @@ async def test_connection_failure_is_reported_and_later_read_recovers(tmp_path,m
 
 @pytest.mark.asyncio
 async def test_current_keeps_h_when_completion_commits_between_candidate_pages(tmp_path,monkeypatch):
-    from ..persistence.test_segment_storage import _assessed_world,_completion_command
+    from ..persistence.test_segment_storage import _assessed_world
     from camctl.capture.segment_models import DefaultScopeState
-    from camctl.persistence.transaction import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     try:
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         boundary=history.current_boundary()
         status=owned.connection.execute('SELECT status FROM actions WHERE id=?',(ref.action_id,)).fetchone()[0]
         def complete():
-            key=new_operation_key()
-            receipt=commit_operation(_completion_command(owned,ref,members,_RESULT_TIME,key),key,owned)
-            assert receipt.kind == 'completed',receipt.error
+            _finish_recording(owned,repo,ref)
         commits=_after_read_transactions(monkeypatch,history.path,4,complete)
         with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=1) as handle:
             assert handle.active_ref() is None
