@@ -924,10 +924,12 @@ async def test_cancel_during_open_settlement_stops_new_work_and_waits(
 
         async def settle(self) -> None:
             self.settle_calls += 1
+            attempt = self.settle_calls
             self.settle_started.set()
             if self.gated:
                 await _wait_event(release_settlement)
-            self.settle_finished.set()
+            if attempt == 1:
+                self.settle_finished.set()
 
     class LoggingOwner(Owner):
         def __init__(self) -> None:
@@ -954,6 +956,9 @@ async def test_cancel_during_open_settlement_stops_new_work_and_waits(
         await _wait_event(business.settle_started)
         assert flow_completed.is_set()
         assert not business.settle_finished.is_set()
+        assert not business.stopped.is_set()
+        assert not logging.stopped.is_set()
+        assert not logging.startup_cancelled.is_set()
         assert not task.done()
         with pytest.raises(SessionLockConflictError):
             acquire_session(context.paths.session_lock)
