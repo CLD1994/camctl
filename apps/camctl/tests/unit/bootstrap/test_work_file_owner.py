@@ -168,7 +168,8 @@ async def test_local_work_settlement_reports_each_unconfirmed_media_save(monkeyp
                 for identity in (1, 2)]
     for command in commands:
         assert (await saves.save_check_result(command)).disposition is SaveDisposition.UNKNOWN
-    calls = repository.save_check_result.call_args_list
+    calls = tuple(repository.save_check_result.call_args_list)
+    assert len(calls) == 2
     keys = [call.args[1] for call in calls]
     assert [call.args[0] for call in calls] == commands
     assert keys[0] != keys[1]
@@ -200,4 +201,4 @@ async def test_local_work_settlement_reports_each_unconfirmed_media_save(monkeyp
     assert work.required_settlements() == 2
     assert database.read.await_count == 2
     assert database.write.await_count == 2
-    assert repository.save_check_result.call_args_list == calls
+    assert tuple(repository.save_check_result.call_args_list) == calls
