@@ -136,21 +136,30 @@ def _media_options(tools, *, read_driver=None, segment_size=None, **overrides):
 
 async def _overrun_recording(
     tmp_path, monkeypatch, values, *, catalog=None, fix_baseline=True, read_driver=None, segment_size=None,
-    recovery_resources=None,
+    recovery_resources=None, retry_stop=False,
 ):
     catalog = Action6RecordCatalog() if catalog is None else catalog
     catalog.duration_s = Decimal("60")
     wall, mono = [_NOW], [5_000_000_000]
     stopper = create_autospec(StopDriver, instance=True)
-    stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
-        returned("stop", "stop_confirmed", request.ticket.target_id))
+    async def stop(request):
+        if retry_stop and stopper.stop.await_count == 1:
+            from .test_call_result_save import _outcome
+
+            return DeviceCallResult.from_outcome(_outcome("stop"))
+        return DeviceCallResult.from_outcome(
+            returned("stop", "stop_confirmed", request.ticket.target_id))
+
+    stopper.stop.side_effect = stop
     result_port, evidence = _result_setup()
     tools = _ProbeTools(values, monkeypatch)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=catalog, start=False,
         runtime_options=_media_options(tools, read_driver=read_driver, segment_size=segment_size,
             results=result_port, evidence=evidence, wall_us=lambda: wall[0],
-            monotonic_ns=lambda: mono[0], stopper=stopper),
+            monotonic_ns=lambda: mono[0], stopper=stopper,
+            **({"stop_config": AttemptConfig(3, Decimal("1"), Decimal("3"))}
+               if retry_stop else {})),
     )
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -162,7 +171,13 @@ async def _overrun_recording(
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     await capture_handler(handler)(action_id, runtime)
 
-    if recovery_resources is not None:
+    if retry_stop:
+        wall[0], mono[0] = _NOW + 72_000_000, 77_000_000_000
+        await capture_handler(handler)(action_id, runtime)
+        assert stopper.stop.await_count == 1
+        wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
+        expected_elapsed = 75_000_000_000
+    elif recovery_resources is not None:
         # START 后结束旧 worker 和文件责任；新会话不得复用旧单调钟锚点。
         database = await recovery_resources.restart_database(owned)
         runtime = await recovery_resources.runtime(
@@ -177,6 +192,26 @@ async def _overrun_recording(
     assert owned.connection.execute(
         "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone() == (expected_elapsed,)
+    if retry_stop:
+        from camctl.persistence.repositories.normal_recording_stop import read_normal_recording_stop
+
+        from camctl.contracts.enums import enum_for
+
+        assert stopper.stop.await_count == 2
+        attempts = owned.connection.execute(
+            "SELECT a.status,a.effect_state FROM operation_runs r"
+            " JOIN operation_attempts a ON a.run_id=r.id"
+            " WHERE r.responsibility_key=? ORDER BY a.attempt_no", (f"stop/{action_id}",)
+        ).fetchall()
+        assert attempts == [
+            (int(enum_for("operation_attempts.status").FAILED),
+             int(enum_for("operation_attempts.effect_state").UNKNOWN)),
+            (int(enum_for("operation_attempts.status").SUCCEEDED),
+             int(enum_for("operation_attempts.effect_state").CONFIRMED)),
+        ]
+        assert not read_normal_recording_stop(
+            owned.connection, await runtime.action(action_id), activity_id
+        )
     wall[0] = _NOW + 80_000_000
     mono[0] += 5_000_000_000
     return owned, runtime, action_id, handler, tools, result_port, evidence
@@ -213,12 +248,12 @@ async def _publish_ordinary_result(runtime, owned, action_id, handler, entries, 
     driver.list_results.assert_awaited_once()
 
 
-async def _assert_saved_decision(owned, action_id, *, coverage, confirmed, count, reason=None, status="succeeded"):
+async def _assert_saved_decision(owned, action_id, *, coverage, confirmed, count, reason=None):
     repository = SegmentRepository()
     ref = repository.read_active_set(action_id, owned)
     assert ref is not None
     decision = repository.read_decision(ref, owned)
-    assert decision.status.value == status
+    assert decision.status.value == "succeeded"
     assert decision.coverage_status.value == coverage
     assert decision.confirmed == confirmed
     assert decision.checked_count == count
@@ -297,13 +332,13 @@ async def test_action6_recovery_measures_only_the_prefix_needed_to_reach_target(
         owned.connection.close()
 
 
-async def test_action6_unknown_third_probe_keeps_two_file_prefix_without_control_success(
+async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_two_file_prefix(
     tmp_path, monkeypatch, capture_resources,
 ):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, monkeypatch,
         (Decimal("18"), Decimal("27"), RuntimeError("ffprobe unavailable"), Decimal("40")),
-        recovery_resources=capture_resources,
+        retry_stop=True,
     )
     try:
         await _publish_ordinary_result(
@@ -317,7 +352,6 @@ async def test_action6_unknown_third_probe_keeps_two_file_prefix_without_control
             confirmed=Decimal("45"),
             count=2,
             reason="probe_failed",
-            status="unconfirmed",
         )
         report = _reported_coverage(tmp_path, owned, action_id)
         assert report["status"] == "unconfirmed"
@@ -335,7 +369,7 @@ async def test_action6_unknown_third_probe_keeps_two_file_prefix_without_control
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members"
         ).fetchone() == (2,)
-        assert (await runtime.action(action_id))["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 3
     finally:
         owned.connection.close()
 
@@ -460,6 +494,62 @@ class _Action6Native151Catalog(Action6NativeCatalog):
         )
 
 
+class _NativeMembersCommitted(Exception):
+    """模拟固定集合提交后，调用者没有收到回执。"""
+
+
+async def _seed_native_inspection(owned, runtime, action_id, handler, resources, tools, monkeypatch):
+    from camctl.capture.segment_inspections import SegmentInspectionRequest, inspect_segment
+    from camctl.contracts.enums import enum_for
+    from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
+    from camctl.outputs.qualification import OperationConfig
+    from camctl.persistence.business import BusinessDatabase
+
+    original_write = BusinessDatabase.write
+    repository = SegmentRepository()
+
+    async def interrupt_fixed_members(database, callback, *, key, description="业务写入"):
+        outcome = await original_write(database, callback, key=key, description=description)
+        if database is runtime.database and outcome.kind is DbOutcomeKind.COMPLETED:
+            ref = repository.read_prepared_result_ref(action_id, owned)
+            if ref is not None:
+                row = repository.read_set(ref, owned)
+                if row["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
+                    raise _NativeMembersCommitted("固定成员已提交，回执未交付")
+        return outcome
+
+    with monkeypatch.context() as fault:
+        fault.setattr(BusinessDatabase, "write", interrupt_fixed_members)
+        with pytest.raises(_NativeMembersCommitted):
+            await capture_handler(handler)(action_id, runtime)
+
+    ref = repository.read_prepared_result_ref(action_id, owned)
+    assert ref is not None
+    row = repository.read_set(ref, owned)
+    assert row["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED)
+    assert row["source_kind"] == int(enum_for("segment_sets.source_kind").COMPLETE_SCAN)
+    sent_at, wait_event = owned.connection.execute(
+        "SELECT sent_at,wait_completed_event_id FROM device_activities WHERE action_id=?",
+        (action_id,),
+    ).fetchone()
+    assert sent_at is not None and wait_event is not None
+    assert row["assessment_json"] is None
+    assert row["published_event_id"] is None
+    members = repository.read_members(ref, None, 128, owned)
+    assert members.next_cursor is None
+    video = next(member for member in members.items if member.member.identity.endswith(".MP4"))
+
+    # 关闭持有原回执的工厂和实际数据库工作线程后，独立调用公开检查入口。
+    database = await resources.restart_database(owned)
+    runtime = await resources.runtime(database, driver=tools.assembly_driver, **tools.assembly_options)
+    flow = runtime.media
+    budget = OperationConfig(flow.max_read_attempts, flow.read_idle_timeout_s, flow.retry_interval_s)
+    step = await inspect_segment(flow, SegmentInspectionRequest(
+        action_id, video.member_id, CoverageTarget(CoverageMetric.FRAMES, 151), budget, runtime.wall_us()))
+    assert step.inspection_id is not None
+    return runtime
+
+
 @pytest.mark.parametrize(
     (
         "values",
@@ -475,7 +565,7 @@ class _Action6Native151Catalog(Action6NativeCatalog):
     ],
     ids=("reached-at-151-frames", "complete-short-of-151-frames"),
 )
-async def test_action6_native_recovery_reports_actual_frame_coverage(
+async def test_action6_native_existing_inspection_resumes_actual_frame_coverage(
     tmp_path,
     monkeypatch,
     values,
@@ -484,6 +574,7 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
     expected_confirmed,
     expected_checked_count,
     action_status,
+    capture_resources,
 ):
     from camctl.capture.timelapse import CaptureWaitConfig
 
@@ -526,26 +617,8 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
         wall[0] = _NOW + 300_200_000
         mono[0] += 300_200_000_000
 
-        # The ordinary native branch intentionally trusts a confirmed natural
-        # completion without media inspection. Exercise the recovery branch
-        # with the very same production handler/listing and saved frozen set.
-        from camctl.capture import action6_completion
-        from camctl.capture.action6_recovery import advance_action6_recovery
-
-        async def inspect_saved_native_result(
-            runtime, requested_action_id, *, canceled=False
-        ):
-            action = (await runtime.action(requested_action_id))
-            ref = await action6_completion.prepare_action6_segment_set(
-                runtime, action, None, canceled=canceled
-            )
-            assert ref is not None
-            await advance_action6_recovery(runtime, action)
-
-        monkeypatch.setattr(
-            action6_completion,
-            "advance_action6_native_result",
-            inspect_saved_native_result,
+        runtime = await _seed_native_inspection(
+            owned, runtime, action_id, handler, capture_resources, tools, monkeypatch
         )
         await capture_handler(handler)(action_id, runtime)
 
@@ -581,7 +654,7 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
 
 
 async def _native_action6_recovery_with_unknown_video_scope(
-    tmp_path, monkeypatch, *, start_unknown: bool, probe_values
+    tmp_path, monkeypatch, capture_resources, *, start_unknown: bool, probe_values
 ):
     from camctl.capture.timelapse import CaptureWaitConfig
 
@@ -623,25 +696,14 @@ async def _native_action6_recovery_with_unknown_video_scope(
     driver = _result_port(result_port, evidence, read)
     wall[0] = _NOW + 300_200_000
     mono[0] += 300_200_000_000
-    from camctl.capture import action6_completion
-    from camctl.capture.action6_recovery import advance_action6_recovery
-
-    async def inspect_saved_native_result(
-        runtime, requested_action_id, *, canceled=False
-    ):
-        action = (await runtime.action(requested_action_id))
-        ref = await action6_completion.prepare_action6_segment_set(
-            runtime, action, None, canceled=canceled
+    if start_unknown:
+        # 目录中存在无法排序的真实视频，普通分类自然进入未知范围处理。
+        await capture_handler(handler)(action_id, runtime)
+    else:
+        runtime = await _seed_native_inspection(
+            owned, runtime, action_id, handler, capture_resources, tools, monkeypatch
         )
-        assert ref is not None
-        await advance_action6_recovery(runtime, action)
-
-    monkeypatch.setattr(
-        action6_completion,
-        "advance_action6_native_result",
-        inspect_saved_native_result,
-    )
-    await capture_handler(handler)(action_id, runtime)
+        await capture_handler(handler)(action_id, runtime)
     assert driver.list_results.await_count == 1
     assert (await runtime.action(action_id))["status"] == 3
     return owned, runtime, action_id, tools
@@ -711,11 +773,13 @@ async def test_action6_native_empty_or_unknown_video_scope_keeps_photo_selectabl
     scope_state,
     member_count,
     reason,
+    capture_resources,
 ):
     owned, runtime, action_id, tools = (
         await _native_action6_recovery_with_unknown_video_scope(
             tmp_path,
             monkeypatch,
+            capture_resources,
             start_unknown=start_unknown,
             probe_values=probe_values,
         )
