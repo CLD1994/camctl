@@ -10,6 +10,7 @@ import pytest
 
 from ..support.outputs import output_operation
 from ..support.output_planning import capture_operation, validate_static_event
+from ..support.read_batch_cases import acquire_read_batch
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
@@ -103,13 +104,15 @@ def _seed_reset_pending(owned, copy_id: int) -> None:
 def _seed_failed_attempts(owned, run_id: int, count: int) -> None:
     """原额度为 5 时保存真实失败及等待，供后续运行按新额度判定。"""
     with closing(owned.connection.execute(
-        "SELECT r.action_id,r.copy_id,c.round,r.attempts_used FROM operation_runs r"
+        "SELECT r.action_id,r.copy_id,c.round,r.attempts_used,c.delivery_id FROM operation_runs r"
         " JOIN file_copies c ON c.id=r.copy_id WHERE r.id=?", (run_id,))) as cursor:
-        action_id, copy_id, copy_round, attempts_used = cursor.fetchone()
+        action_id, copy_id, copy_round, attempts_used, delivery_id = cursor.fetchone()
     assert attempts_used == 0
     with closing(owned.connection.execute(
         "SELECT COUNT(*) FROM operation_attempts WHERE run_id=?", (run_id,))) as cursor:
         assert cursor.fetchone() == (0,)
+    if delivery_id is not None:
+        acquire_read_batch(owned, action_id, "cam-1", _NOW)
     slot = OutputsRepository().grant_read_slot(
         SlotRequest(copy_id, _NOW + 2), new_operation_key(), owned)
     assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
@@ -315,8 +318,12 @@ def test_host_source_copy_preparation_uses_local_facts(local_read, tmp_path):
 def test_in_flight_attempt_is_resumed_not_duplicated(copy_env):
     """未保存读取失败的重启沿原尝试，不重复登记意图或次数。"""
     owned, roots, first = copy_env
-    OutputsRepository().grant_read_slot(
+    if first.delivery_id is not None:
+        acquire_read_batch(owned, _run_action(owned, first.run_id), "cam-1", _NOW)
+    slot = OutputsRepository().grant_read_slot(
         SlotRequest(first.copy_id, _NOW + 1), new_operation_key(), owned)
+    assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+    assert slot.value.outcome in (SlotOutcome.GRANTED, SlotOutcome.HELD)
     intent = AttemptIntent(
         operation="read", action_id=_run_action(owned, first.run_id),
         kind=OperationKind.READ_FILE,
@@ -326,6 +333,7 @@ def test_in_flight_attempt_is_resumed_not_duplicated(copy_env):
     )
     granted = OperationRepository().begin_attempt(intent, new_operation_key(), owned)
     assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+    assert granted.value.disposition is BeginDisposition.GRANTED
     before = tuple(owned.connection.iterdump())
     step = asyncio.run(_prepare(owned, first.copy_id, roots, _NOW + 3))
     assert step.attempt.plan is AttemptPlan.RESUME_EXISTING

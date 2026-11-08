@@ -30,7 +30,7 @@ from camctl.outputs.copy import (
     PreparedRequest, RecopyDisposition, RecopyRegistration, SourceDigest,
     VerificationSave, complete_copy, prepare_copy,
 )
-from camctl.outputs.slots import SlotRequest
+from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository
@@ -373,8 +373,10 @@ def test_read_budget_independent_from_recopy(complete_env):
     assert _row(owned, "SELECT attempts_used,max_attempts_used,retry_wait_required"
         " FROM operation_runs WHERE id=?", run_id) == (3, 5, 1)
     # 重拷只消耗重拷额度；新增读取按本次上限 3 与原已用 3 次比较。
-    OutputsRepository().grant_read_slot(
+    slot = OutputsRepository().grant_read_slot(
         SlotRequest(qualification.copy_id, _NOW + 8), new_operation_key(), owned)
+    assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+    assert slot.value.outcome in (SlotOutcome.GRANTED, SlotOutcome.HELD)
     intent = AttemptIntent(
         operation="read", action_id=_row(
             owned, "SELECT action_id FROM operation_runs WHERE id=?", run_id)[0],
