@@ -616,56 +616,96 @@ async def test_cancel_queued_save_confirms_withdrawal_before_closing_sources(tmp
 
 
 @pytest.mark.asyncio
-async def test_cancel_commit_unknown_waits_for_connection_cleanup_and_preserves_classification(tmp_path,monkeypatch):
+async def test_cancel_commit_unknown_waits_for_connection_cleanup_and_preserves_classification(tmp_path, monkeypatch):
     import sqlite3
-    from camctl.history.snapshots import MaintenanceContext,MaintenanceState,SnapshotRef,SnapshotMaintenanceError,maintain_snapshots
-    from camctl.persistence.repositories import history as module
-    from camctl.persistence.runtime import open_existing,DbOpenMode,DbConfig,OwnedConnection
+    import tempfile
+    from camctl.history.snapshots import MaintenanceContext, MaintenanceState, SnapshotMaintenanceError, maintain_snapshots
     from camctl.persistence.executor import DbExecutor
-    owned,_,_,ref,history=await _fixture(tmp_path)
-    loop=asyncio.get_running_loop();closing=asyncio.Event();release=Event();paths=[];state={'saving':False,'closed':False}
-    class UnknownCommitConnection:
-        def __init__(self,inner):self.inner=inner
-        def execute(self,statement,*args):
-            result=self.inner.execute(statement,*args)
-            if statement=='COMMIT' and state['saving']:
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.history import SqliteSnapshotStore
+    from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
+
+    owned, _, _, ref, history = await _fixture(tmp_path)
+    boundary = history.current_boundary()
+    temporary = tmp_path / 'snapshot-temporary'
+    temporary.mkdir()
+    monkeypatch.setattr(tempfile, 'tempdir', str(temporary))
+    loop = asyncio.get_running_loop()
+    closing = asyncio.Event()
+    release = Event()
+    state = {'saving': False, 'closed': False}
+    real_connect = sqlite3.connect
+    target_uri = history.path.resolve().as_uri() + '?mode=rw'
+    failure = sqlite3.OperationalError('commit acknowledgement lost')
+
+    class Connection(sqlite3.Connection):
+        def blobopen(self, table, column, row, **kwargs):
+            blob = super().blobopen(table, column, row, **kwargs)
+            if (table, column) == ('entity_snapshots', 'content'):
+                state['saving'] = True
+            return blob
+
+        def execute(self, statement, *args, **kwargs):
+            result = super().execute(statement, *args, **kwargs)
+            if statement == 'COMMIT' and state['saving']:
                 result.close()
-                raise sqlite3.OperationalError('commit acknowledgement lost')
+                raise failure
             return result
+
         def close(self):
             loop.call_soon_threadsafe(closing.set)
-            assert release.wait(60),'connection cleanup gate was not released'
-            self.inner.close();state['closed']=True
-        def __getattr__(self,name):return getattr(self.inner,name)
-    def factory():
-        actual=open_existing(history.path,DbOpenMode.EXISTING_RW,DbConfig())
-        return OwnedConnection(UnknownCommitConnection(actual.connection),actual.metadata)
-    executor=DbExecutor(factory,capacity=8,enqueue_timeout_seconds=9)
-    store=module.SqliteSnapshotStore(history.path,executor)
-    async def candidates(*_):return (SnapshotRef(1,ref.action_id),)
-    monkeypatch.setattr(store,'snapshot_candidates',candidates)
-    original=module._save_one_snapshot
-    def save(connection,item):
-        paths.append(item.path);state['saving']=True
-        return original(connection,item)
-    monkeypatch.setattr(module,'_save_one_snapshot',save)
-    task=asyncio.create_task(maintain_snapshots(MaintenanceContext(store=store,state=MaintenanceState(),threshold=1,batch_size=2)))
+            assert release.wait(60), '数据库连接关闭门闩未释放'
+            super().close()
+            state['closed'] = True
+
+    def connect(database, *args, **kwargs):
+        if str(database) == target_uri:
+            assert 'factory' not in kwargs
+            kwargs['factory'] = Connection
+        return real_connect(database, *args, **kwargs)
+
     try:
-        await asyncio.wait_for(closing.wait(),60)
-        task.cancel()
-        delivered=loop.create_future();loop.call_soon(delivered.set_result,None);await delivered
-        assert paths and paths[0].exists() and not task.done() and not state['closed']
-        release.set()
-        with pytest.raises(SnapshotMaintenanceError,match='unknown') as raised:await task
-        assert raised.value.result.kind.value=='unknown' and raised.value.operation_key is not None
-        assert state['closed'] and all(not path.exists() for path in paths)
-        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]==1
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, 'connect', connect)
+            executor = DbExecutor(
+                lambda: open_existing(history.path, DbOpenMode.EXISTING_RW, DbConfig()),
+                capacity=8, enqueue_timeout_seconds=9)
+            store = SqliteSnapshotStore(history.path, executor)
+            task = asyncio.create_task(maintain_snapshots(MaintenanceContext(
+                store=store, state=MaintenanceState(), threshold=1, batch_size=2)))
+            try:
+                await asyncio.wait_for(closing.wait(), 60)
+                paths = list(temporary.rglob('content.jsonl'))
+                assert len(paths) == 1 and paths[0].is_file()
+                expected_content = paths[0].read_bytes()
+                task.cancel()
+                delivered = loop.create_future()
+                loop.call_soon(delivered.set_result, None)
+                await delivered
+                assert all(path.exists() for path in paths) and not task.done() and not state['closed']
+                release.set()
+                with pytest.raises(SnapshotMaintenanceError, match='unknown') as raised:
+                    await task
+                assert raised.value.result.kind is DbOutcomeKind.UNKNOWN
+                assert raised.value.result.error is failure and raised.value.operation_key is not None
+                assert state['closed'] and all(not path.exists() for path in paths)
+                row = owned.connection.execute(
+                    'SELECT s.content, s.change_count, p.snapshot_change_count'
+                    ' FROM entity_snapshots s JOIN entity_snapshot_progress p'
+                    ' ON p.latest_snapshot_id=s.id WHERE s.entity_type=1 AND s.entity_id=?',
+                    (ref.action_id,)).fetchone()
+                assert row is not None and row[0] == expected_content and row[1] == row[2]
+                assert history.current_boundary() == boundary
+            finally:
+                release.set()
+                if not task.done():
+                    try:
+                        await task
+                    except (asyncio.CancelledError, SnapshotMaintenanceError):
+                        pass
+                await executor.close()
     finally:
-        release.set()
-        if not task.done():
-            try:await task
-            except (asyncio.CancelledError,SnapshotMaintenanceError):pass
-        await executor.close();owned.connection.close()
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
