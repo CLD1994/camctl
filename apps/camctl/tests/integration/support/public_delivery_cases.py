@@ -9,6 +9,7 @@ from camctl.capture.handlers import capture_handler
 from camctl.capture.result_inputs import ObservedFile, RESULT_PAGE_CONTRACT
 from camctl.capture.results import FileKind
 from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ObjectId
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
 from camctl.devices.read_session import ReadSession
@@ -51,8 +52,8 @@ class _ReadDriver:
         }),), None)
 
 
-async def prepare_public_delivery(tmp_path, *, content, now):
-    """保存单相机来源，执行真实读取并停在发布前的完整交付。"""
+async def prepare_public_delivery(tmp_path, *, content, now, missing_output_id=None):
+    """执行真实读取；可同时通过精确请求准备一个不存在的产物。"""
     register_file_batch_guards()
     def capture_options(owned, _driver, _defaults):
         action_id, = owned.connection.execute("SELECT id FROM actions").fetchone()
@@ -70,9 +71,15 @@ async def prepare_public_delivery(tmp_path, *, content, now):
         await capture_handler(handler)(source_id, capture)
         output_id, = owned.connection.execute(
             "SELECT id FROM outputs WHERE source_action_id=?", (source_id,)).fetchone()
+        mode = "default"
+        if missing_output_id is not None:
+            missing_output_id = ObjectId(missing_output_id)
+            assert owned.connection.execute(
+                "SELECT 1 FROM outputs WHERE id=?", (missing_output_id,)).fetchone() is None
+            mode = [output_id, missing_output_id]
         action_id, _ = prepare_obtain_selection(
             owned, catalog=_Catalog(), now=now, source_id=source_id,
-            mode="default", request_id=2)
+            mode=mode, request_id=2)
         staging = Path(owned.metadata.staging_path)
         ready, processing = Path(owned.metadata.ready_path), Path(owned.metadata.processing_path)
         for directory in (staging, ready, processing):
@@ -109,6 +116,9 @@ async def prepare_public_delivery(tmp_path, *, content, now):
             int(enum_for("operation_runs.status").SUCCEEDED), 1,
             int(enum_for("operation_attempts.status").SUCCEEDED))
         assert result_event is not None
+        relative_path, = owned.connection.execute(
+            "SELECT relative_path FROM intermediate_files WHERE id=?", (target_id,)).fetchone()
+        assert (staging / relative_path).read_bytes() == content
         assert not tuple(ready.iterdir()) and not tuple(processing.iterdir())
         qualification = SimpleNamespace(delivery_id=delivery_id, copy_id=copy_id,
                                         target_file_id=target_id, action_id=action_id,
