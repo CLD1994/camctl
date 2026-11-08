@@ -15,10 +15,12 @@ from contextlib import closing
 from dataclasses import replace
 
 import pytest
+import pytest_asyncio
 
 from ..support.outputs import output_operation
 from ..support.output_planning import capture_operation
 from ..support.database import business_database, database_path
+from ..support.public_delivery_cases import prepare_public_delivery
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
@@ -28,7 +30,7 @@ from camctl.history.validators import (
 from camctl.host_files.models import BoundDirectories
 from camctl.outputs.copy import CompletionContext, CompletionPhase, complete_copy
 from camctl.outputs.handoff import (
-    DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery,
+    DeliveryContext, DeliveryPhase, publish_delivery,
 )
 from camctl.outputs.work_files import (
     CleanupChecked, CleanupIntent, CleanupResultSave, RetentionRelease,
@@ -475,43 +477,52 @@ async def test_action_owned_delete_failure_keeps_responsibility(
 # ---- 发布后的生命周期 ----
 
 
-def _handoff_dirs(tmp_path, roots):
-    ready = tmp_path / "ready"
-    ready.mkdir(exist_ok=True)
-    processing = tmp_path / "processing"
-    processing.mkdir(exist_ok=True)
-    return DeliveryDirectories(
-        staging=roots.staging, ready=ready, processing=processing)
+@pytest_asyncio.fixture
+async def public_work_env(tmp_path):
+    """正式来源与成功 READ 已保存，完整交付副本等待发布。"""
+    world = await prepare_public_delivery(tmp_path, content=_CONTENT, now=_NOW)
+    try:
+        yield world
+    finally:
+        world[0].connection.close()
 
 
 @pytest.mark.asyncio
-async def test_publication_hands_off_intermediate_file(work_env, tmp_path):
+async def test_publication_hands_off_intermediate_file(public_work_env):
     """发布确认后中间文件转 HANDED_OFF，交接所有权不归自动清理。"""
-    owned, roots, qualification = work_env
+    owned, roots, directories, qualification = public_work_env
+    work_path = _work_path(roots, owned, qualification.target_file_id)
+    assert work_path.read_bytes() == _CONTENT
+    file_name = _row(owned, "SELECT file_name FROM deliveries WHERE id=?", qualification.delivery_id)[0]
     async with business_database(database_path(owned)) as database:
         result = (await output_operation(
             owned, publish_delivery, qualification.delivery_id, DeliveryContext,
             repository=OutputsRepository(),
-            directories=_handoff_dirs(tmp_path, roots),
+            directories=directories,
             occurred_at=_NOW + 10,
         ))
         assert result.phase is DeliveryPhase.PUBLISHED
         assert _file_state(owned, qualification.target_file_id)[0] == 4
+        assert not work_path.exists()
+        assert (directories.ready / file_name).read_bytes() == _CONTENT
         assert _events(owned, 26, 2) >= 1
         # 已交接文件不进入历史清理候选。
         scan = (await clean_work_files(_context(database, roots)))
         assert scan.checked == 0
+        assert (directories.ready / file_name).read_bytes() == _CONTENT
+        assert _file_state(owned, qualification.target_file_id)[0] == 4
 
 
 @pytest.mark.asyncio
 async def test_published_leftover_copy_is_released_and_cleaned(
-        work_env, tmp_path):
+        public_work_env):
     """发布经同名文件确认而 staging 副本留存：转 HANDED_OFF 后释放清理。"""
-    owned, roots, qualification = work_env
+    owned, roots, directories, qualification = public_work_env
     async with business_database(database_path(owned)) as database:
-        directories = _handoff_dirs(tmp_path, roots)
         file_name = _row(owned, "SELECT file_name FROM deliveries WHERE id=?",
                          qualification.delivery_id)[0]
+        leftover = _work_path(roots, owned, qualification.target_file_id)
+        assert leftover.read_bytes() == _CONTENT
         (directories.ready / file_name).write_bytes(_CONTENT)
         result = (await output_operation(
             owned, publish_delivery, qualification.delivery_id, DeliveryContext,
@@ -520,8 +531,8 @@ async def test_published_leftover_copy_is_released_and_cleaned(
             occurred_at=_NOW + 10,
         ))
         assert result.phase is DeliveryPhase.PUBLISHED
-        leftover = _work_path(roots, owned, qualification.target_file_id)
-        assert leftover.exists()
+        assert leftover.read_bytes() == _CONTENT
+        assert (directories.ready / file_name).read_bytes() == _CONTENT
         assert _file_state(owned, qualification.target_file_id)[0] == 4
         _release_ok(owned, qualification.target_file_id)
         assert _file_state(owned, qualification.target_file_id)[:2] == (2, 2)
@@ -529,6 +540,8 @@ async def test_published_leftover_copy_is_released_and_cleaned(
             qualification.target_file_id, _context(database, roots)))
         assert single.outcome is WorkFileSingleOutcome.DELETED
         assert not leftover.exists()
+        assert _file_state(owned, qualification.target_file_id)[:2] == (2, 4)
+        assert (directories.ready / file_name).read_bytes() == _CONTENT
 
 
 # ---- 原键恢复 ----
