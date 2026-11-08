@@ -8,20 +8,12 @@ from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
 import sys
 import threading
-
-import pytest
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.capture.handlers import capture_handler
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
-from camctl.capture.segment_inspections import (
-    SegmentInspectionPhase, SegmentInspectionRequest, inspect_segment,
-)
-from camctl.contracts.values import ConsistencyError
-from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryRead
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
@@ -33,8 +25,6 @@ from camctl.host_files.io import LocalSourceReader
 from camctl.host_files.media import ProbeRequest
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.outputs.obtain_flow import advance_obtain
-from camctl.outputs.qualification import OperationConfig
-from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
 from camctl.session.supervision import Supervisor
 
 from .outputs import obtain_factory, output_drivers, submit_output_document
@@ -131,46 +121,8 @@ class SegmentWorld:
             "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d"
             " ON d.id=s.dependency_id WHERE d.action_id=?", (action_id,)).fetchone()[0]
 
-    async def publish(self, *, inspection=False):
+    async def publish(self):
         self.clock.update(wall=_NOW + 12_000_000, mono=17_000_000_000)
-        if inspection:
-            denied = {'count': 0}
-            def authorize(operation, table, column, *_):
-                if operation == sqlite3.SQLITE_UPDATE and table == 'segment_sets' and column == 'published_event_id':
-                    denied['count'] += 1
-                    return sqlite3.SQLITE_DENY
-                return sqlite3.SQLITE_OK
-            await self.capture.database.read(lambda owned: owned.connection.set_authorizer(authorize))
-            try:
-                with pytest.raises(ConsistencyError):
-                    await capture_handler('camera_record')(self.action_id, self.capture)
-            finally:
-                await self.capture.database.read(lambda owned: owned.connection.set_authorizer(None))
-            assert denied['count'] > 0
-            assert self.owned.connection.execute('SELECT status FROM actions WHERE id=?',
-                (self.action_id,)).fetchone() == (2,)
-            member_id, self.source_file_id = self.owned.connection.execute(
-                'SELECT m.id,m.file_id FROM segment_members m JOIN segment_sets s ON s.id=m.set_id'
-                ' WHERE s.action_id=? AND m.role=1 ORDER BY s.version DESC,m.id LIMIT 1',
-                (self.action_id,)).fetchone()
-            self.clock.update(wall=_NOW + 20_000_000, mono=20_000_000_000)
-            members_before = self.owned.connection.execute(
-                'SELECT * FROM segment_members ORDER BY id').fetchall()
-            media = self.capture.media
-            result = await inspect_segment(media, SegmentInspectionRequest(
-                action_id=self.action_id, member_id=member_id,
-                target=CoverageTarget(CoverageMetric.DURATION_S, 60),
-                budget=OperationConfig(media.max_read_attempts, media.read_idle_timeout_s,
-                                       media.retry_interval_s),
-                occurred_at=self.clock['wall']))
-            assert result.phase is SegmentInspectionPhase.COMPLETED, result
-            assert self.owned.connection.execute(
-                'SELECT * FROM segment_members ORDER BY id').fetchall() == members_before
-            facts = read_inspection_for_member(self.action_id, member_id, self.owned)
-            assert facts.inspection is not None and facts.copy is not None
-            self.input_file_id = facts.copy.target_file_id
-            self.input_path = self.directories.staging / facts.copy.input_relative_path
-            assert self.input_path.read_bytes() == CONTENT
         await capture_handler('camera_record')(self.action_id, self.capture)
         assert self.owned.connection.execute('SELECT status FROM actions WHERE id=?',
             (self.action_id,)).fetchone() == (3,)
@@ -189,6 +141,9 @@ class SegmentWorld:
 
 @asynccontextmanager
 async def segment_world(tmp_path, *, indexes=(1,), unavailable=False):
+    from camctl.persistence.repositories.file_batches import register_file_batch_guards
+
+    register_file_batch_guards()
     world = {}
     clock = {'wall': _NOW, 'mono': 5_000_000_000}
     class CaptureDriver(ReadDriver):
@@ -251,6 +206,74 @@ async def segment_world(tmp_path, *, indexes=(1,), unavailable=False):
         assert not result.failed,result.failed
 
 
+@asynccontextmanager
+async def checked_segment_world(tmp_path, capture_resources, monkeypatch, *,
+                                early_waiters, unavailable=False):
+    """异常录像经正式检查发布后，为已等待的取回保留其检查副本。"""
+    from types import SimpleNamespace
+    from camctl.persistence.repositories.file_batches import register_file_batch_guards
+    from .bootstrap_read_cases import segment_input_case
+
+    register_file_batch_guards()
+    driver = ReadDriver(unavailable=unavailable)
+    source = await segment_input_case(
+        tmp_path, capture_resources, monkeypatch, (Decimal("1.5"),),
+        early_waiters=early_waiters, read_retry_s=Decimal(5), segment_size=4,
+        source_target_s=Decimal(12), expected_source_status=4,
+        obtain_max_read_attempts=3,
+        obtain_drivers=output_drivers(driver, READ_EVIDENCE, read=True, digest=True),
+        driver_id="camctl-adb", result_entries=[
+            _entry('DJI_001/DJI_20261022100000_0001_D.LRF'),
+            _entry('DJI_001/DJI_20261022100000_0001_D.MP4')])
+    try:
+        await source.publish()
+        row = source.owned.connection.execute(
+            "SELECT target_duration_ms,assessment_json FROM segment_sets"
+            " WHERE action_id=? AND published_event_id IS NOT NULL", (source.source_id,)).fetchone()
+        assessment = json.loads(row[1])
+        assert row[0] == 12_000 and assessment['target'] == 12
+        assert assessment['coverage_status'] == 'confirmed_short'
+        assert assessment['confirmed'] == 1.5 and assessment['checked_count'] == 1
+        assert len(source.inputs) == 1
+        input_file_id, _relative, _state = source.inputs[0]
+        input_path = source.paths[input_file_id]
+        assert input_path.read_bytes() == CONTENT
+        source_file_id, device_id, driver_id, locator, target, result = source.owned.connection.execute(
+            "SELECT c.source_device_file_id,a.device_id,a.driver_id,f.locator_json,"
+            " i.target_json,i.result_json FROM file_copies c"
+            " JOIN segment_inspections i ON i.id=c.inspection_id"
+            " JOIN actions a ON a.id=i.action_id"
+            " JOIN device_files f ON f.id=c.source_device_file_id"
+            " WHERE c.target_file_id=?", (input_file_id,)).fetchone()
+        assert (device_id, driver_id) == ('cam-1', 'camctl-adb')
+        assert json.loads(locator) == {'path': '/DCIM/DJI_001/DJI_20261022100000_0001_D.MP4'}
+        assert json.loads(target) == {'metric': 'duration_s', 'value': 12}
+        assert json.loads(result)['metric']['value'] == 1.5
+        obtain = source.obtain_factory(source.database)
+
+        class Clock:
+            def __getitem__(self, key):
+                return (source.wall if key == 'wall' else source.mono)[0]
+
+            def __setitem__(self, key, value):
+                (source.wall if key == 'wall' else source.mono)[0] = value
+
+        async def advance():
+            await advance_obtain(obtain)
+
+        async def accept_obtain(mode, request_id):
+            action, _selection = await source.add_waiter(request_id, mode, start_only=True)
+            return action
+
+        yield SimpleNamespace(
+            owned=source.owned, action_id=source.source_id, clock=Clock(), obtain=obtain,
+            driver=driver, directories=obtain.directories, executor=source.executor,
+            input_file_id=input_file_id, input_path=input_path, source_file_id=source_file_id,
+            early=source.early, advance=advance, accept_obtain=accept_obtain)
+    finally:
+        await source.close()
+
+
 class LocalReadGate:
     """真实文件线程到达首段后等待；可让原读者在已保存一段后报错。"""
     def __init__(self, monkeypatch, *, fail_after_one=False):
@@ -295,12 +318,11 @@ async def paused_local_read(world, monkeypatch, *, fail_after_one=False):
 
 
 @asynccontextmanager
-async def bound_local_delivery(tmp_path, monkeypatch):
+async def bound_local_delivery(tmp_path, capture_resources, monkeypatch):
     """真实取回已开始首段；调用方可在文件线程门闩处注入摘要结果。"""
-    async with segment_world(tmp_path) as world:
-        action_id = await world.accept_obtain('default', 40)
-        await world.advance()
-        await world.publish(inspection=True)
+    async with checked_segment_world(tmp_path, capture_resources, monkeypatch,
+                                     early_waiters=(40,)) as world:
+        action_id, _selection = world.early[0]
         async with paused_local_read(world, monkeypatch) as (gate, advancing):
             copy_id, source, device, target = world.owned.connection.execute(
                 'SELECT c.id,c.source_intermediate_file_id,c.source_device_file_id,c.target_file_id'

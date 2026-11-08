@@ -9,7 +9,6 @@ import camctl.outputs.copy as copy_module
 from camctl.contracts.enums import enum_for
 from camctl.devices.read_session import ReadChunk
 from camctl.host_files.io import LocalSourceReader
-from camctl.outputs.obtain_flow import advance_obtain
 from ..support.output_segments import CONTENT as _CONTENT, bound_local_delivery
 
 pytestmark = pytest.mark.asyncio
@@ -46,8 +45,9 @@ def _read_attempt_state(owned, copy_id):
 
 
 async def _advance_until_terminal(world, owned, action_id, *, ticks=5):
+    started = world.clock['mono']
     for index in range(ticks):
-        world.clock['mono'] = (20 + index * 10) * 1_000_000_000
+        world.clock['mono'] = started + index * 10_000_000_000
         await world.advance()
         status, = owned.connection.execute(
             "SELECT status FROM actions WHERE id=?", (action_id,),
@@ -58,9 +58,9 @@ async def _advance_until_terminal(world, owned, action_id, *, ticks=5):
 
 @pytest.mark.parametrize("mismatch_count,expected", [(1, "ready"), (2, "exhausted")])
 async def test_local_recopy_keeps_read_attempt_and_checksum_exhaustion_is_final(
-        tmp_path, monkeypatch, mismatch_count, expected):
-    async with bound_local_delivery(tmp_path, monkeypatch) as (world, action_id, copy_id, gate, advancing):
-        owned, runtime = world.owned, world.obtain
+        tmp_path, capture_resources, monkeypatch, mismatch_count, expected):
+    async with bound_local_delivery(tmp_path, capture_resources, monkeypatch) as (world, action_id, copy_id, gate, advancing):
+        owned = world.owned
         input_path, directories = world.input_path, world.directories
         digest_calls = await _inject_target_mismatch(monkeypatch, mismatch_count)
 
@@ -86,7 +86,7 @@ async def test_local_recopy_keeps_read_attempt_and_checksum_exhaustion_is_final(
 
         await _advance_until_terminal(world, owned, action_id)
         run, attempts = _read_attempt_state(owned, copy_id)
-        assert runtime.devices[next(iter(runtime.devices))].driver.offsets == []
+        assert world.driver.offsets == []
         if expected == "ready":
             assert owned.connection.execute(
                 "SELECT status FROM actions WHERE id=?", (action_id,),
@@ -120,9 +120,9 @@ async def test_local_recopy_keeps_read_attempt_and_checksum_exhaustion_is_final(
 
 
 async def test_local_source_failure_after_recopy_falls_back_with_original_budget(
-        tmp_path, monkeypatch):
-    async with bound_local_delivery(tmp_path, monkeypatch) as (world, action_id, copy_id, gate, advancing):
-        owned, runtime = world.owned, world.obtain
+        tmp_path, capture_resources, monkeypatch):
+    async with bound_local_delivery(tmp_path, capture_resources, monkeypatch) as (world, action_id, copy_id, gate, advancing):
+        owned = world.owned
         input_path, directories = world.input_path, world.directories
         target_digest_calls = await _inject_target_mismatch(monkeypatch, 1)
         gate.release.set()
@@ -162,7 +162,7 @@ async def test_local_source_failure_after_recopy_falls_back_with_original_budget
             return result
 
         monkeypatch.setattr(LocalSourceReader, "read_chunk", fail_after_one_local_chunk)
-        await advance_obtain(runtime)
+        await world.advance()
 
         source_device_id, = owned.connection.execute(
             "SELECT o.device_file_id FROM file_copies c"
@@ -182,7 +182,7 @@ async def test_local_source_failure_after_recopy_falls_back_with_original_budget
             (copy_row[5],),
         ).fetchone()
         assert (directories.staging / target_path).read_bytes() == _CONTENT[:4]
-        assert runtime.file_executor.unfinished_files() == ()
+        assert world.executor.unfinished_files() == ()
 
         run, attempts = _read_attempt_state(owned, copy_id)
         assert run[1:5] == (int(enum_for("operation_runs.status").ACTIVE), 1, 3, 1)
@@ -197,11 +197,11 @@ async def test_local_source_failure_after_recopy_falls_back_with_original_budget
             " ORDER BY attempt_no", (run[0],),
         ).fetchone()[0] == 1
 
-        device_reader = runtime.devices[next(iter(runtime.devices))].driver
+        device_reader = world.driver
         assert device_reader.offsets == []
-        world.clock['mono'] = 25_000_000_000
+        world.clock['mono'] += 5_000_000_000
         for _ in range(5):
-            await advance_obtain(runtime)
+            await world.advance()
             status, = owned.connection.execute(
                 "SELECT status FROM actions WHERE id=?", (action_id,),
             ).fetchone()

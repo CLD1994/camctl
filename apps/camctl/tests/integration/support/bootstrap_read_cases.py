@@ -499,7 +499,9 @@ class SegmentInputCase:
 
 async def segment_input_case(directory, resources, monkeypatch, values, *, mode="default", partial=False,
                              early_waiters=(20, 21), read_retry_s=Decimal("0"),
-                             segment_size=4, result_check=None, expected_source_status=3):
+                             segment_size=4, result_check=None, expected_source_status=3,
+                             source_target_s=Decimal("60"), obtain_max_read_attempts=1,
+                             obtain_drivers=None, driver_id="segment-file-source", result_entries=None):
     from types import SimpleNamespace
     from datetime import datetime, timezone
     from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
@@ -525,15 +527,15 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
 
     class Catalog(Action6RecordCatalog):
         def driver_id(self, device_id):
-            return "segment-file-source"
+            return driver_id
 
     world = SegmentInputCase()
     world.expected_source_status = expected_source_status
     world.wall, world.mono, world.source_id = [_NOW], [5_000_000_000], 1
     world.catalog = Catalog()
-    world.catalog.duration_s = Decimal("60")
+    world.catalog.duration_s = source_target_s
     world.cfg = session_config(directory, devices={"cam-1": {
-        "kind": "camera", "driver": "segment-file-source",
+        "kind": "camera", "driver": driver_id,
         "recording": {"repair_margin_s": Decimal("2")},
         "copy": {"max_read_attempts": 1 if partial else 3, "retry_interval_s": read_retry_s},
         **({} if result_check is None else {"result_check": result_check})}})
@@ -557,10 +559,10 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
 
         async def list_results(self, request, batch):
             return _completed_result(request.ticket, _stop_context(world.owned, world.source_id),
-                entries=_entries(len(values)), finalized=True)
+                entries=_entries(len(values)) if result_entries is None else result_entries, finalized=True)
 
     world.driver = Driver(_CONTENT)
-    entry = DriverEntry("segment-file-source", world.driver, DriverDeclaration(
+    entry = DriverEntry(driver_id, world.driver, DriverDeclaration(
         control_supported=True, stop_supported=True, query_supported=False, result_supported=True,
         read_supported=True, digest_supported=True, delete_supported=False), evidence,
         DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
@@ -642,9 +644,9 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
     assert world.owned.connection.execute(
         "SELECT control_elapsed_ns FROM device_activities WHERE action_id=1").fetchone() == (None,)
     world.wall[0], world.mono[0] = _NOW + 80_000_000, 85_000_000_000
-    obtain_devices = {identity: {**declaration, "copy": {**declaration["copy"], "max_read_attempts": 1}}
+    obtain_devices = {identity: {**declaration, "copy": {**declaration["copy"], "max_read_attempts": obtain_max_read_attempts}}
         for identity, declaration in world.cfg.devices.items()}
-    world.obtain_factory = session_obtain_assembly(devices=obtain_devices, drivers=DriverRegistry((entry,)),
+    world.obtain_factory = session_obtain_assembly(devices=obtain_devices, drivers=DriverRegistry((entry,)) if obtain_drivers is None else obtain_drivers,
         staging=Path(world.cfg.paths.staging), ready=Path(world.cfg.paths.ready), processing=Path(world.cfg.paths.processing),
         segment_size=segment_size, occurred_at=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0], file_executor=world.executor)
     world.early = [await world.add_waiter(identity, mode) for identity in early_waiters]

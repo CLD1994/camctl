@@ -1,5 +1,7 @@
 """检查副本复用经真实拍摄发布、取回工厂与文件读取验证。"""
 
+from dataclasses import replace
+
 import pytest
 
 from camctl.contracts.enums import enum_for
@@ -9,11 +11,11 @@ from camctl.outputs.obtain_flow import advance_obtain
 from camctl.outputs.work_files import (
     WorkFileContext, WorkFileLimits, WorkFileSingleOutcome, clean_one_work_file,
 )
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 
-from ..capture.test_capture_contract import _NOW
-from ..support.output_segments import CONTENT as _CONTENT, ReadDriver as _ReadDriver, paused_local_read, segment_world
+from ..support.bootstrap_consumers import TransactionFault
+from ..support.output_segments import CONTENT as _CONTENT, checked_segment_world, paused_local_read, segment_world
 
 pytestmark = pytest.mark.asyncio
 
@@ -56,35 +58,28 @@ async def test_only_obtains_waiting_at_the_source_publication_boundary_are_bound
     "success", "fallback_unknown_before_commit", "fallback_unknown_after_commit", "device_unavailable",
 ])
 async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_failure(
-        tmp_path, monkeypatch, scenario):
-    async with segment_world(tmp_path, unavailable=scenario == "device_unavailable") as world:
-        owned, source_action_id = world.owned, world.action_id
-        early_actions = [await world.accept_obtain("default", request) for request in (20, 21)]
-        await world.advance()
-        early = [(action_id, world.selection(action_id)) for action_id in early_actions]
-        await world.publish(inspection=True)
+        tmp_path, capture_resources, monkeypatch, scenario):
+    async with checked_segment_world(tmp_path, capture_resources, monkeypatch,
+            early_waiters=(20, 21), unavailable=scenario == "device_unavailable") as world:
+        owned = world.owned
+        early = world.early
         input_file_id, source_file_id = world.input_file_id, world.source_file_id
         staging, directories = world.directories.staging, world.directories
         executor, obtain_runtime, device_reader = world.executor, world.obtain, world.driver
-        outputs = obtain_runtime.outputs
         fallback_keys = []
-        save_fallback = outputs.fallback_read_source
+        save_fallback = OutputsRepository.fallback_read_source
 
-        def fallback_with_unknown_receipt(request, key, connection):
+        def fallback_with_unknown_receipt(repository, request, key, connection):
             fallback_keys.append(key)
-            if (scenario == "fallback_unknown_before_commit"
-                    and len(fallback_keys) == 1):
-                return DbOutcome(
-                    DbOutcomeKind.UNKNOWN, error=RuntimeError("fallback commit unknown before save"))
-            outcome = save_fallback(request, key, connection)
-            if (scenario == "fallback_unknown_after_commit"
-                    and len(fallback_keys) == 1):
-                assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-                return DbOutcome(
-                    DbOutcomeKind.UNKNOWN, error=RuntimeError("fallback commit receipt lost"))
-            return outcome
+            if scenario.startswith("fallback_unknown") and len(fallback_keys) == 1:
+                fault = TransactionFault(connection.connection,
+                    after_commit=scenario == "fallback_unknown_after_commit")
+                outcome = save_fallback(repository, request, key, replace(connection, connection=fault))
+                assert fault.commit_calls == 1 and outcome.kind is DbOutcomeKind.UNKNOWN
+                return outcome
+            return save_fallback(repository, request, key, connection)
 
-        outputs.fallback_read_source = fallback_with_unknown_receipt
+        monkeypatch.setattr(OutputsRepository, "fallback_read_source", fallback_with_unknown_receipt)
         assert not OutputsRepository().load_work_file_state(
             input_file_id, owned).owner_finished
 
@@ -163,7 +158,7 @@ async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_fail
             assert len(fallback_keys) == 1
 
         # 换源后仍遵守原 READ_FILE 重试间隔，到时沿原机会与尝试恢复。
-        world.clock['mono'] = 25_000_000_000
+        world.clock['mono'] += 5_000_000_000
         if scenario == "device_unavailable":
             for _ in range(4):
                 await advance_obtain(obtain_runtime)
@@ -173,7 +168,7 @@ async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_fail
                 " FROM operation_runs WHERE copy_id=? AND kind=3", (granted[0][0],),
             ).fetchone()
             assert waiting_run == (2, 2, 3, 1)
-            world.clock['mono'] = 30_000_000_000
+            world.clock['mono'] += 5_000_000_000
             for _ in range(4):
                 await advance_obtain(obtain_runtime)
                 statuses = [owned.connection.execute(
@@ -267,7 +262,7 @@ async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_fail
             repository=OutputsRepository(),
             database=obtain_runtime.database,
             staging=staging,
-            occurred_at=_NOW + 25_000_000,
+            occurred_at=world.clock['wall'],
             limits=WorkFileLimits(batch_size=16, limit_per_run=16),
             executor=executor,
         )
