@@ -3,6 +3,7 @@
 import asyncio
 import os
 import signal
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -226,6 +227,7 @@ time.sleep(30)
 
 @pytest.mark.parametrize("entry", ["probe", "repair"])
 @pytest.mark.parametrize("output_fails", [False, True])
+@pytest.mark.skipif(sys.platform == "win32", reason="需要 POSIX 信号注入")
 async def test_signal_errors_keep_media_files_until_real_exit(tmp_path, monkeypatch, entry, output_fails):
     input_ref, output_ref, roots, input_path, _ = _setup(tmp_path)
     tool = _tool(tmp_path, "signal-errors", """
