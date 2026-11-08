@@ -18,6 +18,7 @@ from camctl.operations.process import LocalExit, RawToolOutcome, SignalFailure, 
 from camctl.outputs import copy
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.enums import enum_for
@@ -28,7 +29,10 @@ from .test_read_associations import read_targets
 from .test_qualification import _NOW
 
 from unit.devices.test_adb_camera_driver import EVIDENCE, Transport, _driver
-from .test_read_diagnostics import Channel
+from support.logging import recording_log_channel
+
+
+register_file_batch_guards()
 
 
 def _digest_driver(raw):
@@ -65,11 +69,12 @@ def raw_failure():
 @pytest.mark.asyncio
 async def test_digest_adapter_keeps_raw_exit_stderr_and_signal_facts():
     raw = raw_failure()
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         async with diagnostic_scope():
             result = await digest_reader(raw).read_digest()
-    assert channel.records == []
+    assert records == []
     assert result.digest is None
     assert result.error["code"] == "adb_digest_failed"
     assert result.error["details"]["stderr_hex"] == raw.stderr.hex()
@@ -118,7 +123,8 @@ async def test_verification_failure_logs_original_digest_facts_once_before_save(
             raise OSError("verification save failed")
         return save_verification(self, request, key, worker)
     monkeypatch.setattr(OutputsRepository, "save_verification", verification)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         async with diagnostic_scope():
             if save_failed:
@@ -126,7 +132,7 @@ async def test_verification_failure_logs_original_digest_facts_once_before_save(
                     await advance_obtain(runtime)
             else:
                 await advance_obtain(runtime)
-            assert not channel.records
+            assert not records
         await flush_diagnostics()
         await flush_diagnostics()
     assert len(saved) == len(transport.calls) == 1
@@ -135,8 +141,8 @@ async def test_verification_failure_logs_original_digest_facts_once_before_save(
     assert request.state == int(enum_for("file_copies.verification_state").FAILED)
     if not save_failed:
         assert owned.connection.execute("SELECT verification_state FROM file_copies").fetchone() == (int(enum_for("file_copies.verification_state").FAILED),)
-    assert len(channel.records) == 1
-    record = channel.records[0]
+    assert len(records) == 1
+    record = json.loads(records[0].message)
     tool = record["details"]["raw_outcome"]
     assert tool["exit"] == {"exit_code": None, "signal": 9}
     assert tool["used_grace_s"] == "1.25"

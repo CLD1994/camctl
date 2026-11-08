@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from camctl.bootstrap.obtain_assembly import obtain_flow
+from camctl.capture.files import file_identity_key
 from camctl.contracts.pages import Page
 from camctl.devices.drivers.registry import DriverRegistry
 from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context, flush_diagnostics
@@ -26,10 +27,21 @@ from ..support.outputs import obtain_factory, output_operation, submit_output_do
 from .test_copy_complete import complete_env
 from .test_copy_segments import _drive
 from .test_delivery import prepared_env
-from .test_read_associations import read_targets
-from .test_read_diagnostics import Channel
+from .test_read_associations import read_targets as base_read_targets
+from support.logging import recording_log_channel
 from .test_qualification import _NOW
 from .test_segment_default_scope import _source, _obtain
+
+
+@pytest.fixture
+def read_targets(base_read_targets):
+    owned = base_read_targets
+    owned.connection.execute(
+        "UPDATE device_files SET identity_key=? WHERE id=501",
+        (file_identity_key("cam-1", "camctl-adb", "file-0501"),),
+    )
+    owned.connection.commit()
+    return owned
 
 
 @pytest.mark.asyncio
@@ -40,7 +52,8 @@ async def test_failed_source_resolution_records_original_returned_details(read_t
     instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     factory = obtain_factory(devices={}, drivers=DriverRegistry(()), staging=tmp_path / "staging",
         ready=tmp_path / "ready", processing=tmp_path / "processing", occurred_at=lambda: _NOW)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     async with business_database(database_path(owned)) as database:
         accepted = await submit_output_document(database, catalog=Catalog(), occurred_at=_NOW, body={
             "request_id": "19", "created_at": instant, "name": "来源诊断",
@@ -51,13 +64,13 @@ async def test_failed_source_resolution_records_original_returned_details(read_t
             async with diagnostic_scope():
                 await advance_obtain(factory(database))
                 await advance_obtain(factory(database))
-    assert len(channel.records) == 1
+    assert len(records) == 1
     status, code, raw = owned.connection.execute("SELECT status,error_code,error_details_json FROM actions WHERE id=?", (action,)).fetchone()
     assert status == 4 and code is not None
-    assert channel.records[0]["error"]["code"] == "source_resolution_failed"
-    assert channel.records[0]["error"]["details"] == json.loads(raw)
+    assert json.loads(records[0].message)["error"]["code"] == "source_resolution_failed"
+    assert json.loads(records[0].message)["error"]["details"] == json.loads(raw)
     assert "999001" in raw
-    assert channel.records[0]["context"]["action_id"] == action
+    assert json.loads(records[0].message)["context"]["action_id"] == action
 
 
 @pytest.mark.asyncio
@@ -71,7 +84,8 @@ async def test_unconfirmed_handoff_error_is_held_even_when_save_fails(prepared_e
         def save_unconfirmed_failure(self, request, key, worker):
             self.calls.append((request, key))
             return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=original)
-    port, channel = SavePort(), Channel()
+    port, records = SavePort(), []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         with pytest.raises(DeliveryHandoffError) as caught:
             async with diagnostic_scope():
@@ -79,9 +93,9 @@ async def test_unconfirmed_handoff_error_is_held_even_when_save_fails(prepared_e
                     repository=port, directories=directories, occurred_at=_NOW + 10)
         await flush_diagnostics()
     assert caught.value.__cause__ is original
-    assert len(port.calls) == len(channel.records) == 1
-    assert channel.records[0]["error"]["code"] == "delivery_handoff_unconfirmed"
-    assert channel.records[0]["error"]["details"] == {"delivery_id": str(prepared.delivery_id)}
+    assert len(port.calls) == len(records) == 1
+    assert json.loads(records[0].message)["error"]["code"] == "delivery_handoff_unconfirmed"
+    assert json.loads(records[0].message)["error"]["details"] == {"delivery_id": str(prepared.delivery_id)}
     assert owned.connection.execute("SELECT status FROM deliveries WHERE id=?", (prepared.delivery_id,)).fetchone() == (3,)
 
 
@@ -114,7 +128,8 @@ async def test_original_selection_error_pages_keep_empty_continuations_and_end_o
         pages.append(page)
         return page
     monkeypatch.setattr(segment_selections, "read_original_selection_error_page", read)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     async with selection_world(tmp_path) as (owned, database, factory, action, selection, _):
         with error_diagnostics_context(channel, lambda _: None):
             async with diagnostic_scope():
@@ -124,8 +139,8 @@ async def test_original_selection_error_pages_keep_empty_continuations_and_end_o
         assert cursors[:2] == [None, sentinel]
         assert pages[-1].exhausted
         assert owned.connection.execute("SELECT status FROM obtain_source_selections WHERE id=?", (selection,)).fetchone() == (2,)
-    assert len(channel.records) == 1
-    failures = channel.records[0]["error"]["failures"]
+    assert len(records) == 1
+    failures = json.loads(records[0].message)["error"]["failures"]
     actual = [failure for page in pages for failure in page.items]
     assert len(failures) == len(actual) == 1
     assert failures[0]["error"]["code"] == "output_not_found"
@@ -141,7 +156,8 @@ async def test_error_receipt_read_failure_does_not_replace_saved_business_result
         refs.append(ref)
         raise failure
     monkeypatch.setattr(segment_selections, "read_original_selection_error_page", read)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     async with selection_world(tmp_path) as (owned, database, factory, action, selection, _):
         with error_diagnostics_context(channel, lambda _: None):
             async with diagnostic_scope():
@@ -151,10 +167,10 @@ async def test_error_receipt_read_failure_does_not_replace_saved_business_result
         assert owned.connection.execute("SELECT status FROM obtain_source_selections WHERE id=?", (selection,)).fetchone() == (2,)
         code, raw = owned.connection.execute("SELECT error_code,error_details_json FROM obtain_items WHERE selection_id=?", (selection,)).fetchone()
         assert code is not None and json.loads(raw) == {"requested_output_id": "999001"}
-    assert len(channel.records) == 1
-    assert channel.records[0]["stage"] == "selection_diagnostic_receipt"
-    assert channel.records[0]["error"]["errno"] == 5
-    assert channel.records[0]["error"]["cause"]["errno"] == 13
+    assert len(records) == 1
+    assert json.loads(records[0].message)["stage"] == "selection_diagnostic_receipt"
+    assert json.loads(records[0].message)["error"]["errno"] == 5
+    assert json.loads(records[0].message)["error"]["cause"]["errno"] == 13
 
 
 @pytest.mark.asyncio
@@ -173,7 +189,8 @@ async def test_checksum_failure_is_held_before_recopy_registration(complete_env,
         def register_recopy(self, request, key, worker):
             self.calls.append((request, key))
             return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=original)
-    port, channel = SavePort(), Channel()
+    port, records = SavePort(), []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         with pytest.raises(CopyCompletionError) as caught:
             async with diagnostic_scope():
@@ -181,9 +198,9 @@ async def test_checksum_failure_is_held_before_recopy_registration(complete_env,
                     repository=port, roots=roots, occurred_at=_NOW + 20, max_recopies=1 if exhausted else 2)
         await flush_diagnostics()
     assert caught.value.__cause__ is original
-    assert len(port.calls) == len(channel.records) == 1
-    assert channel.records[0]["stage"] == ("checksum_exhausted" if exhausted else "checksum_verification")
-    assert channel.records[0]["context"]["copy_round"] == 2
+    assert len(port.calls) == len(records) == 1
+    assert json.loads(records[0].message)["stage"] == ("checksum_exhausted" if exhausted else "checksum_verification")
+    assert json.loads(records[0].message)["context"]["copy_round"] == 2
     assert owned.connection.execute("SELECT round,recopies_used FROM file_copies WHERE id=?", (prepared.copy_id,)).fetchone() == (2, 1)
 
 
@@ -203,7 +220,8 @@ async def test_completed_selection_delivery_error_defers_original_pages_until_se
         reads.append((ref, cursor))
         return original(ref, cursor, worker)
     monkeypatch.setattr(segment_selections, "read_original_selection_error_page", read)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     async with selection_world(tmp_path, observer=observer, second=True) as (owned, database, factory, action, selection, following):
         with error_diagnostics_context(channel, lambda _: None):
             with pytest.raises(type(failure)) as caught:
@@ -212,7 +230,7 @@ async def test_completed_selection_delivery_error_defers_original_pages_until_se
             assert caught.value is failure
             assert db_outcome_for(failure).value is receipts[0][0].value
             assert db_outcome_for(failure).kind is DbOutcomeKind.COMPLETED
-            assert not reads and not channel.records
+            assert not reads and not records
             assert owned.connection.execute("SELECT status FROM obtain_source_selections WHERE id=?", (following[1],)).fetchone() == (1,)
             settled = True
             async with diagnostic_scope():
@@ -220,8 +238,8 @@ async def test_completed_selection_delivery_error_defers_original_pages_until_se
                 saved_count = len(reads)
                 await settle_obtain_diagnostics(factory(database))
             assert len(reads) == saved_count
-    assert len(channel.records) == 1 and channel.records[0]["stage"] == "output_selection"
-    assert channel.records[0]["context"]["selection_id"] == selection
+    assert len(records) == 1 and json.loads(records[0].message)["stage"] == "output_selection"
+    assert json.loads(records[0].message)["context"]["selection_id"] == selection
 
 
 @pytest.mark.asyncio
@@ -230,7 +248,8 @@ async def test_obtain_flow_settlement_port_uses_original_context_database(tmp_pa
     def observer(worker, outcome, key):
         if isinstance(outcome.value, SegmentSelectionSaved):
             raise failure
-    channel, databases = Channel(), []
+    records, databases = [], []
+    channel = recording_log_channel(records)
     async with selection_world(tmp_path, observer=observer) as (owned, database, factory, action, selection, _):
         def tracked_factory(actual):
             databases.append(actual)
@@ -245,5 +264,5 @@ async def test_obtain_flow_settlement_port_uses_original_context_database(tmp_pa
                 await flow.settle_diagnostics(context)
                 await flow.settle_diagnostics(context)
         assert databases == [database, database, database]
-    assert len(channel.records) == 1
-    assert channel.records[0]["context"]["selection_id"] == selection
+    assert len(records) == 1
+    assert json.loads(records[0].message)["context"]["selection_id"] == selection
