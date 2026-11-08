@@ -20,7 +20,8 @@ from .test_media_execution import (
     _NOW, _POLICY, _RepositorySaves, _input_ref, _seed_pending_repair, _status,
     pipeline,  # noqa: F401
 )
-from .test_input_copy import pipeline as input_pipeline  # noqa: F401
+from .media_retry_fixtures import media_pipeline  # noqa: F401
+from ..support.capture_media_cases import MediaCase, ScriptTools, media_cases  # noqa: F401
 
 
 class _ToolOwner:
@@ -123,29 +124,34 @@ async def test_canceled_media_keeps_actual_result_and_original_save(pipeline, op
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("save_method", ["save_check_result", "save_repair_decision", "save_repair_result"])
-async def test_media_consumer_stops_on_unreliable_actual_business_save(input_pipeline, monkeypatch, save_method):
-    from camctl.capture.media_flow import CaptureProcessingSaves, run_recording_media
+async def test_media_consumer_stops_on_unreliable_actual_business_save(media_pipeline, media_cases, monkeypatch, save_method):
+    from dataclasses import replace
+    from camctl.capture.media_flow import run_recording_media
     from camctl.contracts.values import ConsistencyError
-    from camctl.host_files.tasks import FileTaskResult
-    from .test_media_flow import ProbeTools, ReadDriverDouble, _flow
-    from .test_input_copy import _CONTENT
+    from camctl.host_files.media import MediaStream
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from ..bootstrap.test_binding_transactions import _CommitFailure
 
-    original = getattr(CaptureProcessingSaves, save_method)
+    owned, roots, source_id = media_pipeline
+    probe = MediaProbe(Decimal("75"), None, (
+        MediaStream(0, "video", "h264", 64, 64, Decimal("75"), False),))
+    tools = ScriptTools(probe, result="failed")
+    case = await MediaCase(owned, roots, source_id, tools).start()
+    original = getattr(CaptureRepository, save_method)
+    outcomes = []
 
-    async def failed(saves, command):
+    def failed(repository, command, key, current):
         if save_method == "save_check_result" and command.phase is CheckPhase.RUNNING:
-            return await original(saves, command)
-        return SaveReceipt(SaveDisposition.UNKNOWN, error=RuntimeError(f"{save_method} commit unknown"))
+            return original(repository, command, key, current)
+        connection = _CommitFailure(current.connection, after=True)
+        outcome = original(repository, command, key, replace(current, connection=connection))
+        outcomes.append(outcome)
+        return outcome
 
-    monkeypatch.setattr(CaptureProcessingSaves, save_method, failed)
-
-    class Tools(ProbeTools):
-        async def repair(self, input, output, *, trim_s):
-            return FileTaskResult(FileTaskId("returned-repair"), ran=True,
-                value=MediaArtifact("tool failed", FileObservation(
-                    FileObservationKind.MISSING, Path(output.root) / output.relative_path),
-                    postprocessing_stopped=True))
-
-    tools = Tools(MediaProbe(Decimal("75"), None))
-    with pytest.raises(ConsistencyError, match=f"{save_method} commit unknown"):
-        await run_recording_media((await _flow(input_pipeline, ReadDriverDouble(_CONTENT), tools)), 1, 1, 11)
+    monkeypatch.setattr(CaptureRepository, save_method, failed)
+    with pytest.raises(ConsistencyError):
+        await run_recording_media(case.runtime.media, 1, 1, source_id)
+    assert len(outcomes) == 1 and outcomes[0].kind is DbOutcomeKind.UNKNOWN
+    assert len(tools.probes) == 1
+    assert len(tools.repairs) == (1 if save_method == "save_repair_result" else 0)
