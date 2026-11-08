@@ -8,9 +8,13 @@ import json
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.capture.files import file_identity_key
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind
 from camctl.outputs.qualification import OperationConfig, QualificationOutcome
+from camctl.outputs.batches import BatchOutcome, BatchRequest
+from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.transaction import TransactionError
@@ -28,6 +32,7 @@ def read_request(request):
     else:
         owned = request.getfixturevalue("read_targets")
         command = _command(internal=request.param == "internal")
+        _set_device_identities(owned)
     if request.param == "internal":
         owned.connection.execute("DELETE FROM obtain_items")
         owned.connection.execute("DELETE FROM outputs")
@@ -35,6 +40,13 @@ def read_request(request):
         owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
     return owned, command
+
+
+def _set_device_identities(owned):
+    for file_id in (501, 502):
+        owned.connection.execute("UPDATE device_files SET identity_key=? WHERE id=?",
+            (file_identity_key("cam-1", "camctl-adb", f"file-{file_id:04d}"), file_id))
+    owned.connection.commit()
 
 
 def _save_grant(owned, command):
@@ -64,12 +76,21 @@ def test_original_key_returns_exact_first_grant(granted):
     assert result.value == first
 
 
-def _later_attempt(owned, command, first):
-    # 已持有机会的投影夹具；本测试验证后续读取与原建档响应的关系。
+def _grant_read_access(owned, command, first):
     if command.source_device_file_id is not None:
-        owned.connection.execute("UPDATE file_copies SET slot_device_id='cam-1' WHERE id=?",
-                                 (first.copy_id,))
-        owned.connection.commit()
+        if command.item_id is not None:
+            register_file_batch_guards()
+            batch = FileBatchRepository().acquire(
+                BatchRequest(command.action_id, "cam-1", command.occurred_at), new_operation_key(), owned)
+            assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch
+        slot = OutputsRepository().grant_read_slot(SlotRequest(first.copy_id, command.occurred_at),
+                                                   new_operation_key(), owned)
+        assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+        assert slot.value.outcome is SlotOutcome.GRANTED, slot.value
+
+
+def _later_attempt(owned, command, first):
+    _grant_read_access(owned, command, first)
     intent = AttemptIntent(operation="read", action_id=command.action_id, kind=OperationKind.READ_FILE,
         target=AttemptTarget(copy_id=first.copy_id), query_purpose=None,
         config=AttemptConfig(5, Decimal("23.000000000000000001"), Decimal("2.1")) if command.config else AttemptConfig(1),
@@ -135,6 +156,7 @@ def test_grant_key_rejects_changed_shared_input(granted, field):
 @pytest.mark.parametrize("field", ["max_attempts", "timeout_s", "retry_interval_s"])
 def test_grant_key_rejects_changed_adopted_device_config(read_targets, field):
     owned, command = read_targets, _command()
+    _set_device_identities(owned)
     key = new_operation_key()
     first = OutputsRepository().grant_file(command, key, owned)
     assert first.kind is DbOutcomeKind.COMPLETED, first.error
@@ -353,6 +375,8 @@ def test_original_length_uses_json_numeric_semantics(read_request, size, saved_s
 @pytest.fixture
 def rejected(target):
     owned, command = target
+    if command.source_device_file_id is not None:
+        _set_device_identities(owned)
     _availability(owned.connection, command, 4)
     owned.connection.commit()
     key = new_operation_key()
