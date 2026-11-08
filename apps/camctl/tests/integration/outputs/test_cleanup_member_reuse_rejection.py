@@ -17,7 +17,7 @@ from camctl.operations.attempts import RunOutcome, StaleRunFinish
 from camctl.operations.models import ErrorValue
 from camctl.outputs.cleanup_flow import (
     FinishCleanupAction, FinishCleanupItem, CancelCleanupItem,
-    ProgressCleanupItem, delete_source_file)
+    ProgressCleanupItem, advance_cleanup, delete_source_file)
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -228,9 +228,18 @@ async def _dispatched_cancel_member(cfg, owned, output_id, driver):
 async def test_member_cancel_reuse_keeps_original_when_facts_changed(environment):
     """成员取消复验保持原取消；其他成员后来的完成不改写原结果。"""
     cfg, owned, context, output_id = await _member_output(environment)
+    canceled_driver = _MatrixDriver(owned)
     canceled_action, item_id, (request, key) = await _dispatched_cancel_member(
-        cfg, owned, output_id, _MatrixDriver(owned))
-    before = _history_count(owned)
+        cfg, owned, output_id, canceled_driver)
+    canceled_calls = len(canceled_driver.deletes), len(canceled_driver.queries)
+    canceled_runtime = await _new_runtime(cfg, owned, canceled_driver)
+    await advance_cleanup(canceled_runtime)
+    assert (len(canceled_driver.deletes), len(canceled_driver.queries)) == canceled_calls
+    released, = owned.connection.execute(
+        "SELECT released_event_id FROM device_file_batches WHERE action_id=?",
+        (canceled_action,),
+    ).fetchone()
+    assert released is not None
 
     # 其他请求后来清理完成同一产物：原取消只读复用，不重新解释。
     other_driver = _MatrixDriver(owned)
