@@ -29,6 +29,8 @@ from camctl.outputs.copy import SourceDigest, SourceDigestReader
 
 from ..support.capture import capture_database
 from .test_input_copy import _CONTENT, pipeline  # noqa: F401  环境夹具
+from .media_retry_fixtures import media_pipeline  # noqa: F401
+from ..support.capture_media_cases import MediaCase, ScriptTools, media_cases  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -162,12 +164,14 @@ class TestDriverReadSessions:
 
 
 class TestRunRecordingMedia:
-    async def test_input_check_chain_completes_without_repair(self, pipeline):
-        owned, roots = pipeline[0], pipeline[1]
-        driver = ReadDriverDouble(_CONTENT)
-        tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
-        step = await run_recording_media(
-            (await _flow(pipeline, driver, tools)), 1, 1, 11)
+    async def test_input_check_chain_completes_without_repair(self, media_pipeline, media_cases):
+        from camctl.host_files.media import MediaStream
+
+        owned, roots, source_id = media_pipeline
+        tools = ScriptTools(MediaProbe(Decimal("61"), None, (
+            MediaStream(0, "video", "h264", 64, 64, Decimal("61"), False),)))
+        case = await MediaCase(owned, roots, source_id, tools).start()
+        step = await run_recording_media(case.runtime.media, 1, 1, source_id)
         assert step.phase is CheckExecutionPhase.CHECK_COMPLETED, step
         assert step.repair_decision is not None
         row = owned.connection.execute(
@@ -182,19 +186,23 @@ class TestRunRecordingMedia:
         ).fetchone()[0]
         assert (roots.staging / relative).read_bytes() == _CONTENT
 
-    async def test_reentry_reuses_copy_and_check_conclusion(self, pipeline):
-        owned = pipeline[0]
-        driver = ReadDriverDouble(_CONTENT)
-        tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
-        flow = (await _flow(pipeline, driver, tools))
-        await run_recording_media(flow, 1, 1, 11)
-        step = await run_recording_media(
-            (await _flow(pipeline, ReadDriverDouble(_CONTENT), tools)), 1, 1, 11)
+    async def test_reentry_reuses_copy_and_check_conclusion(self, media_pipeline, media_cases):
+        from camctl.host_files.media import MediaStream
+
+        owned, roots, source_id = media_pipeline
+        tools = ScriptTools(MediaProbe(Decimal("61"), None, (
+            MediaStream(0, "video", "h264", 64, 64, Decimal("61"), False),)))
+        case = await MediaCase(owned, roots, source_id, tools).start()
+        await run_recording_media(case.runtime.media, 1, 1, source_id)
+        resumed = await MediaCase(owned, roots, source_id, tools).start()
+        step = await run_recording_media(resumed.runtime.media, 1, 1, source_id)
         assert step.phase in (
             CheckExecutionPhase.ALREADY_FINISHED,
             CheckExecutionPhase.FINISHED_DECISION_SAVED), step
         # 重入不再打开读取会话，也不重复拷贝。
-        assert driver.opens == [(driver.opens[0][0], 0)]
+        assert len([call for call in case.driver.calls if call[0] == "read"]) == 1
+        assert not [call for call in resumed.driver.calls if call[0] == "read"]
+        assert len(tools.probes) == 1
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM file_copies").fetchone()[0] == 1
 
