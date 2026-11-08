@@ -11,10 +11,42 @@ from camctl.history.snapshots import prepare_snapshot
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.transaction import encode_json_value
 from .test_record_segment_history import (
-    _assert_same_s_snapshot_bytes,
     _fixture,
     _save,
+    _version,
 )
+
+
+async def _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, previous_paths):
+    """重新准备同一边界的快照，检查重复保存和损坏拒绝。"""
+    from camctl.history.snapshots import SnapshotMaintenanceError
+
+    with history.open_segment_history(ref.action_id, boundary, strategy='current', batch_size=7) as handle:
+        prepared = prepare_snapshot(handle)
+    try:
+        assert prepared.path not in previous_paths
+        assert prepared.path.exists() and prepared.length > 65540
+        assert prepared.boundary == boundary
+        await _save(history, prepared)
+        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0] == 1
+        assert history.current_boundary() == boundary
+        with prepared.path.open('r+b') as source:
+            source.seek(65540)
+            before = source.read(1)
+            assert len(before) == 1
+            source.seek(65540)
+            source.write(b'x' if before != b'x' else b'y')
+        with pytest.raises(SnapshotMaintenanceError):
+            await _save(history, prepared)
+        snapshot_id = owned.connection.execute('SELECT id FROM entity_snapshots').fetchone()[0]
+        with owned.connection.blobopen('entity_snapshots', 'content', snapshot_id) as blob:
+            blob.seek(65540)
+            blob.write(b'\xff')
+        _version(owned, None, repo, ref, 2)
+        with pytest.raises(ConsistencyError):
+            history.open_segment_history(ref.action_id, boundary, strategy='snapshot', batch_size=7)
+    finally:
+        prepared.close()
 
 
 def _change_snapshot(owned, prepared, transform):
@@ -194,7 +226,20 @@ async def test_growth_snapshot_restore_runs_in_managed_thread_and_event_loop_is_
 async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path,monkeypatch,phase):
     from camctl.history.snapshots import (MaintenanceContext,MaintenanceState,SnapshotRef,maintain_snapshots)
     from camctl.persistence.repositories import history as module
-    owned,runtime,repo,ref,history=await _fixture(tmp_path,220 if phase=='middle' else 5)
+    if phase == 'middle':
+        from camctl.capture.segment_models import SegmentSetRef
+        from camctl.persistence.repositories.segments import SegmentRepository
+        from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
+        from ..support.segment_history_corpus import prepare_copy
+
+        directory = tmp_path / 'source'
+        manifest = prepare_copy(directory, 256)
+        ref = SegmentSetRef(*(manifest[name] for name in ('action_id', 'scan_id', 'final_page_event_id', 'version')))
+        owned = open_existing(directory / 'state.db', DbOpenMode.EXISTING_RW, DbConfig())
+        repo = SegmentRepository()
+        history = HistoryRepository(directory / 'state.db')
+    else:
+        owned,_,repo,ref,history=await _fixture(tmp_path)
     boundary=history.current_boundary()
     store,executor=await _snapshot_store(history)
     selected=False
@@ -272,7 +317,7 @@ async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path
             monkeypatch.setattr(PreparedSnapshotSource,'chunks',original_chunks)
             monkeypatch.setattr(snapshots_module,'prepare_snapshot',original_prepare)
             await _assert_same_s_snapshot_bytes(
-                owned,runtime,repo,ref,history,boundary,paths)
+                owned,repo,ref,history,boundary,paths)
     finally:
         release.set()
         if not task.done():
