@@ -41,6 +41,7 @@ async def test_raw_binding_save_gate_preserves_original_requests(pipeline, captu
         return actual_open(path, flags, *args, **kwargs)
 
     try:
+        ended_at = world.wall[0]
         with monkeypatch.context() as fault:
             fault.setattr(os, "open", local_digest_unavailable)
             with pytest.raises(ConsistencyError):
@@ -69,7 +70,7 @@ async def test_raw_binding_save_gate_preserves_original_requests(pipeline, captu
         formed_at = world.wall[0]
         world.prime_clock()
         finishes, children, receipts = [], [], []
-        actual_finish, actual_child = OperationRepository.finish_attempt, CaptureRepository.finish_binding_failure
+        actual_finish, actual_child = OperationRepository.finish_binding_read, CaptureRepository.finish_binding_failure
 
         def submit(actual, request, key, owned, operation, inputs):
             inputs.append((request, key))
@@ -81,9 +82,9 @@ async def test_raw_binding_save_gate_preserves_original_requests(pipeline, captu
                 return result
             return actual(request, key, owned)
 
-        def finish(repository, request, key, owned):
+        def finish(repository, request, key, owned, *, current_identity=None):
             assert request.ticket == ticket
-            return submit(lambda *args: actual_finish(repository, *args), request, key,
+            return submit(lambda *args: actual_finish(repository, *args, current_identity=current_identity), request, key,
                 owned, "finish", finishes)
 
         def child(repository, request, key, owned):
@@ -91,13 +92,13 @@ async def test_raw_binding_save_gate_preserves_original_requests(pipeline, captu
             return submit(lambda *args: actual_child(repository, *args), request, key,
                 owned, "child", children)
 
-        monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
+        monkeypatch.setattr(OperationRepository, "finish_binding_read", finish)
         monkeypatch.setattr(CaptureRepository, "finish_binding_failure", child)
         binding = lambda saved: check_binding(saved, SimpleNamespace(devices={}))
         await world.replay(entrance, failure=True, binding=binding)
         assert len(receipts) == 1 and len(finishes) == 1
         assert len(children) == (1 if stage == "child" else 0)
-        assert finishes[0][0].occurred_at == formed_at
+        assert finishes[0][0].occurred_at == ended_at and formed_at > ended_at
         if children:
             assert children[0][0].occurred_at == formed_at
         inputs = finishes if stage == "finish" else children
@@ -135,7 +136,7 @@ async def test_raw_binding_save_gate_preserves_original_requests(pipeline, captu
         gate.enabled = False
         await world.replay(entrance, binding=binding)
         assert inputs[-1] == original and len(inputs) == 4
-        assert children[-1][0].occurred_at == finishes[0][0].occurred_at == formed_at
+        assert children[-1][0].occurred_at == formed_at and finishes[0][0].occurred_at == ended_at
         assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (4,)
         assert len(world.reader.requests) == 1 and tuple(world.driver.calls) == calls and world.tools() == []
     finally:

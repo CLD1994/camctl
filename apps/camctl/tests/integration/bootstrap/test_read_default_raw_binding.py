@@ -130,18 +130,18 @@ async def _assert_default_binding(pipeline, capture_resources, monkeypatch, entr
     raw = await _raw_world(pipeline, capture_resources, monkeypatch)
     world, ticket = raw.world, raw.ticket
     saves = []
-    actual_finish, actual_binding = OperationRepository.finish_attempt, CaptureRepository.finish_binding_failure
+    actual_finish, actual_binding = OperationRepository.finish_binding_read, CaptureRepository.finish_binding_failure
 
-    def finish(repository, request, key, current):
+    def finish(repository, request, key, current, *, current_identity=None):
         if request.ticket.operation == "read":
             saves.append(("finish", request, key))
-        return actual_finish(repository, request, key, current)
+        return actual_finish(repository, request, key, current, current_identity=current_identity)
 
     def binding(repository, request, key, current):
         saves.append(("binding", request, key))
         return actual_binding(repository, request, key, current)
 
-    monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
+    monkeypatch.setattr(OperationRepository, "finish_binding_read", finish)
     monkeypatch.setattr(CaptureRepository, "finish_binding_failure", binding)
     try:
         await world.replay(entrance, binding=_binding_port(change))
@@ -168,7 +168,8 @@ async def _assert_default_binding(pipeline, capture_resources, monkeypatch, entr
         assert (status, code) == (int(enum_for("actions.status").FAILED), 17)
         assert json.loads(error) == details
         assert [stage for stage, _request, _key in saves] == ["finish", "binding"]
-        assert saves[0][1].ticket == ticket and saves[0][1].occurred_at > raw.ended_at
+        assert saves[0][1].ticket == ticket and saves[0][1].occurred_at == raw.ended_at
+        assert saves[1][1].occurred_at == world.wall[0] and world.wall[0] > raw.ended_at
         assert saves[1][1].action_id == raw.action_id and saves[0][2] != saves[1][2]
         for _stage, _request, key in saves:
             assert owned.connection.execute(

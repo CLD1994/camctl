@@ -26,7 +26,7 @@ async def test_default_raw_binding_unknown_retries_original_inputs(
     raw = await _raw_world(pipeline, capture_resources, monkeypatch)
     world, ticket = raw.world, raw.ticket
     finishes, children, returns, faults = [], [], [], []
-    actual_finish, actual_child = OperationRepository.finish_attempt, CaptureRepository.finish_binding_failure
+    actual_finish, actual_child = OperationRepository.finish_binding_read, CaptureRepository.finish_binding_failure
     formed_at = world.wall[0]
 
     def submit(actual, request, key, current, operation, inputs):
@@ -41,11 +41,9 @@ async def test_default_raw_binding_unknown_retries_original_inputs(
             return result
         return actual(request, key, current)
 
-    def finish(repository, request, key, current):
-        if request.ticket.operation != "read":
-            return actual_finish(repository, request, key, current)
+    def finish(repository, request, key, current, *, current_identity=None):
         assert request.ticket == ticket
-        return submit(lambda *args: actual_finish(repository, *args), request, key,
+        return submit(lambda *args: actual_finish(repository, *args, current_identity=current_identity), request, key,
             current, "finish", finishes)
 
     def child(repository, request, key, current):
@@ -53,14 +51,14 @@ async def test_default_raw_binding_unknown_retries_original_inputs(
         return submit(lambda *args: actual_child(repository, *args), request, key,
             current, "child", children)
 
-    monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
+    monkeypatch.setattr(OperationRepository, "finish_binding_read", finish)
     monkeypatch.setattr(CaptureRepository, "finish_binding_failure", child)
     try:
         await world.replay(entrance, failure=True, binding=_binding_port("missing"))
         assert len(faults) == len(returns) == len(finishes) == 1
         assert len(children) == (0 if stage == "finish" else 1)
         original_finish, finish_key = finishes[0]
-        assert original_finish.occurred_at == formed_at and formed_at > raw.ended_at
+        assert original_finish.occurred_at == raw.ended_at and formed_at > raw.ended_at
         if children:
             assert children[0][0].occurred_at == formed_at and children[0][1] != finish_key
         assert (saved_transaction_events(world.owned.connection, finish_key) is not None) is (
@@ -84,7 +82,7 @@ async def test_default_raw_binding_unknown_retries_original_inputs(
         assert len(children) == (1 if stage == "finish" else 2)
         original_child, child_key = children[0]
         assert all(pair == (original_child, child_key) for pair in children)
-        assert original_child.occurred_at == original_finish.occurred_at == formed_at
+        assert original_child.occurred_at == formed_at and original_finish.occurred_at == raw.ended_at
         assert child_key != finish_key
         for key in (finish_key, child_key):
             assert world.owned.connection.execute(
