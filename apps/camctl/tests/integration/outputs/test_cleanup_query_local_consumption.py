@@ -14,12 +14,12 @@ from sqlite3 import OperationalError
 import pytest
 
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.values import ConsistencyError
 from camctl.operations.attempts import AttemptConfig, FinishDisposition
 from camctl.operations.models import EffectState
 from camctl.outputs.cleanup_flow import (
     CleanupQueryConsumer, CleanupQueryPhase, DeleteDriverPort,
-    FinishCleanupAction, delete_source_file,
+    delete_source_file,
 )
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -189,16 +189,8 @@ async def _world(environment, consumer, present):
     driver = _MatrixDriver(owned)
     old_member = None
     if consumer == "before":
-        old_action, old_item = _start_cleanup(owned, output_id, "2")
-        prior_runtime = await _new_runtime(cfg, owned, driver, query_attempts=1)
-        first = await delete_source_file(prior_runtime, old_item)
-        assert first.phase == "query_unknown", first
-        exhausted = await delete_source_file(prior_runtime, old_item)
-        assert (exhausted.phase, exhausted.detail) == (
-            "failed", "file_query_attempts_exhausted"), exhausted
-        finished = OutputsRepository().finish_cleanup_action(
-            FinishCleanupAction(old_action, _NOW), new_operation_key(), owned)
-        assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+        from .test_cleanup_query_cancel_before_delete import _c1_unknown_delete_terminal
+        old_action, old_item = await _c1_unknown_delete_terminal(cfg, owned, driver, output_id)
         old_member = (old_action, old_item, _original_member_rows(owned, old_action, old_item))
         action_id, item_id = _start_cleanup(owned, output_id, "3")
     else:

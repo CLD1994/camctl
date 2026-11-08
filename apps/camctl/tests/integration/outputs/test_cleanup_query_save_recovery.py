@@ -20,7 +20,7 @@ from camctl.cancellation.models import (
     FixedCancelSet, FixedTarget, SelectionBasis, StartCancelAction,
 )
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
@@ -30,7 +30,7 @@ from camctl.operations.models import (
     Settlement, SettlementBasis,
 )
 from camctl.outputs.cleanup_flow import (
-    FinishCleanupAction, FixCleanupTargets, RestrictCleanupItem,
+    FixCleanupTargets, RestrictCleanupItem,
     StartCleanupAction, delete_source_file,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -183,17 +183,8 @@ async def test_query_save_matrix(environment, consumer, present, kind):
     driver = _MatrixDriver(owned)
     old_member = None
     if consumer == "before":
-        # C1 实际删除未知、查询未知，随后自己的查询预算可靠耗尽。
-        old_action, old_item = _start_cleanup(owned, output_id, "2")
-        previous_runtime = await _new_runtime(cfg, owned, driver, query_attempts=1)
-        first = await delete_source_file(previous_runtime, old_item)
-        assert first.phase == "query_unknown", first
-        exhausted = await delete_source_file(previous_runtime, old_item)
-        assert (exhausted.phase, exhausted.detail) == (
-            "failed", "file_query_attempts_exhausted"), exhausted
-        finished = OutputsRepository().finish_cleanup_action(
-            FinishCleanupAction(old_action, _NOW), new_operation_key(), owned)
-        assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+        from .test_cleanup_query_cancel_before_delete import _c1_unknown_delete_terminal
+        old_action, old_item = await _c1_unknown_delete_terminal(cfg, owned, driver, output_id)
         old_member = (old_action, old_item, _original_member_rows(owned, old_action, old_item))
         action_id, item_id = _start_cleanup(owned, output_id, "3")
     else:

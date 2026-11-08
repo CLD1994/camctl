@@ -21,7 +21,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.operations.attempts import BeginDisposition, FinishDisposition
 from camctl.outputs.cleanup_flow import (
-    FinishCleanupAction, delete_source_file)
+    FinishCleanupAction, advance_cleanup, delete_source_file)
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -102,6 +102,15 @@ async def _c1_unknown_delete_terminal(cfg, owned, driver, output_id: int):
     finished = OutputsRepository().finish_cleanup_action(
         FinishCleanupAction(action_id, _NOW), new_operation_key(), owned)
     assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+    assert (finished.value.action_status, finished.value.succeeded, finished.value.failed) == (4, 0, 1)
+    assert len(driver.deletes) == len(driver.queries) == 1
+    await advance_cleanup(runtime)
+    assert len(driver.deletes) == len(driver.queries) == 1
+    released, = owned.connection.execute(
+        "SELECT released_event_id FROM device_file_batches WHERE action_id=?",
+        (action_id,),
+    ).fetchone()
+    assert released is not None
     return action_id, item_id
 
 
