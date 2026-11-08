@@ -376,7 +376,6 @@ async def _file_snapshot_path(world, tmp_path, path):
     pytest.param({"presence_state": None}, id="required_null"),
     pytest.param({"locator_json": []}, id="json_array_in_object"),
     pytest.param({"original_name": 42}, id="text_as_integer"),
-    pytest.param({"size_bytes": None}, id="complete_without_length"),
     pytest.param({"size_bytes": 2**63}, id="integer_outside_sql_range"),
 ])
 async def test_snapshot_business_values_reject_invalid_state(file_world, tmp_path,
@@ -386,6 +385,59 @@ async def test_snapshot_business_values_reject_invalid_state(file_world, tmp_pat
     _rewrite_snapshot_row(world, snapshot_id, "device_files", 1, changes)
     with pytest.raises(ConsistencyError):
         world.history.restore_entity("device_file", 1, boundary, event_batch_size=1)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_construction_matches_independent_file_history_at_s(file_world):
+    from .test_complete_history import _naive_replay_image
+
+    world = file_world
+    boundary = world.history.current_boundary()
+    expected = _naive_replay_image(world.owned.connection, boundary.last_event_id)[("device_files", 1)]
+    assert expected["size_bytes"] is not None
+    snapshot_id = await _snapshot(world)
+
+    def snapshot_values():
+        content, = world.owned.connection.execute(
+            "SELECT content FROM entity_snapshots WHERE id=?", (snapshot_id,)).fetchone()
+        rows = [parse_exact_json(line) for line in content.decode().splitlines()]
+        return next(row["row"] for row in rows if row.get("table") == "device_files")
+
+    original = snapshot_values()
+    assert {key: original[key] for key in expected} == expected
+    _rewrite_snapshot_row(world, snapshot_id, "device_files", 1, {"size_bytes": None})
+    assert {key: snapshot_values()[key] for key in expected} != expected
+
+
+@pytest.mark.asyncio
+async def test_on_demand_photo_unknown_length_survives_snapshot_read(tmp_path):
+    from pathlib import Path
+    from camctl.capture.handlers import capture_handler
+    from camctl.persistence.repositories.history import HistoryRepository
+    from ..capture.test_host_photo_flow import _world
+
+    config, owned, _, runtime, _ = await _world(tmp_path, storage="device")
+    history = HistoryRepository(Path(config.paths.state_db))
+    executor = DbExecutor(lambda: open_existing(history.path, DbOpenMode.EXISTING_RW, DbConfig()),
+                          capacity=4, enqueue_timeout_seconds=9)
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        boundary = history.current_boundary()
+        ids = [row[0] for row in owned.connection.execute("SELECT id FROM device_files ORDER BY id")]
+        assert len(ids) == 2
+        store = SqliteSnapshotStore(history.path, executor)
+        images = await store.load_entity_images(tuple(SnapshotRef(9, identity) for identity in ids))
+        prepared = [prepare_snapshot(image) for image in images]
+        await store.save_snapshots(tuple(prepared))
+        for identity in ids:
+            saved = CaptureRepository().save_file_presence(
+                FilePresenceSave(identity, 3, NOW), new_operation_key(), owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            restored = history.restore_entity("device_file", identity, boundary)
+            assert restored[("device_files", identity)]["size_bytes"] is None
+    finally:
+        await executor.close()
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
@@ -471,6 +523,8 @@ async def test_snapshot_delivery_rejects_published_state_without_publication_fac
         AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
     )
     from camctl.outputs.slots import SlotOutcome, SlotRequest
+    from camctl.outputs.batches import BatchOutcome, BatchRequest
+    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
     from camctl.persistence.repositories.operations import OperationRepository
     from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -483,6 +537,13 @@ async def test_snapshot_delivery_rejects_published_state_without_publication_fac
     copy_id = world.owned.connection.execute(
         "SELECT id FROM file_copies WHERE delivery_id = ?", (delivery_id,)).fetchone()[0]
     copy = row_facts(world.owned.connection, "file_copies", copy_id)
+    from .test_file_history import _finish_repair
+    _finish_repair(complete_world.capture, world.owned, complete_world.repair_file)
+    register_file_batch_guards()
+    batch = FileBatchRepository().acquire(
+        BatchRequest(delivery["action_id"], "cam-1", NOW), new_operation_key(), world.owned)
+    assert batch.kind is DbOutcomeKind.COMPLETED, batch.error
+    assert batch.value is BatchOutcome.GRANTED, batch.value
     slot = OutputsRepository().grant_read_slot(
         SlotRequest(copy_id, NOW), new_operation_key(), world.owned)
     assert slot.kind is DbOutcomeKind.COMPLETED, slot.error

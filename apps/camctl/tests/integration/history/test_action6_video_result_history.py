@@ -38,6 +38,7 @@ from camctl.persistence.repositories.history import (
     HistoryRepository,
     SqliteSnapshotStore,
 )
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -59,6 +60,7 @@ from ..support.outputs import obtain_factory
 from ..support.capture import capture_database
 
 pytestmark = pytest.mark.asyncio
+register_file_batch_guards()
 
 _BINDING = DeviceBinding(device_id="cam-1", driver_id="camctl-adb")
 
@@ -188,7 +190,7 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
     tmp_path, monkeypatch, capture_resources
 ):
     owned, capture_runtime, action_id, handler, _tools, result_port, evidence = await _overrun_recording(
-        tmp_path, monkeypatch, (Decimal("18"),)
+        tmp_path, monkeypatch, (Decimal("18"),), recovery_resources=capture_resources
     )
     try:
         obtain_action_id, selection_id = _obtain(
@@ -224,20 +226,22 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
         supervisor = Supervisor()
         executor = FileTaskExecutor(supervisor)
         database = await capture_database(owned)
-        factory = obtain_factory(devices={}, drivers=DriverRegistry(()),
+        factory = obtain_factory(devices=_tools.assembly_options["devices"],
+            drivers=_tools.assembly_options["drivers"],
             staging=directories.staging, ready=directories.ready, processing=directories.processing,
             segment_size=4, monotonic_ns=lambda: 22_000_000_000,
             occurred_at=lambda: _NOW + 600_000_001, file_executor=executor)
         obtain_runtime = factory(database)
 
         # 在公开数据库写入边界取得可靠授予后暂停，H 尚无实际读取结果。
-        from camctl.outputs.qualification import FileQualification
+        from camctl.outputs.qualification import FileQualification, QualificationOutcome
         class GrantSaved(BaseException):
             pass
         write = database.write
         async def pause_after_grant(callback, **options):
             result = await write(callback, **options)
             if result.kind is DbOutcomeKind.COMPLETED and isinstance(result.value, FileQualification):
+                assert result.value.outcome is QualificationOutcome.GRANTED, result.value
                 raise GrantSaved()
             return result
         database.write = pause_after_grant
@@ -369,7 +373,8 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
         assert inspection_file_at_h["cleanup_state"] != 4
 
         database = await capture_resources.restart_database(owned)
-        obtain_runtime = obtain_factory(devices={}, drivers=DriverRegistry(()),
+        obtain_runtime = obtain_factory(devices=_tools.assembly_options["devices"],
+            drivers=_tools.assembly_options["drivers"],
             staging=directories.staging, ready=directories.ready, processing=directories.processing,
             segment_size=4, monotonic_ns=lambda: 23_000_000_000,
             occurred_at=lambda: _NOW + 650_000_000, file_executor=executor)(database)

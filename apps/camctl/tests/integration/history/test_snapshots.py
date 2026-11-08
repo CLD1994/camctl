@@ -48,6 +48,7 @@ from .test_file_history import (
     _presence,
     _seed_processing,
     _seed_obtain_action,
+    _set_video_identity,
     _seed_repair_pending,
     _start_repair,
     _submit_plan,
@@ -63,6 +64,7 @@ async def session(tmp_path: Path):
     # 交付链前提：取回动作 31 引用动作 11 的产物 701 与设备文件 501。
     _seed_obtain_action(connection, 31, 1)
     _seed_device_file(connection, 501, 11)
+    _set_video_identity(connection, 501)
     _seed_output(connection, 701, 11, 501)
     _seed_selection_and_item(
         connection, dependency_id=31, selection_id=31, item_id=101,

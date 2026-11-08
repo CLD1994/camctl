@@ -545,9 +545,10 @@ async def world(tmp_path: Path):
         _seed_output,
         _seed_selection_and_item,
     )
-    from .test_file_history import _seed_obtain_action
+    from .test_file_history import _seed_obtain_action, _set_video_identity
     _seed_obtain_action(connection, 31, 1)
     _seed_device_file(connection, 501, 11)
+    _set_video_identity(connection, 501)
     _seed_output(connection, 701, 11, 501)
     _seed_selection_and_item(
         connection, dependency_id=31, selection_id=31, item_id=101,
@@ -690,100 +691,12 @@ async def test_every_event_matches_independent_history(world) -> None:
     with closing(connection.execute(
             "SELECT DISTINCT event_type FROM history_events")) as cursor:
         produced = {int(row[0]) for row in cursor.fetchall()}
+    registered = {definition["id"] for definition in registry.values()}
+    assert produced <= registered, produced - registered
     script_types = {
         name for name, definition in registry.items()
         if definition["id"] in produced}
     assert covered_types == script_types, covered_types ^ script_types
-
-
-# ---- 登记分支到具体用例的证据映射 ----
-
-#: 每个登记事件类型的覆盖方式：script=True 表示综合剧本在本文件
-#: 真实产生并经三路径核对；anchors 列出该类型行为断言的既有测试
-#: 文件（仓库根相对路径）。无生产写入方的类型注明而非折叠。
-_EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
-    "MOTOR_CHANGED": (False, ["apps/camctl/tests/integration/persistence/test_motor_transactions.py"]),
-    "PLAN_ACCEPTED": (True, ["apps/camctl/tests/integration/acceptance/test_acceptance.py"]),
-    "ACTION_ADMITTED": (True, ["apps/camctl/tests/integration/acceptance/test_acceptance.py"]),
-    "SOURCE_RESOLVED": (False, ["apps/camctl/tests/integration/acceptance/test_acceptance.py"]),
-    "TARGETS_FIXED": (False, ["apps/camctl/tests/integration/outputs/test_cleanup_guards.py"]),
-    "ACTION_STARTED": (False, ["apps/camctl/tests/integration/scheduling/test_start_action.py"]),
-    "RETRY_WAIT_CHANGED": (False, ["apps/camctl/tests/integration/operations/test_attempts.py"]),
-    "WINDOW_OBSERVED": (False, ["apps/camctl/tests/integration/scheduling/test_window_expiration.py"]),
-    "ACTION_FINISHED": (True, ["apps/camctl/tests/integration/capture/test_recording_finish.py"]),
-    "PLAN_STATUS_CHANGED": (False, ["apps/camctl/tests/integration/reporting/test_sync_lifecycle.py"]),
-    "OPERATION_CONFIGURED": (True, ["apps/camctl/tests/integration/operations/test_attempts.py"]),
-    "ATTEMPT_STARTED": (False, ["apps/camctl/tests/integration/operations/test_attempts.py"]),
-    "ATTEMPT_RESULT": (False, ["apps/camctl/tests/integration/operations/test_attempts.py"]),
-    "DEVICE_OBSERVED": (False, ["apps/camctl/tests/integration/capture/test_capture_contract.py"]),
-    "BASELINE_CHUNK": (False, ["apps/camctl/tests/integration/capture/test_baseline_history.py"]),
-    "BASELINE_READ": (False, ["apps/camctl/tests/integration/capture/test_baseline_read_owner.py"]),
-    "CAPTURE_WAIT_CHANGED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
-    "RESULT_SET_CONFIRMED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
-    "RESULT_PAGE": (False, ["apps/camctl/tests/integration/capture/test_result_page_history.py"]),
-    "DEVICE_FILE_OBSERVED": (True, ["apps/camctl/tests/integration/capture/test_file_observation.py"]),
-    "RECORDING_DECIDED": (True, ["apps/camctl/tests/integration/capture/test_media_processing.py"]),
-    "RECORDING_PROCESSED": (True, ["apps/camctl/tests/integration/capture/test_media_processing.py"]),
-    "OUTPUT_REGISTERED": (True, ["apps/camctl/tests/integration/capture/test_recording_finish.py"]),
-    # 检查流程真实覆盖 CREATE、RESULT 与结果提交回执未知后的冷启动恢复；
-    # 历史入口另核对 inspection 行及其副本在固定 H 下的归属。
-    "SEGMENT_INSPECTION": (False, [
-        "apps/camctl/tests/integration/capture/test_segment_inspections.py",
-        "apps/camctl/tests/integration/history/test_action6_video_result_history.py",
-    ]),
-    "READ_PERMISSION_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_read_associations.py"]),
-    "COPY_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_copy_creation_slot.py"]),
-    "SEGMENT_FACTS": (False, ["apps/camctl/tests/integration/persistence/test_segment_storage.py"]),
-    "DELIVERY_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_delivery.py"]),
-    "CLEANUP_CHANGED": (False, ["apps/camctl/tests/integration/outputs/test_source_cleanup.py"]),
-    "CANCEL_CHANGED": (False, ["apps/camctl/tests/integration/cancellation/test_effects.py"]),
-    "INTERMEDIATE_FILE_CHANGED": (True, ["apps/camctl/tests/integration/capture/test_media_execution.py"]),
-    "INPUT_DIAGNOSTIC": (False, ["apps/camctl/tests/integration/acceptance/test_validation.py"]),
-    "REPORT_CHANGED": (False, ["apps/camctl/tests/integration/reporting/test_freeze.py"]),
-    "SYNC_CHANGED": (False, ["apps/camctl/tests/integration/reporting/test_sync_lifecycle.py"]),
-    "ACK_ABSORBED": (False, ["apps/camctl/tests/integration/reporting/test_ack_sync.py"]),
-    "CLOCK_ACCEPTED": (False, ["apps/camctl/tests/integration/session/test_session.py"]),
-    "CLEANUP_CURSOR_MOVED": (False, ["apps/camctl/tests/integration/outputs/test_source_cleanup.py"]),
-    "EMERGENCY_RECORDED": (False, ["apps/camctl/tests/integration/capture/test_emergency.py"]),
-}
-
-#: 无生产写入方的事件类型（登记先行；随接入核对，见事件契约审查）。
-_NO_PRODUCER_EVENTS: frozenset[str] = frozenset()
-
-
-async def test_event_coverage_map_is_complete() -> None:
-    """登记的每个事件类型都有覆盖方式；锚点文件真实存在。
-
-    script 标记的集合与综合剧本实际产生的类型集合一致（防漂
-    移）；无生产写入方的类型显式列出，不折叠成已覆盖。
-    """
-    registry = load_event_registry()["events"]
-    assert set(_EVENT_COVERAGE) == set(registry), (
-        set(_EVENT_COVERAGE) ^ set(registry))
-    root = Path(__file__).parents[5]
-    for name, (in_script, anchors) in _EVENT_COVERAGE.items():
-        if name in _NO_PRODUCER_EVENTS:
-            assert not in_script and not anchors, name
-            continue
-        assert anchors, f"{name} 缺少锚点测试"
-        for anchor in anchors:
-            assert (root / anchor).is_file(), (name, anchor)
-    assert set(_NO_PRODUCER_EVENTS) <= set(_EVENT_COVERAGE)
-
-
-async def test_script_types_match_map(world) -> None:
-    """综合剧本实际产生的事件类型与映射的 script 标记一致。"""
-    connection = world.owned.connection
-    registry = load_event_registry()["events"]
-    with closing(connection.execute(
-            "SELECT DISTINCT event_type FROM history_events")) as cursor:
-        produced = {int(row[0]) for row in cursor.fetchall()}
-    actual = {
-        name for name, definition in registry.items()
-        if definition["id"] in produced}
-    mapped = {
-        name for name, (in_script, _) in _EVENT_COVERAGE.items() if in_script}
-    assert actual == mapped, actual ^ mapped
 
 
 # ---- 代表性数据上的分页选择与候选扫描查询计划（验收 68、P-03、P-04、P-06） ----

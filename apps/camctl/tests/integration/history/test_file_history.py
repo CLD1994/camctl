@@ -25,6 +25,7 @@ from camctl.capture.files import (
     FileObservationSave,
     FilePresenceSave,
     OwnershipSave,
+    file_identity_key,
 )
 from camctl.capture.processing import (
     CheckPhase,
@@ -68,6 +69,14 @@ pytestmark = pytest.mark.asyncio
 
 _NOW = 1_750_000_000_000_000
 _SEED_BOUNDARY = HistoryBoundary(txn_id=1, last_event_id=1)
+
+
+def _set_video_identity(connection, file_id):
+    """为取回种子保存与设备绑定一致的录像身份。"""
+    connection.execute(
+        "UPDATE device_files SET identity_key=? WHERE id=?",
+        (file_identity_key("cam-1", "camctl-adb", f"file-{file_id:04d}"), file_id),
+    )
 
 
 def _environment(tmp_path: Path):
@@ -683,6 +692,7 @@ async def test_delivery_intermediate_files_restore_at_h(read_targets) -> None:
     from camctl.persistence.repositories.outputs import OutputsRepository
 
     owned = read_targets
+    _set_video_identity(owned.connection, 501)
     result = OutputsRepository().grant_file(
         _command(), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
