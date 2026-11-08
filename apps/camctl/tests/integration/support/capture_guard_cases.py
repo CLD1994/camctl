@@ -72,9 +72,11 @@ async def known_failure_case(directory, resources, monkeypatch, values, entries,
     from camctl.host_files.media import ProbeRequest
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.operations.attempts import AttemptConfig
     from ..capture.result_consumer_fixtures import consumer_world, returned
     from ..capture.test_action6_segmented_normal import Action6RecordCatalog
     from ..capture.test_capture_contract import _NOW
+    from ..capture.test_call_result_save import _outcome
     from ..capture.test_input_copy import _CONTENT
     from ..capture.test_record_file_completion_wait import _completed_result, _stop_context, _REGISTRY
     from ..bootstrap.test_media_assembly import _EVIDENCE, _tool
@@ -106,7 +108,11 @@ async def known_failure_case(directory, resources, monkeypatch, values, entries,
         world.owned, world.action_id = owned, 1
         activity_id, = owned.connection.execute("SELECT id FROM device_activities WHERE action_id=1").fetchone()
         stopper = create_autospec(StopDriver, instance=True)
-        stopper.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
+        async def stop(request):
+            if stopper.stop.await_count == 1:
+                return DeviceCallResult.from_outcome(_outcome("stop"))
+            return DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
+        stopper.stop.side_effect = stop
         world.control, world.stopper = driver, stopper
 
         async def read(source, offset, ticket, *, idle_timeout_s):
@@ -136,6 +142,7 @@ async def known_failure_case(directory, resources, monkeypatch, values, entries,
                 "result_check": {"max_attempts": 3, "call_timeout_s": Decimal("1.25"),
                     "retry_interval_s": Decimal(2)}}},
             staging=directory/'staging', probe_request=probe, segment_size=4,
+            stop_config=AttemptConfig(3, Decimal("1"), Decimal("3")),
             wall_us=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0])
         return await world.factory(owned)
 
@@ -148,6 +155,9 @@ async def known_failure_case(directory, resources, monkeypatch, values, entries,
         fixed = CaptureRepository().fix_baseline(BaselineFixSave(1, 0, 0, _NOW), new_operation_key(), owned)
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
         await capture_handler(handler)(action_id, runtime)
+        world.wall[0], world.mono[0] = _NOW+72_000_000, 77_000_000_000
+        await capture_handler(handler)(action_id, runtime)
+        assert world.stopper.stop.await_count == 1
         world.wall[0], world.mono[0] = _NOW+75_000_000, 80_000_000_000
         actual_conclude = CaptureRepository.conclude_activity
 

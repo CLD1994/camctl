@@ -51,8 +51,12 @@ def _assert_reliable_control_complete(world):
         "SELECT r.kind,t.status,t.effect_state,t.result_json FROM operation_runs r"
         " JOIN operation_attempts t ON t.run_id=r.id WHERE r.action_id=? AND r.kind IN (1,2) ORDER BY r.kind",
         (action_id,)).fetchall()
-    assert len(rows) == 2
-    for (_kind, status, effect, result), observation in zip(rows, ("start_confirmed", "stop_confirmed")):
+    assert len(rows) == 3
+    first_stop = rows[1]
+    assert first_stop[0] == 2
+    assert first_stop[1] == int(enum_for("operation_attempts.status").FAILED)
+    assert first_stop[2] == int(enum_for("operation_attempts.effect_state").UNKNOWN)
+    for (_kind, status, effect, result), observation in zip((rows[0], rows[2]), ("start_confirmed", "stop_confirmed")):
         assert status == int(enum_for("operation_attempts.status").SUCCEEDED)
         assert effect == int(enum_for("operation_attempts.effect_state").CONFIRMED)
         actual = json.loads(result)
@@ -60,7 +64,7 @@ def _assert_reliable_control_complete(world):
         assert any(item["type"] == observation and item["data"]["activity_id"] == str(activity["id"])
             for item in actual["observations"])
     world.control.control.assert_awaited_once()
-    world.stopper.stop.assert_awaited_once()
+    assert world.stopper.stop.await_count == 2
 
 
 def _scope_rows(owned, set_id: int):
