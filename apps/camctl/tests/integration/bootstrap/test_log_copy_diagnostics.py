@@ -902,9 +902,10 @@ async def test_default_file_io_failure_stops_listener_and_uses_stderr(
         assert "ordinary current log open denied" in stderr.getvalue()
         assert stdout.getvalue() == ""
 
-        later = await deps.log_runtime.channel.alog(
+        later = await deps.log_runtime.channel.submit(
             LogRecord(level=LogLevel.ERROR, message="later ordinary record"))
         assert later.decision.kind.value == "channel_failed"
+        assert later.fallback_written is True
         assert attempts["open"] == 1
         fallback = [json.loads(line) for line in stderr.getvalue().splitlines()
                     if line.startswith("{")]
