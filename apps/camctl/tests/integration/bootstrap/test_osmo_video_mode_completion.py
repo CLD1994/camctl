@@ -1,6 +1,7 @@
 """真实 OSMO 部署绑定穿过单文件媒体链及 native 公共发布。"""
 
 import json
+import shlex
 
 import pytest
 
@@ -11,6 +12,7 @@ from camctl.capture.segment_storage import SegmentResultRef
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.operations.recovery import RecoveryBoundary
+from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 
@@ -34,6 +36,21 @@ async def test_single_file_result_reader_uses_frozen_mode_after_deployment_chang
         osv_path = world.channel.result_path
         lrf_path = osv_path.rsplit(".", 1)[0] + ".LRF"
         world.channel.result_paths = [osv_path, lrf_path]
+        run = world.channel.run
+        family_calls = []
+
+        async def run_with_family(spec, stop):
+            script = shlex.split(spec.argv[5])[2]
+            if "CAMCTL-FAMILY/1" not in script:
+                return await run(spec, stop)
+            world.channel._record_call(spec)
+            family_calls.append(script)
+            stem = next(line for line in script.splitlines() if line.startswith("stem="))
+            assert shlex.split(stem) == ["stem=" + lrf_path.rsplit(".", 1)[0]]
+            frame = b"\0".join((b"CAMCTL-FAMILY/1", osv_path.encode(), lrf_path.encode(), b"END", b""))
+            return RawToolOutcome(LocalExit(exit_code=0), frame, None, None, stderr=b"")
+
+        world.channel.run = run_with_family
         await stop_driver_capture(world, monkeypatch, elapsed_us=22_000_000)
         assert world.owned.connection.execute('SELECT COUNT(*) FROM operation_runs WHERE kind=7').fetchone() == (0,)
 
@@ -76,6 +93,7 @@ async def test_single_file_result_reader_uses_frozen_mode_after_deployment_chang
         entries = {entry["identity"]: entry for entry in listed["entries"]}
         assert entries[osv_path]["paired_identity"] is None
         assert entries[lrf_path]["paired_identity"] == osv_path
+        assert len(family_calls) == 1
         frozen = json.loads(world.owned.connection.execute(
             "SELECT execution_spec_json FROM actions WHERE id=1").fetchone()[0])
         assert frozen["video_result_mode"] == "single_file"
