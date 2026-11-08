@@ -29,8 +29,7 @@ from ..bootstrap.test_output_binding_changes import environment, Catalog, _NOW, 
 from ..support.database import business_database, database_path
 from ..support.outputs import output_operation, prepare_cancel_target, submit_output_document
 from .test_cleanup_delete_save_recovery import _prepared, _configured
-from .test_delivery import prepared_env
-from .test_read_associations import read_targets
+from .test_read_associations import read_targets  # noqa: F401  work_env 的依赖
 from .test_work_files import work_env, _cancel_delivery
 
 pytestmark = pytest.mark.asyncio
@@ -164,8 +163,34 @@ async def test_work_file_io_failure_saved_and_logged_without_repeating_io(monkey
     assert state == 5 and json.loads(raw)['code'] == 'work_file_delete_failed'
 
 
-async def test_handoff_failure_is_logged_even_when_reobservation_confirms_published(monkeypatch, prepared_env):
-    owned, roots, directories, prepared = prepared_env
+async def test_handoff_failure_is_logged_even_when_reobservation_confirms_published(monkeypatch, environment):
+    from camctl.bootstrap.obtain_assembly import obtain_flow
+    from ..bootstrap.test_output_binding_changes import _CONTENT
+    from ..support.outputs import obtain_factory
+
+    cfg, owned, context, driver = environment
+    await _save_photos(cfg, owned, context, driver)
+    source_id, = owned.connection.execute(
+        "SELECT o.source_action_id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'"
+    ).fetchone()
+    accepted = await submit_output_document(context.database, catalog=Catalog(), occurred_at=_NOW, body={
+        'request_id': '2', 'created_at': '2026-01-15 08:00:00', 'name': '取回',
+        'actions': [{'name': '取回', 'type': 'obtain_action_outputs',
+                     'scheduled_at': '2026-01-15 09:00:00',
+                     'params': {'source': {'action_instance_id': str(source_id)}}}]})
+    assert accepted.plan_id is not None, accepted
+    directories = handoff.DeliveryDirectories(
+        staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
+        processing=Path(cfg.paths.processing))
+    factory = obtain_factory(devices=cfg.devices, drivers=_registry(driver),
+        staging=directories.staging, ready=directories.ready, processing=directories.processing,
+        occurred_at=lambda: _NOW, monotonic_ns=lambda: 0, segment_size=4)
+    await obtain_flow(factory)(context)
+    delivery_id, status, name = owned.connection.execute(
+        'SELECT id,status,file_name FROM deliveries').fetchone()
+    assert status == 3
+    assert len(driver.reads) == 1
     failure = PermissionError(13, '移动权限失败')
     calls = []
     async def publish(ref, bound, actual_directories, name):
@@ -177,15 +202,16 @@ async def test_handoff_failure_is_logged_even_when_reobservation_confirms_publis
     lines = []
     with error_diagnostics_context(None, lines.append):
         async with diagnostic_scope():
-            result = await output_operation(owned, handoff.publish_delivery, prepared.delivery_id, handoff.DeliveryContext,
+            result = await output_operation(owned, handoff.publish_delivery, delivery_id, handoff.DeliveryContext,
                 repository=OutputsRepository(), directories=directories, occurred_at=_NOW)
     assert result.phase is handoff.DeliveryPhase.PUBLISHED
     assert len(lines) == len(calls) == 1
     record = json.loads(lines[0])
     assert record['error']['type'] == 'builtins.PermissionError'
     assert record['error']['errno'] == 13
-    assert record['context']['delivery_id'] == prepared.delivery_id
-    assert owned.connection.execute('SELECT status FROM deliveries WHERE id=?', (prepared.delivery_id,)).fetchone() == (5,)
+    assert record['context']['delivery_id'] == delivery_id
+    assert owned.connection.execute('SELECT status FROM deliveries WHERE id=?', (delivery_id,)).fetchone() == (5,)
+    assert (directories.ready / name).read_bytes() == _CONTENT
 
 
 async def test_member_rejection_logs_original_request_once_during_save_retry(environment):
