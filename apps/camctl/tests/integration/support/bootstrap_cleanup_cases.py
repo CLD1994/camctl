@@ -47,8 +47,17 @@ def cleanup_case_factory(*, devices, drivers, staging, file_executor, occurred_a
 def save_cleanup_intent(owned, item_id, operation, config, occurred_at):
     """原票据恢复专项经公开共同建档事务建立尚未保存实际结果的责任。"""
     from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
+    from camctl.outputs.batches import BatchOutcome, BatchRequest
+    from camctl.persistence.repositories.file_batches import FileBatchRepository
     from camctl.persistence.repositories.outputs import OutputsRepository
-    action, = owned.connection.execute('SELECT action_id FROM cleanup_items WHERE id=?', (item_id,)).fetchone()
+    action, device = owned.connection.execute(
+        'SELECT c.action_id,a.device_id FROM cleanup_items c'
+        ' JOIN outputs o ON o.id=COALESCE(c.output_id,c.requested_output_id)'
+        ' LEFT JOIN device_files f ON f.id=o.device_file_id'
+        ' LEFT JOIN actions a ON a.id=f.observer_action_id WHERE c.id=?', (item_id,)).fetchone()
+    if device is not None:
+        batch = FileBatchRepository().acquire(BatchRequest(action, device, occurred_at), new_operation_key(), owned)
+        assert batch.kind is DbOutcomeKind.COMPLETED and batch.value in (BatchOutcome.GRANTED, BatchOutcome.HELD), batch
     intent = AttemptIntent(operation, action,
         OperationKind.DELETE_FILE if operation == 'delete' else OperationKind.CHECK_FILE_EXISTS,
         AttemptTarget(cleanup_item_id=item_id), None, config, occurred_at)

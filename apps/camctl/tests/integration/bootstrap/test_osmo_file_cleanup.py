@@ -35,6 +35,7 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.cancellation import register_cancellation_guards
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.scheduling import register_window_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
@@ -89,6 +90,7 @@ async def world(tmp_path, monkeypatch, request, capture_resources):
     monkeypatch.setattr(drivers_runtime, "_entries", {})
     register_capture_guards()
     register_cancellation_guards()
+    register_file_batch_guards()
     register_window_guard()
     cfg = load_config({
         "paths": {"state_db": str(tmp_path / "state.db"), "log_file": str(tmp_path / "log"),
@@ -119,8 +121,18 @@ async def world(tmp_path, monkeypatch, request, capture_resources):
         path.write_bytes(b"source")
         paths[output_id] = path
         _seed_device_file(connection, output_id, action_id, size=6)
+        if output_id == 706:
+            from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+            import hashlib
+            identity = CameraFileIdentity(file_binding, "/DCIM/hb-original.3FR", "hb-original.3FR",
+                DownloadVariant.ORIGINAL, hashlib.sha256(b"source").hexdigest(), "serial-1", 1, 6)
+            identity_key = json.dumps([file_binding.device_id, file_binding.driver_id, identity.file_identity])
+            locator = json.dumps(identity.locator())
+        else:
+            identity_key = json.dumps([file_binding.device_id, file_binding.driver_id, str(path)])
+            locator = json.dumps({"path": str(path)})
         connection.execute("UPDATE device_files SET identity_key=?,locator_json=?,original_name=? WHERE id=?",
-            (json.dumps([file_binding.device_id, file_binding.driver_id, str(path)]), json.dumps({"path": str(path)}), name, output_id))
+            (identity_key, locator, name, output_id))
         _seed_output(connection, output_id, action_id, output_id, size=6)
     connection.execute("UPDATE device_files SET role=3,original_device_file_id=701,pairing_evidence_json='{}' WHERE id=702")
     connection.execute("UPDATE outputs SET kind=3 WHERE id=702")
@@ -336,6 +348,10 @@ async def test_old_running_uses_registered_recovery_without_replaying_original_t
 
 async def test_mixed_cleanup_routes_saved_device_host_and_unsupported_source_independently(world):
     delivery = world.owned.connection.execute("SELECT * FROM deliveries").fetchall()
+    hb = world.registry.entry("hasselblad_cfv100c")
+    action6 = world.registry.entry("dji-action6")
+    world.registry = DriverRegistry((world.entry, action6, replace(hb,
+        declaration=replace(hb.declaration, delete_supported=False))))
     await _accept(world.owned, "2", [{"name": "混合精确清理", "type": "delete_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00", "params": {"output_ids": ["701", "703", "706"]}}])
     factory = _factory(world)
