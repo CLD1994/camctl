@@ -17,11 +17,11 @@ from decimal import Decimal
 import pytest
 
 from ..support.outputs import output_operation
-from ..support.output_planning import capture_operation
+from ..support.output_planning import EventSequence, proposal_state
+from ..support.output_storage_cases import capture_scoped_operation, observed_operation
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
 from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
 )
@@ -35,6 +35,8 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.repositories import outputs
+from camctl.persistence.transaction import commit_operation
 
 from .test_copy_resume import _command, _make_roots, _qualified, _seed_failed_attempts
 from .test_copy_segments import _CONTENT, _drive, _target_path
@@ -516,50 +518,47 @@ def test_save_prepared_key_recovers_first_response(complete_env):
 
 
 def _proposal(owned, operation, request):
-    return capture_operation(owned, lambda database: operation(
+    return capture_scoped_operation(owned, outputs, lambda database: operation(
         request, new_operation_key(), database))
 
 
-def _validate(plan, events=None, state_rows=None):
-    """模仿内核按顺序分配报告变化序号并逐事件校验。"""
-    from camctl.history.changes import event_report_targets
-
-    working = {
-        table: {row_id: dict(rows) for row_id, rows in table_rows.items()}
-        for table, table_rows in plan.state_rows.items()
-    }
-    chosen = events if events is not None else plan.events
-    seq = 0
-    for event in chosen:
-        if event_report_targets(event, working):
-            seq += 1
-            event = replace(event, change_seq=seq)
-        context = EventContext(
-            TransactionRange(
-                chosen[0].transaction_id, chosen[0].event_id, chosen[-1].event_id),
-            dict(plan.owners),
-            state_rows if state_rows is not None else plan.state_rows,
-            read_coverage=plan.read_coverage)
-        validate_event(event, context)
-        for row in event.rows:
-            if row.after.exists:
-                working.setdefault(row.table, {}).setdefault(
-                    row.row_id, {}).update(row.after.values)
+def _commit_events(owned, proposal, events, *, rejection=None):
+    before = tuple(owned.connection.iterdump())
+    receipt = commit_operation(EventSequence(events, proposal), new_operation_key(), owned)
+    assert not owned.connection.in_transaction
+    if rejection is None:
+        assert receipt.kind == "completed", receipt.error
+    else:
+        assert receipt.kind == "rolled_back", receipt.error
+        assert isinstance(receipt.error, EventValidationError), receipt.error
+        assert rejection in str(receipt.error)
+        assert tuple(owned.connection.iterdump()) == before
 
 
 def test_guard_accepts_real_verification_and_recopy_events(complete_env):
     owned, roots, qualification = complete_env
-    verify = _proposal(owned, OutputsRepository().save_verification, VerificationSave(
-        copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
-        target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 5,
-    ))
-    _validate(verify)
-    _seed_wrong_source_digest(owned, qualification.copy_id)
-    recopy = _proposal(owned, OutputsRepository().register_recopy, RecopyRegistration(
-        copy_id=qualification.copy_id, source_sha256=_WRONG_DIGEST,
-        target_sha256=_CONTENT_DIGEST, max_recopies=1, occurred_at=_NOW + 5,
-    ))
-    _validate(recopy)
+    def verify(target):
+        proposal = _proposal(target, OutputsRepository().save_verification, VerificationSave(
+            copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
+            target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 5))
+        _commit_events(target, proposal, proposal.events)
+        assert _row(target, "SELECT verification_state,target_sha256 FROM file_copies WHERE id=?",
+                    qualification.copy_id) == (3, _CONTENT_DIGEST)
+
+    def recopy(target):
+        changed = b"x" * len(_CONTENT)
+        _target_path(roots, target, qualification.target_file_id).write_bytes(changed)
+        target_digest = hashlib.sha256(changed).hexdigest()
+        assert target_digest != _CONTENT_DIGEST
+        proposal = _proposal(target, OutputsRepository().register_recopy, RecopyRegistration(
+            copy_id=qualification.copy_id, source_sha256=_CONTENT_DIGEST,
+            target_sha256=target_digest, max_recopies=1, occurred_at=_NOW + 5))
+        _commit_events(target, proposal, proposal.events)
+        assert _row(target, "SELECT round,recopies_used,committed_bytes,reset_state"
+                    " FROM file_copies WHERE id=?", qualification.copy_id) == (2, 1, 0, 2)
+
+    observed_operation(owned, verify)
+    observed_operation(owned, recopy)
 
 
 def test_guard_rejects_matched_with_unequal_digests(complete_env):
@@ -573,28 +572,47 @@ def test_guard_rejects_matched_with_unequal_digests(complete_env):
     variant = replace(
         row, after=replace(row.after, values={
             **row.after.values, "target_sha256": _WRONG_DIGEST}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    _commit_events(owned, plan, (replace(event, rows=(variant,)),),
+                   rejection="校验通过要求源摘要与主机摘要一致")
+    _commit_events(owned, plan, plan.events)
 
 
 def test_guard_rejects_recopy_without_full_progress(complete_env):
     owned, roots, qualification = complete_env
-    _seed_wrong_source_digest(owned, qualification.copy_id)
-    owned.connection.execute(
-        "UPDATE file_copies SET verification_state=4, target_sha256=? WHERE id=?",
-        (_CONTENT_DIGEST, qualification.copy_id))
-    owned.connection.commit()
+    changed = b"x" * len(_CONTENT)
+    _target_path(roots, owned, qualification.target_file_id).write_bytes(changed)
+    target_digest = hashlib.sha256(changed).hexdigest()
+    assert target_digest != _CONTENT_DIGEST
+    saved = OutputsRepository().save_verification(VerificationSave(
+        copy_id=qualification.copy_id, state=4, source_sha256=_CONTENT_DIGEST,
+        target_sha256=target_digest, error_json=None, occurred_at=_NOW + 5),
+        new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     plan = _proposal(owned, OutputsRepository().register_recopy, RecopyRegistration(
-        copy_id=qualification.copy_id, source_sha256=_WRONG_DIGEST,
-        target_sha256=_CONTENT_DIGEST, max_recopies=1, occurred_at=_NOW + 5,
+        copy_id=qualification.copy_id, source_sha256=_CONTENT_DIGEST,
+        target_sha256=target_digest, max_recopies=1, occurred_at=_NOW + 5,
     ))
     event = next(e for e in plan.events if e.event_type == 22 and e.reason == 4)
     row = event.rows[0]
-    variant = replace(
-        row, after=replace(row.after, values={
-            **row.after.values, "committed_bytes": 4}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    not_reset = replace(row, after=replace(row.after, values={
+        **row.after.values, "committed_bytes": 4}))
+    _commit_events(owned, plan, (replace(event, rows=(not_reset,)),),
+                   rejection="committed_bytes=4 不在允许范围 [0]")
+    # 存储故障：校验已完成但可靠进度被破坏；不作为合法业务历史。
+    owned.connection.execute("PRAGMA ignore_check_constraints=ON")
+    owned.connection.execute("UPDATE file_copies SET committed_bytes=4 WHERE id=?",
+                             (qualification.copy_id,))
+    owned.connection.commit()
+    current = proposal_state(owned, owners=plan.owners)
+    variant = replace(row, before=replace(row.before, values={
+        **row.before.values, "committed_bytes": 4}))
+    _commit_events(owned, current, (replace(event, rows=(variant,)),),
+                   rejection="重拷登记要求全部字节已经可靠保存")
+    owned.connection.execute("UPDATE file_copies SET committed_bytes=10 WHERE id=?",
+                             (qualification.copy_id,))
+    owned.connection.commit()
+    owned.connection.execute("PRAGMA ignore_check_constraints=OFF")
+    _commit_events(owned, plan, plan.events)
 
 
 def test_guard_rejects_release_without_prepared_copy(complete_env):
@@ -611,10 +629,14 @@ def test_guard_rejects_release_without_prepared_copy(complete_env):
         size_bytes=10, occurred_at=_NOW + 6,
     ))
     release = next(e for e in plan.events if e.event_type == 21)
-    tampered = {
-        table: {row_id: dict(rows) for row_id, rows in rows.items()}
-        for table, rows in plan.state_rows.items()
-    }
-    tampered["file_copies"][qualification.copy_id]["verification_state"] = 1
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(release,), state_rows=tampered)
+    owned.connection.execute("UPDATE file_copies SET verification_state=1 WHERE id=?",
+                             (qualification.copy_id,))
+    owned.connection.commit()
+    current = proposal_state(owned, owners=plan.owners)
+    _commit_events(owned, current, (release,), rejection="副本可靠准备前不能解除源保护")
+    owned.connection.execute("UPDATE file_copies SET verification_state=3 WHERE id=?",
+                             (qualification.copy_id,))
+    owned.connection.commit()
+    _commit_events(owned, plan, plan.events)
+    assert _row(owned, "SELECT source_dependency FROM obtain_items WHERE id=?",
+                _item_id(owned, qualification.delivery_id)) == (0,)

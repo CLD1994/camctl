@@ -2,14 +2,14 @@
 
 import asyncio
 from contextlib import closing
-from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 
 import pytest
 
 from ..support.outputs import output_operation
-from ..support.output_planning import capture_operation, validate_static_event
+from ..support.output_planning import EventSequence, proposal_state
+from ..support.output_storage_cases import capture_scoped_operation, observed_operation
 from ..support.read_batch_cases import acquire_read_batch
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
@@ -34,6 +34,8 @@ from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.repositories import outputs
+from camctl.persistence.transaction import commit_operation
 
 from .test_local_read import local_read  # noqa: F401  主机源建档夹具
 from .test_qualification import _NOW
@@ -447,29 +449,61 @@ def test_reset_key_returns_first_response_and_rejects_changed_input(copy_env):
 
 
 def _reset_proposal(owned, copy_id: int, occurred_at: int = _NOW + 1):
-    return capture_operation(owned, lambda database: OutputsRepository().reset_copy_target(
-        TargetResetRequest(copy_id, occurred_at), new_operation_key(), database))
+    return capture_scoped_operation(
+        owned, outputs, lambda database: OutputsRepository().reset_copy_target(
+            TargetResetRequest(copy_id, occurred_at), new_operation_key(), database))
+
+
+def _commit_reset(owned, proposal, events, *, rejection=None):
+    before = tuple(owned.connection.iterdump())
+    receipt = commit_operation(EventSequence(events, proposal), new_operation_key(), owned)
+    assert not owned.connection.in_transaction
+    if rejection is None:
+        assert receipt.kind == "completed", receipt.error
+    else:
+        assert receipt.kind == "rolled_back", receipt.error
+        assert isinstance(receipt.error, EventValidationError), receipt.error
+        assert rejection in str(receipt.error)
+        assert tuple(owned.connection.iterdump()) == before
 
 
 def test_reset_guard_accepts_real_event(copy_env):
     owned, roots, first = copy_env
     _seed_reset_pending(owned, first.copy_id)
     plan = _reset_proposal(owned, first.copy_id)
-    assert validate_static_event(plan.events[0], plan).branch_name == "RESET"
+    _commit_reset(owned, plan, plan.events)
+    assert owned.connection.execute(
+        "SELECT reset_state,committed_bytes FROM file_copies WHERE id=?",
+        (first.copy_id,)).fetchone() == (1, 0)
 
 
 def test_reset_guard_rejects_nonzero_progress_or_missing_facts(copy_env):
     owned, roots, first = copy_env
     _seed_reset_pending(owned, first.copy_id)
     plan = _reset_proposal(owned, first.copy_id)
-    nonzero = deepcopy(plan.state_rows)
-    nonzero["file_copies"][first.copy_id]["committed_bytes"] = 2
-    with pytest.raises(EventValidationError):
-        validate_static_event(plan.events[0], replace(plan, state_rows=nonzero))
-    empty = {table: dict(rows) for table, rows in deepcopy(plan.state_rows).items()}
-    del empty["file_copies"][first.copy_id]
-    with pytest.raises(EventValidationError):
-        validate_static_event(plan.events[0], replace(plan, state_rows=empty))
+    def nonzero(target):
+        target.connection.execute("UPDATE file_copies SET committed_bytes=2 WHERE id=?",
+                                  (first.copy_id,))
+        target.connection.commit()
+        current = proposal_state(target, owners=plan.owners)
+        _commit_reset(target, current, plan.events, rejection="重置完成要求可靠进度已经归零")
+
+    def missing(target):
+        target.connection.execute("PRAGMA foreign_keys=OFF")
+        target.connection.execute("DELETE FROM file_copies WHERE id=?", (first.copy_id,))
+        target.connection.commit()
+        before = tuple(target.connection.iterdump())
+        result = OutputsRepository().reset_copy_target(
+            TargetResetRequest(first.copy_id, _NOW + 1), new_operation_key(), target)
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(result.error, ConsistencyError), result.error
+        assert "拷贝记录不存在" in str(result.error)
+        assert not target.connection.in_transaction
+        assert tuple(target.connection.iterdump()) == before
+
+    observed_operation(owned, nonzero)
+    observed_operation(owned, missing)
+    _commit_reset(owned, plan, plan.events)
 
 
 def test_reset_guard_rejects_ready_start(copy_env):
@@ -481,5 +515,11 @@ def test_reset_guard_rejects_ready_start(copy_env):
     row = event.rows[0]
     already_ready = replace(
         row, before=replace(row.before, values={"reset_state": 1}))
-    with pytest.raises(EventValidationError):
-        validate_static_event(replace(event, rows=(already_ready,)), plan)
+    owned.connection.execute("UPDATE file_copies SET reset_state=1 WHERE id=?", (first.copy_id,))
+    owned.connection.commit()
+    current = proposal_state(owned, owners=plan.owners)
+    _commit_reset(owned, current, (replace(event, rows=(already_ready,)),),
+                  rejection="更新列没有实际变化")
+    owned.connection.execute("UPDATE file_copies SET reset_state=2 WHERE id=?", (first.copy_id,))
+    owned.connection.commit()
+    _commit_reset(owned, plan, plan.events)
