@@ -11,11 +11,13 @@ from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.persistence.initialization import InitOutcome, initialize_state
 
+from ..support.distribution import prepare_project_metadata
 from .test_composition import RecordingCatalog, RecordingNotifier, _config_for, _parsed, _plan_body
 
 
 @pytest.mark.asyncio
-async def test_handled_input_error_is_logged_when_submit_succeeds(tmp_path):
+async def test_handled_input_error_is_logged_when_submit_succeeds(tmp_path, monkeypatch):
+    prepare_project_metadata(tmp_path, monkeypatch)
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     original = OSError(5, "原始输入读取失败", "/original/source")
@@ -40,7 +42,8 @@ async def test_handled_input_error_is_logged_when_submit_succeeds(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_invalid_action_is_logged_with_saved_identity(tmp_path):
+async def test_invalid_action_is_logged_with_saved_identity(tmp_path, monkeypatch):
+    prepare_project_metadata(tmp_path, monkeypatch)
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     body = _plan_body()
@@ -61,7 +64,8 @@ async def test_invalid_action_is_logged_with_saved_identity(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_standard_error_is_logged_and_original_handlers_restored(tmp_path):
+async def test_standard_error_is_logged_and_original_handlers_restored(tmp_path, monkeypatch):
+    prepare_project_metadata(tmp_path, monkeypatch)
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     deps = build_runtime(CommandMode.RUN, config, catalog=RecordingCatalog())

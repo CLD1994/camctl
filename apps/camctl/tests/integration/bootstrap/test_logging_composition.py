@@ -31,6 +31,7 @@ from camctl.logging_runtime.service import LogRecord
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from integration.logging_runtime.sync_support import FileSyncProbe
 
+from ..support.distribution import prepare_project_metadata
 from .test_composition import (
     RecordingCatalog, RecordingNotifier, _config_for, _parsed, _plan_body,
 )
@@ -44,7 +45,8 @@ def _log_text(home: Path) -> str:
 
 
 class TestSessionLogging:
-    async def test_submit_info_stages_are_written_before_channel_closes(self, tmp_path: Path) -> None:
+    async def test_submit_info_stages_are_written_before_channel_closes(self, tmp_path: Path, monkeypatch) -> None:
+        prepare_project_metadata(tmp_path, monkeypatch)
         cfg = _config_for(tmp_path)
         cfg = replace(cfg, log=replace(cfg.log, level="INFO"))
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
@@ -73,8 +75,9 @@ class TestSessionLogging:
             close_runtime(deps)
 
     async def test_run_failure_error_recorded_and_logging_closed(
-        self, tmp_path: Path,
+        self, tmp_path: Path, monkeypatch,
     ) -> None:
+        prepare_project_metadata(tmp_path, monkeypatch)
         cfg = _config_for(tmp_path)
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)
@@ -103,8 +106,9 @@ class TestSessionLogging:
         assert deps.log_runtime.channel.listener_alive is False
 
     async def test_submit_success_closes_logging_without_error(
-        self, tmp_path: Path,
+        self, tmp_path: Path, monkeypatch,
     ) -> None:
+        prepare_project_metadata(tmp_path, monkeypatch)
         cfg = _config_for(tmp_path)
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)
@@ -149,8 +153,9 @@ class TestCloseRuntimeFallback:
         assert deps.log_runtime.close_attempts == 1
 
 
-async def test_log_config_drives_wiring(tmp_path: Path) -> None:
+async def test_log_config_drives_wiring(tmp_path: Path, monkeypatch) -> None:
     """log 配置块驱动接纳通道参数与级别。"""
+    prepare_project_metadata(tmp_path, monkeypatch)
     cfg = load_config(
         {
             "paths": {
@@ -191,6 +196,7 @@ async def test_log_config_drives_wiring(tmp_path: Path) -> None:
 @pytest.mark.parametrize("sync_kind", ["file", "directory"])
 async def test_runtime_sync_failure_preserves_append_without_file_success(
         tmp_path: Path, monkeypatch, capsys, sync_kind):
+    prepare_project_metadata(tmp_path, monkeypatch)
     cfg = _config_for(tmp_path)
     assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
     deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=RecordingCatalog(),

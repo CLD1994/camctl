@@ -10,6 +10,8 @@ from camctl import cli
 from camctl.bootstrap import application
 from camctl.logging_runtime.performance import record_performance
 
+from ..support.distribution import prepare_project_metadata
+
 
 def _config(tmp_path, level):
     paths = {"state_db": str(tmp_path / "state" / "state.db"),
@@ -24,6 +26,7 @@ def _config(tmp_path, level):
 
 @pytest.mark.parametrize("level", ["DEBUG", "INFO", "WARNING"])
 def test_describe_stages_and_timing_obey_level_without_runtime_files(tmp_path, monkeypatch, level):
+    prepare_project_metadata(tmp_path, monkeypatch)
     config, paths = _config(tmp_path, level)
     original = application.describe
 
@@ -52,7 +55,8 @@ def test_describe_stages_and_timing_obey_level_without_runtime_files(tmp_path, m
     assert not (tmp_path / "ordinary-log").exists()
 
 
-def test_init_info_preserves_empty_stdout_and_reports_actual_outcome(tmp_path):
+def test_init_info_preserves_empty_stdout_and_reports_actual_outcome(tmp_path, monkeypatch):
+    prepare_project_metadata(tmp_path, monkeypatch)
     config, paths = _config(tmp_path, "INFO")
     for expected in ("created", "verified_existing"):
         out, err = StringIO(), StringIO()
@@ -68,6 +72,7 @@ def test_init_info_preserves_empty_stdout_and_reports_actual_outcome(tmp_path):
 
 
 def test_describe_error_has_one_complete_json_diagnostic(tmp_path, monkeypatch):
+    prepare_project_metadata(tmp_path, monkeypatch)
     config, _paths = _config(tmp_path, "INFO")
     original = OSError(5, "capability read failed", "/source")
 
@@ -87,7 +92,8 @@ def test_describe_error_has_one_complete_json_diagnostic(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("command", ["describe", "init"])
-def test_stderr_failure_preserves_successful_business_result(tmp_path, command):
+def test_stderr_failure_preserves_successful_business_result(tmp_path, monkeypatch, command):
+    prepare_project_metadata(tmp_path, monkeypatch)
     config, _paths = _config(tmp_path, "INFO")
 
     class FailedStderr:

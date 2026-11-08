@@ -40,6 +40,7 @@ from camctl.session.locks import (
 
 from ..persistence.test_transactions import PlanCreateCommand, plan_guards
 from ..persistence.test_runtime import _create_legacy_v1_database
+from ..support.distribution import prepare_project_metadata
 
 
 def _expected_staging_subdirs() -> tuple[str, ...]:
@@ -691,6 +692,7 @@ def test_cli_init_reports_release_lock_error_only_on_stderr(
 ) -> None:
     from camctl.cli import main
 
+    prepare_project_metadata(tmp_path, monkeypatch)
     cfg = _config(tmp_path)
     config_path = tmp_path / "camctl.toml"
     _write_cli_config(config_path, cfg)
