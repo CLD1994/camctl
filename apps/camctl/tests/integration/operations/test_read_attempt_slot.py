@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import replace
+import sqlite3
 
 import pytest
 
@@ -14,7 +15,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import BeginAttemptCommand, OperationRepository
 from camctl.persistence.transaction import TransactionError, TransactionScope, commit_operation
 
-from ..outputs.test_grant_reuse import granted, read_request, read_targets, local_read
+from ..outputs.test_grant_reuse import granted, read_request, read_targets, local_read, _grant_read_access
 from ..support.output_storage_cases import QueryProbe
 
 
@@ -22,10 +23,7 @@ from ..support.output_storage_cases import QueryProbe
 def ready_read(granted):
     """提供已持有机会的当前事实，不替代机会授予事务的验收。"""
     owned, command, _, prepared = granted
-    if command.source_device_file_id is not None:
-        owned.connection.execute("UPDATE file_copies SET slot_device_id='cam-1' WHERE id=?",
-                                 (prepared.copy_id,))
-        owned.connection.commit()
+    _grant_read_access(owned, command, prepared)
     return granted
 
 
@@ -87,7 +85,14 @@ def test_read_attempt_requires_the_record_of_its_source(ready_read):
 @pytest.mark.parametrize("binding", ["missing_observer", "different_device", "different_driver"])
 def test_read_attempt_requires_consistent_original_device_binding(ready_read, binding):
     owned, command, _, prepared = ready_read
-    owned.connection.execute("UPDATE device_files SET observer_action_id=? WHERE id=?",
+    with sqlite3.connect(":memory:") as baseline:
+        owned.connection.backup(baseline)
+        accepted = OperationRepository().begin_attempt(_intent(command, prepared), new_operation_key(), owned)
+        assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+        assert accepted.value.disposition is BeginDisposition.GRANTED
+        baseline.backup(owned.connection)
+    column = "source_action_id" if binding == "different_device" else "observer_action_id"
+    owned.connection.execute(f"UPDATE device_files SET {column}=? WHERE id=?",
                              (999 if binding == "missing_observer" else 12, command.source_device_file_id))
     if binding != "missing_observer":
         column = "device_id" if binding == "different_device" else "driver_id"
@@ -97,7 +102,10 @@ def test_read_attempt_requires_consistent_original_device_binding(ready_read, bi
     result = OperationRepository().begin_attempt(_intent(command, prepared), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.ROLLED_BACK, result
     assert isinstance(result.error, ConsistencyError), result.error
+    assert ("读取源观察者与可靠来源的原设备绑定不一致" if binding != "missing_observer"
+            else "缺失") in str(result.error)
     assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction
 
 
 @pytest.mark.parametrize("state", ["released", "next_round"])
