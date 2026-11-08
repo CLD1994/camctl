@@ -252,6 +252,19 @@ def main():
                     (root / NEW_PHOTO.lstrip("/")).write_bytes(b"Action6 independent JPEG original")
         elif (code, payload) == (start_code, "00"):
             record["kind"] = "stop"
+            fail_once = os.environ.get("CAMCTL_ACTION6_TEST_FAIL_FIRST_STOP")
+            if fail_once:
+                try:
+                    claim = os.open(fail_once, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(claim)
+                    record["returned_ns"] = time.monotonic_ns()
+                    record.update(**_clock_fields("returned"), exitcode=1)
+                    _append(calls, record)
+                    sys.stderr.write("simulated ADB transport failure\n")
+                    return 1
         elif setting_call:
             record["kind"] = "setting"
         else:

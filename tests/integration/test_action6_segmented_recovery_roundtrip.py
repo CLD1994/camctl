@@ -8,6 +8,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import time
 from decimal import Decimal
@@ -71,6 +72,7 @@ def _install_action6_tools(
         read_gate: Path | None = None,
         local_read_gate: Path | None = None,
         fail_ffprobe_index: int | None = None,
+        fail_first_stop: bool = False,
 ):
     tools = deployment.root / "tools"
     tools.mkdir()
@@ -167,6 +169,8 @@ def _install_action6_tools(
         environment["CAMCTL_ACTION6_TEST_LOCAL_READ_GATE_DIR"] = str(local_read_gate)
     if fail_ffprobe_index is not None:
         environment["CAMCTL_ACTION6_TEST_FAIL_FFPROBE_INDEX"] = str(fail_ffprobe_index)
+    if fail_first_stop:
+        environment["CAMCTL_ACTION6_TEST_FAIL_FIRST_STOP"] = str(deployment.root / "first-stop-failed")
     return environment, tools / "camctl", clock, remote
 
 
@@ -175,7 +179,7 @@ def _prepare_installed_action6(
         include_jpeg: bool = False, values: tuple[int, ...] | None = None,
         observer_stage: str | None = None, read_gate: Path | None = None,
         local_read_gate: Path | None = None,
-        fail_ffprobe_index: int | None = None,
+        fail_ffprobe_index: int | None = None, fail_first_stop: bool = False,
 ):
     deployment = deployment_factory(
         tmp_path / ("action6-native" if native else "action6-record"), devices=False,
@@ -202,18 +206,12 @@ def _prepare_installed_action6(
     base_config = resources["config.toml"].replace(
         "REPLACE_ACTION6_SERIAL", "action6-test-serial"
     )
-    # 普通录像异常矩阵使用 62 秒修复门槛；与 75 秒停止目标配合时，
-    # 真实 STOP 耗时证据应使生产 handler 进入检查。本测试不合成该证据。
-    recovery_config = (
-        "\n[devices.action6.recording]\nrepair_margin_s = 2\n"
-        if not native else ""
-    )
     # The real deployment default is 128 MiB. This recovery fixture needs a
     # durable partial-copy boundary inside its deliberately small media files.
     copy_config = '\n[copy]\nsegment_size = "1 MiB"\n'
     deployment.config_path.write_text(
         deployment.config_path.read_text(encoding="utf-8")
-        + "\n" + base_config + copy_config + recovery_config
+        + "\n" + base_config + copy_config
         + '\n[devices.action6.video]\nresult_mode = "segmented"\n',
         encoding="utf-8",
     )
@@ -225,7 +223,7 @@ def _prepare_installed_action6(
         package, deployment, params, manifest, capture="timelapse" if native else "record",
         observer_stage=observer_stage, read_gate=read_gate,
         local_read_gate=local_read_gate,
-        fail_ffprobe_index=fail_ffprobe_index,
+        fail_ffprobe_index=fail_ffprobe_index, fail_first_stop=fail_first_stop,
     )
     initial = read_clock(clock)
     initialized = _run(
@@ -716,7 +714,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         observer_stage=observer,
         read_gate=adb_gate,
         local_read_gate=local_gate,
-        fail_ffprobe_index=fail_ffprobe_index,
+        fail_ffprobe_index=fail_ffprobe_index, fail_first_stop=case == "unknown",
     )
     deployment = scenario["deployment"]
     demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
@@ -731,6 +729,38 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
     _wait_for_waiting_obtains(deployment, source_id, waiter_names)
     failure = demo.watch_failures()
     try:
+        if case != "unknown":
+            runs = [record for record in _records(deployment.root / "cli-processes.jsonl")
+                    if record["stage"] == "started" and record["command"][:1] == ["run"]]
+            active = [record for record in runs if Path(f"/proc/{record['pid']}").exists()]
+            assert len(active) == 1
+            initial_pgid = os.getpgid(active[0]["pid"])
+            assert initial_pgid == active[0]["pid"]
+            starts = query_state(
+                deployment.state_db,
+                "SELECT t.status,t.result_event_id FROM operation_runs r "
+                "JOIN operation_attempts t ON t.run_id=r.id "
+                "WHERE r.action_id=? AND r.kind=1 ORDER BY t.attempt_no",
+                (source_id,),
+            )
+            assert len(starts) == 1
+            assert starts[0][0] == int(enum_for("operation_attempts.status").SUCCEEDED)
+            assert starts[0][1] is not None
+            assert not [call for call in _records(deployment.root / "adb-calls.jsonl")
+                        if call.get("kind") == "stop"]
+            assert not query_state(
+                deployment.state_db,
+                "SELECT id FROM operation_runs WHERE responsibility_key=?",
+                (f"stop/{source_id}",),
+            )
+            demo.stop()
+            _assert_process_group_exited(initial_pgid)
+            assert not [call for call in _records(deployment.root / "adb-calls.jsonl")
+                        if call.get("kind") == "stop"]
+            demo = HostDemo(deployment, host_demo, launcher=str(scenario["camctl"]))
+            failure = demo.watch_failures()
+            demo.start(env=scenario["environment"])
+            demo.submit(scenario["plan"])
         _release_clock(scenario, 75)
         gate_marker = None
         boundary_pgid = None
@@ -774,6 +804,15 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             assert (DEFAULT_CHUNK_SIZE_BYTES <= resume_copy_before[7]
                     < resume_copy_before[8])
             assert resume_copy_before[12] == resume_copy_before[4]
+            locator = query_state(
+                deployment.state_db,
+                "SELECT locator_json FROM device_files WHERE id=?",
+                (resume_copy_before[1],),
+            )
+            assert len(locator) == 1
+            assert shlex.split(observed["path_argument"]) == [scenario["facts"][0]["device_path"]]
+            assert scenario["facts"][0]["device_path"] in locator[0][0]
+            os.kill(observed["pid"], 0)
             boundary_pgid = observed["pgid"]
         elif boundary in ("inspection_saved", "source_committed"):
             marker = deployment.root / "action6-observer-marker.json"
@@ -1001,7 +1040,29 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
 
         calls = _records(deployment.root / "adb-calls.jsonl")
         assert len([call for call in calls if call.get("kind") == "start"]) == 1
-        assert len([call for call in calls if call.get("kind") == "stop"]) == 1
+        stops = [call for call in calls if call.get("kind") == "stop"]
+        assert [call["exitcode"] for call in stops] == ([1, 0] if case == "unknown" else [0])
+        if case == "unknown":
+            attempts = query_state(
+                deployment.state_db,
+                "SELECT t.status,t.effect_state,t.result_event_id FROM operation_runs r "
+                "JOIN operation_attempts t ON t.run_id=r.id "
+                "WHERE r.responsibility_key=? ORDER BY t.attempt_no",
+                (f"stop/{source_id}",),
+            )
+            assert [(row[0], row[1]) for row in attempts] == [
+                (int(enum_for("operation_attempts.status").FAILED),
+                 int(enum_for("operation_attempts.effect_state").UNKNOWN)),
+                (int(enum_for("operation_attempts.status").SUCCEEDED),
+                 int(enum_for("operation_attempts.effect_state").CONFIRMED)),
+            ]
+            assert all(row[2] is not None for row in attempts)
+            elapsed = query_state(
+                deployment.state_db,
+                "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?",
+                (source_id,),
+            )
+            assert len(elapsed) == 1 and elapsed[0][0] >= 60_000_000_000
         if boundary == "inspection_saved":
             probed = [item["path"] for item in _ffprobe_records(deployment)]
             assert len(probed) == len(set(probed)) == 3
