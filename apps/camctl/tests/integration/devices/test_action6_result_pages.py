@@ -2,7 +2,7 @@
 
 import asyncio
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from adb_metadata_fixtures import collect_fake_metadata_many
@@ -63,6 +63,15 @@ class Filesystem:
         cursor = (DirectoryCursor(request.binding, request.directories, 0, selected[-1])
                   if len(remaining) > len(selected) else None)
         return DirectoryRead(None, None, Page(tuple(FileIdentity(request.binding, path) for path in selected), cursor))
+
+    async def read_family(self, identity, *, timeout_s, stop):
+        if not isinstance(identity, FileIdentity) or identity.binding != BINDING:
+            raise ValueError("文件请求不属于原设备绑定")
+        target = PurePosixPath(identity.path)
+        return FileAccessRead(None, tuple(
+            FileIdentity(identity.binding, path) for path in self.paths
+            if PurePosixPath(path).parent == target.parent
+            and PurePosixPath(path).stem == target.stem), None)
 
     async def metadata(self, identity, *, timeout_s, stop):
         if identity.path in self.metadata_errors:
