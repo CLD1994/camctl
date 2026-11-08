@@ -27,7 +27,7 @@ from camctl.persistence.repositories.segment_selections import (
     fix_segment_selection,
 )
 from camctl.outputs.sources import read_source_spec
-from camctl.persistence.transaction import row_facts, encode_json_value
+from camctl.persistence.transaction import row_facts
 
 from ..capture.test_record_segment_scope_recovery import (
     _stopped_world,
@@ -155,48 +155,135 @@ async def test_default_scope_and_explicit_ids_select_independently(tmp_path):
 
 
 async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_path, capture_resources):
+    """核对选择、清理和取消仓储的协作及重开后的原键重送。"""
+    from camctl.cancellation.models import (
+        ApplyCancelTarget, CancelApplyMode, CancellationEffect, CancelOutcomeChoice,
+        FinishCancelAction, FixCancelTargets, FixedCancelSet, FixedTarget,
+        RecordCancelResult, SelectionBasis, StartCancelAction,
+    )
     from camctl.capture.files import FilePresenceSave
     from camctl.contracts.enums import enum_for
-    from camctl.outputs.cleanup_flow import StartCleanupAction, FixCleanupTargets
+    from camctl.outputs.cleanup_flow import (
+        CleanupItemDisposition, CleanupTargetsDisposition, FixCleanupTargets,
+        RestrictCleanupItem, StartCleanupAction,
+    )
+    from camctl.persistence.repositories.cancellation import CancellationRepository
+    from camctl.persistence.repositories.outputs import SettleCanceledObtain
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from ..bootstrap.test_output_binding_changes import Catalog
     from ..support.outputs import submit_output_document
-    from .test_cleanup_query_save_recovery import _start_cleanup
 
     owned, runtime, aid = await _source(tmp_path)
     try:
+        now = runtime.wall_us()
+        instant = datetime.fromtimestamp(now // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         originals = [row[0] for row in owned.connection.execute(
             "SELECT id FROM outputs WHERE kind=1 ORDER BY id")]
         previews = [row[0] for row in owned.connection.execute(
             "SELECT id FROM outputs WHERE kind=3 ORDER BY id")]
+        assert len(originals) == len(previews) == 6
         scope = owned.connection.execute(
             "SELECT * FROM segment_scope_members ORDER BY ordinal").fetchall()
-        _, original_selection = _obtain(owned, runtime, aid, "default", 100)
-        original_request = FixSegmentSelection(original_selection, runtime.wall_us())
+        original_action, original_selection = _obtain(owned, runtime, aid, "default", 100)
+        original_request = FixSegmentSelection(original_selection, now)
         original_key = new_operation_key()
         first = fix_segment_selection(original_request, original_key, owned)
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
-        original_items = owned.connection.execute(
-            "SELECT * FROM obtain_items WHERE selection_id=? ORDER BY id",
-            (original_selection,)).fetchall()
-
-        _, cleanup_item = _start_cleanup(owned, originals[1], "902")
+        identity_query = (
+            "SELECT id,selection_id,requested_output_id,output_id,basis,original_output_id,"
+            "preview_output_id,preview_size,repaired_size FROM obtain_items"
+            " WHERE selection_id=? ORDER BY id"
+        )
+        original_identities = owned.connection.execute(identity_query, (original_selection,)).fetchall()
+        assert [row[3] for row in original_identities] == originals[:3]
+        item_ids = tuple(row[0] for row in original_identities)
         assert owned.connection.execute(
-            "SELECT requested_output_id,output_id FROM cleanup_items WHERE id=?",
-            (cleanup_item,)).fetchone() == (originals[1], originals[1])
+            "SELECT status,source_dependency,delivery_id FROM obtain_items"
+            " WHERE selection_id=? ORDER BY id", (original_selection,)).fetchall() == [
+                (int(enum_for("obtain_items.status").SELECTED), 0, None)] * 3
+
+        # 本例是存储契约协作：取消已固定但尚未开始读取的原取回。
+        accepted = await submit_output_document(
+            runtime.database, catalog=Catalog(), occurred_at=now, body={
+                "request_id": "901", "created_at": instant, "name": "取消取回",
+                "actions": [{"name": "取消取回", "type": "cancel_task",
+                             "scheduled_at": instant,
+                             "params": {"target": {"action_instance_id": str(original_action)}}}],
+            })
+        assert accepted.plan_id is not None, accepted
+        cancel_id, = owned.connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+        cancellations = CancellationRepository()
+        started = cancellations.start_cancel_action(StartCancelAction(cancel_id, now), new_operation_key(), owned)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        fixed_cancel = cancellations.fix_cancel_targets(FixCancelTargets(
+            cancel_id, FixedCancelSet((FixedTarget(original_action, SelectionBasis.DIRECT,
+                                                   CancellationEffect.NOT_APPLIED),)), now),
+            new_operation_key(), owned)
+        assert fixed_cancel.kind is DbOutcomeKind.COMPLETED, fixed_cancel.error
+        cancel_item, = fixed_cancel.value.item_ids
+        applied = cancellations.apply_cancel_target(ApplyCancelTarget(
+            cancel_item, CancelApplyMode.WITH_STOP, now), new_operation_key(), owned)
+        assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+        repository = OutputsRepository()
+        settled = repository.settle_canceled_obtain(
+            SettleCanceledObtain(original_action, now, item_ids), new_operation_key(), owned)
+        assert settled.kind is DbOutcomeKind.COMPLETED, settled.error
+        assert settled.value.complete and not settled.value.file_ids
+        recorded = cancellations.record_cancel_result(RecordCancelResult(
+            cancel_item, now, outcome=CancelOutcomeChoice.CANCELED), new_operation_key(), owned)
+        assert recorded.kind is DbOutcomeKind.COMPLETED, recorded.error
+        finished = cancellations.finish_cancel_action(FinishCancelAction(cancel_id, now), new_operation_key(), owned)
+        assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (original_action,)).fetchone() == (
+            int(enum_for("actions.status").CANCELED),)
+        assert owned.connection.execute(identity_query, (original_selection,)).fetchall() == original_identities
+        assert owned.connection.execute(
+            "SELECT status,source_dependency,delivery_id FROM obtain_items"
+            " WHERE selection_id=? ORDER BY id", (original_selection,)).fetchall() == [
+                (int(enum_for("obtain_items.status").CANCELED), 0, None)] * 3
+
+        accepted = await submit_output_document(
+            runtime.database, catalog=Catalog(), occurred_at=now, body={
+                "request_id": "902", "created_at": instant, "name": "清理产物",
+                "actions": [{"name": "清理产物", "type": "delete_action_outputs",
+                             "scheduled_at": instant,
+                             "params": {"output_ids": [str(originals[1])]}}],
+            })
+        assert accepted.plan_id is not None, accepted
+        cleanup_id, = owned.connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+        started = repository.start_cleanup_action(StartCleanupAction(cleanup_id, now), new_operation_key(), owned)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        fixed = repository.fix_cleanup_targets(FixCleanupTargets(cleanup_id, now), new_operation_key(), owned)
+        assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+        assert fixed.value.disposition is CleanupTargetsDisposition.SAVED
+        cleanup_item, = fixed.value.item_ids
+        restricted = repository.restrict_cleanup_item(
+            RestrictCleanupItem(cleanup_item, now), new_operation_key(), owned)
+        assert restricted.kind is DbOutcomeKind.COMPLETED, restricted.error
+        assert restricted.value.disposition is CleanupItemDisposition.SAVED
+        assert owned.connection.execute(
+            "SELECT requested_output_id,output_id,restriction_state FROM cleanup_items WHERE id=?",
+            (cleanup_item,)).fetchone() == (
+                originals[1], originals[1], int(enum_for("cleanup_items.restriction_state").ACTIVE))
         file_id = owned.connection.execute(
             "SELECT device_file_id FROM outputs WHERE id=?", (originals[1],)).fetchone()[0]
         absent = runtime.capture.save_file_presence(FilePresenceSave(
-            file_id, int(enum_for("device_files.presence_state").ABSENT), runtime.wall_us()),
-            new_operation_key(), owned)
+            file_id, int(enum_for("device_files.presence_state").ABSENT), now), new_operation_key(), owned)
         assert absent.kind is DbOutcomeKind.COMPLETED, absent.error
         owned.connection.close()
-        owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         database = await capture_resources.restart_database(tmp_path / "state.db")
+        owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         runtime = await capture_resources.runtime(
             database, driver=runtime.driver, evidence=runtime.evidence,
             wall_us=runtime.wall_us, monotonic_ns=runtime.monotonic_ns,
         )
+        assert owned.connection.execute(
+            "SELECT presence_state FROM device_files WHERE id=?", (file_id,)).fetchone() == (
+                int(enum_for("device_files.presence_state").ABSENT),)
+        original_items = owned.connection.execute(
+            "SELECT * FROM obtain_items WHERE selection_id=? ORDER BY id", (original_selection,)).fetchall()
         history_before = owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()
         repeated = fix_segment_selection(original_request, original_key, owned)
         assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
@@ -212,37 +299,40 @@ async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_p
             (103, originals[3:5], originals[3:5], [2, 2]),
         ):
             _, selection = _obtain(owned, runtime, aid, mode, request_id)
-            saved = fix_segment_selection(FixSegmentSelection(selection, runtime.wall_us()),
-                new_operation_key(), owned)
+            saved = fix_segment_selection(FixSegmentSelection(selection, now), new_operation_key(), owned)
             assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-            assert owned.connection.execute(
-                "SELECT output_id,status FROM obtain_items WHERE selection_id=? ORDER BY id",
-                (selection,)).fetchall() == list(zip(expected, statuses))
+            rows = owned.connection.execute(
+                "SELECT output_id,status,error_code FROM obtain_items WHERE selection_id=? ORDER BY id",
+                (selection,)).fetchall()
+            assert [(row[0], row[1]) for row in rows] == list(zip(expected, statuses))
+            errors = [None] * len(expected)
+            if mode == "default":
+                errors[1] = item_error_id("obtain_items", "output_cleanup_started")
+            assert [row[2] for row in rows] == errors
         assert owned.connection.execute(
             "SELECT * FROM segment_scope_members ORDER BY ordinal").fetchall() == scope
 
         accepted = await submit_output_document(
-            runtime.database, catalog=Catalog(), occurred_at=runtime.wall_us(), body={
-                "request_id": "903", "created_at": "2026-01-15 08:00:00", "name": "清理来源",
+            runtime.database, catalog=Catalog(), occurred_at=now, body={
+                "request_id": "903", "created_at": instant, "name": "清理来源",
                 "actions": [{"name": "清理来源", "type": "delete_action_outputs",
-                             "scheduled_at": "2026-01-15 09:00:00",
+                             "scheduled_at": instant,
                              "params": {"source": {"action_instance_id": str(aid)}}}],
             })
         assert accepted.plan_id is not None, accepted
-        cleanup_id = owned.connection.execute(
-            "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()[0]
-        repository = OutputsRepository()
-        started = repository.start_cleanup_action(StartCleanupAction(cleanup_id, runtime.wall_us()),
-            new_operation_key(), owned)
+        cleanup_id, = owned.connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+        started = repository.start_cleanup_action(StartCleanupAction(cleanup_id, now), new_operation_key(), owned)
         assert started.kind is DbOutcomeKind.COMPLETED, started.error
-        owner = row_facts(owned.connection, "actions", cleanup_id)
+        fields, = owned.connection.execute(
+            "SELECT input_fields_json FROM actions WHERE id=?", (cleanup_id,)).fetchone()
         resolved = repository.resolve_sources(ResolveSources(cleanup_id,
-            read_source_spec(encode_json_value(owner["input_fields_json"])), runtime.wall_us()),
+            read_source_spec(fields), now),
             new_operation_key(), owned)
         assert resolved.kind is DbOutcomeKind.COMPLETED, resolved.error
-        fixed = repository.fix_cleanup_targets(FixCleanupTargets(cleanup_id, runtime.wall_us()),
-            new_operation_key(), owned)
+        fixed = repository.fix_cleanup_targets(FixCleanupTargets(cleanup_id, now), new_operation_key(), owned)
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+        assert fixed.value.disposition is CleanupTargetsDisposition.SAVED
         assert {row[0] for row in owned.connection.execute(
             "SELECT requested_output_id FROM cleanup_items WHERE action_id=?",
             (cleanup_id,))} == set(originals + previews)
