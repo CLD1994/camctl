@@ -96,9 +96,7 @@ retry_interval_s="0"
     expected_capture = _hasselblad_capture_fixture(capture_format)
     expected = (expected_capture["original_bytes"], expected_capture["preview_bytes"])
     assert expected_capture["camera_name"] != expected_capture["original_name"]
-    assert [(row[1], row[2]) for row in sources] == [
-        (len(content), hashlib.sha256(content).hexdigest()) for content in expected
-    ]
+    assert [(row[1], row[2]) for row in sources] == [(None, None), (None, None)]
     locators = [json.loads(row[3]) for row in sources]
     assert [locator["variant"] for locator in locators] == ["original", "thumbnail"]
     assert all(locator["camera_path"] == expected_capture["camera_path"]
@@ -106,7 +104,7 @@ retry_interval_s="0"
     assert all(locator["camera_name"] == expected_capture["camera_name"]
                for locator in locators)
     assert [row[3] for row in outputs] == [
-        expected_capture["original_name"], expected_capture["preview_name"],
+        expected_capture["camera_name"], expected_capture["camera_name"] + ".thumbnail.jpg",
     ]
 
     reports = _published_reports(home / "ready")
@@ -119,14 +117,9 @@ retry_interval_s="0"
     assert set(output_pair) == {"original", "preview"}
     assert output_pair["original"]["output_id"] != output_pair["preview"]["output_id"]
     assert output_pair["preview"]["preview_of_output_id"] == output_pair["original"]["output_id"]
-    for kind, content, media_type in (
-        ("original", expected[0], expected_capture["original_media_type"]),
-        ("preview", expected[1], expected_capture["preview_media_type"]),
-    ):
-        assert output_pair[kind]["media_type"] == media_type
-        assert output_pair[kind]["checksum"] == {
-            "status": "available", "sha256": hashlib.sha256(content).hexdigest(),
-        }
+    for kind in ("original", "preview"):
+        assert "media_type" not in output_pair[kind]
+        assert output_pair[kind]["checksum"] == {"status": "not_obtained"}
 
     output_ids = [int(row[0]) for row in outputs]
     assert [int(output_pair[kind]["output_id"]) for kind in ("original", "preview")] == output_ids
@@ -188,7 +181,7 @@ retry_interval_s="0"
         ["thumbnail", expected_capture["camera_name"]],
     ] * 2
 
-    # 返回等长但内容不同的下载不得覆盖固定设备源摘要或发布新文件。
+    # 每次设备下载独立形成交付事实，不改写原来源身份。
     original_tool = tool.read_text()
     marker = 'payload = original_bytes if args[3] == "original" else PREVIEW'
     assert marker in original_tool
@@ -197,23 +190,30 @@ retry_interval_s="0"
         'payload = b"x" * len(original_bytes) if args[3] == "original" else b"x" * len(PREVIEW)',
     ))
     run_plan(4, [
-        {"name": "corrupt-original", "type": "obtain_action_outputs",
+        {"name": "changed-original", "type": "obtain_action_outputs",
          "params": {"source": {"action_instance_id": "1"}}},
-        {"name": "corrupt-preview", "type": "obtain_action_outputs",
+        {"name": "changed-preview", "type": "obtain_action_outputs",
          "params": {"source": {"action_instance_id": "1"}, "filter": "preview"}},
     ])
     with closing(sqlite3.connect(database)) as connection:
         assert connection.execute(
             "SELECT status FROM actions WHERE plan_id=4 ORDER BY id"
-        ).fetchall() == [(4,), (4,)]
-        assert connection.execute(
-            "SELECT d.status FROM deliveries d JOIN actions a ON a.id=d.action_id"
-            " WHERE a.plan_id=4"
-        ).fetchall() == [(enum_for("deliveries.status").FAILED,)] * 2
+        ).fetchall() == [(3,), (3,)]
+        changed = connection.execute(
+            "SELECT d.id,d.output_id,d.file_name,d.status,t.id,t.size_bytes,t.sha256"
+            " FROM deliveries d JOIN file_copies c ON c.delivery_id=d.id"
+            " JOIN intermediate_files t ON t.id=c.target_file_id"
+            " JOIN actions a ON a.id=d.action_id WHERE a.plan_id=4 ORDER BY d.output_id"
+        ).fetchall()
         assert connection.execute(
             "SELECT id,size_bytes,sha256,locator_json FROM device_files ORDER BY id"
         ).fetchall() == sources
+    assert len(changed) == 2
+    for (delivery_id, output_id, file_name, status, target_id, size, sha256), expected_id, content in zip(changed, output_ids, expected):
+        actual = b"x" * len(content)
+        assert output_id == expected_id and status == int(enum_for("deliveries.status").PUBLISHED)
+        assert delivery_id not in delivery_ids and target_id not in target_file_ids and file_name not in file_names
+        assert size == len(actual) and sha256 == hashlib.sha256(actual).hexdigest()
+        assert (home / "ready" / file_name).read_bytes() == actual
     assert not list((home / "staging" / "read-downloads").iterdir())
-    assert not list((home / "ready").glob("*.3fr"))
-    assert not list((home / "ready").glob("*.jpg"))
     _assert_hasselblad_capture_trajectory(log, capture_format)
