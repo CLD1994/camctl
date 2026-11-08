@@ -52,6 +52,8 @@ PORT_PREFIXES = (
     "camctl.motor.notification",
     "camctl.logging_runtime.diagnostics",
     "camctl.logging_runtime.performance",
+    "camctl.logging_runtime.events",
+    "camctl.logging_runtime.models",
 )
 #: 装配入口与装配辅助：创建实际资源并传入流程，允许接触 SQLite、
 #: 配置与锁实现。报告生成子进程入口 worker 在自己的进程内承担同
@@ -167,6 +169,18 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
     if name in {"camctl.logging_runtime.diagnostics", "camctl.logging_runtime.performance"} and _starts_with(
         target, ("camctl.logging_runtime.models", "camctl.logging_runtime.service",
                  "camctl.logging_runtime.admission"),
+    ):
+        return []
+    # 日志入口实现使用本模块的编码与回执，不向其他消费者开放这些实现。
+    if (
+        name in {"camctl.logging_runtime.diagnostics", "camctl.logging_runtime.events"}
+        and _starts_with(target, ("camctl.logging_runtime.formatting",))
+    ) or (
+        name == "camctl.logging_runtime.diagnostics"
+        and _starts_with(target, ("camctl.logging_runtime.receipt",))
+    ) or (
+        name == "camctl.logging_runtime.events"
+        and _starts_with(target, ("camctl.logging_runtime.service",))
     ):
         return []
     if _starts_with(name, PORT_PREFIXES):
@@ -386,6 +400,31 @@ class TestCheckerDetectsViolations:
         assert _forbidden_edges({source: imports}) == []
         private = _imported_modules(source, "from camctl.logging_runtime.clh_adapter import FileChannel\n")
         assert _forbidden_edges({source: private})
+
+    @pytest.mark.parametrize("source,dependency", [
+        ("camctl.devices.fake", "from camctl.logging_runtime.events import log_context, measure_stage\n"),
+        ("camctl.host_files.fake", "from camctl.logging_runtime.models import LogLevel\n"),
+        ("camctl.operations.fake", "from camctl.logging_runtime.events import record_event\n"),
+        ("camctl.logging_runtime.diagnostics", "from camctl.logging_runtime.receipt import LogReceipt\n"),
+        ("camctl.logging_runtime.diagnostics", "from camctl.logging_runtime.formatting import log_metadata\n"),
+        ("camctl.logging_runtime.performance", "from camctl.logging_runtime.events import record_event\n"),
+    ])
+    def test_logging_interfaces_and_their_own_helpers_are_allowed(self, source, dependency):
+        assert _forbidden_edges({source: _imported_modules(source, dependency)}) == []
+
+    @pytest.mark.parametrize("source", [
+        "camctl.devices.fake", "camctl.host_files.fake", "camctl.operations.fake",
+        "camctl.logging_runtime.events", "camctl.logging_runtime.diagnostics",
+    ])
+    def test_logging_interfaces_do_not_expose_file_adapter(self, source):
+        dependency = "from camctl.logging_runtime.clh_adapter import FileChannel\n"
+        assert _forbidden_edges({source: _imported_modules(source, dependency)})
+
+    @pytest.mark.parametrize("source", ["camctl.devices.fake", "camctl.host_files.fake"])
+    @pytest.mark.parametrize("helper", ["formatting", "receipt"])
+    def test_logging_helpers_are_not_other_components_ports(self, source, helper):
+        dependency = f"from camctl.logging_runtime.{helper} import internal\n"
+        assert _forbidden_edges({source: _imported_modules(source, dependency)})
 
     @pytest.mark.parametrize("dependency", [
         "import sqlite3\n",
