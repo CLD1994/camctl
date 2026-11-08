@@ -691,31 +691,58 @@ async def test_default_round_rejects_isolated_dispatched_marker_without_owner(en
 
 
 async def _durable_delete_only(environment, present, resources):
-    from camctl.contracts.values import new_operation_key
     from camctl.devices.evidence import EvidenceContract, DeviceObservation
-    from camctl.operations.attempts import AttemptConfig, AttemptFinish
-    from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis
-    from camctl.operations.validation import validate_outcome
+    from camctl.devices.ports import DeviceCallResult
+    from camctl.operations.attempts import FinishDisposition
     from .test_cleanup_query_save_recovery import _MatrixDriver
+
+    class SavedDelete(Exception):
+        pass
+
+    class SaveBoundary(OutputsRepository):
+        finish = key = None
+
+        def finish_cleanup_attempt(self, finish, key, owned):
+            saved = super().finish_cleanup_attempt(finish, key, owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            assert saved.value.disposition is FinishDisposition.SAVED
+            self.finish, self.key = finish, key
+            return replace(saved, handoff_error=SavedDelete())
+
     owned, context, runtime, driver, item_id = await _prepared(environment)
-    action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    intent = AttemptIntent("delete", action_id, OperationKind.DELETE_FILE,
-        AttemptTarget(cleanup_item_id=item_id), None, AttemptConfig(5, Decimal(17), Decimal(0)), _NOW)
-    begun = OutputsRepository().begin_cleanup_attempt(intent, new_operation_key(), owned)
-    assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
-    ticket = begun.value.ticket
-    assert ticket is not None
     evidence = _registry(driver).entry("camctl-adb").evidence.with_contract(EvidenceContract(
         "file_delete_presence", 1, "delete", frozenset({"cleanup_item_id", "present"}), identity_field="cleanup_item_id"))
-    observations = () if present is None else (DeviceObservation("file_delete_presence", 1,
-        {"cleanup_item_id": str(item_id), "present": present}),)
-    outcome = CallOutcome(status=AttemptStatus.SUCCEEDED,
-        effect=EffectState.UNKNOWN if present is None else EffectState.CONFIRMED,
-        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("delete_returned", 1, {})), observations=observations)
-    key = new_operation_key()
-    saved = OutputsRepository().finish_cleanup_attempt(
-        AttemptFinish(ticket, validate_outcome(ticket, outcome, evidence), _NOW, retry_wait=True), key, owned)
-    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+
+    async def delete(request):
+        driver.delete_requests.append(request)
+        driver.deletes.append(request.binding)
+        observations = () if present is None else (DeviceObservation(
+            "file_delete_presence", 1,
+            {"cleanup_item_id": request.params["cleanup_item_id"], "present": present}),)
+        return DeviceCallResult(observations, None)
+
+    driver.delete = delete
+    devices = {name: {**declaration, "cleanup": {
+        "delete_timeout_s": Decimal(17), "delete_retry_interval_s": Decimal(0),
+        "query_timeout_s": Decimal(17), "query_retry_interval_s": Decimal(0)}}
+        for name, declaration in environment[0].devices.items()}
+    runtime = await _configured(environment, owned, driver, devices=devices,
+        evidence=evidence, delete_attempts=5, query_attempts=5, wall=lambda: _NOW)
+    port = SaveBoundary()
+    assert not driver.deletes and not driver.queries
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id)):
+        with pytest.raises(SavedDelete):
+            await delete_source_file(runtime, item_id)
+    assert len(driver.deletes) == 1 and not driver.queries
+    assert port.finish is not None and port.key is not None
+    ticket, key = port.finish.ticket, port.key
+    assert driver.delete_requests[0].ticket == ticket
+    batch = owned.connection.execute(
+        "SELECT b.acquired_event_id,b.released_event_id FROM device_file_batches b"
+        " JOIN cleanup_items c ON c.action_id=b.action_id WHERE c.id=?", (item_id,),
+    ).fetchone()
+    assert batch is not None and batch[0] is not None and batch[1] is None
     before = tuple(owned.connection.iterdump())
     owned.connection.close()
     fresh = context.open_connection()
