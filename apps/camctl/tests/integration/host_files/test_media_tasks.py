@@ -1,9 +1,9 @@
 """媒体工具、默认线程池与共享文件责任的真实组合。"""
 
 import asyncio
-import errno
+import os
+import signal
 import threading
-from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -12,7 +12,6 @@ from camctl.host_files import media
 from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.tasks import FileTaskExecutor, FileTaskId, FileTask, FileTaskError
 from camctl.session.supervision import Supervisor
-from camctl.operations import process
 from integration.host_files.test_media import _setup, _tool, _REPAIR_BODY
 
 pytestmark = pytest.mark.asyncio
@@ -228,7 +227,7 @@ time.sleep(30)
 @pytest.mark.parametrize("entry", ["probe", "repair"])
 @pytest.mark.parametrize("output_fails", [False, True])
 async def test_signal_errors_keep_media_files_until_real_exit(tmp_path, monkeypatch, entry, output_fails):
-    input_ref, output_ref, roots, _, _ = _setup(tmp_path)
+    input_ref, output_ref, roots, input_path, _ = _setup(tmp_path)
     tool = _tool(tmp_path, "signal-errors", """
 from pathlib import Path
 import sys, time
@@ -242,29 +241,43 @@ while not marker.with_suffix('.release').exists():
 sys.exit(7)
 """)
     killed = asyncio.Event()
+    signals = []
+    child = None
+    original_spawn = asyncio.create_subprocess_exec
+    original_kill = os.kill
+
+    async def capture_spawn(*args, **kwargs):
+        nonlocal child
+        child = await original_spawn(*args, **kwargs)
+        return child
+
+    def deny_signal(pid, sig):
+        if child is not None and pid == child.pid and sig in (signal.SIGTERM, signal.SIGKILL):
+            signals.append(sig)
+            if sig == signal.SIGKILL:
+                killed.set()
+                raise PermissionError("kill denied")
+            raise PermissionError("terminate denied")
+        return original_kill(pid, sig)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", capture_spawn)
+    monkeypatch.setattr(os, "kill", deny_signal)
     if output_fails:
         original_read = asyncio.StreamReader.read
+        stdout_read = False
 
         async def broken_pipe(reader, size):
-            chunk = await original_read(reader, size)
-            if chunk:
-                # 模拟管道断开时 asyncio 同时关闭 transport 并向 reader 报错。
-                reader._transport.close()
-                reader.set_exception(OSError("pipe read failed"))
-            return chunk
+            nonlocal stdout_read
+            if child is not None and reader is child.stdout:
+                if stdout_read:
+                    raise OSError("pipe read failed")
+                chunk = await original_read(reader, size)
+                if chunk:
+                    stdout_read = True
+                return chunk
+            return await original_read(reader, size)
 
         monkeypatch.setattr(asyncio.StreamReader, "read", broken_pipe)
-
-    def deny_terminate(self):
-        raise PermissionError("terminate denied")
-
-    def deny_kill(self):
-        killed.set()
-        raise PermissionError("kill denied")
-
-    monkeypatch.setattr(process._SubprocessHandle, "request_terminate", deny_terminate)
-    monkeypatch.setattr(process._SubprocessHandle, "request_kill", deny_kill)
-    monkeypatch.setattr(media, "_MEDIA_TERMINATE_GRACE_S", Decimal("0.01"))
     supervisor, owner = Supervisor(), Owner()
     executor = FileTaskExecutor(supervisor)
     identity = FileTaskId("signal-errors")
@@ -275,7 +288,7 @@ sys.exit(7)
     waiting = asyncio.create_task(operation)
     received = None
     try:
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(15):
             while not (tmp_path / "signal-errors.ready").exists():
                 await asyncio.sleep(0.01)
             waiting.cancel()
@@ -286,15 +299,26 @@ sys.exit(7)
             handle.request_stop()
             received = asyncio.create_task(handle.wait())
             await killed.wait()
+            assert signals == [signal.SIGTERM, signal.SIGKILL]
+            assert child.returncode is None
             await asyncio.sleep(0)
             assert not received.done()
             assert executor.unfinished_files() == ((11,) if entry == "probe" else (11, 12))
+            with pytest.raises(FileTaskError):
+                await executor.run_file_task(
+                    FileTask(FileTaskId("delete-input"), 11, "delete", "cleanup",
+                             lambda stop: input_path.unlink()), owner,
+                )
+            assert input_path.read_bytes() == b"x" * 250
     finally:
         (tmp_path / "signal-errors.release").write_text("release")
-        if received is None:
-            await asyncio.gather(waiting, return_exceptions=True)
-    async with asyncio.timeout(5):
-        actual = await received
+        async with asyncio.timeout(5):
+            if received is None:
+                await asyncio.gather(waiting, return_exceptions=True)
+            else:
+                actual = await received
+    assert child.returncode == 7
+    assert input_path.read_bytes() == b"x" * 250
     assert actual.error is None
     assert "exit=7" in actual.value.error
     assert "terminate denied" in actual.value.error and "kill denied" in actual.value.error
