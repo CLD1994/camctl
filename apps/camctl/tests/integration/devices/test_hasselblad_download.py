@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import json
 import os
 import subprocess
 import sys
@@ -14,6 +13,9 @@ import pytest
 
 from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
 
+from camctl.devices.bindings import DeviceBinding
+from camctl.capture.files import file_identity_key
+from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
 from camctl.devices.read_session import SourceFile
@@ -32,12 +34,11 @@ TICKET = AttemptTicket(1, "read", "22", "read/22", 31)
 def source(variant="original", *, content=None):
     content = (RAW if variant == "original" else PREVIEW) if content is None else content
     digest = hashlib.sha256(content).hexdigest()
-    opaque = json.dumps(
-        ["hb-download-v2", CAMERA_PATH, NAME, variant, digest], separators=(",", ":")
-    )
-    return SourceFile(json.dumps(["camera-1", DRIVER_ID, opaque], separators=(",", ":")),
-                      {"camera_path": CAMERA_PATH, "camera_name": NAME,
-                       "variant": variant, "sha256": digest}, len(content))
+    identity = CameraFileIdentity(DeviceBinding("camera-1", DRIVER_ID), CAMERA_PATH,
+                                  NAME, DownloadVariant(variant), digest, "SERIAL", 10,
+                                  len(content))
+    return SourceFile(file_identity_key("camera-1", DRIVER_ID, identity.file_identity),
+                      identity.locator(), len(content))
 
 
 class DownloadTransport:
@@ -156,8 +157,14 @@ async def test_download_error_and_cleanup_error_are_both_retained(tmp_path, monk
     monkeypatch.setattr(DownloadWorkspace, "remove", fail)
     with pytest.raises(ValueError) as failure:
         await driver.open_read(source(), 0, TICKET, idle_timeout_s=Decimal("10"))
-    reason = str(failure.value)
-    assert "output_failed" in reason and "unlink unavailable" in reason and "17" in reason
+    assert failure.value.reason == "preparation_and_cleanup_failed"
+    errors = failure.value.__cause__
+    assert isinstance(errors, ExceptionGroup)
+    download_error, cleanup_error = errors.exceptions
+    assert download_error.steps[-1]["local_exit_code"] == 17
+    assert download_error.steps[-1]["transport_error"] == "output_failed"
+    assert isinstance(cleanup_error, OSError)
+    assert str(cleanup_error) == "unlink unavailable"
     assert (staging / "read-downloads" / "31-1").exists()
     monkeypatch.setattr(DownloadWorkspace, "remove", original)
     await recover_download(staging, TICKET)
@@ -275,6 +282,7 @@ async def test_capture_artifacts_and_both_download_variants_have_identical_bytes
             locator.camera_name,
             variant,
             artifact["sha256"],
+            "CFV100C-001", 10, artifact["size_bytes"],
         )
         fixed = SourceFile(
             file_identity_key(request.binding.device_id, DRIVER_ID, identity.file_identity),
