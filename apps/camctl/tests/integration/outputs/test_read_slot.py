@@ -1,29 +1,30 @@
 """相机读取机会的授予、等待、释放与恢复；正式守卫核对当前事实。"""
 
-from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 
 import pytest
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import EventValidationError
-from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
+from ..support.output_planning import EventSequence, capture_operation, proposal_state
+from ..support.output_storage_cases import observed_operation
 from ..support.read_batch_cases import acquire_read_batch
 from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
 )
 from camctl.outputs.qualification import FileCandidate, OperationConfig, QualificationOutcome
+from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionScope
+from camctl.persistence.transaction import commit_operation
 
 from .test_local_read import local_read  # noqa: F401  主机源建档夹具
-from .test_qualification import _NOW
+from .test_qualification import _NOW, _seed_selection_and_item
 from .test_read_associations import read_targets, _command
 
 
@@ -95,6 +96,21 @@ def two_copies(read_targets):
     return owned, early, late
 
 
+@pytest.fixture
+def same_batch_copies(read_targets):
+    """同一取回动作固定选择两份已完成的同机源文件。"""
+    owned = read_targets
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id IN (11,12)")
+    _seed_selection_and_item(owned.connection, dependency_id=33, selection_id=33,
+                             item_id=103, owner_action_id=31, source_action_id=12,
+                             output_id=702)
+    owned.connection.commit()
+    early = _prepare(owned, _command())
+    late = _prepare(owned, replace(_later_read_command(), action_id=31, item_id=103))
+    acquire_read_batch(owned, 31, "cam-1", _NOW)
+    return owned, early, late
+
+
 def _acquire_early_batch(owned):
     # 这些槽位用例使用已完成来源的文件，不测试等待来源结束。
     owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
@@ -128,9 +144,10 @@ def test_grant_reuses_held_slot_without_new_events(prepared_with_batch):
     assert _dump(owned) == before
 
 
-def test_grant_waits_while_another_copy_holds(two_copies):
-    owned, early, late = two_copies
-    OutputsRepository().grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
+def test_grant_waits_while_another_copy_holds(same_batch_copies):
+    owned, early, late = same_batch_copies
+    initial = OutputsRepository().grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
+    assert initial.kind is DbOutcomeKind.COMPLETED and initial.value.outcome is SlotOutcome.GRANTED, initial
     before = _dump(owned)
     result = OutputsRepository().grant_read_slot(_slot(late.copy_id), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
@@ -139,9 +156,9 @@ def test_grant_waits_while_another_copy_holds(two_copies):
     assert _dump(owned) == before
 
 
-def test_grant_uses_registered_candidate_order(two_copies):
+def test_grant_uses_registered_candidate_order(same_batch_copies):
     """同设备合格候选按统一文件顺序竞争；用途不增加优先级。"""
-    owned, early, late = two_copies
+    owned, early, late = same_batch_copies
     late_first = OutputsRepository().grant_read_slot(
         _slot(late.copy_id), new_operation_key(), owned)
     assert late_first.value.outcome is SlotOutcome.WAIT, late_first.value
@@ -152,17 +169,20 @@ def test_grant_uses_registered_candidate_order(two_copies):
 
 
 def test_grant_order_follows_action_time_not_request_time(two_copies):
-    """较晚申请者的发起动作时间更早时取得机会。"""
+    """较早计划的取回批次先取得设备，后续申请不抢占。"""
     owned, early, late = two_copies
     owned.connection.execute(
         "UPDATE actions SET scheduled_at=? WHERE id=32", (_NOW - 10_000_000,))
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
-    result = OutputsRepository().grant_read_slot(_slot(late.copy_id), new_operation_key(), owned)
-    assert result.value.outcome is SlotOutcome.GRANTED, result.value
-    # 较早候选后到时由当前持有者优先，不因排序打断已开始的拷贝责任。
-    later = OutputsRepository().grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
-    assert later.value.outcome is SlotOutcome.WAIT
-    assert later.value.reason == "device_busy"
+    register_file_batch_guards()
+    repository = FileBatchRepository()
+    first = repository.acquire(BatchRequest(31, "cam-1", _NOW), new_operation_key(), owned)
+    assert first.kind is DbOutcomeKind.COMPLETED and first.value is BatchOutcome.WAIT, first
+    selected = repository.acquire(BatchRequest(32, "cam-1", _NOW), new_operation_key(), owned)
+    assert selected.kind is DbOutcomeKind.COMPLETED and selected.value is BatchOutcome.GRANTED, selected
+    later = repository.acquire(BatchRequest(31, "cam-1", _NOW + 1), new_operation_key(), owned)
+    assert later.kind is DbOutcomeKind.COMPLETED and later.value is BatchOutcome.WAIT, later
 
 
 def test_grant_rejects_foreign_slot(prepared_with_batch):
@@ -364,28 +384,44 @@ def test_missing_copy_is_a_consistency_error(read_targets):
 
 @pytest.fixture
 def mixed_purposes(read_targets):
-    """同一设备上同时具备条件的内部检查输入与普通取回副本。"""
+    """内部读取和取回使用同机的不同来源，互不依赖来源终态。"""
     owned = read_targets
     owned.connection.execute("UPDATE actions SET status=3 WHERE id=12")
     owned.connection.commit()
     external = _prepare(owned, _later_read_command())
-    owned.connection.execute("DELETE FROM obtain_items")
-    owned.connection.execute("DELETE FROM outputs")
-    owned.connection.commit()
     internal = _prepare(owned, _command(internal=True))
     return owned, internal, external
 
 
-def test_slot_order_has_no_purpose_priority(mixed_purposes):
-    """同时间的内部输入与普通取回只按动作身份排序，用途不参与。"""
+@pytest.mark.parametrize("order", ["tie_internal_first", "internal_earlier", "obtain_earlier"])
+def test_slot_order_has_no_purpose_priority(mixed_purposes, order):
+    """空闲相机按动作时间及计划内位置协调内部读取与取回批次。"""
     owned, internal, external = mixed_purposes
-    internal_first = OutputsRepository().grant_read_slot(
-        _slot(internal.copy_id), new_operation_key(), owned)
-    assert internal_first.value.outcome is SlotOutcome.GRANTED, internal_first.value
-    external_later = OutputsRepository().grant_read_slot(
-        _slot(external.copy_id), new_operation_key(), owned)
-    assert external_later.value.outcome is SlotOutcome.WAIT
-    assert external_later.value.reason == "device_busy"
+    if order != "tie_internal_first":
+        earlier = 11 if order == "internal_earlier" else 32
+        owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=?", (_NOW - 1_000_000, earlier))
+        owned.connection.commit()
+    assert _slot_of(owned, internal.copy_id) is None and _slot_of(owned, external.copy_id) is None
+    register_file_batch_guards()
+    batches = FileBatchRepository()
+    requested = batches.acquire(BatchRequest(32, "cam-1", _NOW), new_operation_key(), owned)
+    assert requested.kind is DbOutcomeKind.COMPLETED, requested.error
+    if order == "obtain_earlier":
+        assert requested.value is BatchOutcome.GRANTED, requested
+        internal_result = OutputsRepository().grant_read_slot(
+            _slot(internal.copy_id), new_operation_key(), owned)
+        assert internal_result.value.outcome is SlotOutcome.WAIT, internal_result
+        assert internal_result.value.reason == "file_batch_waiting"
+        external_result = OutputsRepository().grant_read_slot(
+            _slot(external.copy_id), new_operation_key(), owned)
+        assert external_result.value.outcome is SlotOutcome.GRANTED, external_result
+    else:
+        assert requested.value is BatchOutcome.WAIT, requested
+        internal_result = OutputsRepository().grant_read_slot(
+            _slot(internal.copy_id), new_operation_key(), owned)
+        assert internal_result.value.outcome is SlotOutcome.GRANTED, internal_result
+        again = batches.acquire(BatchRequest(32, "cam-1", _NOW + 1), new_operation_key(), owned)
+        assert again.kind is DbOutcomeKind.COMPLETED and again.value is BatchOutcome.WAIT, again
 
 
 # ---- 真实链路 ----
@@ -494,86 +530,90 @@ def _proposal(owned, first: int, direction: str, occurred_at: int = _NOW + 1):
         SlotRequest(first, occurred_at), new_operation_key(), target))
 
 
-def _guard_case(owned, first: int):
-    grant = _proposal(owned, first, "grant")
-    assert grant.events, "授予提案必须产生事件"
-    OutputsRepository().grant_read_slot(
-        SlotRequest(first, _NOW + 1), new_operation_key(), owned)
+def _replay_slot_event(owned, plan, *, event=None, mutate=None):
+    """在独立数据库副本重放正式事件，由事务绑定真实事实端口。"""
+    def replay(target):
+        if mutate is not None:
+            target.connection.execute("PRAGMA ignore_check_constraints=ON")
+            mutate(target.connection)
+            target.connection.commit()
+        before = _dump(target)
+        current = proposal_state(target, owners=plan.owners)
+        receipt = commit_operation(
+            EventSequence((event or plan.events[0],), current), new_operation_key(), target)
+        if receipt.kind == "rolled_back":
+            assert _dump(target) == before
+            assert not target.connection.in_transaction
+        return receipt
+
+    return observed_operation(owned, replay)
+
+
+def _reject_slot_event(owned, plan, message, *, event=None, mutate=None):
+    receipt = _replay_slot_event(owned, plan, event=event, mutate=mutate)
+    assert receipt.kind == "rolled_back", receipt
+    assert isinstance(receipt.error, EventValidationError), receipt.error
+    assert message in str(receipt.error), receipt.error
+
+
+def _release_proposal(owned, copy_id):
+    granted = OutputsRepository().grant_read_slot(_slot(copy_id), new_operation_key(), owned)
+    assert granted.kind is DbOutcomeKind.COMPLETED and granted.value.outcome is SlotOutcome.GRANTED, granted
     size = owned.connection.execute(
-        "SELECT source_size FROM file_copies WHERE id=?", (first,)).fetchone()[0]
+        "SELECT source_size FROM file_copies WHERE id=?", (copy_id,)).fetchone()[0]
     owned.connection.execute(
-        "UPDATE file_copies SET committed_bytes=? WHERE id=?", (size, first))
+        "UPDATE file_copies SET committed_bytes=? WHERE id=?", (size, copy_id))
     owned.connection.commit()
-    release = _proposal(owned, first, "release", _NOW + 2)
-    return grant, release
+    return _proposal(owned, copy_id, "release", _NOW + 2)
 
 
-def test_guard_accepts_real_grant_and_release_events(prepared):
-    owned, command, first = prepared
-    grant, release = _guard_case(owned, first.copy_id)
-    for plan in (grant, release):
-        context = replace(plan, state_rows=deepcopy(plan.state_rows))
-        assert validate_event(plan.events[0], context).branch_name == "SLOT"
+def test_guard_accepts_real_grant_and_release_events(prepared_with_batch):
+    owned, command, first = prepared_with_batch
+    grant = _proposal(owned, first.copy_id, "grant")
+    receipt = _replay_slot_event(owned, grant)
+    assert receipt.kind == "completed", receipt.error
+    release = _release_proposal(owned, first.copy_id)
+    receipt = _replay_slot_event(owned, release)
+    assert receipt.kind == "completed", receipt.error
 
 
-def test_guard_rejects_grant_that_skips_or_changes_binding(prepared):
-    owned, command, first = prepared
-    grant, _ = _guard_case(owned, first.copy_id)
-    context = replace(grant, state_rows=deepcopy(grant.state_rows))
-    event = grant.events[0]
-    row = event.rows[0]
-    occupied = replace(row, before=replace(row.before, values={"slot_device_id": "cam-1"}))
-    with pytest.raises(EventValidationError):
-        validate_event(replace(event, rows=(occupied,)), context)
-    wrong_device = replace(
-        row, after=replace(row.after, values={"slot_device_id": "another-camera"}))
-    with pytest.raises(EventValidationError):
-        validate_event(replace(event, rows=(wrong_device,)), context)
+def test_guard_rejects_grant_that_skips_or_changes_binding(prepared_with_batch):
+    owned, command, first = prepared_with_batch
+    grant = _proposal(owned, first.copy_id, "grant")
+    event, = grant.events
+    row, = event.rows
+    occupied = replace(row, before=replace(row.before, values={"slot_device_id": "another-camera"}))
+    _reject_slot_event(owned, grant, "授予必须从空闲机会开始",
+        event=replace(event, rows=(occupied,)), mutate=lambda db: db.execute(
+            "UPDATE file_copies SET slot_device_id='another-camera' WHERE id=?", (first.copy_id,)))
+    wrong = replace(row, after=replace(row.after, values={"slot_device_id": "another-camera"}))
+    _reject_slot_event(owned, grant, "授予的设备必须等于原来源设备绑定",
+                       event=replace(event, rows=(wrong,)))
 
 
-def test_guard_rejects_grant_for_host_source_or_finished_run(prepared):
-    owned, command, first = prepared
-    grant, _ = _guard_case(owned, first.copy_id)
-    rows = deepcopy(grant.state_rows)
-    copy_id = first.copy_id
-    rows["file_copies"][copy_id]["source_device_file_id"] = None
-    context = replace(grant, state_rows=rows)
-    with pytest.raises(EventValidationError):
-        validate_event(grant.events[0], context)
-
-    run_id = next(iter(grant.state_rows["operation_runs"]))
-    terminal = deepcopy(grant.state_rows)
-    terminal["operation_runs"][run_id]["status"] = 4
-    context = replace(grant, state_rows=terminal)
-    with pytest.raises(EventValidationError):
-        validate_event(grant.events[0], context)
-
-    waiting = deepcopy(grant.state_rows)
-    waiting["operation_runs"][run_id]["retry_wait_required"] = 1
-    context = replace(grant, state_rows=waiting)
-    with pytest.raises(EventValidationError):
-        validate_event(grant.events[0], context)
+def test_guard_rejects_grant_for_host_source_or_finished_run(prepared_with_batch):
+    owned, command, first = prepared_with_batch
+    grant = _proposal(owned, first.copy_id, "grant")
+    _reject_slot_event(owned, grant, "主机源拷贝不能占用相机读取机会",
+        mutate=lambda db: db.execute(
+            "UPDATE file_copies SET source_device_file_id=NULL WHERE id=?", (first.copy_id,)))
+    _reject_slot_event(owned, grant, "读取责任已结束，不能再授予机会",
+        mutate=lambda db: db.execute(
+            "UPDATE operation_runs SET status=4, error_json='{}' WHERE id=?", (first.run_id,)))
+    _reject_slot_event(owned, grant, "重试等待期间不授予新的读取机会",
+        mutate=lambda db: db.execute(
+            "UPDATE operation_runs SET retry_wait_required=1 WHERE id=?", (first.run_id,)))
 
 
-def test_guard_rejects_release_with_active_attempt_or_incomplete_bytes(prepared):
-    owned, command, first = prepared
-    OutputsRepository().grant_read_slot(SlotRequest(first.copy_id, _NOW + 1),
-                                        new_operation_key(), owned)
-    size = owned.connection.execute(
-        "SELECT source_size FROM file_copies WHERE id=?", (first.copy_id,)).fetchone()[0]
-    owned.connection.execute(
-        "UPDATE file_copies SET committed_bytes=? WHERE id=?", (size, first.copy_id))
-    owned.connection.commit()
-    release = _proposal(owned, first.copy_id, "release", _NOW + 2)
-    run_id = next(iter(release.state_rows["operation_runs"]))
-    active = deepcopy(release.state_rows)
-    active["operation_attempts"][901] = {"id": 901, "run_id": run_id, "status": 1}
-    context = replace(release, state_rows=active)
-    with pytest.raises(EventValidationError):
-        validate_event(release.events[0], context)
-
-    reading = deepcopy(release.state_rows)
-    reading["file_copies"][first.copy_id]["committed_bytes"] = 0
-    context = replace(release, state_rows=reading)
-    with pytest.raises(EventValidationError):
-        validate_event(release.events[0], context)
+def test_guard_rejects_release_with_active_attempt_or_incomplete_bytes(prepared_with_batch):
+    owned, command, first = prepared_with_batch
+    release = _release_proposal(owned, first.copy_id)
+    _reject_slot_event(owned, release, "实际读取未结束，不能释放机会",
+        mutate=lambda db: db.execute(
+            "INSERT INTO operation_attempts (id, run_id, attempt_no, status, effect_state,"
+            " intent_event_id, result_event_id, result_json, error_json, copy_round,"
+            " max_attempts_used, timeout_s_json, retry_interval_s_json)"
+            " VALUES (901, ?, 1, 1, 1, 1, NULL, NULL, NULL, 1, 3, 10, 0)", (first.run_id,)))
+    _reject_slot_event(owned, release, "源内容尚未读完，机会保留",
+        mutate=lambda db: db.execute(
+            "UPDATE file_copies SET committed_bytes=0 WHERE id=?", (first.copy_id,)))

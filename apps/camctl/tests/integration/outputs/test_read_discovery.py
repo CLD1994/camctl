@@ -15,7 +15,7 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_read_associations import read_targets, _command  # noqa: F401
-from .test_read_slot import two_copies, _acquire_early_batch, _slot  # noqa: F401
+from .test_read_slot import mixed_purposes, same_batch_copies, two_copies, _acquire_early_batch, _slot  # noqa: F401
 from .test_local_read import local_read  # noqa: F401
 from .test_qualification import _NOW
 from .test_product_competition import competition_database, _seed_many_actions  # noqa: F401
@@ -23,7 +23,9 @@ from .test_qualification import qualification_environment, _candidate, _Seedling
 from .test_obtain_summary import _roots
 from camctl.persistence.repositories import outputs
 from camctl.persistence.transaction import commit_operation
-from ..support.output_planning import EventSequence
+from ..support.output_planning import EventSequence, capture_operation
+from ..support.public_delivery_cases import prepare_public_delivery
+from ..support.read_batch_cases import acquire_read_batch
 from ..support.output_storage_cases import QueryProbe, capture_scoped_operation
 from ..support.outputs import observed_query
 from ..persistence.transaction_fixtures import decorate_transaction_command
@@ -141,6 +143,22 @@ def prepared_env(read_targets, tmp_path):
     return owned, roots, qualification
 
 
+@pytest.fixture
+def published_public_delivery(tmp_path):
+    from .test_copy_segments import _CONTENT
+    from .test_delivery import _publish as publish
+
+    owned, roots, directories, qualification = asyncio.run(
+        prepare_public_delivery(tmp_path, content=_CONTENT, now=_NOW))
+    try:
+        result = publish(owned, directories, qualification.delivery_id)
+        from camctl.outputs.handoff import DeliveryPhase
+        assert result.phase is DeliveryPhase.PUBLISHED
+        yield owned, qualification
+    finally:
+        owned.connection.close()
+
+
 def _publish(owned, roots, delivery_id, tmp_path):
     from camctl.outputs.handoff import DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery
 
@@ -162,24 +180,32 @@ def _publish(owned, roots, delivery_id, tmp_path):
 def test_later_registered_earlier_action_wins_without_full_load(two_copies):
     owned, early, late = two_copies
     owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=32", (_NOW - 1_000_000,))
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
     connection = _BoundedConnection(owned.connection)
-    result = OutputsRepository().grant_read_slot(
-        _slot(late.copy_id), new_operation_key(), replace(owned, connection=connection))
-    assert result.kind is DbOutcomeKind.COMPLETED, result.error
-    assert result.value.outcome is SlotOutcome.GRANTED
+    page = read_candidates(connection, _scope(connection), limit=1)
+    assert [candidate.copy_id for candidate in page.items] == [late.copy_id]
     assert connection.returned and max(connection.returned) == 1
     assert connection.query_plan
+    acquire_read_batch(owned, 32, "cam-1", _NOW)
+    result = OutputsRepository().grant_read_slot(
+        _slot(late.copy_id), new_operation_key(), owned)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value.outcome is SlotOutcome.GRANTED
 
 
 @pytest.mark.parametrize("fault", ["scheduled", "run_owner", "run_copy", "holder_binding"])
-def test_missing_candidate_basis_is_not_filtered_away(two_copies, fault):
-    owned, early, late = two_copies
+def test_missing_candidate_basis_is_not_filtered_away(request, fault):
+    if fault == "scheduled":
+        owned, early, late = request.getfixturevalue("two_copies")
+        _acquire_early_batch(owned)
+    else:
+        owned, early, late = request.getfixturevalue("same_batch_copies")
     owned.connection.execute("PRAGMA ignore_check_constraints=ON")
     if fault == "scheduled":
         owned.connection.execute("UPDATE actions SET scheduled_at=NULL WHERE id=32")
     elif fault == "run_owner":
-        owned.connection.execute("UPDATE operation_runs SET action_id=31 WHERE copy_id=?", (late.copy_id,))
+        owned.connection.execute("UPDATE operation_runs SET action_id=32 WHERE copy_id=?", (late.copy_id,))
     elif fault == "run_copy":
         owned.connection.execute("UPDATE operation_runs SET copy_id=NULL WHERE copy_id=?", (late.copy_id,))
     else:
@@ -188,6 +214,7 @@ def test_missing_candidate_basis_is_not_filtered_away(two_copies, fault):
     result = OutputsRepository().grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(result.error, ConsistencyError)
+    assert "读取候选缺少可靠关联、流程或排序依据" in str(result.error)
 
 
 def test_product_predecessor_scan_retains_only_current_batch(
@@ -227,19 +254,21 @@ def test_host_missing_owner_is_not_filtered_away(local_read):
         read_candidates(owned.connection, _scope(owned.connection, "local"), limit=1)
 
 
-def test_internal_and_delivery_reads_share_global_order(read_targets):
-    owned = read_targets
+def test_internal_and_delivery_reads_share_device_order(mixed_purposes):
+    from camctl.outputs.batches import BatchOutcome, BatchRequest
+    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+
+    owned, internal, external = mixed_purposes
     repository = OutputsRepository(read_batch_size=1)
-    copies = []
-    for internal in (False, True):
-        result = repository.grant_file(_command(internal=internal), new_operation_key(), owned)
-        assert result.kind is DbOutcomeKind.COMPLETED, result.error
-        copies.append(result.value.copy_id)
     # 内部责任虽后建档，但录像动作的计划内顺序先于取回动作。
     page = read_candidates(owned.connection, _scope(owned.connection), limit=1)
-    assert [candidate.copy_id for candidate in page.items] == [copies[1]]
-    assert repository.grant_read_slot(_slot(copies[0]), new_operation_key(), owned).value.reason == "predecessor"
-    assert repository.grant_read_slot(_slot(copies[1]), new_operation_key(), owned).value.outcome is SlotOutcome.GRANTED
+    assert [candidate.copy_id for candidate in page.items] == [internal.copy_id]
+    register_file_batch_guards()
+    batch = FileBatchRepository().acquire(
+        BatchRequest(32, "cam-1", _NOW), new_operation_key(), owned)
+    assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.WAIT, batch
+    granted = repository.grant_read_slot(_slot(internal.copy_id), new_operation_key(), owned)
+    assert granted.kind is DbOutcomeKind.COMPLETED and granted.value.outcome is SlotOutcome.GRANTED, granted
 
 
 @pytest.mark.parametrize("parallel", [False, True])
@@ -619,32 +648,37 @@ def test_obtain_summary_folds_many_items_without_full_materialization(prepared_e
 
 
 def test_plan_guard_independently_rejects_skipped_unfinished_sibling(
-    prepared_env, tmp_path, monkeypatch
+    published_public_delivery, monkeypatch
 ):
     from camctl.history import validators
     from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories.capture import register_capture_guards
     from camctl.persistence.repositories.outputs import FinishObtain
+    from .test_qualification import _seed_action
 
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
-    owned, roots, qualified = prepared_env
-    _publish(owned, roots, qualified.delivery_id, tmp_path)
+    owned, qualified = published_public_delivery
+    action_id = qualified.action_id
+    plan_id, = owned.connection.execute("SELECT plan_id FROM actions WHERE id=?", (action_id,)).fetchone()
+    _seed_action(owned.connection, 1000, plan_id, action_type=2)
+    owned.connection.commit()
 
     def finish_without_pending_siblings(current):
         current.connection.execute(
-            "UPDATE actions SET status=3 WHERE plan_id=1 AND id!=31"
+            "UPDATE actions SET status=3 WHERE plan_id=? AND id!=?", (plan_id, action_id)
         )
         current.connection.commit()
         return OutputsRepository(read_batch_size=1).finish_obtain(
-            FinishObtain(31, _NOW + 20), new_operation_key(), current
+            FinishObtain(action_id, _NOW + 20), new_operation_key(), current
         )
 
-    proposal = capture_scoped_operation(owned, outputs, finish_without_pending_siblings)
+    proposal = capture_operation(owned, finish_without_pending_siblings)
     before = tuple(owned.connection.iterdump())
     result = commit_operation(
         EventSequence(proposal.events, proposal), new_operation_key(), owned
     )
     assert result.kind == "rolled_back"
     assert isinstance(result.error, EventValidationError), result.error
+    assert "计划完成要求全部动作终态" in str(result.error), result.error
     assert tuple(owned.connection.iterdump()) == before
