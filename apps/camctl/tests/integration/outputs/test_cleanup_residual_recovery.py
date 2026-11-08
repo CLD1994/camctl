@@ -327,33 +327,93 @@ async def test_qualified_old_running_attempt_saves_unknown_on_original_ticket(
         owned.connection.close()
 
 
-async def test_later_reliably_not_dispatched_delete_keeps_saved_query_and_retry_wait(environment, capture_resources):
-    from camctl.contracts.values import new_operation_key
-    from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-    from camctl.operations.attempts import AttemptIntent, AttemptTarget, AttemptFinish, OperationKind
-    from camctl.operations.models import CallOutcome, AttemptStatus, EffectState, ErrorValue, Settlement, SettlementBasis, EvidenceValue
-    from camctl.operations.validation import validate_outcome
-    from camctl.outputs.cleanup_results import saved_cleanup_query
+async def test_later_reliably_not_dispatched_delete_keeps_saved_query(environment, capture_resources):
+    import json
+    from camctl.contracts.enums import enum_for
+    from camctl.contracts.workflow_errors import item_error_id
+    from .test_cleanup_query_cancel_before_delete import _EntryPort
     from .test_cleanup_query_local_consumption import _world
-    base, driver, action_id, item_id, _ = await _world(environment, "after", None)
+
+    cfg = environment[0]
+    _, driver, action_id, item_id, _ = await _world(environment, "after", True)
     owned = environment[1]
-    assert (await delete_source_file(base, item_id)).phase == "query_unknown"
-    saved_before = saved_cleanup_query(owned.connection, item_id)
-    member_runtime = await base.for_item(item_id)
-    intent = AttemptIntent("delete", action_id, OperationKind.DELETE_FILE,
-        AttemptTarget(cleanup_item_id=item_id), None, member_runtime.delete_config, _NOW)
-    begun = base.outputs.begin_cleanup_attempt(intent, new_operation_key(), owned)
-    assert begun.kind is DbOutcomeKind.COMPLETED and begun.value.ticket is not None
-    ticket = begun.value.ticket
-    actual = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("canceled_before_dispatch", "delete"), effect=EffectState.NO_EFFECT,
-        settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue("dispatch_prevented", 1, {})))
-    evidence = EvidenceRegistry((EvidenceContract("dispatch_prevented", 1, "delete", frozenset()),))
-    saved = base.outputs.finish_cleanup_attempt(
-        AttemptFinish(ticket, validate_outcome(ticket, actual, evidence), _NOW), new_operation_key(), owned)
-    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    assert saved_cleanup_query(owned.connection, item_id) == saved_before
-    assert (await delete_source_file(base, item_id)).phase == "query_retry_wait"
+    clock = {"ns": 0}
+    factory = cleanup_factory(
+        devices=cfg.devices, drivers=_registry(driver), max_delete_attempts=3,
+        max_query_attempts=3, staging=Path(cfg.paths.staging),
+        occurred_at=lambda: _NOW, monotonic_ns=lambda: clock["ns"],
+    )
+    runtime = await factory(await capture_database(owned))
+    first = await delete_source_file(runtime, item_id)
+    assert first.phase == "still_present", first
     assert len(driver.deletes) == len(driver.queries) == 1
+    query = owned.connection.execute(
+        "SELECT a.run_id,a.attempt_no,a.status,a.effect_state,a.result_json,"
+        " a.error_json,a.intent_event_id,a.result_event_id"
+        " FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+        " WHERE r.cleanup_item_id=? AND r.kind=5", (item_id,),
+    ).fetchone()
+    assert query is not None
+    assert (query[0], query[1]) == (
+        driver.query_requests[0].ticket.run_id, driver.query_requests[0].ticket.attempt_id)
+    observations = json.loads(query[4])["observations"]
+    assert any(value["type"] == "file_presence" and value["data"] == {
+        "cleanup_item_id": str(item_id), "present": True} for value in observations)
+
+    # 等待已经确认仍在后的删除间隔；票据提交后取消，生产流程保存未派发。
+    clock["ns"] = 10_000_000_000
+    port = _EntryPort(owned, item_id, action_id, "cancel_after_grant")
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs:
+                         args[0].target.cleanup_item_id == item_id):
+        step = await delete_source_file(runtime, item_id)
+
+    assert (step.phase, step.detail) == ("canceled", "file_delete_failed"), step
+    assert [entry[:2] for entry in port.entries] == [("delete", DbOutcomeKind.COMPLETED)]
+    attempts = owned.connection.execute(
+        "SELECT a.run_id,a.attempt_no,a.status,a.effect_state,a.result_json,"
+        " a.intent_event_id,a.result_event_id FROM operation_attempts a"
+        " JOIN operation_runs r ON r.id=a.run_id"
+        " WHERE r.cleanup_item_id=? AND r.kind=4 ORDER BY a.attempt_no", (item_id,),
+    ).fetchall()
+    assert len(attempts) == 2
+    assert (attempts[0][0], attempts[0][1]) == (
+        driver.delete_requests[0].ticket.run_id, driver.delete_requests[0].ticket.attempt_id)
+    later = attempts[1]
+    assert later[0] == attempts[0][0] and later[1] == attempts[0][1] + 1
+    assert later[2:4] == (int(enum_for("operation_attempts.status").FAILED),
+                          int(enum_for("operation_attempts.effect_state").NO_EFFECT))
+    assert json.loads(later[4])["settlement"] == {
+        "basis": "not_dispatched",
+        "evidence": {"type": "dispatch_prevented", "version": 1, "data": {}}}
+    assert attempts[0][6] < query[6] <= query[7] < later[5] < later[6]
+    assert owned.connection.execute(
+        "SELECT a.run_id,a.attempt_no,a.status,a.effect_state,a.result_json,"
+        " a.error_json,a.intent_event_id,a.result_event_id"
+        " FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+        " WHERE r.cleanup_item_id=? AND r.kind=5", (item_id,),
+    ).fetchone() == query
+    assert len(driver.deletes) == len(driver.queries) == 1
+    status, restriction, error, final_event = owned.connection.execute(
+        "SELECT status,restriction_state,error_code,final_event_id"
+        " FROM cleanup_items WHERE id=?", (item_id,),
+    ).fetchone()
+    assert (status, restriction, error) == (
+        int(enum_for("cleanup_items.status").CANCELED),
+        int(enum_for("cleanup_items.restriction_state").IRREVERSIBLE),
+        item_error_id("cleanup_items", "file_delete_failed"))
+    assert owned.connection.execute(
+        "SELECT cancel_requested FROM actions WHERE id=?", (action_id,)
+    ).fetchone() == (1,)
+    cancel_events = [event_id for event_id, body in owned.connection.execute(
+        "SELECT id,body_json FROM history_events WHERE id>? AND id<?",
+        (later[5], later[6]),
+    ) if any(row["table"] == "actions" and row["id"] == action_id
+             and row["before"]["values"].get("cancel_requested") == 0
+             and row["after"]["values"].get("cancel_requested") == 1
+             for row in json.loads(body)["rows"])]
+    assert len(cancel_events) == 1
+    assert later[6] < final_event
 
 
 async def test_terminal_flow_running_attempt_is_work_and_cancellation_cannot_finish(
