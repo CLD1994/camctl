@@ -634,13 +634,19 @@ def test_failed_source_with_registered_photo_keeps_existing_selection_rules(
             assert result.value.snapshot.source_error_code is None
             assert result.value.snapshot.selected_output_ids == (501,)
         else:
-            assert result.value.snapshot.source_error_code == item_error_id(
-                "obtain_source_selections", "preview_missing"
-            )
+            assert result.value.snapshot.source_error_code is None
             assert result.value.snapshot.selected_output_ids == ()
+            assert len(result.value.snapshot.items) == 1
             assert result.value.snapshot.items[0].error_code == item_error_id(
                 "obtain_items", "preview_missing"
             )
+            assert result.value.snapshot.items[0].error_details == {
+                "source_action_instance_id": "21", "original_output_id": "501",
+            }
+            assert connection.execute(
+                "SELECT error_code,error_details_json FROM obtain_source_selections WHERE id=?",
+                (selection_id,),
+            ).fetchone() == (None, None)
     finally:
         connection.close()
 
