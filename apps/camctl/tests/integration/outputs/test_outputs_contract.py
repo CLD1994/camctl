@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+import hashlib
 import json
 
 import pytest
@@ -73,16 +74,32 @@ async def prepared_pair(environment):
         occurred_at=lambda: _NOW, monotonic_ns=lambda: 0, segment_size=4,
     )
     flow = obtain_flow(factory)
-    # 会话本轮先判断发布，再实际读取；两份副本在本轮结束时均已可靠准备。
+    # 同机取回按批次连续执行；第二轮先发布已准备的第一份，再读取另一份。
+    await flow(context)
+    assert owned.connection.execute("SELECT status FROM deliveries ORDER BY id").fetchall() == [(3,), (1,)]
+    released, = owned.connection.execute(
+        "SELECT b.released_event_id FROM device_file_batches b"
+        " JOIN deliveries d ON d.action_id=b.action_id ORDER BY d.id LIMIT 1").fetchone()
+    assert released is not None
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+        " WHERE r.kind=3 AND a.status=1").fetchone() == (0,)
     await flow(context)
     copies = owned.connection.execute(
-        "SELECT d.id,c.target_file_id,c.id,d.action_id FROM deliveries d"
-        " JOIN file_copies c ON c.delivery_id=d.id ORDER BY d.id").fetchall()
+        "SELECT d.id,c.target_file_id,c.id,d.action_id,d.status,d.file_name,"
+        " f.relative_path,c.source_size,c.committed_bytes,c.target_sha256 FROM deliveries d"
+        " JOIN file_copies c ON c.delivery_id=d.id"
+        " JOIN intermediate_files f ON f.id=c.target_file_id ORDER BY d.id").fetchall()
     assert len(copies) == 2
-    assert owned.connection.execute("SELECT status FROM deliveries ORDER BY id").fetchall() == [(3,), (3,)]
+    assert [row[4] for row in copies] == [5, 3]
     assert owned.connection.execute("SELECT source_dependency FROM obtain_items ORDER BY id").fetchall() == [(0,), (0,)]
-    assert list(Path(cfg.paths.ready).iterdir()) == []
-    first, second = [SimpleNamespace(
+    expected = hashlib.sha256(_CONTENT).hexdigest()
+    for row in copies:
+        assert row[7:] == (len(_CONTENT), len(_CONTENT), expected)
+        path = (Path(cfg.paths.ready) / row[5] if row[4] == 5 else Path(cfg.paths.staging) / row[6])
+        assert path.read_bytes() == _CONTENT
+    assert len(driver.reads) == 2
+    second, first = [SimpleNamespace(
         delivery_id=row[0], target_file_id=row[1], copy_id=row[2], action_id=row[3],
     ) for row in copies]
     return {
@@ -220,7 +237,8 @@ class TestFailureUnionBeyondDeliveryIncrement:
         assert (await _publish(pair, delivery.delivery_id)).phase is DeliveryPhase.FAILED_FINAL
         first = _freeze_report(owned)
         doc = _read_report(generate_report_file(_report_spec(pair["tmp_path"], first, "union-1.json")))
-        fragment = _action_fragment(doc, "obtain-1")
+        action_name, = _value(owned, "SELECT name FROM actions WHERE id=?", delivery.action_id)
+        fragment = _action_fragment(doc, action_name)
         assert [item["error"]["code"] for item in fragment["result"]["failures"]] == ["delivery_handoff_unconfirmed"]
         assert fragment["result"]["failures"][0]["delivery_id"] == str(delivery.delivery_id)
         ack = await _submit(pair["context"], {
@@ -233,7 +251,7 @@ class TestFailureUnionBeyondDeliveryIncrement:
         second = _freeze_report(owned)
         assert second.from_wm == first.to_wm
         doc = _read_report(generate_report_file(_report_spec(pair["tmp_path"], second, "union-2.json")))
-        fragment = _action_fragment(doc, "obtain-1")
+        fragment = _action_fragment(doc, action_name)
         assert "deliveries" not in fragment
         assert [item["error"]["code"] for item in fragment["result"]["failures"]] == ["delivery_handoff_unconfirmed"]
         assert fragment["result"]["failures"][0]["delivery_id"] == str(delivery.delivery_id)
