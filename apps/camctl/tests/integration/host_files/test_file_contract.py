@@ -38,6 +38,7 @@ from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
 from camctl.host_files.segments import SegmentFailure, SegmentSpec, transfer_segment
 from camctl.host_files.tasks import FileTask, FileTaskExecutor, FileTaskId
+from camctl.logging_runtime.clh_adapter import WriteResult
 from camctl.logging_runtime.copies import (
     CopyOutcome,
     CopyRequest,
@@ -151,16 +152,8 @@ class _CopyChannelDouble:
     def copy_with_write(self, record, destination: Path):
         destination.write_bytes(b"log-copy-bytes")
         self.copied_into = destination
-        return _AppendResult(appended=True), None
-
-
-class _AppendResult:
-    def __init__(self, appended: bool) -> None:
-        self.appended = appended
-        self.append_error = None if appended else "append failed"
-        self.copy_handles_closed = True
-        self.copy_source_close_error = None
-        self.copy_target_close_error = None
+        return WriteResult(appended=True, rotated=False, durable=True,
+                           copy_handles_closed=True), None
 
 
 def _handoff_dirs(tmp_path: Path, content: bytes | None = b"payload"):
