@@ -222,10 +222,15 @@ async def test_growth_snapshot_restore_runs_in_managed_thread_and_event_loop_is_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('phase',['first','middle','later_source','rollback'])
-async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path,monkeypatch,phase):
-    from camctl.history.snapshots import (MaintenanceContext,MaintenanceState,SnapshotRef,maintain_snapshots)
-    from camctl.persistence.repositories import history as module
+@pytest.mark.parametrize('phase', ['first', 'middle', 'later_source', 'rollback'])
+async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path, monkeypatch, phase):
+    import sqlite3
+    import tempfile
+    from camctl.history.snapshots import (
+        MaintenanceContext, MaintenanceState, SnapshotMaintenanceError, SnapshotRef, maintain_snapshots,
+    )
+    from camctl.persistence.models import DbOutcomeKind
+
     if phase == 'middle':
         from camctl.capture.segment_models import SegmentSetRef
         from camctl.persistence.repositories.segments import SegmentRepository
@@ -239,91 +244,177 @@ async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path
         repo = SegmentRepository()
         history = HistoryRepository(directory / 'state.db')
     else:
-        owned,_,repo,ref,history=await _fixture(tmp_path)
-    boundary=history.current_boundary()
-    store,executor=await _snapshot_store(history)
-    selected=False
-    async def candidates(*_):
-        nonlocal selected
-        if selected:return ()
-        selected=True
-        if phase=='later_source':
-            from camctl.contracts.enums import load_registry
-            file_kind=load_registry()['history_objects']['device_file']['id']
-            file_id=owned.connection.execute('SELECT MIN(id) FROM device_files').fetchone()[0]
-            return (SnapshotRef(file_kind,file_id),SnapshotRef(1,ref.action_id))
-        return (SnapshotRef(1,ref.action_id),)
-    monkeypatch.setattr(store,'snapshot_candidates',candidates)
-    loop=asyncio.get_running_loop();started=asyncio.Event();release=Event();paths=[];actual=[]
-    from camctl.history import snapshots as snapshots_module
-    original_prepare=snapshots_module.prepare_snapshot
-    def prepare(image):
-        item=original_prepare(image)
-        if hasattr(item,'path'):paths.append(item.path)
-        return item
-    monkeypatch.setattr(snapshots_module,'prepare_snapshot',prepare)
-    if phase=='middle':
-        from camctl.history.snapshot_stream import PreparedSnapshotSource
-        original_chunks=PreparedSnapshotSource.chunks
-        chunks=original_chunks.fget
-        def middle(self):
-            assert self.length>65536
-            for index,chunk in enumerate(chunks(self)):
-                yield chunk
-                if index==0:
-                    loop.call_soon_threadsafe(started.set)
-                    assert release.wait(60),'middle chunk gate was not released'
-        monkeypatch.setattr(PreparedSnapshotSource,'chunks',property(middle))
-    original=module._save_one_snapshot
-    calls=0
-    def save(connection,item):
-        nonlocal calls
-        calls+=1
-        if phase!='middle' and (phase!='later_source' or calls==2):
-            loop.call_soon_threadsafe(started.set)
-            assert release.wait(60),'test gate was not released'
-        try:
-            value=original(connection,item)
-            if phase=='rollback':
-                import sqlite3
-                raise sqlite3.OperationalError('test write failure before commit')
-            actual.append('completed');return value
-        except BaseException as error:
-            actual.append(type(error).__name__);raise
-    monkeypatch.setattr(module,'_save_one_snapshot',save)
-    task=asyncio.create_task(maintain_snapshots(MaintenanceContext(store=store,state=MaintenanceState(),threshold=1,batch_size=3)))
+        owned, _, repo, ref, history = await _fixture(tmp_path)
+
+    boundary = history.current_boundary()
+    refs = [SnapshotRef(1, ref.action_id)]
+    if phase == 'later_source':
+        from camctl.contracts.enums import load_registry
+        file_kind = load_registry()['history_objects']['device_file']['id']
+        file_id = owned.connection.execute('SELECT MIN(id) FROM device_files').fetchone()[0]
+        refs.insert(0, SnapshotRef(file_kind, file_id))
+    progress_before = {
+        (item.entity_type, item.entity_id): owned.connection.execute(
+            'SELECT snapshot_change_count, latest_snapshot_id FROM entity_snapshot_progress'
+            ' WHERE entity_type=? AND entity_id=?', (item.entity_type, item.entity_id)).fetchone()
+        for item in refs
+    }
+    temporary = tmp_path / 'snapshot-temporary'
+    temporary.mkdir()
+    monkeypatch.setattr(tempfile, 'tempdir', str(temporary))
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = Event()
+    opened, writes, closed, transactions, updated_progress = [], [], [], [], []
+    real_connect = sqlite3.connect
+    target_uri = history.path.resolve().as_uri() + '?mode=rw'
+    failure = sqlite3.OperationalError('测试在快照写入后触发回滚')
+
+    def gate():
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(60), '快照写入门闩未释放'
+
+    class Blob:
+        def __init__(self, blob, index):
+            self.blob, self.index = blob, index
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.blob.close()
+            closed.append(self.index)
+
+        def write(self, data):
+            self.blob.write(data)
+            writes.append((self.index, len(data)))
+            if self.index == 1 and len(writes) == 1 and phase == 'middle':
+                gate()
+
+    class Connection(sqlite3.Connection):
+        def blobopen(self, table, column, row, **kwargs):
+            blob = super().blobopen(table, column, row, **kwargs)
+            if (table, column) != ('entity_snapshots', 'content'):
+                return blob
+            index = len(opened) + 1
+            opened.append(index)
+            if (phase == 'first' and index == 1) or (phase == 'later_source' and index == 2):
+                gate()
+            return Blob(blob, index)
+
+        def execute(self, sql, *args, **kwargs):
+            cursor = super().execute(sql, *args, **kwargs)
+            operation = ' '.join(sql.upper().split())
+            if phase == 'rollback' and operation.startswith('UPDATE ENTITY_SNAPSHOT_PROGRESS'):
+                updated_progress.append(super().execute(
+                    'SELECT snapshot_change_count, latest_snapshot_id FROM entity_snapshot_progress'
+                    ' WHERE entity_type=? AND entity_id=?', (1, ref.action_id)).fetchone())
+                gate()
+                raise failure
+            if opened and operation in ('COMMIT', 'ROLLBACK'):
+                transactions.append(operation)
+            return cursor
+
+    def connect(database, *args, **kwargs):
+        if str(database) == target_uri:
+            assert 'factory' not in kwargs
+            kwargs['factory'] = Connection
+        return real_connect(database, *args, **kwargs)
+
     try:
-        await asyncio.wait_for(started.wait(),60)
-        task.cancel()
-        delivered=loop.create_future();loop.call_soon(delivered.set_result,None)
-        await delivered
-        assert paths and all(path.exists() for path in paths)
-        assert not task.done()
-        task.cancel()
-        release.set()
-        if phase=='rollback':
-            from camctl.history.snapshots import SnapshotMaintenanceError
-            with pytest.raises(SnapshotMaintenanceError,match='rolled_back'):await task
-        else:
-            with pytest.raises(asyncio.CancelledError):await task
-        await executor.close()
-        assert actual==(['OperationalError'] if phase=='rollback' else ['completed']*(2 if phase=='later_source' else 1))
-        assert all(not path.exists() for path in paths)
-        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]==(0 if phase=='rollback' else 2 if phase=='later_source' else 1)
-        assert history.current_boundary()==boundary, '取消后的实际保存不得推进业务历史'
-        if phase=='middle':
-            # 实际保存及来源清理完成后，从相同 H 的当前投影独立准备同 S 内容。
-            monkeypatch.setattr(module,'_save_one_snapshot',original)
-            monkeypatch.setattr(PreparedSnapshotSource,'chunks',original_chunks)
-            monkeypatch.setattr(snapshots_module,'prepare_snapshot',original_prepare)
-            await _assert_same_s_snapshot_bytes(
-                owned,repo,ref,history,boundary,paths)
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, 'connect', connect)
+            store, executor = await _snapshot_store(history)
+            selected = False
+
+            async def candidates(*_):
+                nonlocal selected
+                if selected:
+                    return ()
+                selected = True
+                return tuple(refs)
+
+            patch.setattr(store, 'snapshot_candidates', candidates)
+            task = asyncio.create_task(maintain_snapshots(MaintenanceContext(
+                store=store, state=MaintenanceState(), threshold=1, batch_size=3)))
+            try:
+                await asyncio.wait_for(started.wait(), 60)
+                paths = list(temporary.rglob('content.jsonl'))
+                assert len(paths) == 1 and paths[0].is_file()
+                expected_content = paths[0].read_bytes()
+                if phase == 'middle':
+                    assert len(expected_content) > 65536
+                    assert writes == [(1, 65536)]
+                elif phase == 'later_source':
+                    assert opened == [1, 2] and closed == [1]
+                    assert writes and all(index == 1 for index, _ in writes)
+                elif phase == 'first':
+                    assert opened == [1] and not writes
+                else:
+                    assert opened == [1] and writes and writes[0][0] == 1
+                    assert closed == [1] and len(updated_progress) == 1
+                    assert updated_progress[0][0] > progress_before[(1, ref.action_id)][0]
+                    assert updated_progress[0][1] is not None
+                # 独立连接在写事务未结束时不能看到已写的快照。
+                assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0] == 0
+                task.cancel()
+                delivered = loop.create_future()
+                loop.call_soon(delivered.set_result, None)
+                await delivered
+                assert all(path.exists() for path in paths)
+                assert not task.done()
+                task.cancel()
+                release.set()
+                if phase == 'rollback':
+                    with pytest.raises(SnapshotMaintenanceError, match='rolled_back') as raised:
+                        await task
+                    assert raised.value.result.kind is DbOutcomeKind.ROLLED_BACK
+                    assert raised.value.result.error is failure
+                else:
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                await executor.close()
+                assert closed == opened
+                assert transactions == (['ROLLBACK'] if phase == 'rollback' else ['COMMIT'])
+                assert all(not path.exists() for path in paths)
+                rows = owned.connection.execute(
+                    'SELECT entity_type, entity_id, content, change_count FROM entity_snapshots ORDER BY entity_type'
+                ).fetchall()
+                if phase == 'rollback':
+                    assert rows == []
+                    for item in refs:
+                        assert owned.connection.execute(
+                            'SELECT snapshot_change_count, latest_snapshot_id FROM entity_snapshot_progress'
+                            ' WHERE entity_type=? AND entity_id=?', (item.entity_type, item.entity_id)
+                        ).fetchone() == progress_before[(item.entity_type, item.entity_id)]
+                else:
+                    assert {(row[0], row[1]) for row in rows} == {
+                        (item.entity_type, item.entity_id) for item in refs}
+                    assert next(row[2] for row in rows if row[:2] == (1, ref.action_id)) == expected_content
+                    for entity_type, entity_id, _, count in rows:
+                        progress = owned.connection.execute(
+                            'SELECT snapshot_change_count, latest_snapshot_id FROM entity_snapshot_progress'
+                            ' WHERE entity_type=? AND entity_id=?', (entity_type, entity_id)).fetchone()
+                        assert progress[0] == count and progress[1] is not None
+                assert history.current_boundary() == boundary
+            finally:
+                release.set()
+                if not task.done():
+                    try:
+                        await task
+                    except (asyncio.CancelledError, SnapshotMaintenanceError):
+                        pass
+                await executor.close()
+
+    except BaseException:
+        owned.connection.close()
+        raise
+
+    try:
+        if phase == 'middle':
+            await _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, paths)
     finally:
-        release.set()
-        if not task.done():
-            try:await task
-            except asyncio.CancelledError:pass
-        await executor.close();owned.connection.close()
+        owned.connection.close()
 
 
 async def _block_business(executor):
