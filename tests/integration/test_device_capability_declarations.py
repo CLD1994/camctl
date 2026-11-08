@@ -121,7 +121,7 @@ def client_build(package):
     package.run(["npm", "run", "build"], cwd=CLIENT)
 
 
-def _config(package, directory, *, host_storage="host", fixtures=False):
+def _config(package, directory, *, host_storage="host", fixtures=False, fixture_host_storage="host"):
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "config.toml"
     data = ["[paths]"]
@@ -137,7 +137,7 @@ def _config(package, directory, *, host_storage="host", fixtures=False):
                  f"executable = {json.dumps(str(package.root / 'bin/hb_cli'))}",
                  f'serial = "offline-{device}"', f'output_storage = "{storage}"']
     if fixtures:
-        for device, driver, storage in (("future-host", "vendor.future_empty.v9", "host"),
+        for device, driver, storage in (("future-host", "vendor.future_empty.v9", fixture_host_storage),
                                          ("future-device", "vendor.future_empty.v9", "device"),
                                          ("future-delete", "vendor.future_capture.v9", "device")):
             data += [f"[devices.{device}]", 'kind = "camera"', f'driver = "{driver}"',
@@ -160,7 +160,7 @@ def test_installed_declarations_match_checkout_and_protocol_resources(package, t
     assert _document(installed) == _document(_describe(package, config, checkout=True))
     document = _document(installed)
     assert {device["device_id"]: device["delete_supported"] for device in document["devices"]} == {
-        "action6": True, "osmo": True, "hb-host": True, "hb-device": False,
+        "action6": True, "osmo": True, "hb-host": True, "hb-device": True,
     }
     schema = json.loads((REPO / "protocol/schemas/capabilities.schema.json").read_text())
     registry = Registry().with_resources(
@@ -208,7 +208,7 @@ def test_installed_source_change_keeps_accepted_execution_definition(package, tm
     assert json.loads(original)["output_storage"] == "host"
     _config(package, directory, host_storage="device")
     changed = _document(_describe(package, config))
-    assert next(device for device in changed["devices"] if device["device_id"] == "hb-host")["delete_supported"] is False
+    assert next(device for device in changed["devices"] if device["device_id"] == "hb-host")["delete_supported"] is True
     package.cli("submit", str(request), "--config", str(config))
     plan["request_id"] = "81002"
     request.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf8")
@@ -256,7 +256,7 @@ def test_installed_sources_control_browser_cleanup_across_reload_and_restart(pac
     config = _config(package, directory, fixtures=True)
     current = tmp_path / "current.json"
     current.write_text(_describe(package, config, fixture=True), encoding="utf8")
-    _config(package, directory, host_storage="device", fixtures=True)
+    _config(package, directory, host_storage="device", fixtures=True, fixture_host_storage="device")
     changed = tmp_path / "changed.json"
     changed.write_text(_describe(package, config, fixture=True), encoding="utf8")
     receipt = tmp_path / "visibility.json"

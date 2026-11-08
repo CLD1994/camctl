@@ -505,7 +505,7 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
           branch.properties as Record<string, Record<string, unknown>>,
         ))
           controls.push({
-            label: `${typeof field.title === "string" ? field.title : member} (${member})`,
+            label: `${field["x-camctl-input-toggle"] === true && !(branch.required ?? []).includes(member) ? "启用" : ""}${typeof field.title === "string" ? field.title : member} (${member})`,
             object: name,
             ...(typeof field.description === "string"
               ? { description: field.description }

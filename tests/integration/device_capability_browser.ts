@@ -48,7 +48,7 @@ async function main() {
     action6: true,
     osmo: true,
     "hb-host": true,
-    "hb-device": false,
+    "hb-device": true,
     "future-host": true,
     "future-device": false,
     "future-delete": true,
@@ -72,7 +72,7 @@ async function main() {
       name: device,
       device_id: device,
       result: { repair: { status: "succeeded" } },
-      outputs: (device === "hb-device"
+      outputs: (device === "future-device"
         ? (["original", "preview", "repaired"] as const)
         : (["original"] as const)
       ).map((kind, offset) => ({
@@ -302,7 +302,7 @@ async function main() {
     const retrieve = await expandAction("2", "混合来源取回");
     const expectedCleanup = devices.flatMap((device) =>
       Array.from(
-        { length: device === "hb-device" ? 3 : 1 },
+        { length: device === "future-device" ? 3 : 1 },
         (_, offset) => offset === 2 || expected[device] !== false,
       ),
     );
@@ -397,7 +397,7 @@ async function main() {
     await inspect(initial);
     receipt.installed = true;
     await reload(changed, false);
-    const deviceSource = { ...initial, "hb-host": false };
+    const deviceSource = { ...initial, "future-host": false };
     await inspect(deviceSource);
     receipt.changed_source = true;
     const invalid = current.replace(

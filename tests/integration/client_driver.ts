@@ -1053,6 +1053,13 @@ async function browserPhotoExport(
             key,
           );
         } else {
+          if (field["x-camctl-input-toggle"] === true) {
+            const toggle = section.getByRole("switch", {
+              name: `启用${label}`,
+              exact: true,
+            });
+            if (!(await toggle.isChecked())) await toggle.check();
+          }
           await section
             .getByLabel(label, { exact: true })
             .fill(stringifyJson(params[name][key]));
