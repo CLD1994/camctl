@@ -97,7 +97,8 @@ async def test_action6_finite_cancel_keeps_exact_stop_result_and_original_natura
     await capture_handler(world.kind)(1, runtime)
     stop_before = owned.connection.execute("SELECT t.result_json,t.error_json FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id WHERE r.kind=2").fetchone()
     assert len(_calls(world, "01", "00")) == 1
-    if stop_payload != "00":
+    confirmed = stop_payload in ("00", "df")
+    if not confirmed:
         assert (await runtime.action(1))["status"] == 2
         assert waits == []
         _advance_clock(world, 1829)
@@ -107,11 +108,13 @@ async def test_action6_finite_cancel_keeps_exact_stop_result_and_original_natura
         await capture_handler(world.kind)(1, runtime)
     assert (await runtime.action(1))["status"] == 6
     spec, = owned.connection.execute("SELECT execution_spec_json FROM actions WHERE id=1").fetchone()
-    assert waits == ([json.loads(spec)["file_completion_wait_ms"] / 1000] if stop_payload == "00" else [])
+    assert waits == ([json.loads(spec)["file_completion_wait_ms"] / 1000] if confirmed else [])
     result, error = stop_before
     document = json.loads(result)
-    assert [item["type"] for item in document["observations"]] == (["stop_confirmed"] if stop_payload == "00" else [])
-    assert (error is None) is (stop_payload == "00")
+    assert [item["type"] for item in document["observations"]] == (["stop_confirmed"] if confirmed else [])
+    assert (error is None) is confirmed
+    if confirmed:
+        assert document["observations"][0]["data"]["response_payload"] == stop_payload
     await capture_handler(world.kind)(1, runtime)
     assert owned.connection.execute("SELECT t.result_json,t.error_json FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id WHERE r.kind=2").fetchone() == stop_before
     assert len(_calls(world, "01", "01")) == len(_calls(world, "01", "00")) == 1
