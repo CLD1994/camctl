@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from decimal import Decimal
+import sqlite3
 
 import pytest
 
@@ -12,6 +13,10 @@ from camctl.persistence.repositories.operations import OperationRepository, regi
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.transaction import CommandPlan, commit_operation, event_envelope, row_change, row_facts
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind, QueryPurpose
+from camctl.outputs.batches import BatchOutcome, BatchRequest
+from camctl.outputs.slots import SlotOutcome, SlotRequest
+from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..outputs.test_qualification import (
     _NOW, _seed_action, _seed_device_file, _seed_environment, _seed_output, _seed_plan,
@@ -65,7 +70,7 @@ def _read_rows(internal=False):
         row_change("operation_runs", 41, {
             "action_id": 11 if internal else 31, "delivery_id": delivery_id, "kind": 3,
             "query_purpose": None, "responsibility_key": "read/51", "activity_id": None,
-            "copy_id": 51, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None,
+            "copy_id": 51, "cleanup_item_id": None, "obtain_item_id": None, "availability_check_id": None, "session_key": None,
             "status": 1, "attempts_used": 0, "max_attempts_used": 3,
             "timeout_s_json": Decimal("5"), "retry_interval_s_json": Decimal("1"),
             "retry_wait_required": 0, "error_json": None,
@@ -76,7 +81,7 @@ def _read_rows(internal=False):
             "source_device_file_id": 501, "source_intermediate_file_id": None,
             "target_file_id": 602 if internal else 601, "round": 1, "recopies_used": 0,
             "max_recopies_used": 0, "source_size": 4096, "source_sha256": None,
-            "committed_bytes": 0, "reset_state": 1, "slot_device_id": None,
+            "committed_bytes": 0, "reset_state": 1, "slot_device_id": None, "read_end_event_id": None,
             "verification_state": 1, "target_sha256": None, "verification_error_json": None,
         }),
     )
@@ -122,6 +127,11 @@ def test_read_flow_and_copy_can_be_jointly_created_in_either_order(read_environm
 @pytest.mark.parametrize("fault", ["foreign_action", "wrong_delivery", "missing_parent"])
 def test_joint_read_creation_rejects_inconsistent_parent_before_commit(read_environment, internal, fault):
     owned = read_environment
+    with sqlite3.connect(":memory:") as baseline:
+        owned.connection.backup(baseline)
+        accepted = commit_operation(CreateReadAndCopy(internal), new_operation_key(), owned)
+        assert accepted.kind == "completed", accepted.error
+        baseline.backup(owned.connection)
     run, copy = _read_rows(internal)
     if fault == "foreign_action":
         run = replace(run, after=replace(run.after, values=dict(run.after.values, action_id=31 if internal else 11)))
@@ -134,7 +144,12 @@ def test_joint_read_creation_rejects_inconsistent_parent_before_commit(read_envi
     result = commit_operation(CreateReadAndCopy(internal, rows=(run, copy)), new_operation_key(), owned)
     assert result.kind == "rolled_back", result.error
     assert isinstance(result.error, EventValidationError), result.error
+    expected = {"foreign_action": "读取流程与拷贝所属动作不符",
+                "wrong_delivery": "读取流程与拷贝的交付引用不符",
+                "missing_parent": "归属编号缺失" if internal else "历史归属"}
+    assert expected[fault] in str(result.error)
     assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction
 
 
 @pytest.mark.parametrize("internal", [False, True])
@@ -168,11 +183,27 @@ def _read_intent(internal=False):
                          copy_round=1, occurred_at=_NOW)
 
 
+def _grant_formal_batch(owned):
+    connection = owned.connection
+    connection.execute("UPDATE actions SET status=3 WHERE id=11")
+    connection.execute("UPDATE actions SET source_resolution_state=2,resolved_source_plan_id=1 WHERE id=31")
+    connection.execute("INSERT INTO action_dependencies VALUES (31,31,11)")
+    connection.execute("INSERT INTO obtain_source_selections VALUES (31,31,2,NULL,NULL)")
+    connection.execute("INSERT INTO obtain_items (id,selection_id,output_id,basis,status,source_dependency,delivery_id)"
+                       " VALUES (101,31,701,1,3,1,901)")
+    connection.commit()
+    register_file_batch_guards()
+    result = FileBatchRepository().acquire(BatchRequest(31, "cam-1", _NOW), new_operation_key(), owned)
+    assert result.kind is DbOutcomeKind.COMPLETED and result.value is BatchOutcome.GRANTED, result
+
+
 @pytest.mark.parametrize("internal", [False, True])
 def test_existing_copy_does_not_allow_replacement_read_flow(read_environment, internal):
     owned = read_environment
     result = commit_operation(CreateReadAndCopy(internal), new_operation_key(), owned)
     assert result.kind == "completed", result.error
+    if not internal:
+        _grant_formal_batch(owned)
     owned.connection.execute("DELETE FROM operation_runs WHERE id=41")
     before = tuple(owned.connection.iterdump())
     result = OperationRepository().begin_attempt(_read_intent(internal), new_operation_key(), owned)
@@ -186,9 +217,11 @@ def test_legal_read_uses_consumer_parent_and_original_flow(read_environment, int
     owned = read_environment
     created = commit_operation(CreateReadAndCopy(internal), new_operation_key(), owned)
     assert created.kind == "completed", created.error
-    # 消费端以已持有机会为前提；共同建档本身仍保存空机会。
-    owned.connection.execute("UPDATE file_copies SET slot_device_id='cam-1' WHERE id=51")
-    owned.connection.commit()
+    if not internal:
+        _grant_formal_batch(owned)
+    slot = OutputsRepository().grant_read_slot(SlotRequest(51, _NOW), new_operation_key(), owned)
+    assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+    assert slot.value.outcome is SlotOutcome.GRANTED, slot.value
     repository = OperationRepository()
     key = new_operation_key()
     intent = _read_intent(internal)
