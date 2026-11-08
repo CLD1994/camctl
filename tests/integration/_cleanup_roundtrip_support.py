@@ -371,7 +371,18 @@ max_query_attempts={max_q}
                 if item["pgid"] in groups and item["state"] not in ("Z", "X"):
                     found.append(item)
             return found
-        wait(lambda: not active(), "旧受管组仍有活动成员", 15)
+        remaining = []
+        def settled():
+            nonlocal remaining
+            remaining = active()
+            return not remaining
+        try:
+            wait(settled, "旧受管组仍有活动成员", 15)
+        except AssertionError as error:
+            raise AssertionError(
+                f"{error}; 停止前的进程身份={identities!r}; "
+                f"最后观察到的活动成员={remaining!r}"
+            ) from error
         for old in identities:
             try:
                 current = process_identity(old["pid"])
