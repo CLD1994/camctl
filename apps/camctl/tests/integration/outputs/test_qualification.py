@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from camctl.capture.files import file_identity_key
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import register_acceptance_guards
@@ -135,6 +136,10 @@ def _seed_device_file(
     presence_state: int = 2,
 ) -> None:
     completion_evidence = "{}" if completion_state == 3 else None
+    device_id, driver_id = connection.execute(
+        "SELECT device_id,driver_id FROM actions WHERE id=?", (source_action_id,),
+    ).fetchone()
+    identity = file_identity_key(device_id, driver_id, f"file-{file_id:04d}")
     connection.execute(
         "INSERT INTO device_files (id, observer_action_id, source_action_id,"
         " identity_key, locator_json, ownership_evidence_json, original_name,"
@@ -144,7 +149,7 @@ def _seed_device_file(
         " last_event_id, change_count)"
         " VALUES (?, ?, ?, ?, '{}', '{}', 'video.mp4', 'video/mp4', 2, NULL, NULL,"
         f" {presence_state}, {completion_state}, ?, ?, 3, NULL, NULL, 1, 1, 1)",
-        (file_id, source_action_id, source_action_id, f"file-{file_id:04d}",
+        (file_id, source_action_id, source_action_id, identity,
          completion_evidence, size if completion_state == 3 else None),
     )
 
