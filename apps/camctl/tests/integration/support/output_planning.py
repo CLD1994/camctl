@@ -197,9 +197,12 @@ def observe_ranges(proposal, connection, *queries):
 class ScopedEventSequence(EventSequence):
     """有界事务按每条事件的已写当前状态提供所属窄读取范围。"""
 
-    def __init__(self, events, proposal, scope_for_event):
+    def __init__(self, events, proposal, scope_for_event, *, state_transform=None,
+                 caller_obtain_check_reads=None):
         super().__init__(events, proposal)
         self.scope_for_event = scope_for_event
+        self.state_transform = state_transform
+        self.caller_obtain_check_reads = caller_obtain_check_reads
 
     def plan(self, scope):
         from camctl.history.validators import EventContext
@@ -217,10 +220,14 @@ class ScopedEventSequence(EventSequence):
 
         def current(event, transaction):
             state = read_state(scope.connection)
+            if self.state_transform is not None:
+                state = self.state_transform(deepcopy(state), event)
+            read_scope = self.scope_for_event(event)
             return EventContext(
                 transaction, self.proposal.owners, state, relations,
                 read_coverage=complete_reads(scope.connection, state,
                     (row.row_id for item in events for row in item.rows)),
-                current_reads=SqlEventReads(scope.connection, self.scope_for_event(event)))
+                current_reads=(None if read_scope is None else SqlEventReads(scope.connection, read_scope)),
+                obtain_check_reads=self.caller_obtain_check_reads)
 
         return BoundedCommandPlan(events, current, None, lambda connection: None)

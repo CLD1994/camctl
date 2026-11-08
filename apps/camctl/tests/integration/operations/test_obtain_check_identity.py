@@ -18,6 +18,7 @@ from camctl.persistence.repositories.file_batches import FileBatchRepository, re
 
 from .test_attempts import _NOW, _outcome, _validated
 from ..outputs.test_sources import _seed_environment, _seed_plan, _seed_action, _seed_output
+from ..support.output_planning import EventSequence, ScopedEventSequence, capture_operation
 
 
 def _environment(tmp_path, *, host=True):
@@ -317,63 +318,50 @@ print(json.dumps(sorted((t,i,v) for (t,i),v in rows.items()),sort_keys=True))
         owned.connection.close()
 
 
-class _Proposal:
-    """在真实 Begin 提案上改一项，交由同一正式内核和登记守卫拒绝。"""
-    def __init__(self, key, mutation, *, bounded=False):
-        self.key, self.mutation, self.bounded = key, mutation, bounded
-
-    def plan(self, scope):
-        from copy import deepcopy
-        from camctl.persistence.repositories.operations import BeginAttemptCommand
-        from camctl.persistence.transaction import BoundedCommandPlan
-        from camctl.history.validators import EventContext
-        plan = BeginAttemptCommand(_intent(), self.key).plan(scope)
-        event, = plan.events
-        attempt, run = event.rows
-        state = deepcopy(plan.state_rows)
-        changed = dict(run.after.values)
-        if self.mutation == 'key_cleanup':
-            changed['responsibility_key'] = 'exists/1'
-        elif self.mutation == 'owner_cleanup':
-            changed.update(cleanup_item_id=1, obtain_item_id=None)
-        elif self.mutation == 'both_owners':
-            changed['cleanup_item_id'] = 1
-        elif self.mutation == 'no_owner':
-            changed['obtain_item_id'] = None
-        elif self.mutation == 'wrong_kind':
-            changed.update(kind=4, responsibility_key='delete/1')
-        elif self.mutation == 'missing_fk':
-            changed.update(obtain_item_id=999, responsibility_key='obtain-exists/999')
-        elif self.mutation == 'foreign_action':
-            changed['action_id'] = 1
-        elif self.mutation == 'run_config':
-            changed['timeout_s_json'] = Decimal('1')
-        elif self.mutation == 'attempt_config':
-            attempt = replace(attempt, after=replace(attempt.after,
-                values={**attempt.after.values, 'timeout_s_json':Decimal('1')}))
-        elif self.mutation in ('missing_carrier', 'double_carrier'):
-            state['outputs'][1]['intermediate_file_id'] = None if self.mutation == 'missing_carrier' else 901
-            if self.mutation == 'double_carrier':
-                state['outputs'][1]['device_file_id'] = 901
-        elif self.mutation == 'valid':
-            pass
-        else:
-            raise AssertionError(self.mutation)
-        run = replace(run, after=replace(run.after, values=changed))
-        event = replace(event, rows=(attempt, run))
-        plan = replace(plan, events=(event,), state_rows=state)
-        if not self.bounded:
-            return plan
-        # 真正执行 BoundedCommandPlan：context 只含本事件前有限事实。
-        return BoundedCommandPlan(iter((event,)),
-            lambda current, transaction: EventContext(transaction, plan.owners, deepcopy(state)),
-            plan.result, lambda connection: None)
-
+def _mutate_identity_proposal(plan, mutation):
+    """改变正式仓储实际提交的事件或测试提供的当前事实。"""
+    from copy import deepcopy
+    event, = plan.events
+    attempt, run = event.rows
+    state = deepcopy(plan.state_rows)
+    changed = dict(run.after.values)
+    if mutation == 'key_cleanup':
+        changed['responsibility_key'] = 'exists/1'
+    elif mutation == 'owner_cleanup':
+        changed.update(cleanup_item_id=1, obtain_item_id=None)
+    elif mutation == 'both_owners':
+        changed['cleanup_item_id'] = 1
+    elif mutation == 'no_owner':
+        changed['obtain_item_id'] = None
+    elif mutation == 'wrong_kind':
+        changed.update(kind=4, responsibility_key='delete/1')
+    elif mutation == 'missing_fk':
+        changed.update(obtain_item_id=999, responsibility_key='obtain-exists/999')
+    elif mutation == 'foreign_action':
+        changed['action_id'] = 1
+    elif mutation == 'run_config':
+        changed['timeout_s_json'] = Decimal('1')
+    elif mutation == 'attempt_config':
+        attempt = replace(attempt, after=replace(attempt.after,
+            values={**attempt.after.values, 'timeout_s_json':Decimal('1')}))
+    elif mutation in ('missing_carrier', 'double_carrier'):
+        state['outputs'][1]['intermediate_file_id'] = None if mutation == 'missing_carrier' else 901
+        if mutation == 'double_carrier':
+            state['outputs'][1]['device_file_id'] = 901
+    elif mutation == 'valid':
+        pass
+    else:
+        raise AssertionError(mutation)
+    run = replace(run, after=replace(run.after, values=changed))
+    event = replace(event, rows=(attempt, run))
+    return replace(plan, events=(event,), state_rows=state)
 
 @pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
 @pytest.mark.parametrize('mutation', ['key_cleanup','owner_cleanup','both_owners','no_owner',
     'wrong_kind','missing_fk','foreign_action','run_config','attempt_config','missing_carrier','double_carrier'])
 def test_registered_guards_reject_forged_identity_in_complete_transaction(tmp_path, bounded, mutation):
+    import sqlite3
+    from camctl.history.validators import EventValidationError
     from camctl.persistence.transaction import commit_operation
     _, owned = _environment(tmp_path)
     try:
@@ -381,8 +369,27 @@ def test_registered_guards_reject_forged_identity_in_complete_transaction(tmp_pa
         owned.connection.commit()
         before = tuple(owned.connection.iterdump())
         key = new_operation_key()
-        receipt = commit_operation(_Proposal(key, mutation, bounded=bounded), key, owned)
+        plan = _capture_plan(owned, _intent(), key)
+        with sqlite3.connect(':memory:') as baseline:
+            owned.connection.backup(baseline)
+            accepted = commit_operation(_proposal_command(plan, bounded), key, owned)
+            assert accepted.kind == 'completed', accepted.error
+            baseline.backup(owned.connection)
+        receipt = commit_operation(_proposal_command(_mutate_identity_proposal(plan, mutation), bounded), key, owned)
         assert receipt.kind == 'rolled_back', (mutation, receipt.error)
+        assert isinstance(receipt.error, EventValidationError), receipt.error
+        expected = {'key_cleanup': '流程责任键与固定身份不符',
+            'owner_cleanup': '流程责任键与固定身份不符',
+            'both_owners': '普通流程的固定身份字段无效或缺失',
+            'no_owner': '普通流程的固定身份字段无效或缺失',
+            'wrong_kind': '普通流程的固定身份字段无效或缺失',
+            'missing_fk': '关联记录不存在: obtain_items#999',
+            'foreign_action': '历史归属',
+            'run_config': '配置必须符合真实主机或设备载体分区',
+            'attempt_config': '意图与实际流程采用配置不同',
+            'missing_carrier': '产物必须恰有一种实际文件载体',
+            'double_carrier': '产物必须恰有一种实际文件载体'}
+        assert expected[mutation] in str(receipt.error)
         assert tuple(owned.connection.iterdump()) == before
         assert not owned.connection.in_transaction
     finally:
@@ -395,7 +402,7 @@ def test_registered_guards_accept_legal_owner_in_complete_transaction(tmp_path, 
     _, owned = _environment(tmp_path)
     try:
         key = new_operation_key()
-        receipt = commit_operation(_Proposal(key, 'valid', bounded=bounded), key, owned)
+        receipt = commit_operation(_proposal_command(_capture_plan(owned, _intent(), key), bounded), key, owned)
         assert receipt.kind == 'completed', receipt.error
     finally:
         owned.connection.close()
@@ -462,51 +469,39 @@ def test_host_followup_rejects_unreadable_previous_result_without_new_facts(tmp_
         owned.connection.close()
 
 
-class _FollowupProposal:
-    """修改真实第二票提案的一个前态或写入事实，保留正式事务内核。"""
-    def __init__(self, key, mutation, bounded):
-        self.key, self.mutation, self.bounded = key, mutation, bounded
-
-    def plan(self, scope):
-        from copy import deepcopy
-        from camctl.history.events import RowChange, RowImage
-        from camctl.history.validators import EventContext
-        from camctl.persistence.repositories.operations import BeginAttemptCommand
-        from camctl.persistence.transaction import BoundedCommandPlan
-        plan = BeginAttemptCommand(_intent(occurred_at=_NOW + 2), self.key).plan(scope)
-        event, = plan.events
-        state = deepcopy(plan.state_rows)
-        attempt, run = event.rows
-        if self.mutation in ('missing_result', 'missing_result_event', 'incomplete_result'):
-            previous, = state['operation_attempts'].values()
-            previous['result_event_id' if self.mutation == 'missing_result_event' else 'result_json'] = (
-                {} if self.mutation == 'incomplete_result' else None)
-        elif self.mutation in ('owner', 'action', 'key'):
-            column, value = {'owner': ('obtain_item_id', 2), 'action': ('action_id', 1),
-                             'key': ('responsibility_key', 'obtain-exists/2')}[self.mutation]
-            original = state['operation_runs'][run.row_id][column]
-            run = replace(run, before=replace(run.before, values={**run.before.values, column: original}),
-                          after=replace(run.after, values={**run.after.values, column: value}))
-            event = replace(event, rows=(attempt, run))
-        elif self.mutation == 'saved_attempt_config':
-            previous, = state['operation_attempts'].values()
-            old_attempt = RowChange('operation_attempts', previous['id'],
-                RowImage(True, {'timeout_s_json': None}), RowImage(True, {'timeout_s_json': Decimal('1')}))
-            event = replace(event, rows=(*event.rows, old_attempt))
-        elif self.mutation != 'valid':
-            raise AssertionError(self.mutation)
-        plan = replace(plan, events=(event,), state_rows=state)
-        if not self.bounded:
-            return plan
-        return BoundedCommandPlan(iter((event,)),
-            lambda current, transaction: EventContext(transaction, plan.owners, deepcopy(state)),
-            plan.result, lambda connection: None)
-
+def _mutate_followup_proposal(plan, mutation):
+    from copy import deepcopy
+    from camctl.history.events import RowChange, RowImage
+    event, = plan.events
+    state = deepcopy(plan.state_rows)
+    attempt, run = event.rows
+    if mutation in ('missing_result', 'missing_result_event', 'incomplete_result'):
+        previous, = state['operation_attempts'].values()
+        previous['result_event_id' if mutation == 'missing_result_event' else 'result_json'] = (
+            {} if mutation == 'incomplete_result' else None)
+    elif mutation in ('owner', 'action', 'key'):
+        column, value = {'owner': ('obtain_item_id', 2), 'action': ('action_id', 1),
+                         'key': ('responsibility_key', 'obtain-exists/2')}[mutation]
+        original = state['operation_runs'][run.row_id][column]
+        run = replace(run, before=replace(run.before, values={**run.before.values, column: original}),
+                      after=replace(run.after, values={**run.after.values, column: value}))
+        event = replace(event, rows=(attempt, run))
+    elif mutation == 'saved_attempt_config':
+        previous, = state['operation_attempts'].values()
+        old_attempt = RowChange('operation_attempts', previous['id'],
+            RowImage(True, {'timeout_s_json': None}), RowImage(True, {'timeout_s_json': Decimal('1')}))
+        event = replace(event, rows=(*event.rows, old_attempt))
+    elif mutation != 'valid':
+        raise AssertionError(mutation)
+    plan = replace(plan, events=(event,), state_rows=state)
+    return plan
 
 @pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
 @pytest.mark.parametrize('mutation', ['missing_result', 'missing_result_event', 'incomplete_result',
     'owner', 'action', 'key', 'saved_attempt_config', 'valid'])
 def test_followup_registered_guards_preserve_previous_receipt_and_identity(tmp_path, bounded, mutation):
+    import sqlite3
+    from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories.history import HistoryRepository
     from camctl.persistence.transaction import commit_operation
     path, owned = _environment(tmp_path)
@@ -520,12 +515,26 @@ def test_followup_registered_guards_preserve_previous_receipt_and_identity(tmp_p
         frozen = history.restore_entity('action', 2, boundary)
         before = tuple(owned.connection.iterdump())
         key = new_operation_key()
-        receipt = commit_operation(_FollowupProposal(key, mutation, bounded), key, owned)
+        plan = _capture_plan(owned, _intent(occurred_at=_NOW + 2), key)
+        if mutation != 'valid':
+            with sqlite3.connect(':memory:') as baseline:
+                owned.connection.backup(baseline)
+                accepted = commit_operation(_proposal_command(plan, bounded), key, owned)
+                assert accepted.kind == 'completed', accepted.error
+                baseline.backup(owned.connection)
+        receipt = commit_operation(_proposal_command(_mutate_followup_proposal(plan, mutation), bounded), key, owned)
         if mutation == 'valid':
             assert receipt.kind == 'completed', receipt.error
             assert owned.connection.execute('SELECT attempts_used FROM operation_runs').fetchone() == (2,)
         else:
             assert receipt.kind == 'rolled_back', (mutation, receipt.error)
+            assert isinstance(receipt.error, EventValidationError), receipt.error
+            expected = {'missing_result': '缺少上一票的完整可靠结果',
+                'missing_result_event': '缺少上一票的完整可靠结果',
+                'incomplete_result': '上一票的实际结果不可解释',
+                'owner': '更新列', 'action': '更新列', 'key': '更新列',
+                'saved_attempt_config': '不匹配 ATTEMPT_STARTED.NEW 声明的任何行规格'}
+            assert expected[mutation] in str(receipt.error)
             assert tuple(owned.connection.iterdump()) == before
         assert not owned.connection.in_transaction
         assert HistoryRepository(path).restore_entity('action', 2, boundary) == frozen
@@ -565,48 +574,6 @@ def test_new_configuration_updates_only_new_attempt_and_old_key_keeps_adopted_in
         owned.connection.close()
 
 
-class _UnfinishedFollowup:
-    """真实前票仍运行，只在申请上下文中填写虚构的结束结果。"""
-    def __init__(self, original_key, bounded):
-        self.original_key, self.bounded = original_key, bounded
-
-    def plan(self, scope):
-        from copy import deepcopy
-        from camctl.history.events import business_columns
-        from camctl.history.validators import EventContext
-        from camctl.operations.result_format import result_document, error_document
-        from camctl.persistence.repositories.operations import BeginAttemptCommand
-        from camctl.persistence.transaction import (BoundedCommandPlan, CommandPlan,
-            event_envelope, row_change, row_facts, update_change)
-        base = BeginAttemptCommand(_intent(), self.original_key).plan(scope)
-        ticket = base.result.ticket
-        run = row_facts(scope.connection, 'operation_runs', ticket.run_id)
-        original = row_facts(scope.connection, 'operation_attempts', 1)
-        assert original['status'] == 1 and original['result_event_id'] is None
-        allocation = scope.allocate(1)
-        incoming = {name: original[name] for name in business_columns('operation_attempts')}
-        incoming.update(attempt_no=2, intent_event_id=allocation.first_event_id)
-        columns = ('status', 'attempts_used', 'max_attempts_used', 'timeout_s_json',
-                   'retry_interval_s_json', 'retry_wait_required')
-        before = {name: run[name] for name in columns}
-        event = event_envelope(allocation.first_event_id, allocation.txn_id, 11, 1,
-            (row_change('operation_attempts', 2, incoming),
-             update_change('operation_runs', run['id'], before, {**before, 'attempts_used': 2})),
-            _NOW + 2)
-        state = deepcopy(base.state_rows)
-        outcome = _finish_value(ticket).outcome.outcome
-        state['operation_attempts'] = {1: {**original, 'status': 3,
-            'effect_state': 1, 'result_event_id': original['intent_event_id'],
-            'result_json': result_document(outcome), 'error_json': error_document(outcome.error)}}
-        owners = {('operation_runs', run['id']): ('action', 2),
-                  ('operation_attempts', 2): ('action', 2)}
-        if self.bounded:
-            return BoundedCommandPlan(iter((event,)),
-                lambda current, transaction: EventContext(transaction, owners, deepcopy(state)),
-                None, lambda connection: None)
-        return CommandPlan((event,), owners, state)
-
-
 @pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
 def test_actual_running_previous_ticket_cannot_borrow_context_completion(tmp_path, bounded):
     from camctl.persistence.transaction import commit_operation
@@ -615,44 +582,56 @@ def test_actual_running_previous_ticket_cannot_borrow_context_completion(tmp_pat
         original_key = new_operation_key()
         first = OperationRepository().begin_attempt(_intent(), original_key, owned)
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
-        receipt = _unchanged(owned, lambda: commit_operation(
-            _UnfinishedFollowup(original_key, bounded), new_operation_key(), owned))
+        from contextlib import closing
+        import sqlite3
+        from camctl.persistence.runtime import OwnedConnection
+        from camctl.history.validators import EventValidationError
+        key = new_operation_key()
+        with closing(sqlite3.connect(':memory:')) as connection:
+            owned.connection.backup(connection)
+            clone = OwnedConnection(connection, owned.metadata)
+            finished = _finish(clone, first.value.ticket)
+            assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+            plan = _capture_plan(clone, _intent(occurred_at=_NOW + 2), key)
+            accepted = commit_operation(_proposal_command(plan, bounded), key, clone)
+            assert accepted.kind == 'completed', accepted.error
+        next_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()
+        event, = plan.events
+        rows = tuple(replace(row, after=replace(row.after,
+            values={**row.after.values, 'intent_event_id': next_id}))
+            if row.table == 'operation_attempts' else row for row in event.rows)
+        plan = replace(plan, events=(replace(event, rows=rows),))
+        receipt = _unchanged(owned, lambda: commit_operation(_proposal_command(plan, bounded), key, owned))
         assert receipt.kind == 'rolled_back', receipt.error
+        assert isinstance(receipt.error, EventValidationError), receipt.error
+        assert '缺少上一票的完整可靠结果' in str(receipt.error)
         assert owned.connection.execute('SELECT attempts_used FROM operation_runs').fetchone() == (1,)
     finally:
         owned.connection.close()
 
 
 def _capture_plan(owned, intent, key):
-    from camctl.persistence.repositories.operations import BeginAttemptCommand
-    from camctl.persistence.transaction import TransactionScope
-    connection = owned.connection
-    connection.execute('BEGIN')
-    try:
-        txn = connection.execute('SELECT COALESCE(MAX(id),0) FROM history_transactions').fetchone()[0]
-        last = connection.execute('SELECT COALESCE(MAX(id),0) FROM history_events').fetchone()[0]
-        return BeginAttemptCommand(intent, key).plan(TransactionScope(connection, txn, last))
-    finally:
-        connection.rollback()
+    return capture_operation(owned, lambda target: OperationRepository().begin_attempt(intent, key, target))
 
 
-class _CapturedProposal:
-    def __init__(self, saved, bounded, *, forged_port=None):
-        self.saved, self.bounded, self.forged_port = saved, bounded, forged_port
+def _proposal_command(saved, bounded, *, caller_obtain_check_reads=None):
+    if not bounded:
+        assert caller_obtain_check_reads is None
+        return EventSequence(saved.events, saved)
+    from copy import deepcopy
+    return ScopedEventSequence(saved.events, saved, lambda _event: None,
+        state_transform=lambda _state, _event: deepcopy(saved.state_rows),
+        caller_obtain_check_reads=caller_obtain_check_reads)
 
-    def plan(self, scope):
-        from copy import deepcopy
-        from camctl.history.validators import EventContext
-        from camctl.persistence.transaction import BoundedCommandPlan
-        allocation = scope.allocate(len(self.saved.events))
-        assert allocation.first_event_id == self.saved.events[0].event_id
-        if not self.bounded:
-            assert self.forged_port is None
-            return self.saved
-        return BoundedCommandPlan(iter(self.saved.events),
-            lambda event, transaction: EventContext(transaction, self.saved.owners,
-                deepcopy(self.saved.state_rows), obtain_check_reads=self.forged_port),
-            self.saved.result, lambda connection: None)
+
+def _assert_legal_proposal(owned, plan, bounded, key):
+    import sqlite3
+    from camctl.persistence.transaction import commit_operation
+    with sqlite3.connect(':memory:') as baseline:
+        owned.connection.backup(baseline)
+        accepted = commit_operation(_proposal_command(plan, bounded), key, owned)
+        assert accepted.kind == 'completed', accepted.error
+        baseline.backup(owned.connection)
 
 
 @pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
@@ -670,6 +649,7 @@ def test_followup_guard_reads_actual_previous_result_event(tmp_path, bounded, da
         assert _finish(owned, first.value.ticket).kind is DbOutcomeKind.COMPLETED
         key = new_operation_key()
         plan = _capture_plan(owned, _intent(occurred_at=_NOW + 2), key)
+        _assert_legal_proposal(owned, plan, bounded, key)
         connection = owned.connection
         event_id = connection.execute('SELECT result_event_id FROM operation_attempts').fetchone()[0]
         if damage == 'intent_reference':
@@ -688,14 +668,28 @@ def test_followup_guard_reads_actual_previous_result_event(tmp_path, bounded, da
                                ' WHERE id=(SELECT transaction_id FROM history_events WHERE id=?)', (event_id,))
         connection.commit()
         class ReadError(_FaultConnection):
+            error = sqlite3.OperationalError('actual result read failed')
+
             def execute(self, sql, parameters=()):
                 if sql.startswith('SELECT id,transaction_id,event_type,event_version,'):
-                    raise sqlite3.OperationalError('actual result read failed')
+                    raise self.error
                 return self._connection.execute(sql, parameters)
         target = replace(owned, connection=ReadError(connection, 'unused')) if damage == 'read_error' else owned
-        receipt = _unchanged(owned, lambda: commit_operation(_CapturedProposal(plan, bounded), key, target))
+        receipt = _unchanged(owned, lambda: commit_operation(_proposal_command(plan, bounded), key, target))
         assert receipt.kind == 'rolled_back', receipt.error
-        if damage == 'read_error': assert isinstance(receipt.error, sqlite3.OperationalError)
+        from camctl.history.validators import EventValidationError
+        if damage == 'read_error':
+            assert receipt.error is target.connection.error
+        elif damage == 'incomplete_range':
+            assert isinstance(receipt.error, ConsistencyError)
+            assert '成员与首尾范围不一致' in str(receipt.error)
+        else:
+            assert isinstance(receipt.error, EventValidationError), receipt.error
+            expected = {'intent_reference': '与实际已提交的完整结果事件不同',
+                'missing_event': '前票的实际结果事件缺失',
+                'other_attempt': '与实际已提交的完整结果事件不同',
+                'body_mismatch': '实际结果正文与固定行不同'}
+            assert expected[damage] in str(receipt.error)
     finally:
         owned.connection.close()
 
@@ -715,7 +709,7 @@ def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
         plan = _capture_plan(owned, _intent(host=False), key)
         with sqlite3.connect(':memory:') as baseline:
             owned.connection.backup(baseline)
-            legal = commit_operation(_CapturedProposal(plan, bounded), key, owned)
+            legal = commit_operation(_proposal_command(plan, bounded), key, owned)
             assert legal.kind == 'completed', legal.error
             baseline.backup(owned.connection)
         event, = plan.events
@@ -727,7 +721,7 @@ def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
             values={**row.after.values, 'timeout_s_json':None, 'retry_interval_s_json':None}))
             for row in event.rows))
         plan = replace(plan, events=(event,), state_rows=state)
-        receipt = _unchanged(owned, lambda: commit_operation(_CapturedProposal(plan, bounded), key, owned))
+        receipt = _unchanged(owned, lambda: commit_operation(_proposal_command(plan, bounded), key, owned))
         assert receipt.kind == 'rolled_back', receipt.error
         assert isinstance(receipt.error, EventValidationError)
         assert '配置必须符合真实主机或设备载体分区' in str(receipt.error)
@@ -736,14 +730,22 @@ def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
 
 
 def test_bounded_obtain_check_rejects_caller_supplied_read_port(tmp_path):
+    import sqlite3
     from camctl.persistence.transaction import commit_operation
     _, owned = _environment(tmp_path)
     try:
         key = new_operation_key()
         plan = _capture_plan(owned, _intent(), key)
+        with sqlite3.connect(':memory:') as baseline:
+            owned.connection.backup(baseline)
+            accepted = commit_operation(_proposal_command(plan, True), key, owned)
+            assert accepted.kind == 'completed', accepted.error
+            baseline.backup(owned.connection)
         receipt = _unchanged(owned, lambda: commit_operation(
-            _CapturedProposal(plan, True, forged_port=object()), key, owned))
+            _proposal_command(plan, True, caller_obtain_check_reads=object()), key, owned))
         assert receipt.kind == 'rolled_back', receipt.error
+        assert isinstance(receipt.error, ConsistencyError), receipt.error
+        assert '读取端口必须由原写事务内核创建' in str(receipt.error)
     finally:
         owned.connection.close()
 
@@ -771,10 +773,14 @@ def test_every_obtain_intent_run_requires_exactly_one_own_new_attempt(tmp_path, 
             assert _finish(owned, cleanup.value.ticket).kind is DbOutcomeKind.COMPLETED
         key = new_operation_key()
         plan = _capture_plan(owned, _intent(occurred_at=_NOW + 2), key)
+        _assert_legal_proposal(owned, plan, bounded, key)
         event, = plan.events
         attempt, run = event.rows
         if shape == 'duplicate':
-            event = replace(event, rows=(*event.rows, replace(attempt, row_id=attempt.row_id + 1)))
+            duplicate_id = attempt.row_id + 1
+            event = replace(event, rows=(*event.rows, replace(attempt, row_id=duplicate_id)))
+            plan = replace(plan, owners={**plan.owners,
+                ('operation_attempts', duplicate_id): plan.owners['operation_attempts', attempt.row_id]})
         elif shape == 'missing':
             event = replace(event, rows=(run,))
         else:
@@ -788,7 +794,10 @@ def test_every_obtain_intent_run_requires_exactly_one_own_new_attempt(tmp_path, 
             event = replace(event, rows=rows)
             plan = replace(plan, owners={**other.owners, **plan.owners}, state_rows=state)
         plan = replace(plan, events=(event,))
-        receipt = _unchanged(owned, lambda: commit_operation(_CapturedProposal(plan, bounded), key, owned))
+        receipt = _unchanged(owned, lambda: commit_operation(_proposal_command(plan, bounded), key, owned))
         assert receipt.kind == 'rolled_back', receipt.error
+        from camctl.history.validators import EventValidationError
+        assert isinstance(receipt.error, EventValidationError), receipt.error
+        assert '一次取回 CHECK 意图只能增加紧邻的一票' in str(receipt.error)
     finally:
         owned.connection.close()
