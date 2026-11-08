@@ -1,6 +1,5 @@
 """公开目录读取与H1静态当前事实共同核对来源关系。"""
 
-from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 import sqlite3
@@ -8,15 +7,16 @@ import sqlite3
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.history.events import branch_of, load_event_registry
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.transaction import commit_operation, event_envelope, row_facts, update_change
 from camctl.persistence.models import DbOutcomeKind
 from camctl.outputs.sources import SelectionMode
 
-from ..support.output_planning import validate_static_event, apply_values
-from ..support.output_storage_cases import capture_scoped_operation, observed_rows
+from ..support.output_planning import EventSequence, capture_operation, validate_static_event
+from ..support.output_storage_cases import capture_scoped_operation, observed_operation, observed_rows
 from .test_output_family import family_database
 from .test_catalog_integrity import CatalogConnection, selection_database
 from .test_qualification import _seed_processing
@@ -42,6 +42,29 @@ def _read(owned, mode=SelectionMode.DEFAULT, requested=()):
 
 def _validate(proposal):
     return validate_static_event(proposal.events[0], proposal)
+
+
+def _read_transaction(owned, mode, requested=()):
+    """以公开仓储在独立副本形成事件和事务前事实。"""
+    _request(owned.connection, mode, requested)
+    facts = outputs.load_selection_facts(owned.connection, 11, requested_output_ids=requested)
+    snapshot = _snapshot(owned.connection, mode, requested)
+    proposal = capture_operation(owned, lambda target: outputs.OutputsRepository().fix_selection(
+        outputs.FixSelection(61, snapshot, _NOW), new_operation_key(), target))
+    assert branch_of(proposal.events[0].event_type, proposal.events[0].reason)[0] == "OBTAIN"
+    return facts, proposal
+
+
+def _commit_transaction(owned, proposal):
+    def commit(target):
+        before = tuple(target.connection.iterdump())
+        receipt = commit_operation(EventSequence(proposal.events, proposal), new_operation_key(), target)
+        if receipt.kind == "rolled_back":
+            assert not target.connection.in_transaction
+            assert tuple(target.connection.iterdump()) == before
+        return receipt
+
+    return observed_operation(owned, commit)
 
 
 def test_catalog_read_keeps_raw_rows_and_complete_scopes(selection_database):
@@ -121,17 +144,26 @@ def test_current_catalog_uses_current_sizes_and_not_future_proposal(selection_da
         "UPDATE intermediate_files SET size_bytes=120 WHERE id=801"
     )
     selection_database.connection.commit()
-    facts, context = _read(selection_database, SelectionMode.PREVIEW)
+    facts, context = _read_transaction(selection_database, SelectionMode.PREVIEW)
     assert {member.output_id: member.size_bytes for member in facts.outputs} == {
         701: 4096,
         702: 100,
         703: 120,
         705: 4096,
     }
-    future = deepcopy(context.state_rows)
-    apply_values(future, context.events[0])
-    future["intermediate_files"][801]["size_bytes"] = 99
-    assert _validate(replace(context, transaction_rows=future)).branch_name == "OBTAIN"
+    # 后续事件故意改写一次写列；只有选择事件先通过验证，事务才会因它回滚。
+    spec = load_event_registry()["events"]["INTERMEDIATE_FILE_CHANGED"]
+    later = event_envelope(context.events[-1].event_id + 1, context.events[0].transaction_id,
+        spec["id"], spec["branches"]["LIFECYCLE"]["reason"],
+        (update_change("intermediate_files", 801, {"size_bytes": 120}, {"size_bytes": 99}),), _NOW)
+    proposal = replace(context, events=context.events + (later,),
+                       owners={**context.owners, ("intermediate_files", 801): ("intermediate_file", 801)})
+    receipt = _commit_transaction(selection_database, proposal)
+    assert receipt.kind == "rolled_back", receipt
+    assert isinstance(receipt.error, EventValidationError), receipt.error
+    assert "一次写列" in str(receipt.error) and "size_bytes" in str(receipt.error)
+    assert selection_database.connection.execute(
+        "SELECT size_bytes FROM intermediate_files WHERE id=801").fetchone() == (120,)
     assert tuple(
         row.after.values["output_id"]
         for row in context.events[0].rows
@@ -309,7 +341,7 @@ def test_first_fix_supplies_complete_current_facts_to_registered_guard(
     selection_database, mode
 ):
     requested = (703, 704, 999) if mode is SelectionMode.EXPLICIT_IDS else ()
-    facts, context = _read(selection_database, mode, requested)
+    facts, context = _read_transaction(selection_database, mode, requested)
     assert observed_rows(context, "obtain_items", "selection_id", 61) == {}
     assert observed_rows(context, "recording_processing", "action_id", 11) == {}
     if requested:
@@ -318,7 +350,8 @@ def test_first_fix_supplies_complete_current_facts_to_registered_guard(
         )
         assert observed_rows(context, "outputs", "id", 999) == {}
     assert tuple(member.output_id for member in facts.outputs) == (701, 702, 703, 705)
-    assert _validate(context).branch_name == "OBTAIN"
+    receipt = _commit_transaction(selection_database, context)
+    assert receipt.kind == "completed", receipt.error
     result = outputs.OutputsRepository().fix_selection(
         outputs.FixSelection(
             61, _snapshot(selection_database.connection, mode, requested), _NOW
