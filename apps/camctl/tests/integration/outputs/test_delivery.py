@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import stat
+import sys
 from contextlib import closing
 from dataclasses import replace
 
@@ -176,6 +177,7 @@ def test_intent_save_unknown_keeps_staging(prepared_env, monkeypatch):
         is DeliveryPhase.PUBLISHED
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 的文件交接不执行目录同步")
 def test_sync_failure_keeps_moved_fact_and_recovers(prepared_env, monkeypatch):
     """移动成功但目录同步失败：不保存完成事实；恢复观察 ready 后补存。"""
     owned, roots, directories, qualification = prepared_env
