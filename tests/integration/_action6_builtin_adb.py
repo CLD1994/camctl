@@ -87,6 +87,8 @@ def _file_kind(script):
                 and script == tools.metadata_many_script(selected)):
             return "metadata"
     for path in paths:
+        if script == tools.family_script(path):
+            return "directory"
         for kind, candidate in (("metadata", tools.metadata_script(path)),
                                 ("digest", tools.digest_script(path)),
                                 ("query", tools.file_presence_script(path)),
