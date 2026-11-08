@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -126,6 +127,44 @@ def copy_tree(source, destination):
     destination.mkdir(parents=True, exist_ok=True)
     # GNU cp 在支持的文件系统上使用写时复制，否则复制文件；绝不使用硬链接。
     subprocess.run(['cp', '-a', '--reflink=auto', str(source) + '/.', str(destination)], check=True)
+
+
+def remove_owned_tree(path):
+    """删除本次运行拥有的树；仅在需要时恢复树内目录的所有者权限。"""
+    root = Path(path).absolute()
+    if not stat.S_ISDIR(root.lstat().st_mode):
+        shutil.rmtree(root)
+        return
+    root_real = root.resolve()
+
+    class RetryRemoval(Exception):
+        pass
+
+    def repair(function, failed_path, details):
+        error = details[1]
+        if not isinstance(error, PermissionError):
+            raise error
+        if function in (os.open, os.scandir):
+            directory = Path(failed_path)
+        elif function in (os.unlink, os.rmdir, os.lstat):
+            directory = Path(failed_path).parent
+        else:
+            raise error
+        resolved = directory.resolve()
+        if resolved != root_real and not resolved.is_relative_to(root_real):
+            raise error
+        mode = directory.lstat().st_mode
+        if not stat.S_ISDIR(mode) or mode & stat.S_IRWXU == stat.S_IRWXU:
+            raise error
+        os.chmod(directory, mode | stat.S_IRWXU, follow_symlinks=False)
+        raise RetryRemoval from error
+
+    while True:
+        try:
+            shutil.rmtree(root, onerror=repair)
+            return
+        except RetryRemoval:
+            continue
 
 
 def snapshot(source, destination):
@@ -279,10 +318,10 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity):
         if len(nodes) != len(set(nodes)):
             raise ValueError(f"{task['id']}收集到重复节点，见 {artifacts / 'inventory.json'}")
         def release_collection():
-            shutil.rmtree(work)
-            shutil.rmtree(temporary)
+            remove_owned_tree(work)
+            remove_owned_tree(temporary)
             if (directory / 'python-cache').exists():
-                shutil.rmtree(directory / 'python-cache')
+                remove_owned_tree(directory / 'python-cache')
 
         count = min(args.root_shards, len(nodes))
         if count <= 1:
@@ -467,7 +506,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                         for name in ('source', 'tmp', 'client-candidate'):
                             path = directory / name
                             if path.exists():
-                                shutil.rmtree(path)
+                                remove_owned_tree(path)
                     except OSError as error:
                         task.update(status='failed', exit_code=2,
                                     error=f'清理任务环境失败: {error}')
@@ -505,7 +544,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 item.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
         for private in (output / 'workers').iterdir():
-            shutil.rmtree(private)
+            remove_owned_tree(private)
         summary['finished_utc'] = utc()
         save()
     return summary['exit_code']
@@ -587,12 +626,12 @@ def main():
                 'started_utc': started_utc, 'finished_utc': utc(), 'wall_seconds': time.monotonic() - started,
                 'source': {key: value for key, value in identity.items() if key != 'files'},
                 'versions': versions, 'tasks': tasks})
-            shutil.rmtree(seed)
+            remove_owned_tree(seed)
             print(f'计划 {output / "plan.json"}；未执行测试。', flush=True)
             return 0
         result = asyncio.run(execute(args, tasks, output, seed, python, cache, node_modules, versions, identity, started, started_utc))
         if result == 0:
-            shutil.rmtree(seed)
+            remove_owned_tree(seed)
         print(f'汇总 {output / "summary.json"} exit={result}', flush=True)
         return result
     except (ValueError, OSError, subprocess.CalledProcessError) as error:

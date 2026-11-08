@@ -1,6 +1,8 @@
 """并行入口的真实进程契约测试；不运行产品集成套件。"""
 from __future__ import annotations
 
+import errno
+import importlib.util
 import json
 import os
 import signal
@@ -15,6 +17,84 @@ RUNNER = Path(__file__).resolve().parents[1] / 'run-integration.py'
 
 
 class IntegrationRunnerTest(unittest.TestCase):
+    def test_success_releases_readonly_trees_without_changing_external_symlink_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            external = root / 'external'
+            external.mkdir()
+            sentinel = external / 'sentinel'
+            sentinel.write_text('external content')
+            sentinel.chmod(0o400)
+            external.chmod(0o500)
+            try:
+                self._fixture_repository(source, 'test_readonly.py',
+                    'import os\nfrom pathlib import Path\n'
+                    'def test_readonly(tmp_path):\n'
+                    '    for base in (Path.cwd(), tmp_path, Path(os.environ["UV_CACHE_DIR"])):\n'
+                    '        directory = base / "owned-readonly"\n'
+                    '        directory.mkdir()\n'
+                    '        (directory / "request.json").write_text("owned")\n'
+                    '        (directory / "request.json").chmod(0o400)\n'
+                    f'        (directory / "external").symlink_to({str(external)!r}, target_is_directory=True)\n'
+                    '        locked = directory / "locked"\n'
+                    '        locked.mkdir()\n'
+                    '        (locked / "value").write_text("owned")\n'
+                    '        locked.chmod(0o000)\n'
+                    '        directory.chmod(0o500)\n')
+                original = (external.stat().st_mode, sentinel.stat().st_mode, sentinel.read_bytes())
+                result, output = self._run_fixture(root, source)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                task, = json.loads((output / 'summary.json').read_text())['tasks']
+                self.assertEqual((task['status'], task['exit_code']), ('passed', 0))
+                self.assertEqual(task['progress']['outcomes'], {'passed': 1})
+                self.assertFalse(Path(task['cwd']).exists())
+                self.assertFalse((Path(task['cwd']).parent / 'tmp').exists())
+                self.assertFalse(Path(task['worker_cache']).exists())
+                self.assertEqual((external.stat().st_mode, sentinel.stat().st_mode, sentinel.read_bytes()), original)
+            finally:
+                external.chmod(0o700)
+
+    def test_cleanup_propagates_real_non_permission_error(self):
+        spec = importlib.util.spec_from_file_location('integration_runner_cleanup', RUNNER)
+        module = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(RUNNER.parent))
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.path.pop(0)
+        with tempfile.TemporaryDirectory() as temporary:
+            file = Path(temporary) / 'not-a-directory'
+            file.write_text('keep')
+            with self.assertRaises(NotADirectoryError) as caught:
+                module.remove_owned_tree(file)
+            self.assertEqual(caught.exception.errno, errno.ENOTDIR)
+            self.assertEqual(file.read_text(), 'keep')
+
+    def test_failed_task_keeps_readonly_source_unchanged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_fails.py',
+                'from pathlib import Path\n'
+                'def test_fails():\n'
+                '    directory = Path.cwd() / "owned-readonly"\n'
+                '    directory.mkdir()\n'
+                '    (directory / "evidence").write_text("preserve")\n'
+                '    directory.chmod(0o500)\n'
+                '    assert False\n')
+            retained = None
+            try:
+                result, output = self._run_fixture(root, source)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                task, = json.loads((output / 'summary.json').read_text())['tasks']
+                self.assertEqual((task['status'], task['exit_code']), ('failed', 1))
+                retained = Path(task['cwd']) / 'owned-readonly'
+                self.assertEqual(retained.stat().st_mode & 0o777, 0o500)
+                self.assertEqual((retained / 'evidence').read_text(), 'preserve')
+                self.assertTrue((Path(task['cwd']).parent / 'tmp').is_dir())
+            finally:
+                if retained is not None and retained.exists():
+                    retained.chmod(0o700)
+
     def test_isolated_concurrency_progress_exact_assignment_and_failure(self):
         # 删除隔离、重复调度、隐藏失败或仅用日志尾行表示进度，都会破坏这些行为。
         with tempfile.TemporaryDirectory() as temporary:
