@@ -370,7 +370,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
             task_started = time.monotonic()
             save()
             try:
-                if not (private / 'uv-cache').exists():
+                if task['scope'] != 'node' and not (private / 'uv-cache').exists():
                     await run_blocking(copy_tree, cache, private / 'uv-cache')
                 if task['scope'] != 'camctl' and not (private / 'node_modules').exists():
                     if node_modules is None or not node_modules.is_dir():
@@ -382,12 +382,13 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 temporary = directory / 'tmp'
                 temporary.mkdir()
                 environment = test_environment(python, project, control, private, temporary)
-                environment_root = project / '.venv311'
-                await run_blocking(subprocess.run,
-                    [str(python), '-m', 'venv', '--without-pip', str(environment_root)], env=environment, check=True)
-                packages = environment_root / 'lib/python3.11/site-packages'
-                (packages / 'integration-dependencies.pth').write_text(
-                    versions['site_packages'] + '\n', encoding='utf-8')
+                if task['scope'] != 'node':
+                    environment_root = project / '.venv311'
+                    await run_blocking(subprocess.run,
+                        [str(python), '-m', 'venv', '--without-pip', str(environment_root)], env=environment, check=True)
+                    packages = environment_root / 'lib/python3.11/site-packages'
+                    (packages / 'integration-dependencies.pth').write_text(
+                        versions['site_packages'] + '\n', encoding='utf-8')
                 if task['scope'] != 'camctl':
                     (work / 'apps/client').mkdir(parents=True, exist_ok=True)
                     (work / 'apps/client/node_modules').symlink_to(private / 'node_modules', target_is_directory=True)
@@ -426,7 +427,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                         raise RuntimeError(f'{label}准备失败，见 prepare.log')
 
                 resource_script = project / 'scripts/sync_resources.py'
-                if resource_script.exists():
+                if task['scope'] != 'node' and resource_script.exists():
                     await prepare('package-resources', [str(python), str(resource_script)], work)
                 if task['path'] == HB_MODULE:
                     candidate = directory / 'client-candidate'
