@@ -1,7 +1,7 @@
 """源码外部调用边界的集成检查。
 
 固化路线图 377 行源码审计的结构结论：子进程创建只有受管工具
-进程一处入口；生产代码不导入网络客户端也不建立网络连接；文件
+进程入口和独立维护引擎；生产代码不导入网络客户端也不建立网络连接；文件
 系统直接调用只出现在按责任登记的模块；异常分支全部携带显式类
 型。模块依赖方向由 ``test_dependencies.py`` 的导入图规则覆盖，
 本模块只检查调用边界。每条规则对合成违规样本必须能够报出。
@@ -11,9 +11,8 @@ from __future__ import annotations
 
 import ast
 
-#: 受管工具进程模块：全仓库唯一允许创建子进程的地方；其他模块
-#: （含 adb 传输适配）都通过它的运行接口使用子进程。
-SUBPROCESS_OWNER = "camctl.operations.process"
+#: 普通业务工具进程由受管入口创建；维护引擎在被更新环境外独立运行。
+SUBPROCESS_OWNERS = ("camctl.operations.process", "camctl.update_engine")
 #: 子进程创建的调用形态：属性接收者为标准库名时的方法名。
 SUBPROCESS_CALLS = {
     ("subprocess", "Popen"),
@@ -69,6 +68,8 @@ FILE_ENTRY_PREFIXES = (
     "camctl.resources",         # 包内权威资源（importlib.resources）
     "camctl.acceptance.input",  # 受理输入的真实文件读取适配器
     "camctl.bootstrap",         # 装配入口：构建目录准备与临时移除
+    "camctl.deployment",        # 独立部署检查、数据库副本与迁移入口
+    "camctl.update_engine",     # 独立维护引擎：备份、安装、恢复与发布
 )
 
 
@@ -172,11 +173,11 @@ class TestRealSourceBoundaries:
             assert anchor in sources, f"扫描缺少锚点模块: {anchor}"
 
     def test_subprocess_creation_only_in_managed_process(self, source_inspection) -> None:
-        """子进程创建与 subprocess 导入只出现在受管工具进程模块。"""
+        """子进程创建与 subprocess 导入只出现在受管入口和维护引擎。"""
         violations = [
             entry
             for module, facts in source_inspection.items()
-            if module != SUBPROCESS_OWNER
+            if not _starts_with(module, SUBPROCESS_OWNERS)
             for entry in facts["subprocess"]
         ]
         assert violations == []
@@ -259,6 +260,10 @@ class TestCheckerDetectsViolations:
             "camctl.session.locks", "os.open(path, os.O_RDWR)\n"
         ) == ["camctl.session.locks:1 (os.open)"]
         assert _starts_with("camctl.session.locks", FILE_ENTRY_PREFIXES)
+        assert _starts_with("camctl.update_engine.engine", SUBPROCESS_OWNERS)
+        assert not _starts_with("camctl.update_engine_extra", SUBPROCESS_OWNERS)
+        assert _starts_with("camctl.deployment", FILE_ENTRY_PREFIXES)
+        assert _starts_with("camctl.update_engine.router", FILE_ENTRY_PREFIXES)
         assert _file_entries(
             "camctl.contracts.fake", "text.replace('a', 'b')\n"
         ) == []
