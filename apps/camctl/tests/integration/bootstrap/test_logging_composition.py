@@ -66,8 +66,7 @@ class TestSessionLogging:
             assert all(datetime.fromisoformat(record["logged_at_utc"]).utcoffset().total_seconds() == 0
                 for record in important)
             assert not any(record.get("event") == "timing" for record in records)
-            assert important[0]["logger"] == "camctl.bootstrap.lifecycle"
-            assert "submit" in important[0]["message"]
+            assert important[0]["command_name"] == "submit" and important[0]["version"]
             assert important[-1]["business_succeeded"] is True
             assert "succeeded" not in important[-1]
         finally:
@@ -92,7 +91,12 @@ class TestSessionLogging:
 
         # 会话失败事实作为 ERROR 落盘，无丢弃时不产生关闭摘要。
         content = _log_text(tmp_path)
-        assert "run 会话失败: state_db_error" in content
+        records = [json.loads(line) for line in content.splitlines()]
+        failures = [record for record in records if record.get("event") == "session_failed"]
+        assert len(failures) == 1
+        assert failures[0]["level"] == "ERROR" and failures[0]["command"] == "run"
+        assert failures[0]["reason"] == "state_db_error"
+        assert "file is not a database" in failures[0]["details"]["error"]
         assert "日志关闭摘要" not in content
         # 会话收场已完成有序关闭；兜底关闭不重复处理。
         assert deps.log_runtime.close_attempts == 1

@@ -35,7 +35,8 @@ async def test_handled_input_error_is_logged_when_submit_succeeds(tmp_path):
     assert "原始输入读取失败" in text
     assert "/original/source" in text
     assert "/incoming/plan.json" in text
-    assert len(text.splitlines()) == 1
+    errors = [json.loads(line) for line in text.splitlines() if json.loads(line)["level"] == "ERROR"]
+    assert len(errors) == 1
 
 
 @pytest.mark.asyncio
@@ -55,7 +56,8 @@ async def test_invalid_action_is_logged_with_saved_identity(tmp_path):
     assert '"action_id":1' in text
     assert '"device_id":null' in text
     assert "missing-camera" in text
-    assert len(text.splitlines()) == 1
+    errors = [json.loads(line) for line in text.splitlines() if json.loads(line)["level"] == "ERROR"]
+    assert len(errors) == 1
 
 
 @pytest.mark.asyncio
@@ -90,5 +92,9 @@ async def test_standard_error_is_logged_and_original_handlers_restored(tmp_path)
     text = Path(config.paths.log_file).read_text()
     assert "库调用失败" in text
     assert "第三方完整异常" in text
-    assert '"errno":5' in text
-    assert text.count("库调用失败") == 1
+    errors = [json.loads(line) for line in text.splitlines() if json.loads(line)["level"] == "ERROR"]
+    assert len(errors) == 1
+    message = errors[0]["message"]
+    assert message.count("库调用失败") == 1
+    exception = json.loads(message.split("异常诊断: ", 1)[1])
+    assert exception["errno"] == 5 and exception["filename"] == "/source"

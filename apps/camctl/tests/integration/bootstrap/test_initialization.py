@@ -715,8 +715,9 @@ def test_cli_init_reports_release_lock_error_only_on_stderr(
         opening = line.find("{")
         if opening >= 0:
             diagnostics.append(json.loads(line[opening:]))
-    assert len(diagnostics) == 1
-    diagnostic = diagnostics[0]
+    errors = [record for record in diagnostics if record["level"] == "ERROR"]
+    assert len(errors) == 1
+    diagnostic = errors[0]["exception"]
     assert diagnostic["type"].endswith(".LockError")
     assert diagnostic["cause"]["errno"] == errno.EIO
     assert "cli-init-release-diagnostic-sentinel" in diagnostic["cause"]["message"]

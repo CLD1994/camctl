@@ -36,8 +36,11 @@ def test_describe_stages_and_timing_obey_level_without_runtime_files(tmp_path, m
     assert cli.main(["describe", "--config", str(config)], stdout=out, stderr=err) == 0
     assert json.loads(out.getvalue()) == {"devices": []}
     records = [json.loads(line) for line in err.getvalue().splitlines()]
+    startup = [record for record in records if record["stage"] == "command"]
+    assert len(startup) == 1 and startup[0]["event"] == "started"
+    assert startup[0]["command_name"] == "describe" and startup[0]["version"]
     if level == "WARNING":
-        assert records == []
+        assert records == startup
     else:
         stages = [record for record in records if record["stage"] == "describe"]
         assert [record["event"] for record in stages] == ["started", "returned"]
@@ -76,7 +79,7 @@ def test_describe_error_has_one_complete_json_diagnostic(tmp_path, monkeypatch):
     assert cli.main(["describe", "--config", str(config)], stdout=out, stderr=err) == 1
     assert out.getvalue() == ""
     records = [json.loads(line) for line in err.getvalue().splitlines()]
-    assert [record["event"] for record in records if record["level"] == "INFO"] == ["started", "raised"]
+    assert [record["event"] for record in records if record["stage"] == "describe"] == ["started", "raised"]
     errors = [record for record in records if record["level"] == "ERROR"]
     assert len(errors) == 1
     assert errors[0]["exception"]["errno"] == 5
