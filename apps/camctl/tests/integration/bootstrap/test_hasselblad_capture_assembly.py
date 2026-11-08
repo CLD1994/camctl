@@ -47,7 +47,10 @@ async def test_hasselblad_assembled_start_grant_keeps_original_storage_and_deadl
             staging=Path(changed.paths.staging), wall_us=lambda: _NOW,
             monotonic_ns=lambda: 1, wait_config=lambda _: None)
         action = await runtime.action(1)
-        assert action['execution_spec_json'] == {'output_storage': first, 'start_call_timeout_s': 180}
+        expected = {'output_storage': first, 'start_call_timeout_s': 180}
+        if first == 'device':
+            expected['photo_source_policy'] = 'deferred'
+        assert action['execution_spec_json'] == expected
         ticket = await interrupt_start_grant(runtime, 1, 'camera_take_photo', monkeypatch)
         timeout, = owned.connection.execute(
             'SELECT timeout_s_json FROM operation_attempts WHERE run_id=? AND attempt_no=?',
