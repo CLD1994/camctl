@@ -9,13 +9,15 @@ import pytest_asyncio
 
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding, check_binding
+from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.outputs.qualification import FileCandidate, OperationConfig
-from camctl.outputs.slots import SlotRequest
+from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.outputs.sources import ResolutionState, SelectionMode, SourceResolution, SourceSpec, select_outputs
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import (
     FailReadBinding, FixSelection, OutputsRepository, ResolveSources, StartObtainAction, load_selection_facts,
 )
+from camctl.persistence.repositories.file_batches import FileBatchRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..cancellation.test_report_sync_lifecycle import _fault_owned
@@ -69,8 +71,13 @@ async def test_zero_attempt_binding_original_key_preserves_noop_retry_wait_and_o
     cfg, owned, command = prepared_without_attempt
     repository, key = OutputsRepository(), new_operation_key()
     if held_slot:
+        action_id = owned.connection.execute(
+            "SELECT action_id FROM operation_runs WHERE copy_id=?", (command.copy_id,)).fetchone()[0]
+        batch = FileBatchRepository().acquire(BatchRequest(action_id, "cam-a", _NOW), new_operation_key(), owned)
+        assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch.error
         granted = repository.grant_read_slot(SlotRequest(command.copy_id, _NOW), new_operation_key(), owned)
         assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+        assert granted.value.outcome is SlotOutcome.GRANTED, granted.value
         assert owned.connection.execute("SELECT slot_device_id FROM file_copies WHERE id=?",
             (command.copy_id,)).fetchone() == ('cam-a',)
     faulty = _fault_owned(owned, "COMMIT", after_commit=after_commit)
