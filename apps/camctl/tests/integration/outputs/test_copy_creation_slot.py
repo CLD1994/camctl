@@ -10,12 +10,13 @@ from camctl.operations.attempts import BeginDisposition
 from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
-from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.transaction import commit_operation, saved_transaction_events
 
 from .test_grant_reuse import granted, read_request, read_targets, local_read, _change_event, _reuse
 from ..operations.test_read_attempt_slot import _intent
+from ..support.output_planning import EventSequence, capture_operation
+from camctl.persistence.repositories.outputs import OutputsRepository
 
 
 def test_copy_creation_keeps_camera_slot_empty(granted):
@@ -45,34 +46,35 @@ def test_device_copy_cannot_start_reading_immediately_after_creation(granted):
     assert tuple(owned.connection.iterdump()) == before
 
 
-class _CopyCreation:
-    def __init__(self, command, key, slot):
-        self.command, self.key, self.slot = command, key, slot
-
-    def plan(self, scope):
-        plan = outputs._GrantFileCommand(self.command, self.key).plan(scope)
-        events = []
-        for event in plan.events:
-            row, = event.rows
-            if row.table == "file_copies":
-                row = replace(row, after=replace(row.after, values={**row.after.values, "slot_device_id": self.slot}))
-                event = replace(event, rows=(row,))
-            events.append(event)
-        return replace(plan, events=tuple(events))
-
-
 @pytest.mark.parametrize("slot", [None, "cam-1"])
 def test_formal_copy_creation_requires_empty_initial_slot(read_request, slot):
+    import sqlite3
     owned, command = read_request
     before = tuple(owned.connection.iterdump())
     key = new_operation_key()
-    receipt = commit_operation(_CopyCreation(command, key, slot), key, owned)
+    plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(command, key, target))
+    if slot is not None:
+        with sqlite3.connect(':memory:') as baseline:
+            owned.connection.backup(baseline)
+            accepted = commit_operation(EventSequence(plan.events, plan), key, owned)
+            assert accepted.kind == 'completed', accepted.error
+            baseline.backup(owned.connection)
+    events = []
+    for event in plan.events:
+        row, = event.rows
+        if row.table == "file_copies":
+            row = replace(row, after=replace(row.after, values={**row.after.values, "slot_device_id": slot}))
+            event = replace(event, rows=(row,))
+        events.append(event)
+    receipt = commit_operation(EventSequence(events, plan), key, owned)
     if slot is None:
         assert receipt.kind == "completed", receipt.error
     else:
         assert receipt.kind == "rolled_back", receipt
         assert isinstance(receipt.error, EventValidationError), receipt.error
+        assert '创建后 slot_device_id=' in str(receipt.error)
         assert tuple(owned.connection.iterdump()) == before
+        assert not owned.connection.in_transaction
 
 
 @pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
