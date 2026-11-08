@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from camctl.contracts.enums import enum_for
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
 
 from .test_distribution import (
     _HASSELBLAD_PHOTO_SAMPLE_PARAMS,
@@ -183,14 +184,16 @@ retry_interval_s="0"
 
     # 每次设备下载独立形成交付事实，不改写原来源身份。
     original_tool = tool.read_text()
+    later_preview = JPEG_IMAGE
+    assert later_preview != expected[1]
     marker = 'payload = original_bytes if args[3] == "original" else PREVIEW'
     assert marker in original_tool
     tool.write_text(original_tool.replace(
         marker,
-        'payload = b"x" * len(original_bytes) if args[3] == "original" else b"x" * len(PREVIEW)',
+        f'payload = original_bytes if args[3] == "original" else bytes.fromhex({later_preview.hex()!r})',
     ))
     run_plan(4, [
-        {"name": "changed-original", "type": "obtain_action_outputs",
+        {"name": "original-4", "type": "obtain_action_outputs",
          "params": {"source": {"action_instance_id": "1"}}},
         {"name": "changed-preview", "type": "obtain_action_outputs",
          "params": {"source": {"action_instance_id": "1"}, "filter": "preview"}},
@@ -209,8 +212,9 @@ retry_interval_s="0"
             "SELECT id,size_bytes,sha256,locator_json FROM device_files ORDER BY id"
         ).fetchall() == sources
     assert len(changed) == 2
-    for (delivery_id, output_id, file_name, status, target_id, size, sha256), expected_id, content in zip(changed, output_ids, expected):
-        actual = b"x" * len(content)
+    for (delivery_id, output_id, file_name, status, target_id, size, sha256), expected_id, actual in zip(
+        changed, output_ids, (expected[0], later_preview)
+    ):
         assert output_id == expected_id and status == int(enum_for("deliveries.status").PUBLISHED)
         assert delivery_id not in delivery_ids and target_id not in target_file_ids and file_name not in file_names
         assert size == len(actual) and sha256 == hashlib.sha256(actual).hexdigest()
