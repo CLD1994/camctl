@@ -12,6 +12,8 @@ import time
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.recovery import RecoveryBoundary
@@ -65,8 +67,7 @@ async def _pending_last_read(tmp_path, photo_read_request, monkeypatch):
     devices = {"cam-1": dict(cfg.devices["cam-1"], copy={"max_read_attempts": 2, "retry_interval_s": 0})}
     cfg = replace(cfg, devices=devices, cleanup=replace(cfg.cleanup, work_file_limit_per_run=1))
     monkeypatch.setattr(test_hasselblad_download, "NAME", "B9996039.3FR")
-    old_content = b"OLD!" + _CONTENT[4:]
-    transport = DownloadTransport(payload=old_content, serial="SERIAL-1")
+    transport = DownloadTransport(payload=_CONTENT, serial="SERIAL-1")
     driver = HasselbladDriver(devices, BoundDirectories(Path(cfg.paths.staging)),
                               monotonic_ns=time.monotonic_ns, transport=transport)
     identity, locator = owned.connection.execute(
@@ -77,7 +78,7 @@ async def _pending_last_read(tmp_path, photo_read_request, monkeypatch):
         _saved(outputs.save_photo_read_start(PhotoReadStart(prepared.copy_id, first, session.source_size, _NOW + 2),
                                              new_operation_key(), owned))
         chunk = await asyncio.to_thread(session.read_chunk, 4)
-        assert chunk.data == old_content[:4] and len(chunk.data) == 4
+        assert chunk.data == _CONTENT[:4] and len(chunk.data) == 4
         relative, = owned.connection.execute("SELECT relative_path FROM intermediate_files WHERE id=?",
                                              (prepared.target_file_id,)).fetchone()
         target = Path(cfg.paths.staging) / relative
@@ -90,9 +91,11 @@ async def _pending_last_read(tmp_path, photo_read_request, monkeypatch):
                                     new_operation_key(), owned))
         downloaded = (Path(cfg.paths.staging) / "read-downloads" /
                       f"{first.run_id}-{first.attempt_id}" / "tool-selected-name.bin")
+        source_stat = downloaded.stat()
         real_read = os.read
         def failed_read(fd, length):
-            if Path(os.readlink(f"/proc/self/fd/{fd}")) == downloaded:
+            actual = os.fstat(fd)
+            if (actual.st_dev, actual.st_ino) == (source_stat.st_dev, source_stat.st_ino):
                 raise OSError(errno.EIO, "injected source read failure", str(downloaded))
             return real_read(fd, length)
         with monkeypatch.context() as patch:
@@ -113,7 +116,7 @@ async def _pending_last_read(tmp_path, photo_read_request, monkeypatch):
                                                    _NOW + 4, retry_wait=True), new_operation_key(), owned))
     ticket = begin(_NOW + 5)
     assert ticket.attempt_id == 2
-    assert target.read_bytes() == old_content[:4]
+    assert target.read_bytes() == _CONTENT[:4]
     assert owned.connection.execute("SELECT committed_bytes FROM file_copies WHERE id=?", (prepared.copy_id,)).fetchone() == (4,)
     staging = Path(cfg.paths.staging)
     earlier = staging / "read-downloads" / f"{first.run_id}-{first.attempt_id}"
@@ -136,7 +139,7 @@ def _assert_waiting(owned, prepared, ticket, target):
     assert failure["details"]["read_end"] == {"stopped": True, "bytes_read": 4, "error": "failed"}
     assert owned.connection.execute(
         "SELECT slot_device_id,committed_bytes FROM file_copies WHERE id=?", (prepared.copy_id,)).fetchone() == ("cam-1", 4)
-    assert target.read_bytes() == b"OLD!"
+    assert target.read_bytes() == _CONTENT[:4]
 
 
 async def _default_run(cfg):
@@ -185,19 +188,36 @@ async def test_default_run_exits_on_local_precondition_then_resumes_original_las
     assert not transport.calls
     _assert_waiting(owned, prepared, ticket, target)
 
+    observations = []
+
+    class ObservePhotoRead:
+        delegate = OutputsRepository()
+
+        def save_photo_read_start(self, request, key, worker):
+            result = self.delegate.save_photo_read_start(request, key, worker)
+            if result.kind is DbOutcomeKind.COMPLETED:
+                saved = worker.connection.execute(
+                    "SELECT source_size,committed_bytes FROM file_copies WHERE id=?",
+                    (prepared.copy_id,)).fetchone()
+                observations.append((request.ticket, request.size_bytes, saved))
+            return result
+
     # 5 秒是整个恢复观察预算，10 次仅防止测试忙循环，不表示产品轮次数承诺。
-    async with asyncio.timeout(5):
-        for _ in range(10):
-            second = await _default_run(cfg)
-            if second.succeeded:
-                break
-            assert second.reason == "state_db_error", second
-            assert str(work) in str(second.details) and "FileExistsError" in str(second.details), second
-            assert (work / "old").read_bytes() == b"original responsibility"
-            assert not transport.calls
-            _assert_waiting(owned, prepared, ticket, target)
-        else:
-            pytest.fail("恢复观察内未能处理原工作目录")
+    with repository_port(OutputsRepository, ObservePhotoRead(), ("save_photo_read_start",)):
+        async with asyncio.timeout(5):
+            for _ in range(10):
+                second = await _default_run(cfg)
+                if second.succeeded:
+                    break
+                assert second.reason == "state_db_error", second
+                assert str(work) in str(second.details) and "FileExistsError" in str(second.details), second
+                assert (work / "old").read_bytes() == b"original responsibility"
+                assert not transport.calls
+                _assert_waiting(owned, prepared, ticket, target)
+            else:
+                pytest.fail("恢复观察内未能处理原工作目录")
+
+    assert observations == [(ticket, len(_CONTENT), (len(_CONTENT), 0))]
 
     assert not work.exists()
     assert [spec.argv[3] for spec in transport.calls] == ["list", "info", "download"]
