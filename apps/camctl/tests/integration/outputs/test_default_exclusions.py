@@ -1,7 +1,5 @@
 """默认取回按最终产物身份排除，保存与恢复沿用原请求。"""
 
-from copy import deepcopy
-from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -15,15 +13,17 @@ from camctl.outputs.sources import SelectionSnapshot, select_outputs
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.transaction import commit_operation
 
 from .test_catalog_integrity import selection_database
 from .test_output_family import family_database
 from .test_product_competition import competition_database
 from .test_qualification import qualification_environment
 from .test_sources import _NOW, _fixed_resolution
-from ..support.output_planning import capture_operation, validate_static_event
-from ..support.output_storage_cases import observe_product_competition
+from ..support.output_planning import EventSequence, capture_operation
+from ..support.output_storage_cases import observe_product_competition, observed_operation
 from ..support.outputs import read_test_runtime
 from camctl.devices.drivers.hasselblad.driver import EVIDENCE
 from camctl.devices.read_session import ReadSession
@@ -85,14 +85,39 @@ def test_selection_guard_rechecks_original_exclusions(selection_database):
     facts = outputs.load_selection_facts(owned.connection, 11)
     snapshot = select_outputs(_fixed_resolution((11,)), facts, SelectionMode.DEFAULT,
                               excluded_output_ids=frozenset({703}))
+    assert snapshot.selected_output_ids == (705,)
     proposal = capture_operation(owned, lambda actual: outputs.OutputsRepository().fix_selection(
         outputs.FixSelection(61, snapshot, _NOW), new_operation_key(), actual))
-    event = proposal.events[0]
-    validate_static_event(event, proposal)
-    changed = deepcopy(proposal.state_rows)
-    changed["actions"][30]["input_fields_json"]["params"]["exclude_output_ids"] = ["705"]
-    with pytest.raises(EventValidationError):
-        validate_static_event(event, replace(proposal, state_rows=changed))
+
+    def legal_control(actual):
+        receipt = commit_operation(
+            EventSequence(proposal.events, proposal), new_operation_key(), actual)
+        assert receipt.kind == "completed", receipt.error
+        assert actual.connection.execute(
+            "SELECT output_id FROM obtain_items WHERE selection_id=61 ORDER BY id"
+        ).fetchall() == [(705,)]
+        return receipt
+
+    # 同一原请求和选择在独立完整副本中实际提交，证明对照前提成立。
+    control = observed_operation(owned, legal_control)
+    assert control.kind == "completed", control.error
+
+    _exclude(owned, (705,))
+    changed_facts = outputs.load_selection_facts(owned.connection, 11)
+    changed_snapshot = select_outputs(
+        _fixed_resolution((11,)), changed_facts, SelectionMode.DEFAULT,
+        excluded_output_ids=frozenset({705}))
+    assert changed_snapshot.selected_output_ids == (703,)
+    changed = capture_operation(owned, lambda actual: outputs.OutputsRepository().fix_selection(
+        outputs.FixSelection(61, changed_snapshot, _NOW), new_operation_key(), actual))
+    before = tuple(owned.connection.iterdump())
+    rejected = commit_operation(
+        EventSequence(proposal.events, changed), new_operation_key(), owned)
+    assert rejected.kind == "rolled_back", rejected.error
+    assert isinstance(rejected.error, EventValidationError), rejected.error
+    assert str(rejected.error) == "选择条目的完整集合、保存顺序或依据与原请求及当前事实不一致"
+    assert not owned.connection.in_transaction
+    assert tuple(owned.connection.iterdump()) == before
 
 
 def test_excluded_selection_cannot_restore_excluded_target(selection_database):
@@ -157,6 +182,7 @@ def test_empty_selection_needs_fixed_exclusion_proof(selection_database, invalid
 async def test_obtain_runtime_consumes_saved_default_exclusions(selection_database, tmp_path):
     owned = selection_database
     _exclude(owned)
+    register_file_batch_guards()
     class Source:
         calls = []
         async def open_read(self, source, offset, ticket, *, idle_timeout_s):
@@ -168,7 +194,10 @@ async def test_obtain_runtime_consumes_saved_default_exclusions(selection_databa
         await advance_obtain(runtime)
     assert owned.connection.execute(
         "SELECT output_id FROM obtain_items WHERE selection_id=61 ORDER BY id").fetchall() == [(705,)]
-    assert [source.file_id for source in driver.calls] == ["file-0505"]
+    assert owned.connection.execute(
+        "SELECT output_id FROM deliveries WHERE action_id=30 ORDER BY id").fetchall() == [(705,)]
+    assert [json.loads(source.file_id) for source in driver.calls] == [
+        ["cam-1", "camctl-adb", "file-0505"]]
 
 
 def test_locally_qualified_final_target_is_excluded_even_after_host_cleanup(selection_database):
