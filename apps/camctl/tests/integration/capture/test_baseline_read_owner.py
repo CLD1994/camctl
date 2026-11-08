@@ -340,7 +340,7 @@ async def _cold_intent_world(database, tmp_path):
     return world
 
 
-async def test_same_session_cancelled_actual_task_can_save_unknown_without_cold_boundary(database, tmp_path):
+async def test_cancelled_actual_directory_call_recovers_unknown_after_session_restart(database, tmp_path):
     class Directory(BlockingDirectory):
         async def read_directory(self, request, *, stop):
             self.calls.append(request)
@@ -354,9 +354,17 @@ async def test_same_session_cancelled_actual_task_can_save_unknown_without_cold_
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        resumed = await baseline_case_for().view()
+        assert (await _stored(owned))[0] == 1
+        assert len(directory.calls) == 1 and repository.unknowns == []
+        event = owned.connection.execute("SELECT created_event_id FROM baseline_read_calls").fetchone()[0]
+        resumed = await _cold(owned, boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, horizon=event,
+            repository=repository)
         await baseline_handler(resumed)
         assert (await _stored(owned))[0] == 3 and len(directory.calls) == 1
+        assert len(repository.unknowns) == 1
+        request, key = repository.unknowns[0]
+        assert key == repository.intents[0][0].result_save_key
+        assert CaptureRepository().verify_baseline_read_write(request, key, owned).state.name == "UNCONFIRMED"
     finally:
         owned.connection.close()
 
