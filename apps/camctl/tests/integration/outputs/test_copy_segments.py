@@ -16,6 +16,7 @@ import pytest
 
 from ..support.outputs import output_operation
 from ..support.output_planning import capture_operation, validate_static_event
+from ..support.read_batch_cases import acquire_read_batch
 from ..support.database import business_database, database_path
 
 from camctl.contracts.history_values import TransactionRange
@@ -188,6 +189,8 @@ def test_changed_segment_size_continues_from_committed_position(segment_env):
 def test_segment_transfer_keeps_existing_attempts(segment_env):
     """段保存不新建读取尝试、不改次数：在途尝试身份保持不变。"""
     owned, roots, first = segment_env
+    if first.delivery_id is not None:
+        acquire_read_batch(owned, _run_action(owned, first.run_id), "cam-1", _NOW)
     OutputsRepository().grant_read_slot(
         SlotRequest(first.copy_id, _NOW + 1), new_operation_key(), owned)
     intent = AttemptIntent(
@@ -479,6 +482,8 @@ def test_local_source_segments_copy_bytes(local_read, tmp_path):
 
 
 def _in_flight_attempt(owned, first):
+    if first.delivery_id is not None:
+        acquire_read_batch(owned, _run_action(owned, first.run_id), "cam-1", _NOW)
     slot = OutputsRepository().grant_read_slot(
         SlotRequest(first.copy_id, _NOW + 1), new_operation_key(), owned)
     assert slot.kind is DbOutcomeKind.COMPLETED and slot.value.outcome.name == "GRANTED", slot.value

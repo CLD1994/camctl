@@ -15,7 +15,7 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_read_associations import read_targets, _command  # noqa: F401
-from .test_read_slot import two_copies, _slot  # noqa: F401
+from .test_read_slot import two_copies, _acquire_early_batch, _slot  # noqa: F401
 from .test_local_read import local_read  # noqa: F401
 from .test_qualification import _NOW
 from .test_product_competition import competition_database, _seed_many_actions  # noqa: F401
@@ -263,7 +263,9 @@ def test_delivery_discovery_keeps_internal_holder_with_capture_owner(read_target
 def test_held_retry_copy_precedes_new_candidates(two_copies):
     owned, early, late = two_copies
     repository = OutputsRepository()
-    assert repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
+    _acquire_early_batch(owned)
+    held = repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
+    assert held.kind is DbOutcomeKind.COMPLETED and held.value.outcome is SlotOutcome.GRANTED, held
     owned.connection.execute("UPDATE operation_runs SET retry_wait_required=1 WHERE copy_id=?", (early.copy_id,))
     owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=32", (_NOW - 1_000_000,))
     owned.connection.commit()
@@ -303,7 +305,9 @@ async def test_evicted_read_resumes_after_restart(two_copies):
 
     owned, early, _ = two_copies
     repository = OutputsRepository(read_batch_size=1)
-    assert repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
+    _acquire_early_batch(owned)
+    held = repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
+    assert held.kind is DbOutcomeKind.COMPLETED and held.value.outcome is SlotOutcome.GRANTED, held
     ticket = _start_unended_read(owned, early.copy_id)
     path = _scope(owned.connection).database
     async with _discovery_database(path) as (database, _):

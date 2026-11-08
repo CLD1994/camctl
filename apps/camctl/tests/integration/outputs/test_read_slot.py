@@ -10,6 +10,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import EventValidationError
 from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
+from ..support.read_batch_cases import acquire_read_batch
 from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
 )
@@ -67,6 +68,14 @@ def prepared(request, read_targets):
     return owned, command, _prepare(owned, command)
 
 
+@pytest.fixture
+def prepared_with_batch(prepared):
+    owned, command, first = prepared
+    if command.item_id is not None:
+        acquire_read_batch(owned, command.action_id, "cam-1", _NOW)
+    return owned, command, first
+
+
 def _later_read_command():
     return FileCandidate(
         action_id=32, item_id=102, processing_id=None, output_id=702,
@@ -86,11 +95,18 @@ def two_copies(read_targets):
     return owned, early, late
 
 
+def _acquire_early_batch(owned):
+    # 这些槽位用例使用已完成来源的文件，不测试等待来源结束。
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
+    owned.connection.commit()
+    acquire_read_batch(owned, 31, "cam-1", _NOW)
+
+
 # ---- 授予 ----
 
 
-def test_grant_saves_slot_and_history(prepared):
-    owned, command, first = prepared
+def test_grant_saves_slot_and_history(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     result = OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     assert result.value.outcome is SlotOutcome.GRANTED, result.value
@@ -102,8 +118,8 @@ def test_grant_saves_slot_and_history(prepared):
     assert '"slot_device_id"' in body
 
 
-def test_grant_reuses_held_slot_without_new_events(prepared):
-    owned, command, first = prepared
+def test_grant_reuses_held_slot_without_new_events(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     before = _dump(owned)
     result = OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
@@ -149,8 +165,8 @@ def test_grant_order_follows_action_time_not_request_time(two_copies):
     assert later.value.reason == "device_busy"
 
 
-def test_grant_rejects_foreign_slot(prepared):
-    owned, command, first = prepared
+def test_grant_rejects_foreign_slot(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     owned.connection.execute(
         "UPDATE file_copies SET slot_device_id='another-camera' WHERE id=?", (first.copy_id,))
     owned.connection.commit()
@@ -173,8 +189,8 @@ def test_host_source_never_occupies_a_slot(local_read):
     assert _dump(owned) == before
 
 
-def test_grant_waits_for_retry_interval(prepared):
-    owned, command, first = prepared
+def test_grant_waits_for_retry_interval(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     owned.connection.execute(
         "UPDATE operation_runs SET retry_wait_required=1 WHERE copy_id=?", (first.copy_id,))
     owned.connection.commit()
@@ -186,8 +202,8 @@ def test_grant_waits_for_retry_interval(prepared):
     assert _dump(owned) == before
 
 
-def test_finished_responsibility_needs_no_slot(prepared):
-    owned, command, first = prepared
+def test_finished_responsibility_needs_no_slot(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     owned.connection.execute(
         "UPDATE operation_runs SET status=4, error_json='{}' WHERE copy_id=?", (first.copy_id,))
     owned.connection.commit()
@@ -198,8 +214,8 @@ def test_finished_responsibility_needs_no_slot(prepared):
     assert _dump(owned) == before
 
 
-def test_canceled_owner_needs_no_new_slot(prepared):
-    owned, command, first = prepared
+def test_canceled_owner_needs_no_new_slot(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     owned.connection.execute(
         "UPDATE actions SET cancel_requested=1 WHERE id=?", (command.action_id,))
     owned.connection.commit()
@@ -208,8 +224,8 @@ def test_canceled_owner_needs_no_new_slot(prepared):
     assert result.value.outcome is SlotOutcome.FINISHED
 
 
-def test_grant_key_returns_first_response_and_rejects_changed_input(prepared):
-    owned, command, first = prepared
+def test_grant_key_returns_first_response_and_rejects_changed_input(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     repository = OutputsRepository()
     key = new_operation_key()
     original = repository.grant_read_slot(_slot(first.copy_id), key, owned)
@@ -226,8 +242,8 @@ def test_grant_key_returns_first_response_and_rejects_changed_input(prepared):
     assert isinstance(changed_time.error, Exception), changed_time.error
 
 
-def test_slot_key_cannot_be_used_as_file_grant_key(prepared):
-    owned, command, first = prepared
+def test_slot_key_cannot_be_used_as_file_grant_key(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     key = new_operation_key()
     OutputsRepository().grant_read_slot(_slot(first.copy_id), key, owned)
     result = OutputsRepository().grant_file(command, key, owned)
@@ -237,8 +253,8 @@ def test_slot_key_cannot_be_used_as_file_grant_key(prepared):
 # ---- 释放 ----
 
 
-def test_release_after_bytes_complete(prepared):
-    owned, command, first = prepared
+def test_release_after_bytes_complete(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     size = owned.connection.execute(
         "SELECT source_size FROM file_copies WHERE id=?", (first.copy_id,)).fetchone()[0]
@@ -253,8 +269,8 @@ def test_release_after_bytes_complete(prepared):
     assert len(_slot_history(owned)) == 2
 
 
-def test_release_when_run_finished(prepared):
-    owned, command, first = prepared
+def test_release_when_run_finished(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     owned.connection.execute(
         "UPDATE operation_runs SET status=5 WHERE copy_id=?", (first.copy_id,))
@@ -265,8 +281,8 @@ def test_release_when_run_finished(prepared):
     assert _slot_of(owned, first.copy_id) is None
 
 
-def test_release_is_idempotent_when_slot_empty(prepared):
-    owned, command, first = prepared
+def test_release_is_idempotent_when_slot_empty(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     before = _dump(owned)
     result = OutputsRepository().release_read_slot(
         _slot(first.copy_id, _NOW + 5), new_operation_key(), owned)
@@ -275,9 +291,9 @@ def test_release_is_idempotent_when_slot_empty(prepared):
     assert _dump(owned) == before
 
 
-def test_release_waits_for_active_attempt(prepared):
+def test_release_waits_for_active_attempt(prepared_with_batch):
     """实际读取未结束时迟到通知不能清空机会。"""
-    owned, command, first = prepared
+    owned, command, first = prepared_with_batch
     OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     run_id = owned.connection.execute(
         "SELECT id FROM operation_runs WHERE copy_id=?", (first.copy_id,)).fetchone()[0]
@@ -297,8 +313,8 @@ def test_release_waits_for_active_attempt(prepared):
     assert _dump(owned) == before
 
 
-def test_release_waits_for_retry_wait(prepared):
-    owned, command, first = prepared
+def test_release_waits_for_retry_wait(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     owned.connection.execute(
         "UPDATE operation_runs SET retry_wait_required=1 WHERE copy_id=?", (first.copy_id,))
@@ -309,8 +325,8 @@ def test_release_waits_for_retry_wait(prepared):
     assert result.value.reason == "retry_wait"
 
 
-def test_release_waits_while_bytes_incomplete(prepared):
-    owned, command, first = prepared
+def test_release_waits_while_bytes_incomplete(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     result = OutputsRepository().release_read_slot(
         _slot(first.copy_id, _NOW + 5), new_operation_key(), owned)
@@ -318,8 +334,8 @@ def test_release_waits_while_bytes_incomplete(prepared):
     assert result.value.reason == "still_reading"
 
 
-def test_release_key_returns_first_response(prepared):
-    owned, command, first = prepared
+def test_release_key_returns_first_response(prepared_with_batch):
+    owned, command, first = prepared_with_batch
     OutputsRepository().grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     owned.connection.execute(
         "UPDATE operation_runs SET status=5 WHERE copy_id=?", (first.copy_id,))
@@ -375,9 +391,9 @@ def test_slot_order_has_no_purpose_priority(mixed_purposes):
 # ---- 真实链路 ----
 
 
-def test_granted_slot_enables_real_read_intent(prepared):
+def test_granted_slot_enables_real_read_intent(prepared_with_batch):
     """真实授予后读取意图可用；释放后不再登记新尝试。"""
-    owned, command, first = prepared
+    owned, command, first = prepared_with_batch
     repository = OutputsRepository()
     repository.grant_read_slot(_slot(first.copy_id), new_operation_key(), owned)
     intent = AttemptIntent(
@@ -417,7 +433,9 @@ def test_recopy_round_reacquires_after_release(two_copies):
     """释放后重拷轮次重新参与候选竞争，沿用原拷贝身份。"""
     owned, early, late = two_copies
     repository = OutputsRepository()
-    repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
+    _acquire_early_batch(owned)
+    initial = repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned)
+    assert initial.value.outcome is SlotOutcome.GRANTED, initial
     size = owned.connection.execute(
         "SELECT source_size FROM file_copies WHERE id=?", (early.copy_id,)).fetchone()[0]
     owned.connection.execute(
@@ -442,8 +460,10 @@ def test_file_grant_key_survives_real_slot_changes(read_targets):
     key = new_operation_key()
     first = OutputsRepository().grant_file(command, key, owned)
     assert first.value.outcome is QualificationOutcome.GRANTED, first.error
+    acquire_read_batch(owned, command.action_id, "cam-1", _NOW)
     repository = OutputsRepository()
-    repository.grant_read_slot(_slot(first.value.copy_id), new_operation_key(), owned)
+    slot = repository.grant_read_slot(_slot(first.value.copy_id), new_operation_key(), owned)
+    assert slot.value.outcome is SlotOutcome.GRANTED, slot
     size = owned.connection.execute(
         "SELECT source_size FROM file_copies WHERE id=?",
         (first.value.copy_id,)).fetchone()[0]
@@ -451,10 +471,12 @@ def test_file_grant_key_survives_real_slot_changes(read_targets):
         "UPDATE file_copies SET committed_bytes=? WHERE id=?",
         (size, first.value.copy_id))
     owned.connection.commit()
-    repository.release_read_slot(
+    released = repository.release_read_slot(
         _slot(first.value.copy_id, _NOW + 2), new_operation_key(), owned)
-    repository.grant_read_slot(
+    assert released.value.outcome is SlotOutcome.RELEASED, released
+    reacquired = repository.grant_read_slot(
         _slot(first.value.copy_id, _NOW + 3), new_operation_key(), owned)
+    assert reacquired.value.outcome is SlotOutcome.GRANTED, reacquired
     before = _dump(owned)
     repeated = OutputsRepository().grant_file(command, key, owned)
     assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
