@@ -148,4 +148,8 @@ async def test_verification_failure_logs_original_digest_facts_once_before_save(
     assert tool["used_grace_s"] == "1.25"
     assert tool["signal_failures"] == [{"stage": "kill", "message": "kill permission denied"}]
     assert tool["stderr"] == {"hex": raw.stderr.hex(), "text": raw.stderr.decode("utf-8", "backslashreplace")}
-    assert "private-media-stdout" not in json.dumps(record)
+    assert record["stage"] == "source_verification"
+    assert record["error"]["code"] == "adb_digest_failed"
+    assert record["error"]["details"]["identity"] == "/DCIM/source.mp4"
+    assert record["error"]["details"]["stdout_text"] == raw.output.decode("utf-8")
+    assert tool["output"] == {"byte_count": len(raw.output)}
