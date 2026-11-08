@@ -8,6 +8,7 @@ import sqlite3
 import pytest
 
 from camctl.contracts.values import new_operation_key
+from camctl.capture.files import file_identity_key
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
 from ..support.output_planning import validate_static_event as validate_event
@@ -41,6 +42,8 @@ def competition_database(qualification_environment):
              json.dumps({"params": {"description": "正文" * 10000}}), identity))
     _seed_action(connection, 31, 1, action_type=4)
     _seed_device_file(connection, 501, 11)
+    connection.execute("UPDATE device_files SET identity_key=? WHERE id=501",
+        (file_identity_key("cam-1", "camctl-adb", "file-0501"),))
     _seed_output(connection, 701, 11, 501)
     _seed_selection_and_item(connection, dependency_id=101, selection_id=101, item_id=101,
         owner_action_id=31, source_action_id=11, output_id=701)
