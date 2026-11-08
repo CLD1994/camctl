@@ -1,5 +1,6 @@
 """真实部署目录、首次受理和历史恢复固定 Hasselblad 正式源选择。"""
 
+import asyncio
 import json
 import subprocess
 import sys
@@ -68,6 +69,13 @@ async def _accept(environment, tmp_path, body):
                                  input_path=tmp_path / "input.json")
 
 
+def _expected_spec(storage):
+    spec = {"output_storage": storage, "start_call_timeout_s": 180}
+    if storage == "device":
+        spec["photo_source_policy"] = "deferred"
+    return spec
+
+
 def _catalog(storage=None):
     camera = {"executable": "/no/such/hb_cli", "serial": "SERIAL-1"}
     if storage is not None:
@@ -91,10 +99,10 @@ async def test_photo_acceptance_saves_explicit_params_and_call_budget(environmen
     expected_params = parse_exact_json(encode_json_value(PHOTO_PARAMS))
     assert reconstruct_action_input(row)["params"] == expected_params
     assert parse_exact_json(row["effective_params_json"]) == expected_params
-    assert read_action_spec(row) == {"output_storage": expected, "start_call_timeout_s": 180}
+    assert read_action_spec(row) == _expected_spec(expected)
     history = HistoryRepository(tmp_path / "state.db")
     saved = history.restore_entity("action", 1, history.current_boundary())[("actions", 1)]
-    assert read_action_spec(saved) == {"output_storage": expected, "start_call_timeout_s": 180}
+    assert read_action_spec(saved) == _expected_spec(expected)
 
 
 @pytest.mark.parametrize("first,current", [("host", "device"), ("device", "host")])
@@ -108,16 +116,12 @@ async def test_repeated_request_and_history_keep_original_storage(environment, t
     boundary = history.current_boundary()
     outcome = await _accept((owned, replace(context, catalog=_catalog(current))), tmp_path, {"request_id": "42"})
     assert outcome.plan_disposition is PlanDisposition.REUSED
-    assert read_action_spec(_action_facts(connection).tables["actions"][1]) == {
-        "output_storage": first, "start_call_timeout_s": 180,
-    }
+    assert read_action_spec(_action_facts(connection).tables["actions"][1]) == _expected_spec(first)
     historical = history.restore_entity("action", 1, boundary)[("actions", 1)]
-    assert read_action_spec(historical) == {"output_storage": first, "start_call_timeout_s": 180}
+    assert read_action_spec(historical) == _expected_spec(first)
     body["request_id"] = "43"
     await _accept((owned, replace(context, catalog=_catalog(current))), tmp_path, body)
-    assert read_action_spec(row_facts(connection, "actions", 2)) == {
-        "output_storage": current, "start_call_timeout_s": 180,
-    }
+    assert read_action_spec(row_facts(connection, "actions", 2)) == _expected_spec(current)
 
 
 @pytest.mark.parametrize("field", ["output_storage", "storage"])
@@ -155,7 +159,7 @@ async def test_describe_exports_hasselblad_without_device_or_executable(tmp_path
     stdout, stderr = StringIO(), StringIO()
 
     assert not missing_tool.exists()
-    assert main(["describe", "--config", str(config)], stdout, stderr) == 0
+    assert await asyncio.to_thread(main, ["describe", "--config", str(config)], stdout, stderr) == 0
     described = json.loads(stdout.getvalue(), parse_float=Decimal)
     parameter = described["devices"][0]["actions"][0]["parameter_types"][0]
 
@@ -168,7 +172,11 @@ async def test_describe_exports_hasselblad_without_device_or_executable(tmp_path
         for choice in branch["properties"].get("shutter_s", {}).get("oneOf", ())
     }
     assert stdout.getvalue().count("\n") == 1
-    assert stderr.getvalue() == ""
+    records = [json.loads(line) for line in stderr.getvalue().splitlines()]
+    assert len(records) == 1
+    assert (records[0]["command_name"], records[0]["stage"], records[0]["event"], records[0]["level"]) == (
+        "describe", "command", "started", "INFO"
+    )
 
 
 async def test_first_import_under_low_decimal_precision_keeps_shutter_strings_exact():

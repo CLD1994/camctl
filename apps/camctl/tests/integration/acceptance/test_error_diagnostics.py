@@ -16,6 +16,7 @@ from camctl.acceptance.service import (
 from camctl.contracts.values import new_operation_key
 from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
+from camctl.persistence.runtime import DatabaseMetadata
 
 from ..support.database import business_database, create_test_database
 
@@ -31,7 +32,10 @@ async def test_failed_admission_preserves_primary_and_secondary_database_errors(
     primary = OSError(5, "保存输入失败", "/state")
     secondary = RuntimeError("原连接收场失败")
     actual = DbOutcome(kind, error=primary, secondary_errors=(secondary,))
-    database = SimpleNamespace(write=AsyncMock(return_value=actual))
+    database = SimpleNamespace(
+        metadata=DatabaseMetadata("camctl", "test-instance", 1, "/staging", "/ready", "/processing"),
+        write=AsyncMock(return_value=actual),
+    )
     with pytest.raises(AcceptanceStateError) as caught:
         await accept_input(ParsedInput("/input", {}), context(), new_operation_key(), database)
     assert caught.value.__cause__.exceptions == (primary, secondary)
@@ -44,7 +48,10 @@ async def test_failed_admission_keeps_original_control_object_and_actual_result(
     control = asyncio.CancelledError("原输入取消")
     secondary = OSError(5, "原回滚失败", "/state")
     actual = DbOutcome(DbOutcomeKind.UNKNOWN, control=control, secondary_errors=(secondary,))
-    database = SimpleNamespace(write=AsyncMock(return_value=actual))
+    database = SimpleNamespace(
+        metadata=DatabaseMetadata("camctl", "test-instance", 1, "/staging", "/ready", "/processing"),
+        write=AsyncMock(return_value=actual),
+    )
     with pytest.raises(asyncio.CancelledError) as caught:
         await accept_input(ParsedInput("/input", {}), context(), new_operation_key(), database)
     assert caught.value is control

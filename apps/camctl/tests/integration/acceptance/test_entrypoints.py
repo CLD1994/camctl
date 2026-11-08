@@ -75,6 +75,14 @@ def _plan_file(home: Path, request_id: str) -> Path:
     return target
 
 
+def _assert_started(stderr, command):
+    records = [json.loads(line) for line in stderr.getvalue().splitlines()]
+    assert len(records) == 1
+    assert (records[0]["command_name"], records[0]["stage"], records[0]["event"], records[0]["level"]) == (
+        command, "command", "started", "INFO"
+    )
+
+
 class TestRealEntrypoints:
     def test_init_submit_describe_do_not_start_run_log_sweep(
             self, tmp_path: Path, monkeypatch) -> None:
@@ -106,7 +114,7 @@ class TestRealEntrypoints:
         assert main(["init", "--config", str(config)],
                     stdout=init_stdout, stderr=init_stderr) == 0
         assert init_stdout.getvalue() == ""
-        assert init_stderr.getvalue() == ""
+        _assert_started(init_stderr, "init")
 
         describe_stdout, describe_stderr = io.StringIO(), io.StringIO()
         assert main(["describe", "--config", str(config)],
@@ -114,7 +122,7 @@ class TestRealEntrypoints:
         described = json.loads(describe_stdout.getvalue())
         assert isinstance(described["devices"], list)
         assert describe_stdout.getvalue().count("\n") == 1
-        assert describe_stderr.getvalue() == ""
+        _assert_started(describe_stderr, "describe")
 
         plan = _plan_file(home, "33")
         submit_stdout, submit_stderr = io.StringIO(), io.StringIO()
