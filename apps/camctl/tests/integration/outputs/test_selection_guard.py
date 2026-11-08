@@ -9,9 +9,10 @@ import pytest
 from camctl.contracts.values import MAX_OBJECT_ID, new_operation_key
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
-from ..support.output_planning import capture_operation, validate_static_event as validate_event
+from ..support.output_planning import EventSequence, capture_operation, validate_static_event as validate_event
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
+from camctl.persistence.transaction import commit_operation, row_facts
 
 from .test_catalog_integrity import selection_database
 from .test_output_family import family_database
@@ -33,16 +34,36 @@ def _change_item(event, index=0, **values):
     return replace(event, rows=event.rows[:index + 1] + (changed,) + event.rows[index + 2:])
 
 
+def _commit_selection(owned, event, proposal, *, rejected=False):
+    before = tuple(owned.connection.iterdump())
+    receipt = commit_operation(EventSequence((event,), proposal), new_operation_key(), owned)
+    assert not owned.connection.in_transaction
+    if rejected:
+        assert receipt.kind == "rolled_back", receipt.error
+        assert isinstance(receipt.error, EventValidationError), receipt.error
+        assert "选择条目的完整集合、保存顺序或依据" in str(receipt.error)
+        assert tuple(owned.connection.iterdump()) == before
+    else:
+        assert receipt.kind == "completed", receipt.error
+    return receipt
+
+
 @pytest.mark.parametrize("mode", list(SelectionMode))
 def test_registered_guard_accepts_complete_saved_request(selection_database, mode):
     event, context = _proposal(selection_database, mode)
-    assert validate_event(event, context).branch_name == "OBTAIN"
+    _commit_selection(selection_database, event, context)
 
 
 @pytest.mark.parametrize("mode", list(SelectionMode))
 def test_event_row_order_does_not_change_persisted_selection_order(selection_database, mode):
     event, context = _proposal(selection_database, mode)
-    validate_event(replace(event, rows=tuple(reversed(event.rows))), context)
+    _commit_selection(selection_database, replace(event, rows=tuple(reversed(event.rows))), context)
+    saved = outputs.load_selection(selection_database.connection, 61)
+    assert [(item.output_id, item.requested_output_id) for item in saved.items] == {
+        SelectionMode.DEFAULT: [(703, None), (705, None)],
+        SelectionMode.PREVIEW: [(703, None), (None, None)],
+        SelectionMode.EXPLICIT_IDS: [(705, 705), (703, 703), (None, 999), (None, 704)],
+    }[mode]
 
 
 @pytest.mark.parametrize("mode", list(SelectionMode))
@@ -57,8 +78,7 @@ def test_registered_guard_rejects_incomplete_or_reordered_saved_collection(selec
         context.owners["obtain_items", 99] = ("action", 30)
     else:
         rows[1], rows[2] = replace(rows[1], row_id=rows[2].row_id), replace(rows[2], row_id=rows[1].row_id)
-    with pytest.raises(EventValidationError):
-        validate_event(replace(event, rows=tuple(rows)), context)
+    _commit_selection(selection_database, replace(event, rows=tuple(rows)), context, rejected=True)
 
 
 @pytest.mark.parametrize("mode,changes", [
@@ -71,8 +91,7 @@ def test_registered_guard_rejects_incomplete_or_reordered_saved_collection(selec
 ])
 def test_registered_guard_rejects_selection_facts_not_derived_from_request(selection_database, mode, changes):
     event, context = _proposal(selection_database, mode)
-    with pytest.raises(EventValidationError):
-        validate_event(_change_item(event, **changes), context)
+    _commit_selection(selection_database, _change_item(event, **changes), context, rejected=True)
 
 
 @pytest.mark.parametrize("table,column,identity", [
@@ -219,10 +238,10 @@ def test_reliably_empty_catalog_uses_saved_mode(selection_database, mode):
     connection.execute("DELETE FROM outputs WHERE source_action_id=11")
     connection.commit()
     event, context = _proposal(selection_database, mode)
-    validate_event(event, context)
+    _commit_selection(selection_database, event, context)
     if mode is SelectionMode.EXPLICIT_IDS:
         assert [row.after.values["error_code"] for row in event.rows[1:]] == [1, 1, 1, 2]
-        selection = {**context.state_rows["obtain_source_selections"][61], **event.rows[0].after.values}
+        selection = row_facts(connection, "obtain_source_selections", 61)
         assert selection["error_code"] is None
     else:
         assert len(event.rows) == 1
