@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from ..support.distribution import prepare_project_metadata
+
 
 def _run_cli(home: Path, *arguments: str, cwd: Path | None = None):
     environment = dict(os.environ)
@@ -87,7 +89,8 @@ class TestRealEntrypoints:
     def test_init_submit_describe_do_not_start_run_log_sweep(
             self, tmp_path: Path, monkeypatch) -> None:
         from camctl.cli import main
-        from camctl.logging_runtime import copies
+
+        prepare_project_metadata(tmp_path, monkeypatch)
 
         home = tmp_path / "home"
         home.mkdir()
@@ -101,14 +104,17 @@ class TestRealEntrypoints:
         old_temp.write_bytes(b"old marker temp")
         formal_marker.write_bytes(b"malformed formal marker")
 
-        original_listdir = copies._listdir
+        original_listdir = os.listdir
         scans: list[Path] = []
 
-        def record_listdir(path: Path):
-            scans.append(Path(path))
+        def record_listdir(path="."):
+            if isinstance(path, (str, bytes, os.PathLike)):
+                directory = Path(os.fsdecode(path)).resolve()
+                if directory == logs_dir.resolve():
+                    scans.append(directory)
             return original_listdir(path)
 
-        monkeypatch.setattr(copies, "_listdir", record_listdir)
+        monkeypatch.setattr(os, "listdir", record_listdir)
 
         init_stdout, init_stderr = io.StringIO(), io.StringIO()
         assert main(["init", "--config", str(config)],

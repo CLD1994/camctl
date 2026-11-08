@@ -35,6 +35,7 @@ from .test_fields import _action_facts
 from ..persistence.test_runtime import _create_valid_database
 from ..support.acceptance import accept_document
 from ..support.database import database_path
+from ..support.distribution import prepare_project_metadata
 
 pytestmark = pytest.mark.asyncio
 
@@ -139,7 +140,8 @@ async def test_plan_storage_field_is_rejected_by_the_original_parameter_schema(e
     assert connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone()[0] == 0
 
 
-async def test_describe_exports_hasselblad_without_device_or_executable(tmp_path):
+async def test_describe_exports_hasselblad_without_device_or_executable(tmp_path, monkeypatch):
+    prepare_project_metadata(tmp_path, monkeypatch)
     missing_tool = tmp_path / "missing-hb_cli"
     config = tmp_path / "config.toml"
     config.write_text(
