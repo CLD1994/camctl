@@ -1069,7 +1069,7 @@ async def test_internal_original_read_unknown_recovery_finishes_original_binding
 
 
 @pytest.mark.parametrize("new_session", [False, True])
-async def test_obtain_verify_preserves_original_end_or_resumes_at_full_offset(pending_read, monkeypatch, new_session, capture_resources):
+async def test_obtain_verify_resumes_from_saved_original_end(pending_read, monkeypatch, new_session, capture_resources):
     cfg, owned, _command = pending_read
     driver = ReadRequests(owned, _CONTENT)
     database = await capture_database(owned)
@@ -1085,11 +1085,11 @@ async def test_obtain_verify_preserves_original_end_or_resumes_at_full_offset(pe
             recovery_max_event_id=lambda: horizon)(next_database)
 
     await _assert_verify_end_recovery(owned, runtime, driver, lambda: advance_obtain(runtime),
-        fresh, advance_obtain, monkeypatch, new_session)
+        fresh, advance_obtain, monkeypatch)
 
 
 @pytest.mark.parametrize("new_session", [False, True])
-async def test_internal_verify_preserves_original_end_or_resumes_at_full_offset(pipeline, monkeypatch, new_session, capture_resources):
+async def test_internal_verify_resumes_from_saved_original_end(pipeline, monkeypatch, new_session, capture_resources):
     flow, driver = await _internal_flow(pipeline)
 
     async def fresh(horizon):
@@ -1103,10 +1103,10 @@ async def test_internal_verify_preserves_original_end_or_resumes_at_full_offset(
 
     await _assert_verify_end_recovery(flow.owned, flow, driver,
         lambda: run_recording_media(flow.media, 1, 1, flow.source_id),
-        fresh, lambda current: run_recording_media(current.media, 1, 1, current.source_id), monkeypatch, new_session)
+        fresh, lambda current: run_recording_media(current.media, 1, 1, current.source_id), monkeypatch)
 
 
-async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new_runtime, advance, monkeypatch, new_session):
+async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new_runtime, advance, monkeypatch):
     from camctl.capture.media_flow import RecordingInputCopies
     from camctl.contracts.values import ConsistencyError
     from camctl.outputs.copy import CopyCompletionError
@@ -1132,6 +1132,9 @@ async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new
     assert owned.connection.execute(
         "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
         (original_ticket.run_id, original_ticket.attempt_id)).fetchone() == (1, None)
+    end_event, = owned.connection.execute(
+        "SELECT read_end_event_id FROM file_copies WHERE id=?", (copy_id,)).fetchone()
+    assert end_event is not None
     horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
     fresh = await new_runtime(horizon)
 
@@ -1144,10 +1147,9 @@ async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new
         "SELECT attempts_used FROM operation_runs WHERE id=?", (original_ticket.run_id,)).fetchone() == (original_ticket.attempt_id,)
     assert owned.connection.execute(
         "SELECT committed_bytes,source_size,round,recopies_used FROM file_copies WHERE id=?", (copy_id,)).fetchone() == progress
-    assert len(driver.requests) == (2 if new_session else 1)
-    if new_session:
-        assert driver.requests[1][0] == original_ticket
-        assert driver.requests[1][3] == progress[1]
+    assert owned.connection.execute(
+        "SELECT read_end_event_id FROM file_copies WHERE id=?", (copy_id,)).fetchone() == (end_event,)
+    assert len(driver.requests) == 1
 
 
 async def test_obtain_complete_actual_read_precedes_later_business_cancel(pending_read):
