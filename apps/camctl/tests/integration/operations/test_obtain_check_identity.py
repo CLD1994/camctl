@@ -703,6 +703,8 @@ def test_followup_guard_reads_actual_previous_result_event(tmp_path, bounded, da
 @pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
 def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
     from copy import deepcopy
+    import sqlite3
+    from camctl.history.validators import EventValidationError
     from camctl.persistence.transaction import commit_operation, row_facts
     _, owned = _environment(tmp_path, host=False)
     try:
@@ -711,6 +713,11 @@ def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
         owned.connection.commit()
         key = new_operation_key()
         plan = _capture_plan(owned, _intent(host=False), key)
+        with sqlite3.connect(':memory:') as baseline:
+            owned.connection.backup(baseline)
+            legal = commit_operation(_CapturedProposal(plan, bounded), key, owned)
+            assert legal.kind == 'completed', legal.error
+            baseline.backup(owned.connection)
         event, = plan.events
         state = deepcopy(plan.state_rows)
         host = row_facts(owned.connection, 'outputs', 2)['intermediate_file_id']
@@ -722,6 +729,8 @@ def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
         plan = replace(plan, events=(event,), state_rows=state)
         receipt = _unchanged(owned, lambda: commit_operation(_CapturedProposal(plan, bounded), key, owned))
         assert receipt.kind == 'rolled_back', receipt.error
+        assert isinstance(receipt.error, EventValidationError)
+        assert '配置必须符合真实主机或设备载体分区' in str(receipt.error)
     finally:
         owned.connection.close()
 
