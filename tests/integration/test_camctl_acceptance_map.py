@@ -101,8 +101,8 @@ def _resolve_existing(path_text: str) -> list[str]:
 def test_every_software_contract_has_evidence_owner() -> None:
     """每条正式验收都有结构完整的映射行，引用的路径真实存在。"""
     expected = _authoritative_ids()
-    assert len(expected) == 165, (
-        f"权威验收条目应为 165 条，实际解析到 {len(expected)} 条；"
+    assert len(expected) == 166, (
+        f"权威验收条目应为 166 条，实际解析到 {len(expected)} 条；"
         "解析器或权威文档发生了变化")
     entries = _mapped_entries()
 
