@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.attempts import (
     AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, BeginDisposition,
     OperationKind,
@@ -13,6 +13,8 @@ from camctl.operations.attempts import (
 from camctl.operations.models import AttemptStatus, EffectState, ErrorValue, SettlementBasis
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
+from camctl.outputs.batches import BatchOutcome, BatchRequest
+from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 
 from .test_attempts import _NOW, _outcome, _validated
 from ..outputs.test_sources import _seed_environment, _seed_plan, _seed_action, _seed_output
@@ -22,18 +24,24 @@ def _environment(tmp_path, *, host=True):
     path, owned = _seed_environment(tmp_path)
     connection = owned.connection
     _seed_plan(connection, 1)
-    _seed_action(connection, 1, 1, action_type=1)
+    _seed_action(connection, 1, 1, action_type=1, status=3 if not host else 2)
     _seed_action(connection, 2, 1, action_type=4, source_resolution_state=1)
+    if not host:
+        connection.execute("UPDATE actions SET source_resolution_state=2,resolved_source_plan_id=1 WHERE id=2")
     connection.execute("UPDATE actions SET input_fields_json=?,execution_spec_json=? WHERE id=2",
         ('{"params":{"source":{"action_instance_id":"1"},"purpose":"manual","output_ids":["1","2"]}}',
          '{"selection_mode":3}'))
     _seed_output(connection, 1, 1, 2 if host else 1, availability=5)
     connection.execute("INSERT INTO action_dependencies VALUES (1,2,1)")
-    connection.execute("INSERT INTO obtain_source_selections VALUES (1,1,1,NULL,NULL)")
+    connection.execute("INSERT INTO obtain_source_selections VALUES (1,1,?,NULL,NULL)", (2 if not host else 1,))
     connection.execute(
         "INSERT INTO obtain_items (id,selection_id,requested_output_id,output_id,basis,"
         "status,source_dependency) VALUES (1,1,1,NULL,5,1,0)")
     connection.commit()
+    if not host:
+        register_file_batch_guards()
+        batch = FileBatchRepository().acquire(BatchRequest(2, "cam-1", _NOW), new_operation_key(), owned)
+        assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch
     return path, owned
 
 
@@ -125,11 +133,22 @@ def test_running_original_ticket_cannot_be_hidden_by_new_key(tmp_path):
 
 @pytest.mark.parametrize("host", [True, False])
 def test_actual_carrier_rejects_other_configuration_partition(tmp_path, host):
+    legal_path = tmp_path / "legal"
+    legal_path.mkdir()
+    _, legal = _environment(legal_path, host=host)
+    try:
+        accepted = OperationRepository().begin_attempt(_intent(host=host), new_operation_key(), legal)
+        assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+        assert accepted.value.disposition is BeginDisposition.GRANTED
+    finally:
+        legal.connection.close()
     _, owned = _environment(tmp_path, host=host)
     try:
         refused = _unchanged(owned, lambda: OperationRepository().begin_attempt(
             _intent(host=not host), new_operation_key(), owned))
         assert refused.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(refused.error, ConsistencyError)
+        assert "配置必须符合真实主机或设备载体分区" in str(refused.error)
     finally:
         owned.connection.close()
 
