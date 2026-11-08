@@ -1,6 +1,7 @@
 from dataclasses import replace
 from decimal import Decimal
 import asyncio
+from itertools import chain, repeat
 import os
 import signal
 import sys
@@ -139,7 +140,7 @@ async def test_cancel_during_failed_start_preserves_not_dispatched_fact():
 
 @pytest.mark.asyncio
 async def test_deadline_before_first_dispatch_is_not_dispatched():
-    readings = iter([0, 5_000_000_000])
+    readings = chain([0], repeat(5_000_000_000))
     transport = Transport()
     result = await check(driver(transport, lambda: next(readings)))
     outcome = result.to_device_result("31").outcome

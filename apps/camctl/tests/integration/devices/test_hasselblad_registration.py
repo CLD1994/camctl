@@ -66,7 +66,7 @@ def test_hasselblad_catalog_and_task_binding_resolve_each_device_source(
     expected = {
         "hb-default": (CaptureStorage.HOST, True),
         "hb-host": (CaptureStorage.HOST, True),
-        "hb-device": (CaptureStorage.DEVICE, False),
+        "hb-device": (CaptureStorage.DEVICE, True),
     }
     for device_id, (storage, delete_supported) in expected.items():
         assert definition.source_storage_resolver(config.devices[device_id]) is storage
@@ -89,11 +89,11 @@ def test_hasselblad_catalog_and_task_binding_resolve_each_device_source(
         for device in catalog.describe_document()["devices"]
     }
     assert described["hb-host"]["delete_supported"] is True
-    assert described["hb-device"]["delete_supported"] is False
+    assert described["hb-device"]["delete_supported"] is True
 
     entry = drivers_runtime.current_registry().entry(DRIVER_ID)
     assert entry is not None
-    assert entry.declaration.delete_supported is False
+    assert entry.declaration.delete_supported is True
 
     resolver = definition.source_storage_resolver
     previous_entry = entry
@@ -134,4 +134,4 @@ def test_invalid_hasselblad_source_rejects_registration_and_catalog_atomically(
 
     direct_catalog = build_catalog(valid, definitions_before)
     assert direct_catalog.source_delete_supported("hb0") is True
-    assert driver_definition().declaration.delete_supported is False
+    assert driver_definition().declaration.delete_supported is True
