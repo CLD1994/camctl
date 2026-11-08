@@ -8,7 +8,6 @@ import json
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.capture.files import file_identity_key
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind
 from camctl.outputs.qualification import OperationConfig, QualificationOutcome
 from camctl.outputs.batches import BatchOutcome, BatchRequest
@@ -32,7 +31,6 @@ def read_request(request):
     else:
         owned = request.getfixturevalue("read_targets")
         command = _command(internal=request.param == "internal")
-        _set_device_identities(owned)
     if request.param == "internal":
         owned.connection.execute("DELETE FROM obtain_items")
         owned.connection.execute("DELETE FROM outputs")
@@ -40,13 +38,6 @@ def read_request(request):
         owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
     return owned, command
-
-
-def _set_device_identities(owned):
-    for file_id in (501, 502):
-        owned.connection.execute("UPDATE device_files SET identity_key=? WHERE id=?",
-            (file_identity_key("cam-1", "camctl-adb", f"file-{file_id:04d}"), file_id))
-    owned.connection.commit()
 
 
 def _save_grant(owned, command):
@@ -156,7 +147,6 @@ def test_grant_key_rejects_changed_shared_input(granted, field):
 @pytest.mark.parametrize("field", ["max_attempts", "timeout_s", "retry_interval_s"])
 def test_grant_key_rejects_changed_adopted_device_config(read_targets, field):
     owned, command = read_targets, _command()
-    _set_device_identities(owned)
     key = new_operation_key()
     first = OutputsRepository().grant_file(command, key, owned)
     assert first.kind is DbOutcomeKind.COMPLETED, first.error
@@ -375,8 +365,6 @@ def test_original_length_uses_json_numeric_semantics(read_request, size, saved_s
 @pytest.fixture
 def rejected(target):
     owned, command = target
-    if command.source_device_file_id is not None:
-        _set_device_identities(owned)
     _availability(owned.connection, command, 4)
     owned.connection.commit()
     key = new_operation_key()

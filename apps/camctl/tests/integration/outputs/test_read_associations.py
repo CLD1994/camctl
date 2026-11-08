@@ -8,6 +8,7 @@ import sqlite3
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.capture.files import file_identity_key
 from camctl.contracts.json_values import parse_exact_json
 from camctl.outputs.qualification import FileCandidate, OperationConfig, QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
@@ -31,6 +32,9 @@ def read_targets(tmp_path):
         for action_id in (11, 12):
             _seed_action(connection, action_id, 1, action_type=2)
             _seed_device_file(connection, action_id + 490, action_id)
+            file_id = action_id + 490
+            connection.execute("UPDATE device_files SET identity_key=? WHERE id=?",
+                (file_identity_key("cam-1", "camctl-adb", f"file-{file_id:04d}"), file_id))
             _seed_output(connection, action_id + 690, action_id, action_id + 490)
         for action_id in (31, 32):
             _seed_action(connection, action_id, 1, action_type=4)
