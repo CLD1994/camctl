@@ -21,6 +21,8 @@ from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.values import new_operation_key
 from camctl.devices.catalog import DriverDefinitions, build_catalog
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID, driver_definition
+from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.history.snapshots import SnapshotRef, prepare_snapshot
 from camctl.outputs.catalog import FileReference, OutputDraft, OutputKind, OutputCatalogFacts
 from camctl.outputs.cleanup_flow import delete_source_file
@@ -157,9 +159,11 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
             "policy": {"max_delay_ms": 5000},
         }])
         scheduling = SchedulingRepository()
+        camera = read_camera_config(config.devices["cam-1"])
         for save, request in (
             (scheduling.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
-            (scheduling.start_action, StartActionRequest(1, _NOW, _NOW)),
+            (scheduling.start_action, StartActionRequest(
+                1, _NOW, _NOW, expected_identity=CameraIdentity(camera.serial, camera.product_id))),
         ):
             outcome = save(request, new_operation_key(), owned)
             assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
