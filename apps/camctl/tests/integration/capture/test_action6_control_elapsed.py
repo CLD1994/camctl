@@ -1,4 +1,4 @@
-"""Action6 分段普通录像沿真实当前会话计时进入异常内容检查。"""
+"""Action6 分段普通录像保存当前会话的控制时长。"""
 
 import json
 from decimal import Decimal
@@ -28,7 +28,7 @@ from .test_record_file_completion_wait import (
 pytestmark = pytest.mark.asyncio
 
 
-async def test_action6_recording_handler_persists_current_session_elapsed_and_inspects(
+async def test_action6_recording_handler_persists_current_session_elapsed_and_publishes(
     tmp_path, monkeypatch,
 ):
     clock = {"wall_us": _NOW, "monotonic_ns": 5_000_000_000}
@@ -88,18 +88,19 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
         assert control_elapsed_ns == 75_000_000_000
         stopper.stop.assert_awaited_once()
         result_driver.list_results.assert_awaited_once()
-        assert len(tools.calls) == 3
-        assert all(not count_frames for _, count_frames in tools.calls)
+        assert tools.calls == []
 
         repository = SegmentRepository()
         ref = repository.read_active_set(action_id, owned)
         decision = repository.read_decision(ref, owned)
         assert decision.status.value == "succeeded"
-        assert decision.coverage_status.value == "reached"
+        assert decision.coverage_status.value == "not_performed"
         assert decision.metric.value == "duration_s"
         assert decision.target == Decimal("60")
-        assert decision.confirmed == Decimal("67")
-        assert decision.checked_count == 3
+        assert decision.confirmed is None
+        assert decision.checked_count == 0
+        assert decision.default_scope.state.value == "nonempty"
+        assert decision.default_scope.member_count == 4
     finally:
         owned.connection.close()
 
