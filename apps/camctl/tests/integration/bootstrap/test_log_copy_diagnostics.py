@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import json
 import sys
+import tomllib
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -58,6 +60,18 @@ def _assert_report_failure(text):
 async def test_report_copy_sync_failure_keeps_original_receipt_and_consumes_failure(
         tmp_path: Path, monkeypatch) -> None:
     from camctl.logging_runtime import diagnostics
+
+    # 源码测试环境未必安装发行包；为启动日志提供项目实际版本元数据。
+    project = Path(__file__).resolve().parents[3] / "pyproject.toml"
+    with project.open("rb") as stream:
+        version = tomllib.load(stream)["project"]["version"]
+    metadata_root = tmp_path / "distribution"
+    dist_info = metadata_root / f"camctl-{version}.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: camctl\nVersion: {version}\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(metadata_root))
+    assert metadata.version("camctl") == version
 
     deps = await _runtime(tmp_path)
     path = Path(deps.config.paths.log_file)
