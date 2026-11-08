@@ -10,7 +10,8 @@ from camctl.bootstrap.cleanup_assembly import cleanup_flow, session_cleanup_asse
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.devices.drivers.registry import DriverRegistry
 
-from ..outputs.test_cleanup_residual_recovery import _orphan_intent
+from ..outputs.test_cleanup_delete_save_recovery import _prepared
+from ..outputs.test_cleanup_residual_recovery import _orphan_intent, _orphan_intent_for_prepared
 from ..support.outputs import output_test_session
 from .test_output_binding_changes import _NOW, Catalog, environment
 
@@ -22,7 +23,23 @@ async def test_run_reports_state_db_error_for_unqualified_original_cleanup(
     environment, operation
 ):
     with output_test_session():
-        owned, _, driver, item_id, ticket, _ = await _orphan_intent(environment, operation)
+        if operation == "query":
+            from camctl.contracts.values import new_operation_key
+            from camctl.outputs.batches import BatchOutcome, BatchRequest
+            from camctl.persistence.models import DbOutcomeKind
+            from camctl.persistence.repositories.file_batches import FileBatchRepository
+
+            prepared = await _prepared(environment, before_query=True)
+            owned = prepared[0]
+            prior_action, device = owned.connection.execute(
+                "SELECT action_id,device_id FROM device_file_batches WHERE released_event_id IS NULL"
+            ).fetchone()
+            released = FileBatchRepository().release(BatchRequest(prior_action, device, _NOW),
+                new_operation_key(), owned)
+            assert released.kind is DbOutcomeKind.COMPLETED and released.value is BatchOutcome.RELEASED, released
+            owned, _, driver, item_id, ticket, _ = await _orphan_intent_for_prepared(environment, prepared, operation)
+        else:
+            owned, _, driver, item_id, ticket, _ = await _orphan_intent(environment, operation)
     cfg = environment[0]
     before_attempts = tuple(
         owned.connection.execute("SELECT * FROM operation_attempts")
