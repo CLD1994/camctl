@@ -9,6 +9,7 @@ import errno
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.contracts.values import new_operation_key
@@ -26,10 +27,12 @@ from camctl.operations.validation import validate_outcome
 from camctl.devices.drivers.hasselblad.driver import EVIDENCE
 from camctl.persistence.models import DbOutcomeKind
 
+from ..capture.test_host_photo_flow import _NOW, _input_time
+from ..support.hasselblad_read_cases import prepare_device_photo
 from ..outputs.test_grant_reuse import read_request, local_read
 from ..outputs.test_read_associations import _command
 from ..outputs.test_qualification import (
-    _NOW, _seed_plan, _seed_action, _seed_device_file, _seed_output,
+    _seed_plan, _seed_action, _seed_device_file, _seed_output,
     _seed_processing, _seed_selection_and_item,
 )
 
@@ -77,7 +80,72 @@ def read_targets(download_config):
         owned.connection.close()
 
 
+
+@pytest_asyncio.fixture
+async def photo_read_request(tmp_path, capture_resources):
+    """通过正式拍摄和受理入口建立相机原图及取回责任。"""
+    from camctl.outputs.qualification import FileCandidate, OperationConfig
+    from ..support.bootstrap_cleanup_cases import fix_obtain_selections
+    from ..support.capture import capture_database
+    from ..support.outputs import submit_output_document
+
+    cfg, owned, _driver, catalog, output_id, file_id = await prepare_device_photo(
+        tmp_path, capture_resources)
+    try:
+        database = await capture_database(owned)
+        accepted = await submit_output_document(database, catalog=catalog, occurred_at=_NOW,
+            body={"request_id": "2", "created_at": _input_time(), "name": "取回原图",
+                "actions": [{"name": "取回", "type": "obtain_action_outputs",
+                    "scheduled_at": _input_time(),
+                    "params": {"source": {"action_instance_id": "1"}}}]})
+        assert accepted.plan_id is not None, accepted
+        action_id, = owned.connection.execute("SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+        fix_obtain_selections(owned, action_id, _NOW)
+        item_id, = owned.connection.execute(
+            "SELECT id FROM obtain_items WHERE output_id=?", (output_id,)).fetchone()
+        command = FileCandidate(action_id, item_id, None, output_id, file_id,
+            "part", "3fr", "原图", OperationConfig(3, Decimal("10"), Decimal("0")), _NOW)
+        yield owned, command
+    finally:
+        owned.connection.close()
+
+
+def acquire_batch(owned, command):
+    from camctl.outputs.batches import BatchOutcome, BatchRequest
+    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+    device, = owned.connection.execute(
+        'SELECT a.device_id FROM device_files f JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?',
+        (command.source_device_file_id,)).fetchone()
+    register_file_batch_guards()
+    saved = FileBatchRepository().acquire(
+        BatchRequest(command.action_id, device, command.occurred_at), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED and saved.value in (BatchOutcome.GRANTED, BatchOutcome.HELD), saved
+
+
+def capture_selection(when):
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+    return CaptureSelectionInput('cam-1', DRIVER_ID, CameraIdentity('SERIAL-1', 10),
+        HasselbladDriver.default_prepare_lead_s, when)
+
+
 def begin_read(owned, command, prepared):
+    from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind, BeginDisposition
+    from camctl.outputs.slots import SlotRequest, SlotOutcome
+    acquire_batch(owned, command)
+    slot = OutputsRepository().grant_read_slot(SlotRequest(prepared.copy_id, command.occurred_at, capture_selection(command.occurred_at)), new_operation_key(), owned)
+    assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+    assert slot.value.outcome in (SlotOutcome.GRANTED, SlotOutcome.HELD), slot.value
+    saved = OperationRepository().begin_attempt(AttemptIntent('read', command.action_id,
+        OperationKind.READ_FILE, AttemptTarget(copy_id=prepared.copy_id), None,
+        AttemptConfig(5, Decimal('23.000000000000000001'), Decimal('2.1')), command.occurred_at + 1,
+        copy_round=1, capture_selection=capture_selection(command.occurred_at + 1)), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    assert saved.value.disposition is BeginDisposition.GRANTED
+    return running_read_ticket(owned, prepared.copy_id)
+
+
+def legacy_begin_read(owned, command, prepared):
     from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind, BeginDisposition
     from camctl.outputs.slots import SlotRequest
     slot = OutputsRepository().grant_read_slot(SlotRequest(prepared.copy_id, command.occurred_at), new_operation_key(), owned)
@@ -89,6 +157,7 @@ def begin_read(owned, command, prepared):
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     assert saved.value.disposition is BeginDisposition.GRANTED
     return running_read_ticket(owned, prepared.copy_id)
+
 
 
 def make_work(staging, ticket, content=b'partial'):
@@ -111,18 +180,20 @@ def assert_maintenance_failure(observed, config, original):
     assert cause['errno'] == original.errno
     assert cause['filename'] == original.filename
     assert cause['traceback'] and cause['traceback'][-1]['function'] in ('remove', 'fail_replace')
-    text = Path(config.paths.log_file).read_text()
-    assert text.count('run 会话失败: state_db_error') == 1
-    details = [line.removeprefix('诊断详情: ') for line in text.splitlines() if line.startswith('诊断详情: ')]
-    assert len(details) == 1
-    assert json.loads(details[0]) == outcome.details
+    records = [json.loads(line) for line in Path(config.paths.log_file).read_text().splitlines()]
+    failures = [record for record in records if record.get('event') == 'session_failed']
+    assert len(failures) == 1
+    assert (failures[0]['command'], failures[0]['reason'], failures[0]['level']) == (
+        'run', 'state_db_error', 'ERROR')
+    logged = failures[0]['details']['exception']
+    assert logged['type'] == diagnostic['type']
+    assert logged['cause'] == cause
+    assert logged['context'] == {'$ref': '#/details/exception/cause'}
 
 
 @pytest.fixture
-def original_read(read_request, tmp_path):
-    owned, command = read_request
-    owned.connection.execute('UPDATE actions SET driver_id=? WHERE id=11', (DRIVER_ID,))
-    owned.connection.commit()
+def original_read(photo_read_request, tmp_path):
+    owned, command = photo_read_request
     granted = OutputsRepository().grant_file(command, new_operation_key(), owned)
     assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
     ticket, intent = begin_read(owned, command, granted.value)
@@ -131,7 +202,6 @@ def original_read(read_request, tmp_path):
     return owned, ticket, intent, staging, work
 
 
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("boundary", [RecoveryBoundary.HOST_LOCAL_SETTLED, RecoveryBoundary.HOST_POWER_CYCLE])
 async def test_unconfigured_original_read_saves_local_recovery_evidence(original_read, boundary):
@@ -144,7 +214,6 @@ async def test_unconfigured_original_read_saves_local_recovery_evidence(original
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 @pytest.mark.parametrize("boundary,horizon_delta,removed", [
     (RecoveryBoundary.HOST_LOCAL_SETTLED, 0, True),
     (RecoveryBoundary.HOST_POWER_CYCLE, 0, True),
@@ -152,8 +221,9 @@ async def test_unconfigured_original_read_saves_local_recovery_evidence(original
     (RecoveryBoundary.HOST_LOCAL_SETTLED, -1, False),
 ])
 async def test_cleanup_requires_original_ticket_and_confirmed_startup_boundary(
-        original_read, download_config, monkeypatch, boundary, horizon_delta, removed):
+        original_read, photo_read_request, download_config, monkeypatch, boundary, horizon_delta, removed):
     owned, ticket, intent, staging, work = original_read
+    _, command = photo_read_request
     late = {}
     async def new_read_after_range(database):
         from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
@@ -166,8 +236,9 @@ async def test_cleanup_requires_original_ticket_and_confirmed_startup_boundary(
             key=key, description='原 READ 实际返回')
         key = new_operation_key()
         saved = await database.write(lambda worker: OperationRepository().begin_attempt(AttemptIntent(
-            'read', 31, OperationKind.READ_FILE, AttemptTarget(copy_id=int(ticket.target_id)), None,
-            AttemptConfig(5, Decimal('10'), Decimal('0')), _NOW + 11, copy_round=1), key, worker),
+            'read', command.action_id, OperationKind.READ_FILE, AttemptTarget(copy_id=int(ticket.target_id)), None,
+            AttemptConfig(5, Decimal('23.000000000000000001'), Decimal('2.1')), _NOW + 2_100_011, copy_round=1,
+            capture_selection=capture_selection(_NOW + 2_100_011)), key, worker),
             key=key, description='范围固定后新 READ')
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
         late['ticket'] = saved.value.ticket
@@ -184,7 +255,6 @@ async def test_cleanup_requires_original_ticket_and_confirmed_startup_boundary(
     assert running_read_ticket(owned, int(ticket.target_id))[0] == ticket
 
 
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("boundary,delta", [(RecoveryBoundary.UNCONFIRMED, 0),
     (RecoveryBoundary.HOST_LOCAL_SETTLED, -1), (RecoveryBoundary.HOST_POWER_CYCLE, -1)])
@@ -197,7 +267,6 @@ async def test_unconfigured_read_cannot_save_recovery_without_original_boundary(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 async def test_completed_read_is_cleaned_without_camera_or_recovery_assumption(
         original_read, download_config, monkeypatch):
     owned, ticket, intent, staging, work = original_read
@@ -216,7 +285,6 @@ async def test_completed_read_is_cleaned_without_camera_or_recovery_assumption(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 async def test_current_actual_download_owner_prevents_recovery_deletion(
         original_read, download_config, monkeypatch):
     from camctl.host_files.downloads import DownloadWorkspace
@@ -234,7 +302,6 @@ async def test_current_actual_download_owner_prevents_recovery_deletion(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 async def test_default_session_cleans_original_download_before_business_resume(
         original_read, download_config, monkeypatch):
     owned, ticket, intent, staging, work = original_read
@@ -246,7 +313,6 @@ async def test_default_session_cleans_original_download_before_business_resume(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 async def test_unknown_prefix_never_hides_known_responsibility_across_runs(
         original_read, download_config, monkeypatch):
     owned, ticket, intent, staging, work = original_read
@@ -279,14 +345,14 @@ async def test_last_budget_original_ticket_waits_for_maintenance_then_resumes(
     granted = OutputsRepository().grant_file(command, new_operation_key(), owned)
     assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
     prepared = granted.value
-    first, _ = begin_read(owned, command, prepared)
+    first, _ = legacy_begin_read(owned, command, prepared)
     failed = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.UNKNOWN,
         error=ErrorValue('device_error', 'read'),
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('read_returned', 1, {})))
     saved = OperationRepository().finish_attempt(AttemptFinish(first,
         validate_outcome(first, failed, EVIDENCE), _NOW + 2, retry_wait=True), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    ticket, intent = begin_read(owned, command, prepared)
+    ticket, intent = legacy_begin_read(owned, command, prepared)
     assert ticket.attempt_id == 2
     budgets = owned.connection.execute(
         "SELECT max_attempts_used,timeout_s_json,retry_interval_s_json FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
@@ -395,8 +461,8 @@ async def test_bounded_cursor_advances_past_retained_or_failed_known_responsibil
         record(*tickets)
 
     if blocked != 'late':
-        first, _ = begin_read(owned, command, first_grant.value)
-        second, _ = begin_read(owned, second_command, second_grant.value)
+        first, _ = legacy_begin_read(owned, command, first_grant.value)
+        second, _ = legacy_begin_read(owned, second_command, second_grant.value)
         saved = OperationRepository().finish_attempt(finish(second), new_operation_key(), owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
         record(first, second)
@@ -441,16 +507,18 @@ async def test_bounded_cursor_advances_past_retained_or_failed_known_responsibil
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 async def test_cursor_write_failure_is_a_real_maintenance_error(
         original_read, download_config, monkeypatch):
     from camctl.host_files import downloads
     owned, ticket, intent, staging, work = original_read
     failure = PermissionError(errno.EACCES, 'cursor replace denied', str(staging / '.read-download-cleanup-cursor'))
     failures = []
-    def fail_replace(*_args):
-        failures.append(failure)
-        raise failure
+    real_replace = downloads.os.replace
+    def fail_replace(source, destination, *args, **kwargs):
+        if Path(destination) == staging / '.read-download-cleanup-cursor':
+            failures.append(failure)
+            raise failure
+        return real_replace(source, destination, *args, **kwargs)
     monkeypatch.setattr(downloads.os, 'replace', fail_replace)
     observed = await run_download_maintenance(download_config, monkeypatch,
         boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, limit=1)
@@ -461,13 +529,14 @@ async def test_cursor_write_failure_is_a_real_maintenance_error(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 async def test_known_actual_owner_blocks_both_resume_and_unavailable_recovery(original_read):
     from camctl.host_files.downloads import DownloadWorkspace
     owned, ticket, intent, staging, work = original_read
     owner = DownloadWorkspace(staging, ticket)
     assert owner.claim()
-    driver = HasselbladDriver({}, BoundDirectories(staging), monotonic_ns=lambda: 0)
+    driver = HasselbladDriver({'cam-1': {'kind': 'camera', 'driver': DRIVER_ID,
+        'hasselblad': {'executable': '/tool/hb_cli', 'serial': 'SERIAL-1', 'product_id': 10}}},
+        BoundDirectories(staging), monotonic_ns=lambda: 0)
     try:
         for configured in (True, False):
             async with download_obtain_runtime(owned, staging, driver,
