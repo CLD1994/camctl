@@ -12,7 +12,7 @@ camctl 的测试启动入口使用[内存预算测试](../../docs/camctl/memory-
 
 该模式只把软件准备从业务窗口中分离，不写入虚构的启动事实，不增加 `max_delay_ms`，也不替换父进程、C 主程序或门闩的真实超时。受控桥在实际进入驱动门时保存端口和 PID，测试须核对当前进程身份；原中断点仍以各场景的已提交事实为准。真正未来等待、过期及驱动实际等待的专项保持原边界。切换状态的读者先读取完整状态，再采样实际单调时间，避免把旧采样与新 running 锚点组合。
 
-`test_device_capability_declarations.py` 在仓库外离线构建并安装 wheel 与锁定运行依赖，比较安装版和源码的正式能力导出，核对全部内置驱动、Hasselblad 两种正式源、同驱动的独立设备配置，以及任意驱动标识和无拍摄任务设备。真实 `init`、`submit` 与 SQLite 核对配置切换后旧执行定义保持，新请求使用新来源；同一份安装版 JSON 经根 Schema、wheel 资源、客户端实际加载、HTTP、参数表单和设备指南消费。Action6 普通录像表单读取实际必填光圈／码率，原生延时表单读取实际参数类型、三种输出和预览声明；Action6 的 `delete_supported=true`、Hasselblad 设备源的 `false` 也按安装版输出核对。非法删除声明的重载保留旧有效目录，旧说明缺字段仍为未知，有效空目录整体替换。设备工具边界禁止调用，不连接真实相机。
+`test_device_capability_declarations.py` 在仓库外离线构建并安装 wheel 与锁定运行依赖，比较安装版和源码的正式能力导出，核对全部内置驱动、Hasselblad 两种正式源、同驱动的独立设备配置，以及任意驱动标识和无拍摄任务设备。真实 `init`、`submit` 与 SQLite 核对配置切换后旧执行定义保持，新请求使用新来源；同一份安装版 JSON 经根 Schema、wheel 资源、客户端实际加载、HTTP、参数表单和设备指南消费。Action6 普通录像表单读取实际必填光圈／码率，原生延时表单读取实际参数类型、三种输出和预览声明；全部内置设备的 `delete_supported=true` 和虚构设备源的 `false` 也按安装版输出核对。非法删除声明的重载保留旧有效目录，旧说明缺字段仍为未知，有效空目录整体替换。设备工具边界禁止调用，不连接真实相机。
 
 页面联合链使用两份实际安装版导出验证当前源变更、逐设备指南及动作／产物清理入口。非法字段和重复键重载失败后仍按旧有效目录展示；首次加载失败与有效空目录按未知保留入口。混合来源、原片、预览、修复成品和产物状态分别核对，草稿及已导出原请求保持不变。
 
@@ -71,7 +71,9 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 
 ### 正式源文件清理的安装版联合链
 
-`test_device_file_cleanup_roundtrip.py` 从仓库外构建并独立安装 wheel，核对正式内置登记、DELETE／FILE_QUERY 工厂、端口及模块来源，经真实客户端导出、C host、CLI、SQLite、文件、报告导入及累计 ACK 验证已有独立动作 `delete_action_outputs`。该模块的 10 个分区覆盖 repaired／OSV／LRF／主机原图／主机预览逐份精确清理、不支持设备源与主机源混合、已清理产物的新请求，以及删除中断、独立预算、原配置保存、提交回执未知、终态伴随和在途取消恢复。外部 ADB 模型只识别已审阅的精确脚本及原目标，不替换生产文件工厂、解释器或状态机。
+`test_device_file_cleanup_roundtrip.py` 从仓库外构建并独立安装 wheel，核对正式内置登记、DELETE／FILE_QUERY 工厂、端口及模块来源，经真实客户端导出、C host、CLI、SQLite、文件、报告导入及累计 ACK 验证已有独立动作 `delete_action_outputs`。该模块的九个业务分区覆盖 repaired／OSV／LRF／主机原图／主机预览逐份精确清理、已清理产物的新请求，以及删除中断、独立预算、原配置保存、提交回执未知、终态伴随和在途取消恢复。外部 ADB 模型只识别已审阅的精确脚本及原目标，不替换生产文件工厂、解释器或状态机。
+
+设备源不支持删除与主机源混合时，各成员独立处理的行为由 [camctl 组件测试](../../apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py)验证；[设备能力声明测试](test_device_capability_declarations.py)验证不支持删除的声明与网页展示。完整安装链目前不覆盖该混合场景，不能由这些分别验证的结果推断完整链已通过。
 
 正式修复样本含两路 H.264 主视频，源与成品均实际运行 ffprobe 和全流解码；STOP 后的 3 秒等待使用真实单调钟。每例独立数据库、远端树和进程组，保存原请求／票据／结果／文件及报告事实。取消分区在结束旧组前断言目标取消已提交、DELETE 仍 RUNNING、结果事件为空、门闩进程仍活动且未发 QUERY，再由新 host 沿原尝试恢复 UNKNOWN，只核实一次，不重放删除。
 

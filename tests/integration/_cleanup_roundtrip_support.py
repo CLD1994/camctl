@@ -201,8 +201,7 @@ print(json.dumps({"version":importlib.metadata.version("camctl"),"distribution":
 
 
 class World:
-    def __init__(self, package, tmp_path, host_demo, monkeypatch, *, osmo=True,
-                 prepared=None, case_id=None):
+    def __init__(self, package, tmp_path, host_demo, monkeypatch, *, prepared=None, case_id=None):
         self.package = package
         self.root = tmp_path / "world"
         self.case_id = case_id or tmp_path.name
@@ -210,7 +209,7 @@ class World:
             self.deployment = Deployment(self.root, devices=False)
         else:
             assert self.root == prepared.root
-            assert package is prepared.package and osmo == prepared.with_osmo
+            assert package is prepared.package
             self.deployment = copy(prepared.deployment)
         self.db = self.deployment.state_db
         self.demo_path = host_demo
@@ -227,7 +226,6 @@ class World:
         self.members = {}
         self.host = None
         self.config_extra = ""
-        self.with_osmo = osmo
         self.config_original = (self.deployment.config_path.read_text()
                                 if prepared is None else prepared.config_original)
         self.monkeypatch.chdir(self.root)
@@ -299,7 +297,7 @@ delete_timeout_s="{timeout}"
 query_timeout_s="{query_timeout}"
 delete_retry_interval_s="{interval}"
 query_retry_interval_s="0"
-''' if self.with_osmo else ""
+'''
         self.deployment.config_path.write_text(self.config_original + f'''
 [cleanup]
 max_delete_attempts={max_d}

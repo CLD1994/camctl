@@ -9,7 +9,7 @@ import sys
 import pytest
 
 from _cleanup_roundtrip_support import (
-    RAW, PREVIEW, World, _hb_tool, cleanup_package, json_write, process_identity, records, rows, sha, wait,
+    _hb_tool, cleanup_package, json_write, process_identity, records, rows, wait,
 )
 from _cleanup_source_snapshot import cleanup_osmo_source
 from camctl.contracts.enums import enum_for
@@ -42,72 +42,6 @@ def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatc
                    for output in action.get("outputs", [])}
         for source in sources:
             assert outputs[str(world.sources[source]["id"])]["availability"] == "cleaned"
-
-
-def test_cleanup_device_delete_unsupported_with_host_files(
-        tmp_path, host_demo, cleanup_package, monkeypatch):
-    """不支持设备删除不能阻断同一请求中主机两份正式源的实际清理。"""
-    with World(cleanup_package, tmp_path, host_demo, monkeypatch, osmo=False) as world:
-        world.prepare_hasselblad()
-        world.assert_report_ack_and_history()
-        original = world.sources["hb-original"]
-        preview = world.sources["hb-preview"]
-        device = world.sources["hb-device-original"]
-        device_preview = world.sources["hb-device-preview"]
-        ids = [device["id"], original["id"], preview["id"]]
-        device_before = rows(world.db, "SELECT * FROM device_files ORDER BY id")
-        tool_calls = {mode: records(world.tools / f"hb-{mode}.jsonl") for mode in ("host", "device")}
-        for calls in tool_calls.values():
-            capture_calls = [call for call in calls if call["argv"][3] == "capture"]
-            assert len(capture_calls) == 1
-        for key, content in (("hb-original", RAW), ("hb-preview", PREVIEW)):
-            assert world.path(key).read_bytes() == content
-            assert rows(world.db, "SELECT size_bytes,sha256 FROM intermediate_files WHERE id=?",
-                        (world.sources[key]["intermediate_file_id"],)) == [{"size_bytes": len(content), "sha256": sha(content)}]
-        plan, receipt = world.export("mixed-hb-cleanup", [world.action(
-            "mixed-hb-cleanup", "delete_action_outputs", {"output_ids": list(map(str, ids))})])
-        world.host.submit(plan)
-        action, = world.wait_action(receipt["request_id"], "FAILED")
-        items = rows(world.db, "SELECT * FROM cleanup_items WHERE action_id=? ORDER BY id", (action["id"],))
-        assert [item["output_id"] for item in items] == ids
-        statuses = enum_for("cleanup_items.status")
-        assert [item["status"] for item in items] == [int(statuses.FAILED), int(statuses.SUCCEEDED), int(statuses.SUCCEEDED)]
-        assert items[0]["error_code"] == item_error_id("cleanup_items", "file_delete_failed")
-        assert items[0]["restriction_state"] == int(enum_for("cleanup_items.restriction_state").ACTIVE)
-        assert rows(world.db, "SELECT * FROM operation_runs WHERE cleanup_item_id=?", (items[0]["id"],)) == []
-        for item in items[1:]:
-            run, = rows(world.db, "SELECT * FROM operation_runs WHERE cleanup_item_id=?", (item["id"],))
-            assert run["responsibility_key"] == f"delete/{item['id']}"
-            assert run["attempts_used"] == 1
-            assert run["timeout_s_json"] is None and run["retry_interval_s_json"] is None
-            attempt, = rows(world.db, "SELECT * FROM operation_attempts WHERE run_id=?", (run["id"],))
-            assert attempt["attempt_no"] == 1 and attempt["error_json"] is None
-            result = json.loads(attempt["result_json"])
-            assert result["settlement"]["basis"] == "observed"
-            assert result["observations"] == [{"type": "file_absent", "version": 1,
-                "data": {"cleanup_item_id": str(item["id"])}}]
-        assert rows(world.db, "SELECT * FROM device_files ORDER BY id") == device_before
-        assert not world.path("hb-original").exists()
-        assert not world.path("hb-preview").exists()
-        for mode, calls in tool_calls.items():
-            assert records(world.tools / f"hb-{mode}.jsonl") == calls
-        assert world.calls() == []
-        output_rows = {row["id"]: row for row in rows(world.db, "SELECT * FROM outputs")}
-        availability = enum_for("outputs.availability")
-        assert output_rows[device["id"]]["availability"] == int(availability.RESTRICTED)
-        assert output_rows[device["id"]]["cleanup_status"] == int(enum_for("outputs.cleanup_status").INCOMPLETE)
-        assert json.loads(output_rows[device["id"]]["cleanup_error_json"])["code"] == "file_delete_failed"
-        assert output_rows[device_preview["id"]] == {key: value for key, value in device_preview.items()
-            if key not in ("action_name", "locator_json", "relative_path")}
-        assert all(output_rows[source["id"]]["availability"] == int(availability.CLEANED)
-                   for source in (original, preview))
-        snapshot = world.assert_report_ack_and_history()
-        reported = next(a for plan in snapshot["plans"] for a in plan.get("actions", [])
-                        if a["action_instance_id"] == str(action["id"]))
-        assert reported["status"] == "failed"
-        assert [(item["output_id"], item["status"]) for item in reported["result"]["items"]] == [
-            (str(ids[0]), "failed"), (str(ids[1]), "succeeded"), (str(ids[2]), "succeeded")]
-        assert reported["result"]["items"][0]["error"]["code"] == "file_delete_failed"
 
 
 def test_cleanup_new_request_for_cleaned_output(tmp_path, cleanup_osmo_source, monkeypatch):
