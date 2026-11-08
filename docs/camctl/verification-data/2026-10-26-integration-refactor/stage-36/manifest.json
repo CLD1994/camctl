@@ -1,0 +1,553 @@
+{
+  "date": "2026-11-08",
+  "scope": "Action6异常录像合法前态、原读取保存恢复及默认会话门禁；五个完整文件组合回归",
+  "source_commit": "ed21b0a436420a061c4d79d1a3665261e1b04f2b",
+  "baseline_commit": "05897503b1ed3910d80e78b57dd2c68de7a044c6",
+  "production_changes": false,
+  "integrated_commits": [
+    {
+      "author": "03e90ce5",
+      "root": "db8b7eb5"
+    },
+    {
+      "author": "813d5ce9",
+      "root": "132676e5"
+    },
+    {
+      "author": "2cca67ea",
+      "root": "7010fd43"
+    },
+    {
+      "author": "66f8b5fd",
+      "root": "ed21b0a4"
+    }
+  ],
+  "verification": {
+    "cases": 48,
+    "outcomes": {
+      "passed": 48
+    },
+    "all_teardowns_passed": true,
+    "jobs": 2,
+    "files": {
+      "tests/integration/bootstrap/test_read_default_consumers.py": {
+        "cases": 23,
+        "outcomes": {
+          "passed": 23
+        },
+        "case_phase_seconds": 6.505748384995968,
+        "max_case_seconds": 1.1365415189939085
+      },
+      "tests/integration/bootstrap/test_read_default_save_gate.py": {
+        "cases": 6,
+        "outcomes": {
+          "passed": 6
+        },
+        "case_phase_seconds": 1.3765062419843161,
+        "max_case_seconds": 0.23851739898964297
+      },
+      "tests/integration/capture/test_action6_budget_cold_recovery.py": {
+        "cases": 1,
+        "outcomes": {
+          "passed": 1
+        },
+        "case_phase_seconds": 1.0476215209928341,
+        "max_case_seconds": 1.0476215209928341
+      },
+      "tests/integration/capture/test_action6_segmented_recovery.py": {
+        "cases": 9,
+        "outcomes": {
+          "passed": 9
+        },
+        "case_phase_seconds": 8.884202049011947,
+        "max_case_seconds": 1.7866786130034598
+      },
+      "tests/integration/capture/test_action6_lifecycle_recovery.py": {
+        "cases": 9,
+        "outcomes": {
+          "passed": 9
+        },
+        "case_phase_seconds": 3.2503260490193497,
+        "max_case_seconds": 0.7952726640214678
+      }
+    },
+    "tasks": [
+      {
+        "id": "camctl/bootstrap",
+        "status": "passed",
+        "exit_code": 0,
+        "wall_seconds": 14.150563084011083,
+        "cases": 29
+      },
+      {
+        "id": "camctl/capture",
+        "status": "passed",
+        "exit_code": 0,
+        "wall_seconds": 21.268396398998448,
+        "cases": 19
+      }
+    ],
+    "entry_wall_seconds": 24.86189044000639,
+    "outer_wall_seconds": 25.11262962500041,
+    "exit_code": 0,
+    "source_snapshot_sha256": "387809788f932c0714a0d173a7fdc3c3d5509574a0fa48d254357998782e2965",
+    "cases_over_nine_seconds": []
+  },
+  "resources": {
+    "launcher_exit_code": 0,
+    "errors": [],
+    "remaining_pids": [
+      []
+    ],
+    "delegation_removed": true,
+    "capacity_acceptance": false,
+    "strict_no_swap_acceptance": false
+  },
+  "coverage": {
+    "action6": "真实跨会话、首次停止失败后重试或已建立的公开检查责任；保留可靠控制加未知尾段成功、完整不足、照片和冷恢复预算。四项native不再替换私有推进。",
+    "read_default": "支持源摘要的真实校验事务提交前后UNKNOWN、三类流程原完整申请/key/time重送；不支持摘要的结束释放另保留。真实默认会话遇必要错误停止后续业务，普通流程恢复后才执行新设备调用。"
+  },
+  "review": {
+    "action6": {
+      "agent": "/root/sol_high_review_action6_paths",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "accepted_author_final": "813d5ce9"
+    },
+    "read_default": {
+      "agent": "/root/sol_high_review_read_phases",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "accepted_author_final": "66f8b5fd"
+    },
+    "final_receipts": {
+      "agent": "/root/sol_high_review_read_phases",
+      "conclusion": "无剩余交付阻断",
+      "evidence": "review/final-receipt-review.txt",
+      "scope": "最终48节点、全部阶段、作者最终节点、六个源码文件、归档、文档与验收边界；未重跑测试。"
+    }
+  },
+  "development_corrections": [
+    "Action6早期全绿版本仍有内部advance替换及遗漏的可靠控制成功分区，以final-three-files-v2为最终作者验证。",
+    "早期default-consumers/result.xml的15项全部改为不支持源摘要，覆盖不足；后续verification/result.xml的27项已补回支持源摘要，但尚缺最终两个装配与执行门禁见证。最终verification/final.log/xml为29项完整文件验证。",
+    "读取默认门禁首次诊断因错误导入尚未到达行为，保留原失败，不计作生产失败。"
+  ],
+  "evidence_authority": {
+    "action6": "action6/final-three-files-v2.log 与.xml、final-command.txt、final-v2-exit-code.txt、final-mapping.md",
+    "read_default": "read-default/verification/final.log 与.xml、command.txt、final.exit；早期run.log/result.xml不是最终验收",
+    "integrated": "integrated/run.json、integration/summary.json及tasks中的cases/inventory/output/result"
+  },
+  "limitations": [
+    "不是完整camctl与根Python/Node验收；完整范围另行在同一ed21b0a4启动，尚在运行。",
+    "阶段35的两项检查原保存接续及既有绑定恢复生产失败未在本批重跑，不据本批通过关闭。",
+    "普通回归的委派收场不等于容量验收；严格无交换、目标设备均未执行。",
+    "不观察内部只读候选SQL的物理顺序；只证明实际业务调用门禁。",
+    "原失败未完成目标操作，前后行为准备也有修正，不计算同负载加速比。"
+  ],
+  "archive": {
+    "file": "runs.tar.gz",
+    "bytes": 575722,
+    "sha256": "1fa14f878414ed34bc414b947df5f16ab029616d5926f6ebbbf5f6073b820667",
+    "members": [
+      {
+        "path": "action6/changes.patch",
+        "bytes": 9911,
+        "sha256": "9465c5e4b98ca20d95d7dcde4c946f65bd5bc6197305276a350808ef22453af1"
+      },
+      {
+        "path": "action6/command.txt",
+        "bytes": 496,
+        "sha256": "7c19aebc1b46ffdaa71b59cca4be44c19f386bcaecdf64d144e144cf391bee86"
+      },
+      {
+        "path": "action6/exit-code.txt",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "action6/final-changes.patch",
+        "bytes": 18427,
+        "sha256": "c23e38ebc5a4dcf5209ef748fe0fe399e157d729df130295cf75b804bae04182"
+      },
+      {
+        "path": "action6/final-command.txt",
+        "bytes": 566,
+        "sha256": "fc7563a8cbfe1d4ca6adf676e36e00ccaf1fa2b2dcc2f666a36ee2820d0a8570"
+      },
+      {
+        "path": "action6/final-exit-code.txt",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "action6/final-mapping.md",
+        "bytes": 3434,
+        "sha256": "06f235abd8c60133f50bf3ab1be5f829c3a2a43236401933a0f9432a25d0e9de"
+      },
+      {
+        "path": "action6/final-source.txt",
+        "bytes": 401,
+        "sha256": "43226b49b532addd803cc4257b9f29dfaa55e17be6668a4e9675dbad01a5b106"
+      },
+      {
+        "path": "action6/final-status.txt",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "action6/final-three-files-v2.log",
+        "bytes": 100,
+        "sha256": "3e77e5cda9b3de99622416549cd45c6f85b10f2b40261e362c9f0002f1ae8963"
+      },
+      {
+        "path": "action6/final-three-files-v2.xml",
+        "bytes": 3642,
+        "sha256": "b94518b7d12b88d1b97337a2ba94a3f7b3b4df87e93832cdc4028988b2a07546"
+      },
+      {
+        "path": "action6/final-three-files.log",
+        "bytes": 100,
+        "sha256": "0f77808d327256ba4de990b6c83a2cd613b4a3f84cfe3fe2d473b6b701ca410b"
+      },
+      {
+        "path": "action6/final-three-files.xml",
+        "bytes": 3642,
+        "sha256": "6f820b094653a03d82827ea2952bf9acc3a576887fd2b3dfbff33db7770f41be"
+      },
+      {
+        "path": "action6/final-v2-exit-code.txt",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "action6/mapping.md",
+        "bytes": 2491,
+        "sha256": "4c11eb4138b94b866fc7fd89293f03a2ebcfd01e79f5aea9cc2b99ee4f3511f9"
+      },
+      {
+        "path": "action6/native-first.log",
+        "bytes": 3724,
+        "sha256": "414c93f7af5b72514bbb42835d6eaa21fee072ce0131d998c6a399d551ac52f6"
+      },
+      {
+        "path": "action6/native-second.log",
+        "bytes": 98,
+        "sha256": "edc41597ba96b8ee34654f6f1f420c00c860940d2a9810d81c0cce9aaf91f82e"
+      },
+      {
+        "path": "action6/source.txt",
+        "bytes": 517,
+        "sha256": "d6334fbf2083e6d03687f9501265125ddf01e6d21cce38ec420cd2fa88420e60"
+      },
+      {
+        "path": "action6/status.txt",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "action6/three-files.log",
+        "bytes": 100,
+        "sha256": "285ec16a861022115ce0b7aaf55e94fd60139181266526f5f9972bad0afa801d"
+      },
+      {
+        "path": "action6/three-files.xml",
+        "bytes": 3615,
+        "sha256": "137735270618ccc550083a5a0c44cb143ad5bef643ee866b870735f1899bf725"
+      },
+      {
+        "path": "integrated/budget/launcher.json",
+        "bytes": 3374,
+        "sha256": "31c843f7d9c2c2062ebe722ae65b02baaf35e80505efc10560347e7da3f67853"
+      },
+      {
+        "path": "integrated/integration/plan.json",
+        "bytes": 772,
+        "sha256": "db37c30ca3388d28e74025932c4434735d12f26c822bc993db3bef50147fa7a5"
+      },
+      {
+        "path": "integrated/integration/source.json",
+        "bytes": 2459486,
+        "sha256": "aaf35f2fc154e64b6aa458f456bf6dfb198e7dab13dbe2771a1b84633be51ca6"
+      },
+      {
+        "path": "integrated/integration/summary.json",
+        "bytes": 8622,
+        "sha256": "177a988089b21fe15bf7628b1b18c05c905654cba25923cb8ddb2cd6d80989c8"
+      },
+      {
+        "path": "integrated/run.json",
+        "bytes": 1427,
+        "sha256": "4ad404ee7ce243a5020599a45347811891a2a652cbe6b757985097b927b956cc"
+      },
+      {
+        "path": "integrated/run.log",
+        "bytes": 801,
+        "sha256": "00018e8fb1bb3a606d1e5163e6ddf9367be7854f014ab652076812fabc98154d"
+      },
+      {
+        "path": "integrated/source.patch",
+        "bytes": 41961,
+        "sha256": "5cfc3702cdd7a61f5d1fa51667e505b660b74b4c6cfa0315aacc3d5816b2ae41"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/cases.json",
+        "bytes": 16142,
+        "sha256": "eaf8e9724530a9ac83696b094c5d38640dbcab37c24d6398f349d980433c819b"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/command.json",
+        "bytes": 3469,
+        "sha256": "e80a03d37afe44e2d387909f5a96254e38aa486638e00190e777c019e5b4305e"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/events.jsonl",
+        "bytes": 56449,
+        "sha256": "721c6be41de760abfee088f2fa10cc8e953a95e0badb277ffb871a0fc334a3a2"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/inventory.json",
+        "bytes": 3873,
+        "sha256": "4519cbfc71161815853cb4f8e5cf8ddffe36cb16ba92ceae10563f214b885ee4"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/output.log",
+        "bytes": 10978,
+        "sha256": "67fd0f3501110ee4ee03647fe190e58e115268d12df0b02fe7815ef5335b3ca2"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/preparations.json",
+        "bytes": 559,
+        "sha256": "f6b5abdb2cf3bcf93d92f82cbff85636d0b91fbbe1a8c565d0409a736ae50df9"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/prepare.log",
+        "bytes": 26,
+        "sha256": "329a68c4cf5ca284752fd6a17d0f2780f6f5976989043242e67d3ff18d6bc6cc"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/progress.json",
+        "bytes": 221,
+        "sha256": "9d13d59c13dba51592358ba2d959592f732b6cd1423da7a892b716599c9fda09"
+      },
+      {
+        "path": "integrated/tasks/001-camctl-bootstrap/artifacts/result.json",
+        "bytes": 3200,
+        "sha256": "2125a763f65aa9de58bb11d6d754befdd6123b2d49997fce60e6057366944b1d"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/cases.json",
+        "bytes": 10790,
+        "sha256": "34f5d2b2eab25f75c7faa1a7c50c3c1976b9c0a63cef2c9c254ed6ec5ea281d0"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/command.json",
+        "bytes": 3621,
+        "sha256": "250c6cb571e0e0ed1c6545756055c99a496db14647322d831c3d52c015e2fc2a"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/events.jsonl",
+        "bytes": 38737,
+        "sha256": "4da8fce24d696d8fb8df7155ea914a7612fefbbb3d1c9ee80d5095f37b744a5c"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/inventory.json",
+        "bytes": 2730,
+        "sha256": "01a5bedaf17e052889bcb8e284a429dd3a00b773c14e75dfbe18996acb80e4e4"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/output.log",
+        "bytes": 5250,
+        "sha256": "24487fd848bf74ca4b7c8af00134773efcb7284d2e7d850dd35c42e88e13f15f"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/preparations.json",
+        "bytes": 556,
+        "sha256": "1f8cb35291bece977a638b4f2d3e4083c5ee064f80483bdc20831bbafb177eb1"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/prepare.log",
+        "bytes": 26,
+        "sha256": "329a68c4cf5ca284752fd6a17d0f2780f6f5976989043242e67d3ff18d6bc6cc"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/progress.json",
+        "bytes": 222,
+        "sha256": "0da8e9cd96431df0f17e42fe6c3d2fd08c9c2ec918efd3a09db23d934fc8d798"
+      },
+      {
+        "path": "integrated/tasks/002-camctl-capture/artifacts/result.json",
+        "bytes": 3355,
+        "sha256": "e78fcba4694c82740720d36f335da557721e877ccf50cc7e06376da08caa3ea5"
+      },
+      {
+        "path": "read-default/default-consumers/command.txt",
+        "bytes": 984,
+        "sha256": "a6d9f30f73fcb7cdcc94cfdb1f0a9743742ea7295208ecca5bf6b3b73b6fdbe5"
+      },
+      {
+        "path": "read-default/default-consumers/exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "read-default/default-consumers/first-exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "read-default/default-consumers/first-result.xml",
+        "bytes": 72034,
+        "sha256": "2bca4954d929182be94ceaec2756e567bd951625a265cded54614fa5cf65454d"
+      },
+      {
+        "path": "read-default/default-consumers/first-run.log",
+        "bytes": 71103,
+        "sha256": "5714de2bc85dfcac0acc5ab7ee2929eab7fc5d6a65c98b7dd299d67ddfaafaa8"
+      },
+      {
+        "path": "read-default/default-consumers/result.xml",
+        "bytes": 2934,
+        "sha256": "0f24d1c2a7020bc883c194e80f11047d49057bdf97e349a2cfeefedc73256afc"
+      },
+      {
+        "path": "read-default/default-consumers/run.log",
+        "bytes": 99,
+        "sha256": "262ff794044db768be044cbe68f005cd2cb47457c4a4e3b44bc5820c6e0ab4ac"
+      },
+      {
+        "path": "read-default/default-consumers/source-sha256.txt",
+        "bytes": 338,
+        "sha256": "bcdb0d924532c44a2a0279699a2bc43d4917d7ca554df8ac0a73a61c5d3267a0"
+      },
+      {
+        "path": "read-default/default-consumers/source/bootstrap_consumers.py",
+        "bytes": 28622,
+        "sha256": "00c12a0e66697bcd0d300a2e9f0b38f353ced84bd378fd68605ec22c3d623c51"
+      },
+      {
+        "path": "read-default/default-consumers/source/test_read_default_consumers.py",
+        "bytes": 5272,
+        "sha256": "02cbd3207e12e870df6593cc2d0033b3461092236fb2096e69307052e5075f63"
+      },
+      {
+        "path": "read-default/verification/command.txt",
+        "bytes": 1404,
+        "sha256": "94ec6e08ec76ba50f5fe31792d0c2e55b9f77498c2889c85bcee20421f9811fc"
+      },
+      {
+        "path": "read-default/verification/default-diagnostic.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "read-default/verification/default-diagnostic.log",
+        "bytes": 98,
+        "sha256": "c420fbcd629a020d82db5355a0430090ad57720c65b08d7983461589c3bab90d"
+      },
+      {
+        "path": "read-default/verification/default-diagnostic.xml",
+        "bytes": 406,
+        "sha256": "f0092daf9eb50e2dbd40c3c08a23f6c324ea80a6f213cd5394a3b9cae4f23ab7"
+      },
+      {
+        "path": "read-default/verification/exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "read-default/verification/final.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "read-default/verification/final.log",
+        "bytes": 99,
+        "sha256": "fcde37c73e18c36e641a8a8326073025322da52a4a271b99dd48a5da4f8d0557"
+      },
+      {
+        "path": "read-default/verification/final.xml",
+        "bytes": 5134,
+        "sha256": "63cde168152a3ff0c10363dbaafd0b8b8faae854f4aad46b7bcc1ac81c5b7b1a"
+      },
+      {
+        "path": "read-default/verification/gate-diagnostic.exit",
+        "bytes": 2,
+        "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      {
+        "path": "read-default/verification/gate-diagnostic.log",
+        "bytes": 1620,
+        "sha256": "b5fb873403c0a83cbffd7362ad0a75acb4adf520a49f56ad844246b490d9df68"
+      },
+      {
+        "path": "read-default/verification/gate-diagnostic.xml",
+        "bytes": 1666,
+        "sha256": "068deecb5faa851e135e8d40ffc9ee788b3663724e91fc8bcf195baa530696df"
+      },
+      {
+        "path": "read-default/verification/gate-second.exit",
+        "bytes": 2,
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "path": "read-default/verification/gate-second.log",
+        "bytes": 98,
+        "sha256": "c3015b35bbe497af98bf5a2b3ceb02f809f7f7feb0377d20d0fae299787ed553"
+      },
+      {
+        "path": "read-default/verification/gate-second.xml",
+        "bytes": 421,
+        "sha256": "db432c857f38cb94daaf96dbd6cac17ed3d6b575141f7870419f9674f85314db"
+      },
+      {
+        "path": "read-default/verification/result.xml",
+        "bytes": 5184,
+        "sha256": "7193ae179610ee8a42fa1e7424bffd374e12081e39eff109891e7349829ac21c"
+      },
+      {
+        "path": "read-default/verification/run.log",
+        "bytes": 99,
+        "sha256": "9e8ebfe9138f9a566004a1de32b0aa5c80e0e098fe22ee9467048b42bc776132"
+      },
+      {
+        "path": "read-default/verification/source-sha256.txt",
+        "bytes": 496,
+        "sha256": "dead1eda26f72b12b65da8cbacebdd508a5803c1551941ebaebf94ba41ec88d7"
+      },
+      {
+        "path": "read-default/verification/source/bootstrap_consumers.py",
+        "bytes": 26271,
+        "sha256": "4ccfaff73d0fcaae9cfedad69ec3999f2ed6da6f36040e496dc2fa94931378ee"
+      },
+      {
+        "path": "read-default/verification/source/test_read_default_consumers.py",
+        "bytes": 11597,
+        "sha256": "beccd276b1e97d6c44b2eb1e8b927b2ae824ec48b69e3c3d5a139b1daa0ffbe9"
+      },
+      {
+        "path": "read-default/verification/source/test_read_default_save_gate.py",
+        "bytes": 3032,
+        "sha256": "e82b2312e4e3b0da311c557e0e5a7ef9892d48d3f66c4d9af9192887e0b1fb6a"
+      },
+      {
+        "path": "review/final-receipt-review.txt",
+        "bytes": 1363,
+        "sha256": "42a260d9f6ac5dee4bc7d877bfa0da7489b441222ffdef9baf627c518988a9a3"
+      }
+    ]
+  },
+  "document_validation": {
+    "git_diff_check": "passed",
+    "repository_link_check": {
+      "exit_code": 1,
+      "scope": "node scripts/check-doc-links.mjs，扫描仓库全部Markdown",
+      "findings": [
+        ".agents/skills/camctl-real-device-deploy/assets/bundle/README.md: docs/camctl-configuration.md",
+        ".agents/skills/camctl-real-device-deploy/assets/bundle/README.md: docs/camctl_host.h",
+        ".agents/skills/camctl-real-device-deploy/assets/bundle/README.md: docs/host-configuration.md"
+      ],
+      "note": "三处均在本批未修改的部署模板；本批两份正文的本地文件链接另行核验。"
+    },
+    "changed_document_links": "passed: 本批两份Markdown的本地文件目标存在；未校验标题锚点。"
+  }
+}
