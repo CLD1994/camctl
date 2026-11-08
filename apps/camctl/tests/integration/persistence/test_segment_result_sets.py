@@ -349,7 +349,7 @@ async def test_complete_scan_uses_actual_positive_and_negative_pairing_facts(tmp
     try:
         preview=ids['/DCIM/raw.LRF']
         paired=runtime.capture.save_result_file_pairing(PairResultFilesSave(preview,saved.ref,
-            _boundary(owned),runtime.wall_us()),new_operation_key(),owned)
+            runtime.wall_us()),new_operation_key(),owned)
         assert paired.kind is DbOutcomeKind.COMPLETED,paired.error
         _finish_scan(owned,runtime,saved)
         action_id=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
@@ -598,7 +598,7 @@ async def test_later_pair_fact_does_not_demote_reliable_retained_preview(tmp_pat
     try:
         preview=ids['/DCIM/raw.LRF']
         paired=runtime.capture.save_result_file_pairing(PairResultFilesSave(preview,first.ref,
-            _boundary(owned),runtime.wall_us()),new_operation_key(),owned)
+            runtime.wall_us()),new_operation_key(),owned)
         assert paired.kind is DbOutcomeKind.COMPLETED,paired.error
         _finish_scan(owned,runtime,first,retry_wait=True)
         source=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
@@ -624,7 +624,7 @@ async def test_later_pair_fact_does_not_demote_reliable_retained_preview(tmp_pat
                 new_operation_key(),owned)
             assert proof.kind is DbOutcomeKind.COMPLETED,proof.error
         negative=runtime.capture.save_result_file_pairing(PairResultFilesSave(preview,last.value,
-            _boundary(owned),runtime.wall_us()),new_operation_key(),owned)
+            runtime.wall_us()),new_operation_key(),owned)
         assert negative.kind is DbOutcomeKind.COMPLETED,negative.error
         reason=owned.connection.execute('SELECT reason FROM device_file_pairing_facts WHERE id=?',
             (negative.value,)).fetchone()[0]

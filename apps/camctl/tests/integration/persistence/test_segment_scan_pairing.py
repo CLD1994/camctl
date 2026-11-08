@@ -43,7 +43,7 @@ async def _ready(tmp_path, entries, *, unfinished=(), next_cursor=None):
 
 
 def _request(owned, runtime, saved, preview):
-    return files.PairResultFilesSave(preview, saved.ref, _boundary(owned), runtime.wall_us())
+    return files.PairResultFilesSave(preview, saved.ref, runtime.wall_us())
 
 
 @pytest.mark.asyncio
@@ -149,14 +149,19 @@ async def test_real_transaction_guard_derives_all_pair_facts(tmp_path, bounded, 
 async def test_original_key_is_bound_to_request_time_boundary_and_scan(tmp_path):
     owned, runtime, saved, ids, _ = await _ready(tmp_path, [_entry('raw.LRF'), _entry('raw.OSV')])
     try:
-        from camctl.contracts.history_values import HistoryBoundary
         request = _request(owned, runtime, saved, ids['/DCIM/raw.LRF'])
         key = new_operation_key()
+        source_boundary = _boundary(owned)
         fact = _ok(runtime.capture.save_result_file_pairing(request, key, owned))
+        assert owned.connection.execute(
+            'SELECT source_txn_id,source_event_id FROM device_file_pairing_facts WHERE id=?',
+            (fact,)).fetchone() == (source_boundary.txn_id, source_boundary.last_event_id)
+        assert _boundary(owned) != source_boundary
         assert runtime.capture.verify_result_file_pairing(request, key, owned) == fact
+        assert _ok(runtime.capture.save_result_file_pairing(request, key, owned)) == fact
         before = _snapshot(owned)
         for changed in (replace(request, occurred_at=request.occurred_at + 1),
-                replace(request, source_boundary=_boundary(owned)),
+                replace(request, preview_file_id=ids['/DCIM/raw.OSV']),
                 replace(request, scan=replace(request.scan, page_no=2))):
             assert runtime.capture.save_result_file_pairing(changed, key, owned).kind is DbOutcomeKind.ROLLED_BACK
         assert _snapshot(owned) == before
@@ -727,7 +732,7 @@ async def test_complete_family_pairs_without_rewriting_raw_page(tmp_path):
         raw_before = owned.connection.execute(
             "SELECT body_json FROM history_events WHERE id=?", (saved.ref.event_id,)
         ).fetchone()
-        request = files.PairResultFilesSave(preview, saved.ref, _boundary(owned), runtime.wall_us())
+        request = files.PairResultFilesSave(preview, saved.ref, runtime.wall_us())
         key = new_operation_key()
         fact = _ok(runtime.capture.save_result_file_pairing(request, key, owned))
         assert type(fact) is int and fact > 0

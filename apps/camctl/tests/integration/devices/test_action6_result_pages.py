@@ -227,7 +227,6 @@ async def test_action6_pages_register_many_jpegs_and_cross_page_mp4_lrf_pair(
 async def test_segmented_formal_adapter_pairs_only_new_files_after_complete_scan(
         owned, tmp_path, monkeypatch):
     from camctl.capture.files import FileCompletionSave, OwnershipFromResultPageSave, PairResultFilesSave
-    from camctl.persistence.repositories.history import HistoryRepository
 
     baseline = tuple(ROOT + f"/A/{index:03}.JPG" for index in range(31))
     stem = ROOT + "/DJI_001/DJI_20261022100000_0001_D."
@@ -275,9 +274,8 @@ async def test_segmented_formal_adapter_pairs_only_new_files_after_complete_scan
             assert completion.kind is DbOutcomeKind.COMPLETED, completion.error
     preview_id = owned.connection.execute(
         "SELECT file_id FROM result_page_files WHERE identity=?", (preview,)).fetchone()[0]
-    boundary = HistoryRepository(Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])).current_boundary()
     paired = runtime.capture.save_result_file_pairing(
-        PairResultFilesSave(preview_id, final.value, boundary, _SCHEDULED + 5),
+        PairResultFilesSave(preview_id, final.value, _SCHEDULED + 5),
         new_operation_key(), owned)
     assert paired.kind is DbOutcomeKind.COMPLETED, paired.error
     assert len(filesystem.directory_calls) == 2
