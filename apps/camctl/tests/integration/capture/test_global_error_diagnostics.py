@@ -12,7 +12,7 @@ from camctl.host_files.media import MediaProbe
 from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context
 from camctl.operations.models import ErrorValue
 
-from .test_input_copy import pipeline  # noqa: F401
+from .media_retry_fixtures import media_pipeline  # noqa: F401
 from ..support.capture_diagnostic_cases import diagnostic_case, actual_call, call_world, started_call
 from ..support.call_cases import SavedCallBoundary
 from ..support.capture_media_cases import media_cases, MediaCase, ScriptTools
@@ -63,15 +63,15 @@ async def test_confirmed_stop_keeps_actual_call_error_and_tool_stderr(tmp_path, 
     assert len(case.stop.calls) == 1
 
 
-async def test_media_check_failure_is_logged_after_real_read_and_reliable_save(pipeline, media_cases):
-    owned, roots = pipeline[:2]
+async def test_media_check_failure_is_logged_after_real_read_and_reliable_save(media_pipeline, media_cases):
+    owned, roots, source_id = media_pipeline
     tools = ScriptTools(MediaProbe(None, 'probe_failed: media unavailable'))
-    case = await MediaCase(owned, roots, 11, tools).start()
+    case = await MediaCase(owned, roots, source_id, tools).start()
     try:
         records = []
         with error_diagnostics_context(None, records.append):
             async with diagnostic_scope():
-                step = await run_recording_media(case.runtime.media, 1, 1, 11)
+                step = await run_recording_media(case.runtime.media, 1, 1, source_id)
                 assert not records
         assert step.phase is CheckExecutionPhase.CHECK_TERMINAL
         document, = [json.loads(record) for record in records]
