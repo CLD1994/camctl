@@ -16,6 +16,7 @@ from time import monotonic_ns as _default_monotonic_ns
 import pytest
 import pytest_asyncio
 
+from camctl.capture.files import file_identity_key
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
@@ -28,6 +29,7 @@ from camctl.outputs.cleanup_flow import (
 )
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.operations import (
     OperationRepository,
     register_operation_guards,
@@ -44,6 +46,7 @@ from ..support.outputs import cleanup_runtime
 register_operation_guards()
 register_outputs_guards()
 register_capture_guards()
+register_file_batch_guards()
 
 _NOW = 1_750_000_000_000_000
 _BINDING = DeviceBinding(device_id="cam-1", driver_id="camctl-adb")
@@ -146,8 +149,11 @@ async def pipeline(tmp_path: Path):
         " identity_key, locator_json, ownership_evidence_json, role,"
         " presence_state, completion_state, completion_evidence_json,"
         " checksum_support, size_bytes, created_event_id, last_event_id,"
-        " change_count) VALUES (501, 11, 11, 'file-0501', '{}', '{}', 2, 2, 3,"
-        " '{}', 2, 10, 1, 1, 1)")
+        " change_count) VALUES (501, 11, 11, ?, '{}', '{}', 2, 2, 3,"
+        " '{}', 2, 10, 1, 1, 1)",
+        (file_identity_key(*connection.execute(
+            "SELECT device_id, driver_id FROM actions WHERE id = 11").fetchone(),
+            "file-0501"),))
     connection.execute(
         "INSERT INTO outputs (id, source_action_id, kind, device_file_id,"
         " availability, cleanup_status, media_json, created_event_id,"

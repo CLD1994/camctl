@@ -9,17 +9,21 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from camctl.capture.files import file_identity_key
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories import outputs
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import (
+    commit_operation,
     event_envelope,
     row_change,
     row_facts,
@@ -27,6 +31,8 @@ from camctl.persistence.transaction import (
 )
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.output_planning import EventSequence, proposal_state
+from ..support.output_storage_cases import capture_scoped_operation
 
 register_outputs_guards()
 register_capture_guards()
@@ -86,8 +92,11 @@ def _environment(tmp_path: Path, *, explicit: bool = True):
         " presence_state, completion_state, completion_evidence_json,"
         " checksum_support, size_bytes, created_event_id, last_event_id,"
         " change_count)"
-        " VALUES (501, 11, 11, 'file-0501', '{}', '{}', 2, 2, 3, '{}', 2, 10,"
-        " 1, 1, 1)")
+        " VALUES (501, 11, 11, ?, '{}', '{}', 2, 2, 3, '{}', 2, 10,"
+        " 1, 1, 1)",
+        (file_identity_key(*connection.execute(
+            "SELECT device_id, driver_id FROM actions WHERE id = 11").fetchone(),
+            "file-0501"),))
     connection.execute(
         "INSERT INTO cleanup_items (id, action_id, requested_output_id, status,"
         " restriction_state) VALUES (90, 30, 701, 1, 1)")
@@ -140,46 +149,96 @@ def _fix_rows(owned, requested=(701,), *, action_type_ok=True):
     return rows, owners
 
 
+def _commit_proposal(owned, proposal, events, *, rejection=None):
+    before = tuple(owned.connection.iterdump())
+    receipt = commit_operation(EventSequence(events, proposal), new_operation_key(), owned)
+    assert not owned.connection.in_transaction
+    if rejection is None:
+        assert receipt.kind == "completed", receipt.error
+    else:
+        assert receipt.kind == "rolled_back", receipt.error
+        assert isinstance(receipt.error, EventValidationError), receipt.error
+        assert rejection in str(receipt.error)
+        assert tuple(owned.connection.iterdump()) == before
+    return receipt
+
+
 class TestTargetSetGuard:
+    @staticmethod
+    def _fix_proposal(owned, requested=(701,)):
+        from camctl.outputs.cleanup_flow import FixCleanupTargets
+
+        connection = owned.connection
+        connection.execute("DELETE FROM cleanup_items")
+        connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+                           (json.dumps({"params": {"output_ids": [str(i) for i in requested]}}),))
+        connection.commit()
+        return capture_scoped_operation(
+            owned, outputs, lambda target: outputs.OutputsRepository().fix_cleanup_targets(
+                FixCleanupTargets(30, _NOW), new_operation_key(), target))
+
     def test_explicit_fix_accepts_matching_request_set(self, tmp_path: Path):
         owned = _environment(tmp_path)
-        rows, owners = _fix_rows(owned)
-        event = _envelope(2, 2, 4, 2, rows, _NOW)
-        validate_event(event, _context(owned, _state(owned), owners))
+        proposal = self._fix_proposal(owned)
+        _commit_proposal(owned, proposal, proposal.events)
+        assert owned.connection.execute(
+            "SELECT requested_output_id, output_id FROM cleanup_items WHERE action_id=30"
+        ).fetchall() == [(701, None)]
+        owned.connection.close()
 
     @pytest.mark.parametrize("requested", [(999,), (701, 999), ()])
     def test_explicit_fix_rejects_mismatched_sets(self, tmp_path, requested):
         owned = _environment(tmp_path)
-        rows, owners = _fix_rows(owned, requested)
-        event = _envelope(2, 2, 4, 2, rows, _NOW)
-        with pytest.raises(EventValidationError):
-            validate_event(event, _context(owned, _state(owned), owners))
+        proposal = self._fix_proposal(owned, requested if requested == (701, 999) else (701,))
+        event = proposal.events[0]
+        if requested == (701, 999):
+            # 提案包含两个成员，而本次实际原请求只有 701。
+            owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+                                     (json.dumps({"params": {"output_ids": ["701"]}}),))
+            owned.connection.commit()
+            proposal = proposal_state(owned, owners=proposal.owners)
+        elif requested:
+            row = event.rows[1]
+            changed = replace(row, after=replace(row.after, values={
+                **row.after.values, "requested_output_id": requested[0]}))
+            event = replace(event, rows=(event.rows[0], changed))
+        else:
+            event = replace(event, rows=(event.rows[0],))
+        _commit_proposal(owned, proposal, (event,), rejection=(
+            "清理目标固定必须创建清理成员" if not requested
+            else "精确清理成员与原请求及机内照片配对不一致"))
+        owned.connection.close()
 
     def test_initial_item_values_must_be_unresolved(self, tmp_path):
         owned = _environment(tmp_path)
-        rows, owners = _fix_rows(owned)
-        broken = tuple(
-            row if row.table != "cleanup_items"
-            else type(row)(  # 构造非法初始值：限制已建立。
-                table=row.table, row_id=row.row_id, before=row.before,
-                after=type(row.after)(
-                    exists=True,
-                    values={**row.after.values, "restriction_state": 2}))
-            for row in rows)
-        event = _envelope(2, 2, 4, 2, broken, _NOW)
-        with pytest.raises(EventValidationError):
-            validate_event(event, _context(owned, _state(owned), owners))
+        proposal = self._fix_proposal(owned)
+        event = proposal.events[0]
+        row = event.rows[1]
+        broken = replace(row, after=replace(row.after, values={
+            **row.after.values, "restriction_state": 2}))
+        _commit_proposal(owned, proposal, (replace(event, rows=(event.rows[0], broken)),),
+                         rejection="restriction_state=2 不在允许范围")
+        owned.connection.close()
 
     def test_range_fix_checks_source_membership(self, tmp_path):
-        owned = _environment(tmp_path, explicit=False)
-        rows, owners = _fix_rows(owned, (701,))
-        event = _envelope(2, 2, 4, 2, rows, _NOW)
-        validate_event(event, _context(owned, _state(owned), owners))
-        other, other_owners = _fix_rows(owned, (999,))
-        with pytest.raises(EventValidationError):
-            validate_event(
-                _envelope(3, 3, 4, 2, other, _NOW),
-                _context(owned, _state(owned), other_owners, event_id=3))
+        from camctl.outputs.cleanup_flow import FixCleanupTargets
+
+        owned = TestFixCleanupTargetsCommand._scope_environment(tmp_path)
+        TestFixCleanupTargetsCommand._processing_completed(owned)
+        proposal = capture_scoped_operation(
+            owned, outputs, lambda target: outputs.OutputsRepository().fix_cleanup_targets(
+                FixCleanupTargets(30, _NOW), new_operation_key(), target))
+        event = proposal.events[0]
+        row = event.rows[1]
+        other = replace(row, after=replace(row.after, values={
+            **row.after.values, "requested_output_id": 999}))
+        _commit_proposal(owned, proposal, (replace(event, rows=(event.rows[0], other)),),
+                         rejection="范围清理成员不属于本动作固定来源")
+        _commit_proposal(owned, proposal, proposal.events)
+        assert owned.connection.execute(
+            "SELECT requested_output_id FROM cleanup_items WHERE action_id=30"
+        ).fetchall() == [(701,)]
+        owned.connection.close()
 
     def test_fail_branch_creates_no_members(self, tmp_path):
         owned = _environment(tmp_path)
@@ -207,37 +266,57 @@ class TestCleanupMemberGuard:
         return state
 
     def test_progress_requires_fixed_target_set(self, tmp_path):
+        from camctl.outputs.cleanup_flow import ProgressCleanupItem, RestrictCleanupItem
+        from camctl.persistence.models import DbOutcomeKind
+
         owned = _environment(tmp_path)
-        progress = update_change("cleanup_items", 90,
-                                 {"status": 2, "restriction_state": 2},
-                                 {"status": 3, "restriction_state": 2})
-        event = _envelope(2, 2, 24, 2, (progress,), _NOW)
-        owners = {("cleanup_items", 90): ("action", 30)}
-        with pytest.raises(EventValidationError):
-            validate_event(event, _context(
-                owned, self._item_state(owned, status=2, restriction_state=2), owners))
-        fixed = self._item_state(owned, status=2, restriction_state=2)
-        fixed["actions"][30]["target_selection_state"] = 2
-        validate_event(event, _context(owned, fixed, owners))
+        connection = owned.connection
+        connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
+        connection.commit()
+        repository = outputs.OutputsRepository()
+        restricted = repository.restrict_cleanup_item(
+            RestrictCleanupItem(90, _NOW), new_operation_key(), owned)
+        assert restricted.kind is DbOutcomeKind.COMPLETED, restricted.error
+        proposal = capture_scoped_operation(
+            owned, outputs, lambda target: repository.progress_cleanup_item(
+                ProgressCleanupItem(90, _NOW), new_operation_key(), target))
+        connection.execute("UPDATE actions SET target_selection_state=1 WHERE id=30")
+        connection.commit()
+        current = proposal_state(owned, owners=proposal.owners)
+        _commit_proposal(owned, current, proposal.events,
+                         rejection="清理成员推进要求目标集合已固定")
+        connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
+        connection.commit()
+        _commit_proposal(owned, proposal, proposal.events)
+        assert connection.execute("SELECT status FROM cleanup_items WHERE id=90").fetchone() == (3,)
+        connection.close()
 
     def test_restrict_confirms_output_once_from_null(self, tmp_path):
+        from camctl.outputs.cleanup_flow import RestrictCleanupItem
+
         owned = _environment(tmp_path)
-        restrict = update_change(
-            "cleanup_items", 90,
-            {"output_id": None, "status": 1, "restriction_state": 1},
-            {"output_id": 701, "status": 2, "restriction_state": 2})
-        owners = {("cleanup_items", 90): ("action", 30)}
-        state = self._item_state(owned)
-        state["actions"][30]["target_selection_state"] = 2
-        validate_event(_envelope(2, 2, 24, 1, (restrict,), _NOW),
-                       _context(owned, state, owners))
-        reconfirm = update_change(
-            "cleanup_items", 90,
-            {"output_id": 701, "status": 1, "restriction_state": 1},
-            {"output_id": 702, "status": 2, "restriction_state": 2})
-        with pytest.raises(EventValidationError):
-            validate_event(_envelope(3, 3, 24, 1, (reconfirm,), _NOW),
-                           _context(owned, state, owners, event_id=3))
+        owned.connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
+        owned.connection.commit()
+        proposal = capture_scoped_operation(
+            owned, outputs, lambda target: outputs.OutputsRepository().restrict_cleanup_item(
+                RestrictCleanupItem(90, _NOW), new_operation_key(), target))
+        event = proposal.events[0]
+        row = event.rows[0]
+        owned.connection.execute("UPDATE cleanup_items SET output_id=701 WHERE id=90")
+        owned.connection.commit()
+        reconfirm = replace(row,
+            before=replace(row.before, values={**row.before.values, "output_id": 701}),
+            after=replace(row.after, values={**row.after.values, "output_id": 702}))
+        _commit_proposal(owned, proposal,
+                         (replace(event, rows=(reconfirm,)), *proposal.events[1:]),
+                         rejection="output_id'] 已赋值，不能再次更改")
+        owned.connection.execute("UPDATE cleanup_items SET output_id=NULL WHERE id=90")
+        owned.connection.commit()
+        _commit_proposal(owned, proposal, proposal.events)
+        assert owned.connection.execute(
+            "SELECT output_id, status, restriction_state FROM cleanup_items WHERE id=90"
+        ).fetchone() == (701, 2, 2)
+        owned.connection.close()
 
     def test_terminal_member_requires_final_event_and_basis(self, tmp_path):
         owned = _environment(tmp_path)
@@ -276,39 +355,66 @@ class TestCleanupMemberGuard:
                            _context(owned, state, owners, event_id=4))
 
     def test_absence_basis_accepts_device_file_absent(self, tmp_path):
+        from camctl.outputs.cleanup_flow import (
+            CleanupOutcomeChoice, FinishCleanupItem, RestrictCleanupItem)
+        from camctl.persistence.models import DbOutcomeKind
+
         owned = _environment(tmp_path)
-        state = self._item_state(owned, status=2, restriction_state=2)
-        state["actions"][30]["target_selection_state"] = 2
-        state["cleanup_items"][90]["output_id"] = 701
-        state["device_files"][501]["presence_state"] = 3
-        owners = {("cleanup_items", 90): ("action", 30)}
-        confirmed = update_change(
-            "cleanup_items", 90,
-            {"status": 2, "restriction_state": 2, "outcome": None,
-             "final_event_id": None, "error_code": None,
-             "error_details_json": None},
-            {"status": 4, "restriction_state": 4, "outcome": 3,
-             "final_event_id": 2, "error_code": None,
-             "error_details_json": None})
-        validate_event(_envelope(2, 2, 24, 3, (confirmed,), _NOW),
-                       _context(owned, state, owners))
+        connection = owned.connection
+        connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
+        connection.commit()
+        repository = outputs.OutputsRepository()
+        restricted = repository.restrict_cleanup_item(
+            RestrictCleanupItem(90, _NOW), new_operation_key(), owned)
+        assert restricted.kind is DbOutcomeKind.COMPLETED, restricted.error
+        connection.execute("UPDATE device_files SET presence_state=3 WHERE id=501")
+        connection.commit()
+        proposal = capture_scoped_operation(
+            owned, outputs, lambda target: repository.finish_cleanup_item(
+                FinishCleanupItem(90, CleanupOutcomeChoice.ABSENCE_CONFIRMED, _NOW),
+                new_operation_key(), target))
+        _commit_proposal(owned, proposal, proposal.events)
+        assert connection.execute(
+            "SELECT status, outcome FROM cleanup_items WHERE id=90"
+        ).fetchone() == (4, 3)
+        connection.close()
 
     def test_single_deleting_handler_per_output(self, tmp_path):
+        from camctl.outputs.cleanup_flow import ProgressCleanupItem, RestrictCleanupItem
+        from camctl.persistence.models import DbOutcomeKind
+
         owned = _environment(tmp_path)
-        state = self._item_state(owned, status=2, restriction_state=2)
-        state["actions"][30]["target_selection_state"] = 2
-        state["cleanup_items"][90]["output_id"] = 701
-        # 另一动作的同产物项已在删除中。
-        state["cleanup_items"][95] = {
-            "id": 95, "action_id": 31, "requested_output_id": 701,
-            "output_id": 701, "status": 3, "restriction_state": 2}
-        owners = {("cleanup_items", 90): ("action", 30)}
-        progress = update_change("cleanup_items", 90,
-                                 {"status": 2, "restriction_state": 2},
-                                 {"status": 3, "restriction_state": 2})
-        with pytest.raises(EventValidationError):
-            validate_event(_envelope(2, 2, 24, 2, (progress,), _NOW),
-                           _context(owned, state, owners))
+        connection = owned.connection
+        connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
+        connection.commit()
+        repository = outputs.OutputsRepository()
+        restricted = repository.restrict_cleanup_item(
+            RestrictCleanupItem(90, _NOW), new_operation_key(), owned)
+        assert restricted.kind is DbOutcomeKind.COMPLETED, restricted.error
+        proposal = capture_scoped_operation(
+            owned, outputs, lambda target: repository.progress_cleanup_item(
+                ProgressCleanupItem(90, _NOW), new_operation_key(), target))
+        # 模拟另一动作先取得同一产物的删除处理权。
+        connection.execute(
+            "INSERT INTO actions (id, plan_id, input_index, name, type, scheduled_at,"
+            " input_fields_json, execution_spec_json, status, execution_started,"
+            " cancel_requested, source_resolution_state, resolved_source_plan_id,"
+            " target_selection_state, created_event_id, last_event_id, change_count)"
+            " VALUES (31, 1, 2, 'clean2', 5, ?, '{}', '{}', 2, 1, 0, 2, 1, 2, 1, 1, 1)",
+            (_NOW,))
+        connection.execute(
+            "INSERT INTO cleanup_items (id, action_id, requested_output_id, output_id,"
+            " status, restriction_state) VALUES (95, 31, 701, 701, 3, 2)")
+        connection.commit()
+        current = proposal_state(owned, owners=proposal.owners)
+        _commit_proposal(owned, current, proposal.events,
+                         rejection="共同来源仍有读取依赖或其他删除处理者")
+        connection.execute("DELETE FROM cleanup_items WHERE id=95")
+        connection.execute("DELETE FROM actions WHERE id=31")
+        connection.commit()
+        _commit_proposal(owned, proposal, proposal.events)
+        assert connection.execute("SELECT status FROM cleanup_items WHERE id=90").fetchone() == (3,)
+        connection.close()
 
 
 class TestFixCleanupTargetsCommand:
@@ -534,8 +640,10 @@ class TestFixCleanupTargetsCommand:
                 " presence_state, completion_state, completion_evidence_json,"
                 " checksum_support, size_bytes, created_event_id, last_event_id,"
                 " change_count)"
-                f" VALUES ({file_id}, 11, {source_id}, 'file-{file_id}', '{{}}',"
-                " '{}', 2, 2, 3, '{}', 2, 10, 1, 1, 1)")
+                " VALUES (?, 11, ?, ?, '{}', '{}', 2, 2, 3, '{}', 2, 10, 1, 1, 1)",
+                (file_id, source_id, file_identity_key(*owned.connection.execute(
+                    "SELECT device_id, driver_id FROM actions WHERE id=?", (source_id,)
+                ).fetchone(), f"file-{file_id}")))
             owned.connection.execute(
                 "INSERT INTO outputs (id, source_action_id, kind, device_file_id,"
                 " availability, cleanup_status, media_json, created_event_id,"
