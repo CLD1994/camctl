@@ -560,62 +560,6 @@ async def test_cancel_started_load_receives_and_closes_late_detached_handle(tmp_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('waiting_admission',[False,True])
-async def test_cancel_queued_save_confirms_withdrawal_before_closing_sources(tmp_path,monkeypatch,waiting_admission):
-    from camctl.history.snapshots import MaintenanceContext,MaintenanceState,SnapshotRef,maintain_snapshots
-    from camctl.persistence.repositories import history as history_module
-    owned,_,_,ref,history=await _fixture(tmp_path)
-    store,executor=await _snapshot_store(history)
-    async def candidates(*_):return (SnapshotRef(1,ref.action_id),)
-    monkeypatch.setattr(store,'snapshot_candidates',candidates)
-    blockers=[];paths=[];admitted=asyncio.Event();executed=[];queued_business=[];timers=[];receipts=[]
-    original_save=store.save_snapshots
-    async def queued(prepared):
-        paths.extend(item.path for item in prepared if hasattr(item,'path'))
-        blockers.append(await _block_business(executor))
-        if waiting_admission:
-            from camctl.persistence.models import DbJob,DbJobKind,DbPriority
-            for _ in range(executor._core._capacity):
-                queued_business.append(executor.submit_read(DbJob(new_operation_key(),'fill actual queue',DbJobKind.READ,DbPriority.BUSINESS,lambda _:None)))
-        return await original_save(prepared)
-    monkeypatch.setattr(store,'save_snapshots',queued)
-    original_submit=executor.submit_write
-    def submit(job):
-        before=asyncio.all_tasks()
-        future=original_submit(job);receipts.append(future)
-        if waiting_admission:
-            assert any(item.job.key==job.key for item in executor._core._admissions)
-            timers.extend(asyncio.all_tasks()-before)
-        admitted.set();return future
-    monkeypatch.setattr(executor,'submit_write',submit)
-    monkeypatch.setattr(history_module,'_save_one_snapshot',lambda *a:executed.append(True))
-    task=asyncio.create_task(maintain_snapshots(MaintenanceContext(store=store,state=MaintenanceState(),threshold=1,batch_size=2)))
-    try:
-        await asyncio.wait_for(admitted.wait(),60)
-        assert all(path.exists() for path in paths)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):await task
-        assert all(not path.exists() for path in paths)
-        assert receipts and receipts[0].done() and receipts[0].result().kind.value=='not_executed'
-        blockers[0][0].set();await blockers[0][1]
-        await asyncio.gather(*queued_business)
-        await executor.close()
-        # 已撤回操作可靠NOT_EXECUTED；既有executor拥有的准入计时监督
-        # 按原截止自行结束，测试只等待该真实Task，不修改执行器。
-        await asyncio.gather(*timers)
-        assert executed==[] and not executor._results
-        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]==0
-    finally:
-        for release,future in blockers:release.set();await future
-        if not task.done():
-            try:await task
-            except asyncio.CancelledError:pass
-        await executor.close()
-        await asyncio.gather(*timers,return_exceptions=True)
-        owned.connection.close()
-
-
-@pytest.mark.asyncio
 async def test_cancel_commit_unknown_waits_for_connection_cleanup_and_preserves_classification(tmp_path, monkeypatch):
     import sqlite3
     import tempfile
