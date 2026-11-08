@@ -744,33 +744,91 @@ async def test_cancel_during_preparation_waits_for_source_owner_to_finish(tmp_pa
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure',['missing_event','query_error'])
-async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp_path,monkeypatch,failure):
+@pytest.mark.parametrize('failure', ['missing_event', 'query_error'])
+async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp_path, monkeypatch, failure):
     import sqlite3
-    from camctl.history.bounded import SegmentHistoryHandle
-    owned,runtime,repo,ref,history,before,prepared=await _before_assessment(tmp_path)
-    opened=[];original_init=SegmentHistoryHandle.__init__
-    def capture(self,*args,**kwargs):
-        original_init(self,*args,**kwargs);opened.append((self,Path(self._temporary.name)))
-    monkeypatch.setattr(SegmentHistoryHandle,'__init__',capture)
+    import tempfile
+
+    owned, runtime, repo, ref, history, before, prepared = await _before_assessment(tmp_path)
+    temporary = tmp_path / 'history-temporary'
+    temporary.mkdir()
+    real_connect = sqlite3.connect
+    target_uri = history.path.resolve().as_uri() + '?mode=ro'
+    failed = []
+    derived = []
+    query_error = sqlite3.OperationalError('forward page read failed')
+
+    class ReadConnection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            reads = set()
+
+            def authorize(action, table, column, database, source):
+                if action == sqlite3.SQLITE_READ:
+                    reads.add((table, column))
+                return sqlite3.SQLITE_OK
+
+            self.set_authorizer(authorize)
+            try:
+                cursor = super().execute(statement, *args, **kwargs)
+            finally:
+                self.set_authorizer(None)
+            if (failure == 'query_error' and
+                    {('entity_event_links', 'change_count'), ('history_events', 'body_json')} <= reads):
+                cursor.close()
+                failed.append(True)
+                raise query_error
+            return cursor
+
+    class DerivedConnection(sqlite3.Connection):
+        def close(self):
+            super().close()
+            self.was_closed = True
+
+    def connect(database, *args, **kwargs):
+        if str(database) == target_uri:
+            assert 'factory' not in kwargs
+            kwargs['factory'] = ReadConnection
+            return real_connect(database, *args, **kwargs)
+        path = Path(database) if isinstance(database, (str, Path)) else None
+        if path is not None and path.is_absolute() and path.is_relative_to(temporary):
+            assert 'factory' not in kwargs
+            kwargs['factory'] = DerivedConnection
+            connection = real_connect(database, *args, **kwargs)
+            connection.was_closed = False
+            derived.append((connection, path, path.is_file()))
+            return connection
+        return real_connect(database, *args, **kwargs)
+
     try:
-        if failure=='missing_event':
+        if failure == 'missing_event':
             from .test_record_segment_history import _version
-            _version(owned,runtime,repo,ref,2)
-        boundary=history.current_boundary()
-        if failure=='missing_event':
-            event=owned.connection.execute('SELECT MIN(event_id) FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id>? AND event_id<?',
-                (prepared.entity_type,ref.action_id,before.last_event_id,boundary.last_event_id)).fetchone()[0]
+            _version(owned, runtime, repo, ref, 2)
+        boundary = history.current_boundary()
+        if failure == 'missing_event':
+            event = owned.connection.execute(
+                'SELECT MIN(event_id) FROM entity_event_links WHERE entity_type=? AND entity_id=?'
+                ' AND event_id>? AND event_id<?',
+                (prepared.entity_type, ref.action_id, before.last_event_id, boundary.last_event_id),
+            ).fetchone()[0]
             assert event is not None
-            owned.connection.execute('DELETE FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id=?',
-                (prepared.entity_type,ref.action_id,event))
-            error=ConsistencyError
-        else:
-            def fail(*args,**kwargs):raise sqlite3.OperationalError('forward page read failed')
-            monkeypatch.setattr(history,'_object_event_page',fail);error=sqlite3.OperationalError
-        with pytest.raises(error):history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=1)
-        assert opened and all(handle._db is None and not directory.exists() for handle,directory in opened)
-    finally:prepared.close();owned.connection.close()
+            owned.connection.execute(
+                'DELETE FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id=?',
+                (prepared.entity_type, ref.action_id, event),
+            )
+        monkeypatch.setattr(tempfile, 'tempdir', str(temporary))
+        monkeypatch.setattr(sqlite3, 'connect', connect)
+        with pytest.raises(ConsistencyError if failure == 'missing_event' else sqlite3.OperationalError) as raised:
+            history.open_segment_history(ref.action_id, boundary, strategy='snapshot', batch_size=1)
+        if failure == 'query_error':
+            assert failed == [True] and raised.value is query_error
+        assert derived and all(
+            existed and connection.was_closed and not path.exists() and not path.parent.exists()
+            for connection, path, existed in derived
+        )
+        assert history.current_boundary() == boundary
+    finally:
+        prepared.close()
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
