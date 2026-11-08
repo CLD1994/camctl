@@ -476,16 +476,28 @@ async def test_waiter_cancel_keeps_delete_owner_until_actual_return_is_saved(env
 async def test_cleanup_begin_same_key_rejects_changed_original_input(environment):
     from decimal import Decimal
     from camctl.contracts.values import new_operation_key
-    from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
+    from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind
+    from camctl.outputs.batches import BatchOutcome, BatchRequest
+    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
     from ..bootstrap.test_output_binding_changes import _NOW
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=True)
     action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+    device_id, = owned.connection.execute(
+        "SELECT a.device_id FROM cleanup_items c JOIN outputs o ON o.id=c.output_id"
+        " JOIN device_files f ON f.id=o.device_file_id JOIN actions a ON a.id=f.observer_action_id"
+        " WHERE c.id=?", (item_id,),
+    ).fetchone()
+    register_file_batch_guards()
+    batch = FileBatchRepository().acquire(
+        BatchRequest(action_id, device_id, _NOW), new_operation_key(), owned)
+    assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch
     original = AttemptIntent("query", action_id, OperationKind.CHECK_FILE_EXISTS,
         AttemptTarget(cleanup_item_id=item_id), None, AttemptConfig(3, Decimal(10), Decimal(0)), _NOW)
     key = new_operation_key()
     repository = OutputsRepository()
     granted = repository.begin_cleanup_attempt(original, key, owned)
     assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+    assert granted.value.disposition is BeginDisposition.GRANTED and granted.value.ticket is not None, granted
     saved_count = owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0]
     same = repository.begin_cleanup_attempt(original, key, owned)
     assert same.kind is DbOutcomeKind.COMPLETED and same.value.ticket == granted.value.ticket
