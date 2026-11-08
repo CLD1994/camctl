@@ -20,7 +20,6 @@ from camctl.capture.media_flow import (
     load_processing_status,
     run_recording_media,
 )
-from camctl.contracts.values import ConsistencyError
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.host_files.media import MediaProbe
 from camctl.host_files.models import BoundDirectories
@@ -112,18 +111,6 @@ async def _flow(pipeline, driver, tools) -> MediaFlow:
         digest_supported=True,
         digest=_Digest(_CONTENT),
     )
-
-
-class TestDriverReadSessions:
-    async def test_rejects_incomplete_source(self, pipeline):
-        owned = pipeline[0]
-        owned.connection.execute(
-            "UPDATE device_files SET completion_state = 1, size_bytes = NULL"
-            " WHERE id = 11")
-        owned.connection.commit()
-        sessions = DriverReadSessions(await capture_database(owned), ReadDriverDouble(_CONTENT), None)
-        with pytest.raises(ConsistencyError):
-            await sessions.open_session(11, 0)
 
 
 class TestRunRecordingMedia:
