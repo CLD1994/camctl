@@ -163,7 +163,7 @@ async def test_work_file_io_failure_saved_and_logged_without_repeating_io(monkey
     assert state == 5 and json.loads(raw)['code'] == 'work_file_delete_failed'
 
 
-async def test_handoff_failure_is_logged_even_when_reobservation_confirms_published(monkeypatch, environment):
+async def test_publication_sync_failure_is_logged_once_before_recovery(monkeypatch, environment):
     from camctl.bootstrap.obtain_assembly import obtain_flow
     from ..bootstrap.test_output_binding_changes import _CONTENT
     from ..support.outputs import obtain_factory
@@ -191,26 +191,41 @@ async def test_handoff_failure_is_logged_even_when_reobservation_confirms_publis
         'SELECT id,status,file_name FROM deliveries').fetchone()
     assert status == 3
     assert len(driver.reads) == 1
-    failure = PermissionError(13, '移动权限失败')
+    failure = PermissionError(13, '目录同步权限失败')
     calls = []
     async def publish(ref, bound, actual_directories, name):
         calls.append(ref)
-        # 模拟本次发布返回错误前，主程序已把同一完整文件接入 ready。
+        # camctl 已移动完整文件到 ready，随后目录同步失败。
         os.replace(bound.staging / ref.relative_path, actual_directories.ready / name.name)
-        return PublishResult(PublishStage.NOT_MOVED, DirectorySyncStage.NOT_ATTEMPTED, False, 'move_failed', failure)
+        return PublishResult(PublishStage.MOVED, DirectorySyncStage.FAILED, True, 'directory_sync_failed', failure)
     monkeypatch.setattr(handoff, 'publish_file', publish)
     lines = []
     with error_diagnostics_context(None, lines.append):
         async with diagnostic_scope():
+            with pytest.raises(handoff.DeliveryHandoffError) as caught:
+                await output_operation(owned, handoff.publish_delivery, delivery_id, handoff.DeliveryContext,
+                    repository=OutputsRepository(), directories=directories, occurred_at=_NOW)
+            assert caught.value.stage == 'publication_sync_failed'
+            assert caught.value.__cause__ is failure
+            status, intent, published = owned.connection.execute(
+                'SELECT status,publication_intent_event_id,published_event_id FROM deliveries WHERE id=?',
+                (delivery_id,)).fetchone()
+            assert status == 4 and intent is not None and published is None
+            assert (directories.ready / name).read_bytes() == _CONTENT
+            assert not (directories.staging / calls[0].relative_path).exists()
             result = await output_operation(owned, handoff.publish_delivery, delivery_id, handoff.DeliveryContext,
                 repository=OutputsRepository(), directories=directories, occurred_at=_NOW)
     assert result.phase is handoff.DeliveryPhase.PUBLISHED
     assert len(lines) == len(calls) == 1
+    assert len(driver.reads) == 1
     record = json.loads(lines[0])
     assert record['error']['type'] == 'builtins.PermissionError'
     assert record['error']['errno'] == 13
     assert record['context']['delivery_id'] == delivery_id
-    assert owned.connection.execute('SELECT status FROM deliveries WHERE id=?', (delivery_id,)).fetchone() == (5,)
+    status, saved_intent, published = owned.connection.execute(
+        'SELECT status,publication_intent_event_id,published_event_id FROM deliveries WHERE id=?',
+        (delivery_id,)).fetchone()
+    assert status == 5 and saved_intent == intent and published is not None
     assert (directories.ready / name).read_bytes() == _CONTENT
 
 
