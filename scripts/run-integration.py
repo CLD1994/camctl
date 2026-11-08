@@ -24,6 +24,10 @@ CAMCTL = 'apps/camctl/tests/integration'
 ROOT = 'tests/integration'
 HB_MODULE = ROOT + '/test_hasselblad_photo_roundtrip.py'
 ROOT_SHARD_SECONDS = 600
+TIMING = 'docs/camctl/verification-data/2026-10-25-integration-timing'
+TIMING_INPUTS = {f'{TIMING}/{name}' for name in (
+    'camctl-files.csv', 'cross-component-files.csv', 'cross-component-cases.csv')}
+VERIFICATION_DATA = 'docs/camctl/verification-data/'
 
 
 def utc():
@@ -82,7 +86,7 @@ def covers(parent, child):
 
 
 def case_history(source):
-    path = source / 'docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv'
+    path = source / TIMING / 'cross-component-cases.csv'
     if not path.exists():
         return {}, set()
     with path.open(encoding='utf-8-sig', newline='') as stream:
@@ -94,7 +98,7 @@ def case_history(source):
 
 def order_by_measurement(source, tasks):
     """既有记录只用于排程；未测目标仍完整执行。"""
-    timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
+    timing = source / TIMING
     costs = {}
     for name in ('camctl-files.csv', 'cross-component-files.csv'):
         path = timing / name
@@ -128,10 +132,17 @@ def snapshot(source, destination):
     head = command_output(['git', 'rev-parse', 'HEAD'], source)
     files = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=source)
     paths = sorted(set(os.fsdecode(path) for path in files.split(b'\0') if path))
+    try:
+        output_relative = destination.parent.relative_to(source).as_posix() + '/'
+    except ValueError:
+        output_relative = None
     subprocess.run(['git', 'clone', '--shared', '--no-checkout', '--quiet', str(source), str(destination)], check=True)
     subprocess.run(['git', 'read-tree', 'HEAD'], cwd=destination, check=True)
     inventory = []
     for relative in paths:
+        if ((relative.startswith(VERIFICATION_DATA) and relative not in TIMING_INPUTS) or
+                (output_relative is not None and relative.startswith(output_relative))):
+            continue
         original = source / relative
         if not original.exists() and not original.is_symlink():
             continue
@@ -147,6 +158,10 @@ def snapshot(source, destination):
         inventory.append({'path': relative, 'sha256': hashlib.sha256(content).hexdigest()})
     return {'root': str(source), 'head': head,
             'status': command_output(['git', 'status', '--short'], source),
+            'snapshot_scope': {'excluded_directory': VERIFICATION_DATA,
+                               'allowed_timing_inputs': sorted(TIMING_INPUTS),
+                               'excluded_output_directory': output_relative,
+                               'git_index': 'HEAD; excluded tracked files appear deleted'},
             'snapshot_sha256': hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest(),
             'files': inventory}
 
@@ -263,9 +278,16 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity):
         nodes = json.loads((artifacts / 'inventory.json').read_text())
         if len(nodes) != len(set(nodes)):
             raise ValueError(f"{task['id']}收集到重复节点，见 {artifacts / 'inventory.json'}")
+        def release_collection():
+            shutil.rmtree(work)
+            shutil.rmtree(temporary)
+            if (directory / 'python-cache').exists():
+                shutil.rmtree(directory / 'python-cache')
+
         count = min(args.root_shards, len(nodes))
         if count <= 1:
             result.append(task)
+            release_collection()
             continue
         groups = [[] for _ in range(count)]
         totals = [0.0] * count
@@ -281,6 +303,7 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity):
                            'parent_id': task['id'], 'shard': index + 1, 'shards': count,
                            'targets': sorted(group, key=nodes.index), 'estimated_seconds': totals[index],
                            'collection': str(artifacts), 'collected_nodes': len(nodes)})
+        release_collection()
     return sorted(result, key=lambda task: (-task['estimated_seconds'], task['id']))
 
 
@@ -298,6 +321,15 @@ async def managed_wait(process):
             except asyncio.TimeoutError:
                 os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
+        raise
+
+
+async def run_blocking(function, *args, **kwargs):
+    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
         raise
 
 
@@ -333,24 +365,25 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
             artifacts = directory / 'artifacts'
             artifacts.mkdir(parents=True)
             work = directory / 'source'
-            task.update(status='preparing', worker=number, artifacts=str(artifacts), cwd=str(work), started_utc=utc())
+            task.update(status='preparing', worker=number, worker_cache=str(private),
+                        artifacts=str(artifacts), cwd=str(work), started_utc=utc())
             task_started = time.monotonic()
             save()
             try:
                 if not (private / 'uv-cache').exists():
-                    await asyncio.to_thread(copy_tree, cache, private / 'uv-cache')
+                    await run_blocking(copy_tree, cache, private / 'uv-cache')
                 if task['scope'] != 'camctl' and not (private / 'node_modules').exists():
                     if node_modules is None or not node_modules.is_dir():
                         raise ValueError('根与 Node 集成测试需要 --node-modules 指向已按锁文件准备的客户端依赖')
-                    await asyncio.to_thread(copy_tree, node_modules, private / 'node_modules')
-                await asyncio.to_thread(clone_snapshot, seed, work)
+                    await run_blocking(copy_tree, node_modules, private / 'node_modules')
+                await run_blocking(clone_snapshot, seed, work)
                 project = work / 'apps/camctl'
                 project.mkdir(parents=True, exist_ok=True)
                 temporary = directory / 'tmp'
                 temporary.mkdir()
                 environment = test_environment(python, project, control, private, temporary)
                 environment_root = project / '.venv311'
-                await asyncio.to_thread(subprocess.run,
+                await run_blocking(subprocess.run,
                     [str(python), '-m', 'venv', '--without-pip', str(environment_root)], env=environment, check=True)
                 packages = environment_root / 'lib/python3.11/site-packages'
                 (packages / 'integration-dependencies.pth').write_text(
@@ -397,7 +430,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                     await prepare('package-resources', [str(python), str(resource_script)], work)
                 if task['path'] == HB_MODULE:
                     candidate = directory / 'client-candidate'
-                    await asyncio.to_thread(clone_snapshot, seed, candidate)
+                    await run_blocking(clone_snapshot, seed, candidate)
                     (candidate / 'apps/client/node_modules').symlink_to(private / 'node_modules', target_is_directory=True)
                     environment['CAMCTL_HB_TEST_CLIENT_ROOT'] = str(candidate)
                     environment['npm_config_cache'] = str(private / 'npm-cache')
@@ -428,6 +461,17 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 task.update(finished_utc=utc(), wall_seconds=time.monotonic() - task_started)
                 save()
                 write_json(artifacts / 'result.json', task)
+                if task['status'] == 'passed':
+                    try:
+                        for name in ('source', 'tmp', 'client-candidate'):
+                            path = directory / name
+                            if path.exists():
+                                shutil.rmtree(path)
+                    except OSError as error:
+                        task.update(status='failed', exit_code=2,
+                                    error=f'清理任务环境失败: {error}')
+                        save()
+                        write_json(artifacts / 'result.json', task)
                 print(f"结束 {task['id']} status={task['status']} exit={task.get('exit_code')} seconds={task['wall_seconds']:.3f}", flush=True)
             if queue.empty():
                 break
@@ -459,6 +503,8 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
             if not item.done():
                 item.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
+        for private in (output / 'workers').iterdir():
+            shutil.rmtree(private)
         summary['finished_utc'] = utc()
         save()
     return summary['exit_code']
@@ -515,7 +561,7 @@ def main():
             raise ValueError(f'uv 缓存目录不存在: {cache}')
         node_modules = (args.node_modules or source / 'apps/client/node_modules').resolve()
         if args.output:
-            output = args.output.absolute()
+            output = args.output.resolve()
             output.mkdir(parents=True, exist_ok=False)
         else:
             import tempfile
@@ -540,9 +586,12 @@ def main():
                 'started_utc': started_utc, 'finished_utc': utc(), 'wall_seconds': time.monotonic() - started,
                 'source': {key: value for key, value in identity.items() if key != 'files'},
                 'versions': versions, 'tasks': tasks})
+            shutil.rmtree(seed)
             print(f'计划 {output / "plan.json"}；未执行测试。', flush=True)
             return 0
         result = asyncio.run(execute(args, tasks, output, seed, python, cache, node_modules, versions, identity, started, started_utc))
+        if result == 0:
+            shutil.rmtree(seed)
         print(f'汇总 {output / "summary.json"} exit={result}', flush=True)
         return result
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
