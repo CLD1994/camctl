@@ -8,78 +8,51 @@
 """
 
 import asyncio
-import hashlib
 import json
 import os
-import shutil
+import stat
 from contextlib import closing
 from dataclasses import replace
 
 import pytest
+import pytest_asyncio
 
-from ..support.outputs import output_operation
+from ..support.outputs import output_operation, prepare_cancel_target
+from ..support.output_planning import EventSequence, capture_operation
+from ..support.output_storage_cases import observed_operation
+from ..support.public_delivery_cases import prepare_public_delivery
+from ..bootstrap.test_output_binding_changes import Catalog
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
 from camctl.host_files.io import DirectorySyncStage
-from camctl.host_files.models import BoundDirectories
-from camctl.outputs.copy import CompletionContext, CompletionPhase, complete_copy
 from camctl.outputs.handoff import (
-    DeliveryContext, DeliveryDirectories, DeliveryHandoffError,
-    DeliveryPhase, PublicationIntentRequest, PublicationSaveRequest,
+    DeliveryContext, DeliveryHandoffError,
+    DeliveryPhase, IntentDisposition, PublicationIntentRequest, PublicationSaveRequest,
     UnconfirmedFailureSave, publish_delivery,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionScope
+from camctl.persistence.transaction import commit_operation
 
-from .test_copy_resume import _command, _qualified
-from .test_copy_segments import _CONTENT, _drive
-from .test_local_read import local_read  # noqa: F401
+from .test_copy_segments import _CONTENT
 from .test_qualification import _NOW
-from .test_read_associations import read_targets  # noqa: F401
 
 register_capture_guards()
 
-_CONTENT_DIGEST = hashlib.sha256(_CONTENT).hexdigest()
-
-
-@pytest.fixture
-def prepared_env(read_targets, tmp_path):
+@pytest_asyncio.fixture
+async def prepared_env(tmp_path):
     """已准备完成（PREPARED）的 10 字节设备源交付副本。
 
     完整拷贝并校验通过后交付进入 PREPARED、源依赖已解除；staging
     工作副本仍在原位，ready 与 processing 为空目录。
     """
-    owned = read_targets
-    owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
-    owned.connection.execute(
-        "UPDATE device_files SET size_bytes=10, checksum_support=2, sha256=?"
-        " WHERE id=501", (_CONTENT_DIGEST,))
-    owned.connection.commit()
-    qualification = _qualified(owned, _command())
-    staging = tmp_path / "staging"
-    for name in ("deliveries", "recording-inputs", "derived"):
-        (staging / name).mkdir(parents=True)
-    ready = tmp_path / "ready"
-    ready.mkdir()
-    processing = tmp_path / "processing"
-    processing.mkdir()
-    roots = BoundDirectories(staging=staging)
-    asyncio.run(_drive(owned, roots, qualification.copy_id, segment_size=10))
-    step = asyncio.run(output_operation(
-        owned, complete_copy, qualification.copy_id, CompletionContext,
-        repository=OutputsRepository(),
-        roots=roots,
-        occurred_at=_NOW + 5,
-    ))
-    assert step.phase is CompletionPhase.PREPARED
-    directories = DeliveryDirectories(
-        staging=staging, ready=ready, processing=processing)
-    return owned, roots, directories, qualification
+    world = await prepare_public_delivery(tmp_path, content=_CONTENT, now=_NOW)
+    try:
+        yield world
+    finally:
+        world[0].connection.close()
 
 
 def _publish(owned, directories, delivery_id, *, occurred_at=_NOW + 10,
@@ -123,6 +96,7 @@ def _save_intent(owned, delivery_id: int) -> None:
             delivery_id=delivery_id, occurred_at=_NOW + 8),
         new_operation_key(), owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    assert outcome.value.disposition is IntentDisposition.SAVED
 
 
 # ---- 正常发布 ----
@@ -168,9 +142,8 @@ def test_hold_when_conditions_unmet(prepared_env):
 
 def test_canceled_owner_skips_intent(prepared_env):
     owned, roots, directories, qualification = prepared_env
-    owned.connection.execute(
-        "UPDATE actions SET cancel_requested=1 WHERE id=31")
-    owned.connection.commit()
+    prepare_cancel_target(owned, catalog=Catalog(), now=_NOW,
+                          action_id=qualification.action_id)
     with pytest.raises(DeliveryHandoffError) as caught:
         _publish(owned, directories, qualification.delivery_id)
     assert caught.value.stage == "owner_canceled"
@@ -209,14 +182,14 @@ def test_sync_failure_keeps_moved_fact_and_recovers(prepared_env, monkeypatch):
     delivery_id = qualification.delivery_id
     file_name = _file_name(owned, delivery_id)
 
-    def _broken(path):
-        raise OSError("sync refused")
+    original_fsync = os.fsync
 
-    from camctl.host_files import handoff as handoff_module
-    if not handoff_module._DIRECTORY_SYNC_SUPPORTED:
-        monkeypatch.setattr(
-            handoff_module, "_DIRECTORY_SYNC_SUPPORTED", True)
-    monkeypatch.setattr(handoff_module, "_sync_directory", _broken)
+    def _broken(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("sync refused")
+        return original_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", _broken)
     with pytest.raises(DeliveryHandoffError) as caught:
         _publish(owned, directories, delivery_id)
     assert caught.value.stage == "publication_sync_failed"
@@ -266,7 +239,7 @@ def test_host_claims_to_processing_before_save(prepared_env, monkeypatch):
 
 
 def test_move_not_moved_reobserves_and_confirms(prepared_env, monkeypatch):
-    """移动被拒绝后重新观察：副本已被第三方放到 ready 时确认交付。"""
+    """目标在竞争期间出现时重新观察同一完整副本。"""
     owned, roots, directories, qualification = prepared_env
     delivery_id = qualification.delivery_id
     file_name = _file_name(owned, delivery_id)
@@ -274,9 +247,8 @@ def test_move_not_moved_reobserves_and_confirms(prepared_env, monkeypatch):
     from camctl.outputs import handoff as handoff_rules
 
     async def _conflict(ref, roots_arg, directories_arg, target):
-        shutil.move(
-            str(_staging_copy(roots, owned, qualification.target_file_id)),
-            str(directories.ready / file_name))
+        os.link(_staging_copy(roots, owned, qualification.target_file_id),
+                directories.ready / file_name)
         return PublishResult(
             stage=PublishStage.NOT_MOVED,
             directory=DirectorySyncStage.NOT_ATTEMPTED,
@@ -287,6 +259,7 @@ def test_move_not_moved_reobserves_and_confirms(prepared_env, monkeypatch):
     monkeypatch.undo()
     assert result.phase is DeliveryPhase.PUBLISHED
     assert (directories.ready / file_name).read_bytes() == _CONTENT
+    assert _staging_copy(roots, owned, qualification.target_file_id).exists()
     assert _row(owned, "SELECT status FROM deliveries WHERE id=?",
                 delivery_id)[0] == 5
 
@@ -330,9 +303,8 @@ def test_observed_delivery_after_cancel_still_saves(prepared_env):
     os.replace(
         _staging_copy(roots, owned, qualification.target_file_id),
         directories.ready / file_name)
-    owned.connection.execute(
-        "UPDATE actions SET cancel_requested=1 WHERE id=31")
-    owned.connection.commit()
+    prepare_cancel_target(owned, catalog=Catalog(), now=_NOW,
+                          action_id=qualification.action_id)
     result = _publish(owned, directories, delivery_id)
     assert result.phase is DeliveryPhase.PUBLISHED
     assert _row(owned, "SELECT status FROM deliveries WHERE id=?",
@@ -388,12 +360,15 @@ def test_ready_observation_failure_is_not_missing(prepared_env, monkeypatch):
     _save_intent(owned, delivery_id)
     _staging_copy(roots, owned, qualification.target_file_id).unlink()
 
-    def _broken(path):
-        from camctl.outputs.handoff import LocationObservation
-        return LocationObservation(observed=False, error=OSError("busy"))
+    original_stat = os.stat
+    target = directories.ready / _file_name(owned, delivery_id)
 
-    from camctl.outputs import handoff as handoff_rules
-    monkeypatch.setattr(handoff_rules, "_digest_location", _broken)
+    def _broken(path, *args, **kwargs):
+        if os.fspath(path) == os.fspath(target):
+            raise OSError("busy")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", _broken)
     with pytest.raises(DeliveryHandoffError) as caught:
         _publish(owned, directories, delivery_id)
     assert caught.value.stage == "handoff_undecidable"
@@ -535,116 +510,89 @@ def test_unconfirmed_key_recovers_first_response(prepared_env):
 # ---- 正式守卫 ----
 
 
-def _proposal(owned, command):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = command.plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    assert plan.events, "提案必须产生事件"
-    return plan
+def _proposal(owned, method, request):
+    key = new_operation_key()
+    return capture_operation(
+        owned, lambda actual: getattr(OutputsRepository(), method)(request, key, actual))
 
 
-def _validate(plan, events=None, state_rows=None):
-    """模仿内核按顺序分配报告变化序号并逐事件校验。"""
-    from camctl.history.changes import event_report_targets
-
-    working = {
-        table: {row_id: dict(rows) for row_id, rows in table_rows.items()}
-        for table, table_rows in plan.state_rows.items()
-    }
-    chosen = events if events is not None else plan.events
-    seq = 0
-    for event in chosen:
-        if event_report_targets(event, working):
-            seq += 1
-            event = replace(event, change_seq=seq)
-        context = EventContext(
-            TransactionRange(
-                chosen[0].transaction_id, chosen[0].event_id, chosen[-1].event_id),
-            dict(plan.owners),
-            state_rows if state_rows is not None else plan.state_rows,
-            read_coverage=plan.read_coverage)
-        validate_event(event, context)
-        for row in event.rows:
-            if row.after.exists:
-                working.setdefault(row.table, {}).setdefault(
-                    row.row_id, {}).update(row.after.values)
+def _validate(owned, plan, events=None, state_rows=None):
+    """由真实事务内核绑定读取事实，在独立副本验证事件组。"""
+    proposal = plan if state_rows is None else replace(plan, state_rows=state_rows)
+    sequence = EventSequence(plan.events if events is None else events, proposal)
+    receipt = observed_operation(
+        owned, lambda actual: commit_operation(sequence, new_operation_key(), actual))
+    if receipt.kind != "completed":
+        raise receipt.error
 
 
 def test_guard_accepts_real_intent_and_publish_events(prepared_env):
     owned, roots, directories, qualification = prepared_env
-    intent = _proposal(owned, outputs._PublicationIntentCommand(
+    intent = _proposal(owned, "save_publication_intent",
         PublicationIntentRequest(
-            delivery_id=qualification.delivery_id, occurred_at=_NOW + 8),
-        new_operation_key()))
-    _validate(intent)
+            delivery_id=qualification.delivery_id, occurred_at=_NOW + 8))
+    _validate(owned, intent)
     _save_intent(owned, qualification.delivery_id)
-    publication = _proposal(owned, outputs._PublicationSaveCommand(
+    publication = _proposal(owned, "save_publication",
         PublicationSaveRequest(
-            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9),
-        new_operation_key()))
-    _validate(publication)
+            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9))
+    _validate(owned, publication)
 
 
 def test_guard_accepts_backfill_publication_events(prepared_env):
     """从 PREPARED 补意图并保存完成的真实组合通过正式守卫。"""
     owned, roots, directories, qualification = prepared_env
-    plan = _proposal(owned, outputs._PublicationSaveCommand(
+    plan = _proposal(owned, "save_publication",
         PublicationSaveRequest(
-            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9),
-        new_operation_key()))
+            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9))
     reasons = [event.reason for event in plan.events]
     # 意图、完成与目标文件交接（HANDED_OFF）在同一事务共同保存。
     assert reasons == [3, 4, 2]
-    _validate(plan)
+    _validate(owned, plan)
 
 
 def test_guard_rejects_intent_referencing_other_event(prepared_env):
     owned, roots, directories, qualification = prepared_env
-    plan = _proposal(owned, outputs._PublicationIntentCommand(
+    plan = _proposal(owned, "save_publication_intent",
         PublicationIntentRequest(
-            delivery_id=qualification.delivery_id, occurred_at=_NOW + 8),
-        new_operation_key()))
+            delivery_id=qualification.delivery_id, occurred_at=_NOW + 8))
     event = plan.events[0]
     row = event.rows[0]
     variant = replace(
         row, after=replace(row.after, values={
             **row.after.values,
             "publication_intent_event_id": event.event_id + 5}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    with pytest.raises(EventValidationError, match="发布意图必须"):
+        _validate(owned, plan, events=(replace(event, rows=(variant,)),))
 
 
 def test_guard_rejects_publish_referencing_other_event(prepared_env):
     owned, roots, directories, qualification = prepared_env
     _save_intent(owned, qualification.delivery_id)
-    plan = _proposal(owned, outputs._PublicationSaveCommand(
+    plan = _proposal(owned, "save_publication",
         PublicationSaveRequest(
-            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9),
-        new_operation_key()))
+            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9))
     event = plan.events[0]
     row = event.rows[0]
     variant = replace(
         row, after=replace(row.after, values={
             **row.after.values,
             "published_event_id": event.event_id + 5}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    with pytest.raises(EventValidationError, match="交接完成必须"):
+        _validate(owned, plan, events=(replace(event, rows=(variant,)),))
 
 
 def test_guard_rejects_fail_with_unregistered_code(prepared_env):
     owned, roots, directories, qualification = prepared_env
     delivery_id = qualification.delivery_id
     from camctl.outputs.handoff import DeliveryFailure
-    plan = _proposal(owned, outputs._UnconfirmedFailureCommand(
+    plan = _proposal(owned, "save_unconfirmed_failure",
         UnconfirmedFailureSave(
             delivery_id=delivery_id,
             failure=DeliveryFailure(
                 code="delivery_handoff_unconfirmed", stage="publication",
                 details={"delivery_id": str(delivery_id)}),
-            occurred_at=_NOW + 11),
-        new_operation_key()))
+            occurred_at=_NOW + 11))
     event = plan.events[0]
     row = event.rows[0]
     variant = replace(
@@ -654,22 +602,21 @@ def test_guard_rejects_fail_with_unregistered_code(prepared_env):
                 "code": "not_a_registered_code", "stage": "publication",
                 "details": {"delivery_id": str(delivery_id)},
             }}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    with pytest.raises(EventValidationError, match="公共错误登记"):
+        _validate(owned, plan, events=(replace(event, rows=(variant,)),))
 
 
 def test_guard_rejects_publish_without_verified_copy(prepared_env):
     """副本校验未完成时保存发布事实被正式守卫拒绝。"""
     owned, roots, directories, qualification = prepared_env
     _save_intent(owned, qualification.delivery_id)
-    plan = _proposal(owned, outputs._PublicationSaveCommand(
+    plan = _proposal(owned, "save_publication",
         PublicationSaveRequest(
-            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9),
-        new_operation_key()))
+            delivery_id=qualification.delivery_id, occurred_at=_NOW + 9))
     tampered = {
         table: {row_id: dict(rows) for row_id, rows in rows.items()}
         for table, rows in plan.state_rows.items()
     }
     tampered["file_copies"][qualification.copy_id]["verification_state"] = 1
-    with pytest.raises(EventValidationError):
-        _validate(plan, state_rows=tampered)
+    with pytest.raises(EventValidationError, match="副本未完成字节校验"):
+        _validate(owned, plan, state_rows=tampered)
