@@ -361,11 +361,13 @@ class IntegrationRunnerTest(unittest.TestCase):
                 path.mkdir()
             (cache / 'item').write_text('cached')
             wrapper = binaries / 'cp'
-            wrapper.write_text('#!/bin/sh\ntouch "$COPY_STARTED"\nsleep 2\n/usr/bin/cp "$@"\ntouch "$COPY_FINISHED"\n')
+            wrapper.write_text('#!/bin/sh\nset -e\ntouch "$COPY_STARTED"\nsleep 2\n/usr/bin/cp "$@"\n'
+                               'cmp "$COPY_SOURCE" "$COPY_TARGET"\ntouch "$COPY_FINISHED"\n')
             wrapper.chmod(0o755)
             environment = os.environ.copy()
             environment.update(PATH=str(binaries) + os.pathsep + environment['PATH'],
-                               COPY_STARTED=str(root / 'started'), COPY_FINISHED=str(root / 'finished'))
+                               COPY_STARTED=str(root / 'started'), COPY_FINISHED=str(root / 'finished'),
+                               COPY_SOURCE=str(cache / 'item'), COPY_TARGET=str(output / 'workers/0/uv-cache/item'))
             process = subprocess.Popen([sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
                 '--uv-cache', str(cache), '--node-modules', str(modules), '--output', str(output), '--jobs', '1'],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=environment)
