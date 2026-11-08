@@ -154,7 +154,8 @@ async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolat
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": model,
                            "adb": {"serial": "serial-1"}}}, "paths": {
         "state_db": str(tmp_path / "session.db"), "staging": str(tmp_path / "staging"),
-        "ready": str(tmp_path / "ready"), "processing": str(tmp_path / "processing")}}, ConfigDefaults())
+        "ready": str(tmp_path / "ready"), "processing": str(tmp_path / "processing"),
+        "log_file": str(tmp_path / "camctl.log")}}, ConfigDefaults())
     registration.register_builtin_camera_drivers(config)
     driver = drivers_runtime.current_registry().entry(model).driver
     commands = []
