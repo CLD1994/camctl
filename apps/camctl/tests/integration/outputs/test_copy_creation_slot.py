@@ -7,7 +7,9 @@ import pytest
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import EventValidationError
 from camctl.operations.attempts import BeginDisposition
+from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.transaction import commit_operation, saved_transaction_events
@@ -30,6 +32,11 @@ def test_copy_creation_keeps_camera_slot_empty(granted):
 @pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
 def test_device_copy_cannot_start_reading_immediately_after_creation(granted):
     owned, command, _, prepared = granted
+    if command.item_id is not None:
+        register_file_batch_guards()
+        batch = FileBatchRepository().acquire(
+            BatchRequest(command.action_id, "cam-1", command.occurred_at), new_operation_key(), owned)
+        assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch
     before = tuple(owned.connection.iterdump())
     result = OperationRepository().begin_attempt(_intent(command, prepared), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
