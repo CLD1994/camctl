@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from camctl.contracts.values import new_operation_key
+from camctl.capture.files import file_identity_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
@@ -28,6 +29,8 @@ from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import (
     register_operation_guards,
 )
+from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.persistence.repositories.outputs import (
     OutputsRepository,
     register_outputs_guards,
@@ -46,6 +49,7 @@ register_cancellation_guards()
 register_operation_guards()
 register_outputs_guards()
 register_capture_guards()
+register_file_batch_guards()
 
 _NOW = 1_750_000_000_000_000
 _BINDING = DeviceBinding(device_id="cam-1", driver_id="camctl-adb")
@@ -175,8 +179,9 @@ def pipeline(tmp_path: Path):
         " identity_key, locator_json, ownership_evidence_json, role,"
         " presence_state, completion_state, completion_evidence_json,"
         " checksum_support, size_bytes, created_event_id, last_event_id,"
-        " change_count) VALUES (501, 11, 11, 'file-0501', '{}', '{}', 2, 2, 3,"
-        " '{}', 2, 10, 1, 1, 1)")
+        " change_count) VALUES (501, 11, 11, ?, '{}', '{}', 2, 2, 3,"
+        " '{}', 2, 10, 1, 1, 1)",
+        (file_identity_key('cam-1', 'camctl-adb', 'file-0501'),))
     connection.execute(
         "INSERT INTO outputs (id, source_action_id, kind, device_file_id,"
         " availability, cleanup_status, media_json, created_event_id,"
@@ -252,6 +257,10 @@ class TestTakeoverPreservesOldFailure:
             " FROM outputs WHERE id = 701")
         assert output[:2] == (2, 5)
         assert json.loads(output[2])["code"] == "file_query_attempts_exhausted"
+        released = FileBatchRepository().release(BatchRequest(30, 'cam-1', _NOW + 10),
+                                                  new_operation_key(), owned)
+        assert released.kind is DbOutcomeKind.COMPLETED, released.error
+        assert released.value is BatchOutcome.RELEASED
 
         # B：后来的有效请求接手同一产物，不重开 A 的旧项。
         b_item = _fix_b(owned).item_ids[0]
@@ -357,13 +366,22 @@ class TestCleanupCancel:
         task = asyncio.ensure_future(
             delete_source_file(await _runtime(owned, driver), 91))
         # 等待流程推进到删除调用挂起后，取消才到达。
-        await driver.entered.wait()
-        from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
+        entered = asyncio.create_task(driver.entered.wait())
         try:
-            _apply_cleanup_cancel(owned, 30)
+            done, _ = await asyncio.wait((task, entered), return_when=asyncio.FIRST_COMPLETED)
+            if task in done:
+                result = await task
+                pytest.fail(f"删除调用尚未开始，业务已结束: {result!r}")
+            from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
+            try:
+                _apply_cleanup_cancel(owned, 30)
+            finally:
+                release.set()
+            step = await task
         finally:
+            entered.cancel()
             release.set()
-        step = await task
+            await asyncio.gather(entered, task, return_exceptions=True)
         assert step.phase == "canceled", step
         assert step.detail == "delete_unconfirmed", step
         # 在途调用的结束事实已保存：删除尝试存在且不在执行中。
