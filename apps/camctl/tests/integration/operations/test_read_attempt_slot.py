@@ -6,17 +6,20 @@ import sqlite3
 
 import pytest
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history import validators
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import BeginAttemptCommand, OperationRepository
-from camctl.persistence.transaction import TransactionError, TransactionScope, commit_operation
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.transaction import TransactionError, commit_operation
+from camctl.outputs.slots import SlotOutcome, SlotRequest
+from camctl.outputs.batches import BatchOutcome, BatchRequest
+from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 
 from ..outputs.test_grant_reuse import granted, read_request, read_targets, local_read, _grant_read_access
 from ..support.output_storage_cases import QueryProbe
+from ..support.output_planning import EventSequence, capture_operation
 
 
 @pytest.fixture
@@ -128,75 +131,111 @@ def test_original_read_intent_does_not_reapply_current_slot_or_round(ready_read,
     assert tuple(owned.connection.iterdump()) == before
 
 
-def _proposal(owned, command, prepared):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = BeginAttemptCommand(_intent(command, prepared), new_operation_key()).plan(
-            TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    event, = plan.events
-    return event, EventContext(TransactionRange(event.transaction_id, event.event_id, event.event_id),
-                               plan.owners, deepcopy(plan.state_rows))
-
-
 @pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
-@pytest.mark.parametrize("change", ["slot", "round", "source", "binding"])
-def test_formal_read_intent_cannot_use_future_slot_facts(ready_read, change):
-    owned, command, _, prepared = ready_read
-    event, context = _proposal(owned, command, prepared)
-    validate_event(event, context)
-    future = deepcopy(context.state_rows)
-    if change == "slot":
-        context.state_rows["file_copies"][prepared.copy_id]["slot_device_id"] = None
-    elif change == "round":
-        context.state_rows["file_copies"][prepared.copy_id].update(round=2, recopies_used=1)
-    elif change == "source":
-        context.state_rows.setdefault("device_files", {}).pop(command.source_device_file_id, None)
+def test_later_slot_grant_cannot_authorize_earlier_read_attempt(granted):
+    owned, command, _, prepared = granted
+    request = SlotRequest(prepared.copy_id, command.occurred_at)
+    if command.item_id is not None:
+        register_file_batch_guards()
+        batch = FileBatchRepository().acquire(
+            BatchRequest(command.action_id, "cam-1", command.occurred_at), new_operation_key(), owned)
+        assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch
+
+    def acquire_and_begin(target):
+        slot = OutputsRepository().grant_read_slot(request, new_operation_key(), target)
+        assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+        assert slot.value.outcome is SlotOutcome.GRANTED
+        begun = OperationRepository().begin_attempt(_intent(command, prepared), new_operation_key(), target)
+        assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
+        assert begun.value.disposition is BeginDisposition.GRANTED
+        return begun
+
+    proposal = capture_operation(owned, acquire_and_begin)
+    slot_event, intent_event = proposal.events
+    assert (slot_event.event_type, intent_event.event_type) == (22, 11)
+    with sqlite3.connect(":memory:") as baseline:
+        owned.connection.backup(baseline)
+        legal = commit_operation(EventSequence((slot_event, intent_event), proposal), new_operation_key(), owned)
+        assert legal.kind == "completed", legal.error
+        baseline.backup(owned.connection)
+
+    event_id = slot_event.event_id
+    rows = tuple(replace(row, after=replace(row.after,
+        values={**row.after.values, "intent_event_id": event_id}))
+        if row.table == "operation_attempts" else row for row in intent_event.rows)
+    early_intent = replace(intent_event, rows=rows)
+    before = tuple(owned.connection.iterdump())
+    refused = commit_operation(EventSequence((early_intent, slot_event), proposal), new_operation_key(), owned)
+    assert refused.kind == "rolled_back", refused.error
+    assert isinstance(refused.error, EventValidationError), refused.error
+    assert "设备读取意图要求当前拷贝已取得原来源设备的读取机会" in str(refused.error)
+    assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction
+
+
+def _incomplete_read_proposal(owned, intent, key, mutation):
+    proposal = capture_operation(owned,
+        lambda target: OperationRepository().begin_attempt(intent, key, target))
+    state = deepcopy(proposal.state_rows)
+    copy = state["file_copies"][intent.target.copy_id]
+    if mutation == "slot":
+        copy["slot_device_id"] = "another-camera"
+    elif mutation == "round":
+        copy.update(round=2, recopies_used=1)
+    elif mutation == "binding":
+        source = state["device_files"][copy["source_device_file_id"]]
+        state["actions"].pop(source["observer_action_id"])
     else:
-        context.state_rows.setdefault("actions", {}).pop(11, None)
-    with pytest.raises(EventValidationError):
-        validate_event(event, replace(context, transaction_rows=future))
-
-
-class _IncompleteRead:
-    def __init__(self, intent, key, mutation):
-        self.intent, self.key, self.mutation = intent, key, mutation
-
-    def plan(self, scope):
-        plan = BeginAttemptCommand(self.intent, self.key).plan(scope)
-        state = deepcopy(plan.state_rows)
-        copy = state["file_copies"][self.intent.target.copy_id]
-        if self.mutation == "slot":
-            copy["slot_device_id"] = "another-camera"
-        elif self.mutation == "round":
-            copy.update(round=2, recopies_used=1)
-        else:
-            table, identity = (("device_files", copy["source_device_file_id"])
-                               if copy["source_device_file_id"] is not None
-                               else ("intermediate_files", copy["source_intermediate_file_id"]))
-            state[table].pop(identity)
-        return replace(plan, state_rows=state)
+        table, identity = (("device_files", copy["source_device_file_id"])
+                           if copy["source_device_file_id"] is not None
+                           else ("intermediate_files", copy["source_intermediate_file_id"]))
+        state[table].pop(identity)
+    return replace(proposal, state_rows=state)
 
 
 @pytest.mark.parametrize("mutation", ["slot", "round", "source"])
-def test_real_intent_transaction_requires_complete_current_read_facts(ready_read, mutation, monkeypatch):
+def test_real_intent_transaction_requires_complete_current_read_facts(ready_read, mutation):
     owned, command, _, prepared = ready_read
-    original = validators.NAMED_GUARDS["attempt_intent"]
-    reached = []
-
-    def inspect(event, context):
-        reached.append((event.event_type, event.reason))
-        original(event, context)
-
-    monkeypatch.setitem(validators.NAMED_GUARDS, "attempt_intent", inspect)
+    with sqlite3.connect(":memory:") as baseline:
+        owned.connection.backup(baseline)
+        legal = OperationRepository().begin_attempt(_intent(command, prepared), new_operation_key(), owned)
+        assert legal.kind is DbOutcomeKind.COMPLETED, legal.error
+        assert legal.value.disposition is BeginDisposition.GRANTED
+        baseline.backup(owned.connection)
     key = new_operation_key()
+    proposal = _incomplete_read_proposal(owned, _intent(command, prepared), key, mutation)
     before = tuple(owned.connection.iterdump())
-    receipt = commit_operation(_IncompleteRead(_intent(command, prepared), key, mutation), key, owned)
-    assert reached == [(11, 1)], receipt.error
+    receipt = commit_operation(EventSequence(proposal.events, proposal), key, owned)
     assert receipt.kind == "rolled_back", receipt
     assert isinstance(receipt.error, EventValidationError), receipt.error
+    expected = {"slot": "读取机会" if command.source_device_file_id else "主机源拷贝不能持有相机读取机会",
+                "round": "读取意图的轮次与当前拷贝不符", "source": "固定关联缺少"}
+    assert expected[mutation] in str(receipt.error)
     assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction
+
+
+@pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
+def test_real_intent_transaction_requires_current_device_binding(ready_read):
+    owned, command, _, prepared = ready_read
+    owned.connection.execute("UPDATE device_files SET observer_action_id=12 WHERE id=?",
+                             (command.source_device_file_id,))
+    owned.connection.commit()
+    with sqlite3.connect(":memory:") as baseline:
+        owned.connection.backup(baseline)
+        legal = OperationRepository().begin_attempt(_intent(command, prepared), new_operation_key(), owned)
+        assert legal.kind is DbOutcomeKind.COMPLETED, legal.error
+        assert legal.value.disposition is BeginDisposition.GRANTED
+        baseline.backup(owned.connection)
+    key = new_operation_key()
+    proposal = _incomplete_read_proposal(owned, _intent(command, prepared), key, "binding")
+    before = tuple(owned.connection.iterdump())
+    receipt = commit_operation(EventSequence(proposal.events, proposal), key, owned)
+    assert receipt.kind == "rolled_back", receipt.error
+    assert isinstance(receipt.error, EventValidationError), receipt.error
+    assert "固定关联缺少 actions#12" in str(receipt.error)
+    assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction
 
 
 @pytest.mark.parametrize("failure", ["execute", "fetch"])
