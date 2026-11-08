@@ -415,12 +415,16 @@ class SegmentInputCase:
         runtime = await self.factory(self.database, "cam-1")
         await capture_handler("camera_record")(self.source_id, runtime)
         assert self.owned.connection.execute("SELECT status FROM actions WHERE id=?",
-            (self.source_id,)).fetchone() == (3,)
+            (self.source_id,)).fetchone() == (self.expected_source_status,)
+        assert self.owned.connection.execute(
+            "SELECT published_event_id IS NOT NULL FROM segment_sets WHERE action_id=?",
+            (self.source_id,)).fetchone() == (1,)
         self.inputs = self.owned.connection.execute(
             "SELECT f.id,f.relative_path,s.state FROM intermediate_files f"
             " JOIN file_copies c ON c.target_file_id=f.id"
             " JOIN segment_inspections s ON s.id=c.inspection_id WHERE f.owner_action_id=? ORDER BY f.id",
             (self.source_id,)).fetchall()
+        assert self.inputs, "异常普通录像未形成分段检查副本"
         self.paths = {identity: Path(self.cfg.paths.staging) / relative for identity, relative, _state in self.inputs}
         return self.inputs
 
@@ -495,7 +499,7 @@ class SegmentInputCase:
 
 async def segment_input_case(directory, resources, monkeypatch, values, *, mode="default", partial=False,
                              early_waiters=(20, 21), read_retry_s=Decimal("0"),
-                             segment_size=4, result_check=None):
+                             segment_size=4, result_check=None, expected_source_status=3):
     from types import SimpleNamespace
     from datetime import datetime, timezone
     from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
@@ -524,6 +528,7 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
             return "segment-file-source"
 
     world = SegmentInputCase()
+    world.expected_source_status = expected_source_status
     world.wall, world.mono, world.source_id = [_NOW], [5_000_000_000], 1
     world.catalog = Catalog()
     world.catalog.duration_s = Decimal("60")
@@ -575,11 +580,14 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
     body += "if value is None: raise SystemExit('probe unavailable')\n"
     body += "print(json.dumps({'format':{'duration':value},'streams':[{'index':0,'codec_type':'video','codec_name':'h264','width':64,'height':64,'duration':value,'avg_frame_rate':'30/1','disposition':{'attached_pic':0}}]}))\n"
     probe = ProbeRequest(ffprobe=_tool(directory, "segment-cleanup-probe", body))
-    world.factory = session_capture_assembly(
-        drivers=DriverRegistry((entry,)), devices=world.cfg.devices, staging=Path(world.cfg.paths.staging),
-        file_executor=world.executor,
-        probe_request=probe, wait_config=execution_wait_config,
-        wall_us=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0], segment_size=segment_size)
+    def capture_factory():
+        return session_capture_assembly(
+            drivers=DriverRegistry((entry,)), devices=world.cfg.devices, staging=Path(world.cfg.paths.staging),
+            file_executor=world.executor,
+            probe_request=probe, wait_config=execution_wait_config,
+            wall_us=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0], segment_size=segment_size)
+
+    world.factory = capture_factory()
     instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     await accept_plan(world.database, directory, world.catalog, {
         "request_id": "1", "created_at": instant, "name": "分段输入来源",
@@ -601,6 +609,15 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     runtime = await world.factory(world.database, "cam-1")
     await capture_handler("camera_record")(1, runtime)
+    assert world.owned.connection.execute(
+        "SELECT started_at IS NOT NULL FROM device_activities WHERE action_id=1").fetchone() == (1,)
+    settled = await world.executor.drain_required()
+    assert not settled.failed
+    world.owned.connection.close()
+    world.database = await resources.restart_database(world.path)
+    world.owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
+    world.factory = capture_factory()
+    runtime = await world.factory(world.database, "cam-1")
     world.wall[0], world.mono[0] = _NOW + 75_000_000, 80_000_000_000
 
     class StopPrepared(Exception):
@@ -621,6 +638,9 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
             pass
         else:
             raise AssertionError("准备必须在可靠停止及活动结束保存后交付")
+    assert world.driver.calls == [("control", "start_recording"), ("stop", "stop_recording")]
+    assert world.owned.connection.execute(
+        "SELECT control_elapsed_ns FROM device_activities WHERE action_id=1").fetchone() == (None,)
     world.wall[0], world.mono[0] = _NOW + 80_000_000, 85_000_000_000
     obtain_devices = {identity: {**declaration, "copy": {**declaration["copy"], "max_read_attempts": 1}}
         for identity, declaration in world.cfg.devices.items()}

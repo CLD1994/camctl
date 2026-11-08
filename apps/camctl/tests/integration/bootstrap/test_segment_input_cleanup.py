@@ -103,7 +103,8 @@ async def test_completed_copy_without_selected_consumers_cleans_before_waiters_e
 
 
 async def test_finished_partial_inspection_copy_has_no_bound_consumers(tmp_path, capture_resources, monkeypatch):
-    world = await _published_world(tmp_path, capture_resources, monkeypatch, (Decimal(60),), partial=True)
+    world = await _published_world(tmp_path, capture_resources, monkeypatch, (Decimal(60),),
+        partial=True, expected_source_status=4)
     try:
         committed, size = world.owned.connection.execute(
             "SELECT committed_bytes,source_size FROM file_copies WHERE inspection_id IS NOT NULL").fetchone()
@@ -155,7 +156,7 @@ async def test_first_inspection_cleanup_failure_is_saved_without_same_run_retry(
 
 async def test_unconfirmed_copy_without_consumers_cleans_while_other_waiters_run(tmp_path, capture_resources, monkeypatch):
     world = await _published_world(tmp_path, capture_resources, monkeypatch,
-        (Decimal(18), Decimal(27), RuntimeError("probe unavailable")))
+        (Decimal(18), Decimal(27), RuntimeError("probe unavailable")), expected_source_status=4)
     try:
         assert [row[2] for row in world.inputs] == [2, 2, 4]
         results = await _clean(world)
