@@ -117,6 +117,8 @@ async def _interrupted(tmp_path, *, maximum=1, terminal=False, finalized=None,
 async def test_interrupted_partial_scan_exhausts_without_losing_complete_file(tmp_path):
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path)
     try:
+        # 第一轮接续原页和尝试，下一轮由正式处理器继续消费已保存事实。
+        await capture_handler(handler)(action_id, runtime)
         await capture_handler(handler)(action_id, runtime)
         status, raw_error, result = owned.connection.execute(
             "SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=?",
@@ -143,6 +145,7 @@ async def test_partial_scan_recovery_preserves_complete_files_for_shared_consume
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path, consumer=consumer)
     try:
         await capture_handler(handler)(action_id, runtime)
+        await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (
             int(enum_for("actions.status").CANCELED) if consumer == "cancel" else 4,)
         assert owned.connection.execute("SELECT source_action_id,completion_state FROM device_files").fetchone() == (action_id, 3)
@@ -157,6 +160,7 @@ async def test_partial_scan_keeps_actual_device_end_separate_from_unknown_set(tm
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path,
         consumer="timelapse", completion=True)
     try:
+        await capture_handler(handler)(action_id, runtime)
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (4,)
         assert owned.connection.execute("SELECT activity_state,occupancy_state FROM device_activities").fetchone() == (3, 2)
@@ -198,6 +202,7 @@ async def test_partial_scan_retains_complete_original_when_preview_pair_is_unrea
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path,
         first_entries=[_entry("a"), preview])
     try:
+        await capture_handler(handler)(action_id, runtime)
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (4,)
         assert owned.connection.execute("SELECT source_action_id,completion_state FROM device_files ORDER BY id").fetchall() == [(action_id, 3), (None, 1)]
@@ -306,6 +311,7 @@ async def test_interrupted_scan_starts_new_round_with_own_cursor_and_same_budget
     driver.list_results.side_effect = complete
     try:
         await capture_handler(handler)(action_id, runtime)
+        await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT attempt_no,status FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
             (original.ref.ticket.run_id,)).fetchall() == [(1, int(enum_for("operation_attempts.status").UNKNOWN)), (2, 2)]
         assert runtime.capture.read_result_page(original.ref, owned) == original
@@ -400,6 +406,7 @@ async def test_new_round_interrupted_before_first_return_keeps_previous_v2_files
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
         resumed = (await _resumed(owned, runtime, horizon))
+        await capture_handler(handler)(action_id, resumed)
         await capture_handler(handler)(action_id, resumed)
         assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?",
             (original.ref.ticket.run_id,)).fetchone() == (2,)
