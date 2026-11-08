@@ -8,7 +8,10 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.contracts.workflow_errors import registered_error_spec, validate_error_details
+from camctl.contracts.enums import enum_for
+from camctl.contracts.workflow_errors import (
+    item_error_id, registered_error_spec, validate_error_details,
+)
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -135,7 +138,7 @@ def test_all_effective_restrictions_contribute_to_priority(target, facts, availa
 
 
 @pytest.mark.parametrize("fact,availability,cleanup", [
-    (None, 2, 2), (None, 3, 4), ((2, 2), 1, 1),
+    (None, 2, 2), ((2, 2), 1, 1),
     ((4, 4), 2, 2), ((2, 2), 2, 3),
 ])
 def test_inconsistent_cleanup_projection_rolls_back(target, fact, availability, cleanup):
@@ -149,6 +152,63 @@ def test_inconsistent_cleanup_projection_rolls_back(target, fact, availability, 
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(result.error, ConsistencyError), result.error
     assert tuple(owned.connection.iterdump()) == before
+
+
+def test_saved_completed_device_cleanup_rejects_without_own_member(read_targets):
+    """消费已保存的文件与产物完成事实，不要求本项清理成员已经结束。"""
+    owned, command = read_targets, _command()
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
+    _availability(owned.connection, command, 3, 4)
+    owned.connection.commit()
+    assert owned.connection.execute("SELECT COUNT(*) FROM cleanup_items").fetchone() == (0,)
+
+    result = OutputsRepository().grant_file(command, new_operation_key(), owned)
+
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
+    item = row_facts(owned.connection, "obtain_items", 101)
+    assert item["status"] == int(enum_for("obtain_items.status").FAILED)
+    assert item["error_code"] == item_error_id("obtain_items", "output_unavailable")
+    assert item["error_details_json"] == {"output_id": "701", "availability": "cleaned"}
+    validate_error_details("output_unavailable", item["error_details_json"])
+    assert item["delivery_id"] is None and item["source_dependency"] == 0
+    assert owned.connection.execute("SELECT COUNT(*) FROM deliveries").fetchone() == (0,)
+    assert not owned.connection.in_transaction
+
+
+@pytest.mark.parametrize("file_completed", [False, True], ids=["file-not-cleaned", "file-cleaned"])
+def test_completed_host_cleanup_agrees_with_source_file(local_read, file_completed):
+    """本地文件和产物共同完成才可保存最终拒绝；两者矛盾须回滚。"""
+    owned, command = local_read
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
+    _availability(owned.connection, command, 3, 4)
+    state = enum_for("intermediate_files.cleanup_state")
+    owned.connection.execute(
+        "UPDATE intermediate_files SET cleanup_state=? WHERE id=?",
+        (int(state.COMPLETED if file_completed else state.NOT_NEEDED),
+         command.source_intermediate_file_id),
+    )
+    owned.connection.commit()
+    before = tuple(owned.connection.iterdump())
+
+    result = OutputsRepository().grant_file(command, new_operation_key(), owned)
+
+    if not file_completed:
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(result.error, ConsistencyError), result.error
+        assert not owned.connection.in_transaction
+        assert tuple(owned.connection.iterdump()) == before
+    else:
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
+        item = row_facts(owned.connection, "obtain_items", 101)
+        assert item["status"] == int(enum_for("obtain_items.status").FAILED)
+        assert item["error_code"] == item_error_id("obtain_items", "output_unavailable")
+        assert item["error_details_json"] == {"output_id": "701", "availability": "cleaned"}
+        validate_error_details("output_unavailable", item["error_details_json"])
+        assert item["delivery_id"] is None and item["source_dependency"] == 0
+        assert owned.connection.execute("SELECT COUNT(*) FROM deliveries").fetchone() == (0,)
+        assert not owned.connection.in_transaction
 
 
 @pytest.mark.parametrize("availability,presence", [(1, 1), (1, 3), (4, 2), (5, 2)])
