@@ -424,7 +424,7 @@ async def test_new_round_interrupted_before_first_return_keeps_previous_v2_files
         owned.connection.close()
 
 
-async def test_committed_attempt_without_file_facts_restores_pages_before_new_query(tmp_path):
+async def test_interrupted_file_fact_restores_page_before_new_query(tmp_path):
     class InterruptedFileSave(CaptureRepository):
         hits = 0
         def save_file_ownership(self, request, key, owned):
@@ -440,11 +440,13 @@ async def test_committed_attempt_without_file_facts_restores_pages_before_new_qu
                 await asyncio.wait_for(capture_handler(handler)(action_id, runtime), 5)
         assert observer.hits > 0
         assert owned.connection.execute("SELECT status FROM operation_attempts WHERE run_id=?",
-            (original.ref.ticket.run_id,)).fetchone() == (int(enum_for("operation_attempts.status").UNKNOWN),)
+            (original.ref.ticket.run_id,)).fetchone() == (int(enum_for("operation_attempts.status").RUNNING),)
         assert owned.connection.execute("SELECT source_action_id FROM device_files").fetchone() == (None,)
+        assert runtime.capture.read_result_page(original.ref, owned) == original
+        horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = (await _resumed(owned, runtime, result_case_for().options["recovery_max_event_id"]()))
+        resumed = await _resumed(owned, runtime, horizon)
         async def complete(request, batch):
             assert request.ticket.attempt_id == 2
             assert owned.connection.execute("SELECT source_action_id,completion_state FROM device_files").fetchone() == (action_id, 3)
@@ -452,6 +454,11 @@ async def test_committed_attempt_without_file_facts_restores_pages_before_new_qu
         driver.list_results.side_effect = complete
         result_case_for().results.delegate = DriverResultListing(driver, _BINDING, _RECOVERY)
         await capture_handler(handler)(action_id, resumed)
+        await capture_handler(handler)(action_id, resumed)
+        assert owned.connection.execute("SELECT attempt_no,status FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
+            (original.ref.ticket.run_id,)).fetchall() == [
+                (1, int(enum_for("operation_attempts.status").UNKNOWN)),
+                (2, int(enum_for("operation_attempts.status").SUCCEEDED))]
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (3,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (1,)
         assert resumed.capture.read_result_page(original.ref, owned) == original
