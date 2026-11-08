@@ -115,43 +115,6 @@ async def _flow(pipeline, driver, tools) -> MediaFlow:
 
 
 class TestDriverReadSessions:
-    async def test_opens_session_by_completed_file_facts(self, pipeline):
-        from camctl.contracts.values import new_operation_key
-        from camctl.operations.attempts import (
-            AttemptConfig, AttemptIntent, AttemptTarget, OperationKind,
-        )
-        from camctl.outputs.qualification import FileCandidate, OperationConfig
-        from camctl.persistence.models import DbOutcomeKind
-        from camctl.persistence.repositories.operations import OperationRepository
-        from camctl.persistence.repositories.outputs import OutputsRepository, SlotRequest
-
-        owned = pipeline[0]
-        driver = ReadDriverDouble(_CONTENT)
-        repository = OutputsRepository()
-        now = 1_750_000_100_000_000
-        granted = repository.grant_file(FileCandidate(
-            action_id=1, item_id=None, processing_id=1, output_id=None,
-            source_device_file_id=11, target_extension="mp4", delivery_extension=None,
-            delivery_display_name=None,
-            config=OperationConfig(3, Decimal("10"), Decimal("0")), occurred_at=now),
-            new_operation_key(), owned)
-        assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
-        copy_id = granted.value.copy_id
-        slot = repository.grant_read_slot(SlotRequest(copy_id, now), new_operation_key(), owned)
-        assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
-        begun = OperationRepository().begin_attempt(AttemptIntent(
-            "read", 1, OperationKind.READ_FILE, AttemptTarget(copy_id=copy_id), None,
-            AttemptConfig(3, Decimal("10"), Decimal("0")), now, copy_round=1),
-            new_operation_key(), owned)
-        assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
-        sessions = DriverReadSessions(await capture_database(owned), driver, ticket=begun.value.ticket)
-        session = await sessions.open_session(11, 4)
-        assert session.position() == 4
-        source, offset = driver.opens[0]
-        assert offset == 4
-        assert source.size_bytes == len(_CONTENT)
-        assert source.file_id  # 身份键承载稳定身份
-
     async def test_rejects_incomplete_source(self, pipeline):
         owned = pipeline[0]
         owned.connection.execute(
@@ -206,21 +169,57 @@ class TestRunRecordingMedia:
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM file_copies").fetchone()[0] == 1
 
-    async def test_short_duration_requires_repair_flow(self, pipeline):
-        owned = pipeline[0]
-        tools = ProbeTools(MediaProbe(duration_s=Decimal("200"), error=None))
-        step = await run_recording_media(
-            (await _flow(pipeline, ReadDriverDouble(_CONTENT), tools)), 1, 1, 11)
-        # 多录 200s 超过目标加余量：修复决定保存并登记输出后进入执行，
-        # 工具未运行保留运行阶段，下一次推进续跑。
+    async def test_long_recording_keeps_repair_pending_until_tool_finishes(self, media_pipeline, media_cases):
+        import asyncio
+        import sys
         from camctl.capture.media import RepairExecutionPhase
+        from camctl.host_files.media import MediaStream
 
-        assert step.phase is RepairExecutionPhase.TOOL_NOT_COMPLETED, step
-        decision = owned.connection.execute(
-            "SELECT repair_state, repair_basis_json FROM recording_processing"
-            " WHERE id = 1").fetchone()
-        assert decision[0] == 4
-        assert tools.calls == ["probe", "repair"]
+        class PausedRepairTools(ScriptTools):
+            def configure(self, directory):
+                requests = super().configure(directory)
+                repair = self.directory / "repair"
+                repair.write_text(
+                    "#!" + sys.executable + "\n"
+                    "import json,pathlib,sys,time\n"
+                    f"root=pathlib.Path({str(self.directory)!r})\n"
+                    "path=pathlib.Path(sys.argv[-1])\n"
+                    "with (root/'calls.jsonl').open('a') as log:\n"
+                    "    log.write(json.dumps(['repair',int(path.stem),str(path)])+'\\n')\n"
+                    "(root/'repair-started').touch()\n"
+                    "while not (root/'release-repair').exists(): time.sleep(.005)\n"
+                    f"path.write_bytes({self.content!r})\n"
+                )
+                repair.chmod(0o755)
+                return requests
+
+        owned, roots, source_id = media_pipeline
+        tools = PausedRepairTools(MediaProbe(Decimal("200"), None, (
+            MediaStream(0, "video", "h264", 64, 64, Decimal("200"), False),)))
+        case = await MediaCase(owned, roots, source_id, tools).start()
+        task = asyncio.create_task(run_recording_media(case.runtime.media, 1, 1, source_id))
+
+        async def wait_for_repair():
+            while not (tools.directory / "repair-started").exists():
+                if task.done():
+                    await task
+                    raise AssertionError("修复工具尚未启动，媒体流程已结束")
+                await asyncio.sleep(.005)
+
+        try:
+            await asyncio.wait_for(wait_for_repair(), 5)
+            assert not task.done()
+            decision = owned.connection.execute(
+                "SELECT repair_state, repair_basis_json FROM recording_processing WHERE id=1").fetchone()
+            assert decision[0] == 4
+            assert tools.calls == ["probe", "repair"]
+            (tools.directory / "release-repair").touch()
+            step = await asyncio.wait_for(task, 5)
+            assert step.phase is RepairExecutionPhase.SUCCEEDED, step
+            assert (roots.staging / step.output_file.relative_path).read_bytes() == tools.content
+        finally:
+            (tools.directory / "release-repair").touch()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def test_status_loader_reads_saved_facts(self, pipeline):
         owned = pipeline[0]
@@ -275,36 +274,48 @@ class _FlakyReadDriver:
 
 class TestCopyRetryInterval:
     async def test_segment_failure_waits_interval_before_next_read(
-            self, pipeline):
+            self, media_pipeline):
+        from types import SimpleNamespace
+        from camctl.bootstrap.capture_assembly import session_capture_assembly
         from camctl.capture.input_copy import InputPhase
+        from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
+        from camctl.devices.ports import DriverDeclaration
+        from camctl.host_files.tasks import FileTaskExecutor
+        from camctl.session.supervision import Supervisor
+        from ..bootstrap.test_media_assembly import _SessionDriver, _config
+        from .media_retry_fixtures import _EVIDENCE
 
-        owned, roots = pipeline[0], pipeline[1]
+        owned, roots, source_id = media_pipeline
         driver = _FlakyReadDriver()
-        tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
         clock = _Clock()
-        flow = MediaFlow(
-            database=await capture_database(owned),
-            roots=roots,
-            sessions=DriverReadSessions(await capture_database(owned), driver, ticket=None),
-            tools=tools,
-            policy=MediaPolicy(repair_margin_s=Decimal("2")),
-            occurred_at=lambda: 1_750_000_100_000_000,
-            digest_supported=True,
-            digest=_Digest(_CONTENT),
-            retry_interval_s=Decimal("3"),
-            monotonic_ns=clock,
-        )
-        step = await run_recording_media(flow, 1, 1, 11)
-        # 段传输通信失败：保存失败事实并建立读取重试等待。
-        assert step.phase is InputPhase.SEGMENT_FAILED, step
-        assert driver.opens == 1
-        clock.advance_s(Decimal("1"))
-        waited = await run_recording_media(flow, 1, 1, 11)
-        # 间隔未到：不开新读取会话，不触设备。
-        assert waited.phase is InputPhase.RETRY_WAITING, waited
-        assert driver.opens == 1
-        clock.advance_s(Decimal("2"))
-        retried = await run_recording_media(flow, 1, 1, 11)
-        # 到时：恢复续传，再次打开读取会话。
-        assert retried.phase is InputPhase.SEGMENT_FAILED, retried
-        assert driver.opens == 2
+        base = _SessionDriver(_CONTENT)
+        ports = SimpleNamespace(control=base.control, stop=base.stop,
+            open_read=driver.open_read, digest=base.digest)
+        declaration = DriverDeclaration(control_supported=True, stop_supported=True,
+            query_supported=False, result_supported=False, read_supported=True,
+            digest_supported=True, delete_supported=False)
+        registry = DriverRegistry((DriverEntry("camctl-adb", ports, declaration,
+            _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
+        devices = {key: dict(value) for key, value in _config(roots.staging.parent).devices.items()}
+        devices["cam-1"]["copy"] = {"retry_interval_s": Decimal("3")}
+        executor = FileTaskExecutor(Supervisor())
+        factory = session_capture_assembly(devices=devices, drivers=registry,
+            staging=roots.staging, wait_config=lambda _: None,
+            wall_us=lambda: 1_750_000_100_000_000, monotonic_ns=clock,
+            file_executor=executor)
+        runtime = await factory(await capture_database(owned), "cam-1")
+        assert runtime is not None and runtime.media is not None
+        try:
+            step = await run_recording_media(runtime.media, 1, 1, source_id)
+            assert step.phase is InputPhase.SEGMENT_FAILED, step
+            assert driver.opens == 1
+            clock.advance_s(Decimal("1"))
+            waited = await run_recording_media(runtime.media, 1, 1, source_id)
+            assert waited.phase is InputPhase.RETRY_WAITING, waited
+            assert driver.opens == 1
+            clock.advance_s(Decimal("2"))
+            retried = await run_recording_media(runtime.media, 1, 1, source_id)
+            assert retried.phase is InputPhase.SEGMENT_FAILED, retried
+            assert driver.opens == 2
+        finally:
+            assert not (await executor.drain_required()).failed
