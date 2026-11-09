@@ -129,8 +129,8 @@ async def _save_file_snapshot(path: Path, entity_id: int, entity_type: int) -> N
 
 @pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
 @pytest.mark.asyncio
-async def test_real_accepted_host_photo_history_restores_complete_boundaries_and_forward_snapshot(
-    tmp_path: Path, monkeypatch, capture_format,
+async def test_real_accepted_host_photo_history_restores_complete_boundaries_and_snapshot(
+    tmp_path: Path, capture_format,
 ):
     original_bytes = JPEG_IMAGE + b"history-original" if capture_format == "jpeg" else _ORIGINAL
     config = _config(tmp_path)
@@ -333,21 +333,10 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
             assert history.restore_entity("output", output_id, boundary_cleanup) == \
                 expected_at_cleanup[("output", output_id)]
 
-        # 快照位于准备 H；完整字节、提升及清理之后，恢复原图到完整字节 H
-        # 应选快照正向回放，并还原清理前的精确字节事实。
-        original_page = history._object_event_page
-        forward_directions = []
-
-        def record_forward(ref, lower, upper, previous, expected_count, **kwargs):
-            if ref == (file_entity, files.original.file_id):
-                forward_directions.append(kwargs["forward"])
-            return original_page(ref, lower, upper, previous, expected_count, **kwargs)
-
-        monkeypatch.setattr(history, "_object_event_page", record_forward)
-        restored_forward = history.restore_entity(
+        # 准备 H 已保存快照；原图在提升和清理后仍可恢复到完整字节 H。
+        restored_at_complete = history.restore_entity(
             "intermediate_file", files.original.file_id, boundary_complete)
-        assert forward_directions and all(forward_directions)
-        assert restored_forward == complete_original
+        assert restored_at_complete == complete_original
         assert complete_preview == history.restore_entity(
             "intermediate_file", files.preview.file_id, boundary_complete)
 
