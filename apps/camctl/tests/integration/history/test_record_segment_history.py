@@ -101,9 +101,13 @@ async def test_current_boundary_does_not_read_event_bodies(tmp_path, monkeypatch
 
         def connect(database, *args, **kwargs):
             connection = original_connect(database, *args, **kwargs)
-            if _is_readonly_database(database, kwargs.get('uri', False), history.path):
-                connection.set_authorizer(authorize)
-                attached.append(True)
+            try:
+                if _is_readonly_database(database, kwargs.get('uri', False), history.path):
+                    connection.set_authorizer(authorize)
+                    attached.append(True)
+            except BaseException:
+                connection.close()
+                raise
             return connection
 
         monkeypatch.setattr(sqlite3, 'connect', connect)
@@ -153,6 +157,8 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
     boundary = HistoryBoundary(**manifest['boundary'])
     observations = []
     original_connect = sqlite3.connect
+    # SQLite 约每 10 条虚拟机指令回调一次；短步进可能不足一次回调，不能当作精确指令数。
+    progress_interval = 10
 
     class Cursor(sqlite3.Cursor):
         def fetchall(self):
@@ -193,7 +199,7 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
                 counter[0] += 1
                 return 0
             self.set_authorizer(authorize)
-            self.set_progress_handler(advance, 1)
+            self.set_progress_handler(advance, progress_interval)
             try:
                 cursor = self.cursor(factory=Cursor).execute(sql, parameters)
             finally:
@@ -230,37 +236,36 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
             any('SEARCH' in row[3].upper() and name in row[3] for row in plan)
             and not any('TEMP' in row[3].upper() for row in plan) for plan in plans)]
         assert used
-    indexed_steps = sum(item[2] for item in observations)
+    indexed_callback_count = sum(item[2] for item in observations)
     # 在独立副本移除实际使用的索引，重放正式入口执行的同一组查询与参数。
     with closing(original_connect(path)) as db:
         for name in used:
             db.execute('DROP INDEX "' + name.replace('"', '""') + '"')
-        steps = [0]
+        callbacks = [0]
         def advance():
-            steps[0] += 1
+            callbacks[0] += 1
             return 0
-        db.set_progress_handler(advance, 1)
         control_ids = []
         for sql, params, _, original_rows in observations:
-            control_rows = db.execute(sql, params).fetchall()
+            db.set_progress_handler(advance, progress_interval)
+            try:
+                control_rows = db.execute(sql, params).fetchall()
+            finally:
+                db.set_progress_handler(None, 0)
             assert control_rows == original_rows
             control_ids.extend(row[0] for row in control_rows)
-        db.set_progress_handler(None, 0)
         assert len(control_ids) == size and set(control_ids) == member_ids
-        assert indexed_steps < steps[0]
+        assert indexed_callback_count < callbacks[0]
     print('SEGMENT_INDEX_WORK', {'size': size, 'queries': len(observations),
-          'indexed_steps': indexed_steps, 'without_index_steps': steps[0],
+          'progress_interval': progress_interval, 'indexed_callback_count': indexed_callback_count,
+          'without_index_callback_count': callbacks[0],
           'first_plan': plans[0], 'last_plan': plans[-1]}, flush=True)
 
 
-def test_segment_candidate_index_work(tmp_path, monkeypatch):
-    """在两个固定负载中核对成员候选查询的索引及实际工作量。"""
-    small = tmp_path / 'small'
-    large = tmp_path / 'large'
-    small.mkdir()
-    large.mkdir()
-    _segment_candidate_index_work(small, monkeypatch, 256)
-    _segment_candidate_index_work(large, monkeypatch, 2048)
+@pytest.mark.parametrize('size', [256, 2048])
+def test_segment_candidate_index_work(tmp_path, monkeypatch, size):
+    """在固定负载中核对成员候选查询的索引及实际工作量。"""
+    _segment_candidate_index_work(tmp_path, monkeypatch, size)
 
 
 @pytest.mark.asyncio
