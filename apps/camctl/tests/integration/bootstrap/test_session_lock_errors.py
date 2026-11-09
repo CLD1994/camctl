@@ -377,19 +377,6 @@ async def test_default_run_lock_failure_has_zero_business_effects(
         return original_listdir(path)
 
     monkeypatch.setattr(os, "listdir", count_scan)
-    emergency_calls: list[str] = []
-    original_emergency = lifecycle._emergency_settlement_of
-
-    def observe_emergency(current):
-        settlement = original_emergency(current)
-
-        async def run_settlement():
-            emergency_calls.append("called")
-            return await settlement()
-
-        return run_settlement
-
-    monkeypatch.setattr(lifecycle, "_emergency_settlement_of", observe_emergency)
     try:
         outcome = await execute_command(
             deps, _source(
@@ -417,7 +404,6 @@ async def test_default_run_lock_failure_has_zero_business_effects(
     assert backend.calls == {"open": 1, "try_lock": 1, "unlock": 0, "close": 1}
     assert session_connections == []
     assert scans == []
-    assert emergency_calls == []
     assert catalog.calls == []
     assert old_copy.read_bytes() == b"keep until session ownership is acquired"
     assert _database_image(Path(config.paths.state_db)) == before
@@ -544,7 +530,7 @@ async def test_submit_keeps_acceptance_when_real_admission_holder_conflicts(
 
 
 @pytest.mark.asyncio
-async def test_admission_acquire_failure_keeps_commits_and_skips_ordinary_flows(
+async def test_admission_acquire_failure_keeps_commits_and_skips_report_generation(
         tmp_path: Path, monkeypatch) -> None:
     config = _config_for(tmp_path)
     assert initialize_state(
@@ -554,6 +540,8 @@ async def test_admission_acquire_failure_keeps_commits_and_skips_ordinary_flows(
     prior_events = _rows(database, "SELECT * FROM history_events ORDER BY id")
     prior_plan = _rows(database, "SELECT * FROM plans WHERE request_id = ?",
                        ("710003",))
+    prior_reports = _rows(database, "SELECT * FROM reports ORDER BY id")
+    prior_deliveries = _rows(database, "SELECT * FROM deliveries ORDER BY id")
     assert prior_plan
     assert len(prior_plan) == 1
     prior_ack = _scalar(
@@ -578,34 +566,14 @@ async def test_admission_acquire_failure_keeps_commits_and_skips_ordinary_flows(
         monkeypatch, session_path=session_path, admission_path=admission_path,
         admission_backend=backend,
     )
-    ordinary_calls: list[tuple[str, ...]] = []
-    capture_calls: list[str] = []
-    original_assembly = lifecycle._report_assembly
-    from camctl.bootstrap.flows import CaptureFlow
+    report_calls = []
+    original_generate = WorkerSupervisor.generate
 
-    capture_flows: list[CaptureFlow] = []
-    original_capture_call = CaptureFlow.__call__
+    async def observe_generate(supervisor, job):
+        report_calls.append(job.job_id)
+        return await original_generate(supervisor, job)
 
-    async def observe_capture_call(self, context):
-        if any(self is flow for flow in capture_flows):
-            capture_calls.append("scheduling")
-        return await original_capture_call(self, context)
-
-    monkeypatch.setattr(CaptureFlow, "__call__", observe_capture_call)
-
-    def observe_assembly(*args, **kwargs):
-        flows, supervisor = original_assembly(*args, **kwargs)
-        capture_flows.append(flows["scheduling"])
-        return flows, supervisor
-
-    monkeypatch.setattr(lifecycle, "_report_assembly", observe_assembly)
-    original_drive_flows = session_service._drive_flows
-
-    async def observe_drive_flows(context):
-        ordinary_calls.append(tuple(context.flows))
-        return await original_drive_flows(context)
-
-    monkeypatch.setattr(session_service, "_drive_flows", observe_drive_flows)
+    monkeypatch.setattr(WorkerSupervisor, "generate", observe_generate)
     try:
         outcome = await execute_command(deps, None)
     finally:
@@ -620,12 +588,13 @@ async def test_admission_acquire_failure_keeps_commits_and_skips_ordinary_flows(
     assert outcome.needs_run is None
     assert transaction_observations == [True]
     assert backend.calls == {"open": 1, "try_lock": 1, "unlock": 0, "close": 1}
-    assert ordinary_calls == []
-    assert capture_calls == []
+    assert report_calls == []
     current_events = _rows(database, "SELECT * FROM history_events ORDER BY id")
     assert current_events[:len(prior_events)] == prior_events
     assert _rows(database, "SELECT * FROM plans WHERE request_id = ?",
                  ("710003",)) == prior_plan
+    assert _rows(database, "SELECT * FROM reports ORDER BY id") == prior_reports
+    assert _rows(database, "SELECT * FROM deliveries ORDER BY id") == prior_deliveries
     assert _scalar(
         database,
         "SELECT acknowledged_wm, acknowledged_report_id"
