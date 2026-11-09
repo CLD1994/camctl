@@ -173,7 +173,10 @@ async def test_recovery_diagnoses_every_executed_directory_observation(tmp_path,
         generated.path.rename(world.ready / publication.report_file_name(1, generated.sha256))
     finally:
         owned.connection.close()
-    original_files = {p.name: p.read_bytes() for p in world.ready.iterdir()}
+    original_reports = {
+        p.name: p.read_bytes() for p in world.ready.iterdir()
+        if publication.parse_report_file_name(p.name) is not None
+    }
     observed = []
     original_listdir = publication.os.listdir
     paths = {"ready": world.ready, "processing": world.processing,
@@ -207,7 +210,11 @@ async def test_recovery_diagnoses_every_executed_directory_observation(tmp_path,
         assert matched[0]["context"]["report_id"] == 1
         assert matched[0]["context"]["database_id"] == database_id
     monkeypatch.setattr(publication.os, "listdir", original_listdir)
-    assert {p.name: p.read_bytes() for p in world.ready.iterdir()} == original_files
+    # 报告恢复失败仍可交付日志副本；原报告的集合和全部字节必须保持。
+    assert {
+        p.name: p.read_bytes() for p in world.ready.iterdir()
+        if publication.parse_report_file_name(p.name) is not None
+    } == original_reports
 
 
 @pytest.mark.asyncio
