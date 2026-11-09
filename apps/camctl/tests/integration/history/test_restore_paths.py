@@ -18,6 +18,7 @@ from camctl.persistence.repositories.history import SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import encode_json_value, row_facts
 
+from ..support.history_rows import observe_readonly_rows
 from ..persistence.test_motor_transactions import NOW, owned
 from .test_object_closure import _history
 from .test_operation_ownership import _create_flow, operation_world
@@ -85,43 +86,6 @@ async def _prepared(world, ref):
     return prepared
 
 
-def _observe_readonly_rows(monkeypatch, database_path, observe):
-    import os
-    import sqlite3
-    from urllib.parse import parse_qs, urlsplit
-    from urllib.request import url2pathname
-
-    opened = []
-    real_connect = sqlite3.connect
-
-    class ObservedConnection(sqlite3.Connection):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            original_factory = self.row_factory
-
-            def record(cursor, row):
-                observe(cursor, row)
-                return row if original_factory is None else original_factory(cursor, row)
-
-            self.row_factory = record
-
-    def connect(database, *args, **kwargs):
-        if kwargs.get("uri") and str(database).startswith("file:"):
-            parts = urlsplit(str(database))
-            file_path = url2pathname(("//" + parts.netloc if parts.netloc else "") + parts.path)
-            if (parse_qs(parts.query).get("mode") == ["ro"] and os.path.exists(file_path)
-                    and os.path.samefile(file_path, database_path)):
-                assert "factory" not in kwargs
-                kwargs["factory"] = ObservedConnection
-                connection = real_connect(database, *args, **kwargs)
-                opened.append(connection)
-                return connection
-        return real_connect(database, *args, **kwargs)
-
-    monkeypatch.setattr(sqlite3, "connect", connect)
-    return opened
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path,before,after,has_snapshot", [
     ("current", 2, 0, True), ("exact", 0, 3, True),
@@ -152,7 +116,7 @@ async def test_cost_path_reads_only_selected_event_range(file_world, monkeypatch
             assert len(id_columns) == 1
             observed.append((row[id_columns[0]], row[body_columns[0]]))
 
-    opened = _observe_readonly_rows(monkeypatch, world.history.path, record)
+    opened = observe_readonly_rows(monkeypatch, world.history.path, record)
     actual = world.history.restore_entity("device_file", 1, boundary, event_batch_size=1)
     if path in ("current", "exact"):
         wanted = []
@@ -911,7 +875,7 @@ async def test_snapshot_allows_repeated_null_unique_keys(two_item_world, monkeyp
             assert all(names.count(name) == 1 for name in columns)
             selected.append(tuple(row[names.index(name)] for name in columns))
 
-    opened = _observe_readonly_rows(monkeypatch, world.history.path, record)
+    opened = observe_readonly_rows(monkeypatch, world.history.path, record)
     restored = world.history.restore_entity("action", 2, boundary)
     # (entity_type, entity_id, boundary_event_id) 在快照表中唯一。
     assert opened and selected == [snapshot]

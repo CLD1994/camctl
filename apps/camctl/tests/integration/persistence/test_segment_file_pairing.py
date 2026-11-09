@@ -25,6 +25,7 @@ from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
 
 from .test_segment_storage import SegmentedCatalog
+from ..support.history_rows import observe_readonly_rows
 from ..capture.result_consumer_fixtures import consumer_world
 from ..capture.test_result_page_history import _actual, _request
 
@@ -489,7 +490,7 @@ async def test_ownership_needs_reliable_page_not_complete_scan(tmp_path, bounded
 
 
 @pytest.mark.asyncio
-async def test_file_owner_initial_snapshot_current_restore_same_h(tmp_path):
+async def test_file_owner_initial_snapshot_current_restore_same_h(tmp_path, monkeypatch):
     from camctl.history.decoding import decode_event_row
     from camctl.history.events import branch_of, event_type_name
     from camctl.history.replay import EntityImage, RestoreSeed, restore
@@ -537,13 +538,33 @@ async def test_file_owner_initial_snapshot_current_restore_same_h(tmp_path):
                                                 SnapshotRef(action_type, source)))
         prepared = [prepare_snapshot(image) for image in images]
         assert (await store.save_snapshots(tuple(prepared)))[0].ref.entity_id == request.file_id
+        columns = ('entity_type', 'entity_id', 'boundary_event_id', 'change_count',
+                   'format_version', 'content')
+        saved_snapshot = owned.connection.execute(
+            'SELECT entity_type, entity_id, boundary_event_id, change_count, format_version, content'
+            ' FROM entity_snapshots WHERE entity_type=? AND entity_id=? AND boundary_event_id=?',
+            (entity_type, request.file_id, boundary.last_event_id)).fetchone()
+        assert saved_snapshot is not None
         for presence in (2, 3, 2):
             _ok(runtime.capture.save_file_presence(files.FilePresenceSave(request.file_id, presence,
                 runtime.wall_us()), new_operation_key(), owned))
-        with history._read_connection() as db:
-            seed = history._object_seed(db, 'device_file', request.file_id, boundary, event_batch_size=1)
-            assert seed.snapshot is not None and seed.snapshot.boundary == boundary
-        snapshot = history.restore_entity('device_file', request.file_id, boundary, event_batch_size=1)
+        assert history.current_boundary().last_event_id > boundary.last_event_id
+        selected = []
+
+        def record(cursor, row):
+            names = [column[0] for column in cursor.description]
+            content_columns = [index for index, name in enumerate(names)
+                               if name == 'content' or row[index] == saved_snapshot[-1]]
+            if content_columns:
+                assert len(content_columns) == 1 and names[content_columns[0]] == 'content'
+                assert all(names.count(name) == 1 for name in columns)
+                selected.append(tuple(row[names.index(name)] for name in columns))
+
+        with monkeypatch.context() as observation:
+            opened = observe_readonly_rows(observation, path, record)
+            snapshot = history.restore_entity('device_file', request.file_id, boundary, event_batch_size=1)
+        # 快照表的 (entity_type, entity_id, boundary_event_id) 唯一。
+        assert opened and selected == [saved_snapshot]
         assert snapshot[('device_files', request.file_id)] == current
         assert runtime.capture.verify_ownership_from_result_page(request, key, owned).file_id == request.file_id
         assert current['role'] == 3 and current['source_action_id'] == source
