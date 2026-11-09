@@ -41,6 +41,7 @@ from camctl.persistence.transaction import row_facts
 
 from ..persistence.test_motor_transactions import NOW, owned
 from .test_restore_paths import file_world
+from ..support.history_rows import observe_readonly_rows
 
 
 def _query_plan(connection: sqlite3.Connection, statement: str, parameters=()):
@@ -168,7 +169,24 @@ def test_event_growth_restore_pages_cost(file_world, monkeypatch):
     changes = 400
     for index in range(changes):
         _presence_change(world)
-    opened = _count_connections(world.history, monkeypatch)
+    event_ids = [row[0] for row in world.owned.connection.execute(
+        "SELECT id FROM history_events WHERE id > ? ORDER BY id", (boundary.last_event_id,))]
+    assert len(event_ids) == changes
+    views = []
+    active = {}
+
+    def record(cursor, row):
+        names = [column[0] for column in cursor.description]
+        if "body_json" in names:
+            assert names.count("id") == 1
+            assert cursor.connection.in_transaction
+            active.setdefault(cursor.connection, []).append(row[names.index("id")])
+
+    def end_view(connection):
+        assert not connection.in_transaction
+        views.append(active.pop(connection, []))
+
+    opened = observe_readonly_rows(monkeypatch, world.history.path, record, end_view)
     tracemalloc.start()
     started = time.perf_counter()
     rows = world.history.restore_entity(
@@ -179,8 +197,14 @@ def test_event_growth_restore_pages_cost(file_world, monkeypatch):
     assert rows == {("device_files", 1): expected}
     pages = -(-changes // batch)
     # 种子一个读事务加每页一个；事件页全部读取自身目录，无空页。
-    assert len(opened) == 1 + pages, (len(opened), pages)
-    print(f"\n事件增长 {changes} 次: 恢复 {elapsed:.3f}s 峰值 {peak}B 读事务 {len(opened)}")
+    assert opened and not active and len(views) == 1 + pages
+    assert views[0] == []
+    assert all(len(view) == batch for view in views[1:])
+    assert [event for view in views[1:] for event in view] == list(reversed(event_ids))
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+    print(f"\n事件增长 {changes} 次: 恢复 {elapsed:.3f}s 峰值 {peak}B 读事务 {len(views)}")
 
 
 def test_unrelated_growth_keeps_target_restore_stable(file_world, monkeypatch):
@@ -227,16 +251,3 @@ def _presence_change(world):
         FilePresenceSave(1, 3 if current == 2 else 2, NOW),
         new_operation_key(), world.owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-
-
-def _count_connections(repository, monkeypatch):
-    opened = []
-    original = repository._connect
-
-    def connect():
-        connection = original()
-        opened.append(connection)
-        return connection
-
-    monkeypatch.setattr(repository, "_connect", connect)
-    return opened

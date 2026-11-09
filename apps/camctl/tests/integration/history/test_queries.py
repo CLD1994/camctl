@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import url2pathname
+import os
 import json
 import sqlite3
 
@@ -19,6 +22,7 @@ from camctl.persistence.repositories.history import HistoryRepository
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.database import business_database
+from ..support.history_rows import observe_readonly_rows
 
 pytestmark = pytest.mark.asyncio
 
@@ -314,17 +318,21 @@ async def test_missing_evidence_in_stored_event_is_not_an_empty_default(reposito
 
 async def test_successful_page_is_returned_after_explicit_read_transaction_ends(repository, monkeypatch):
     boundary = await _seed_plans(repository, 1)
-    statements = []
-    actual_connect = repository._connect
-    def connect():
-        connection = actual_connect()
-        connection.set_trace_callback(statements.append)
-        return connection
-    monkeypatch.setattr(repository, "_connect", connect)
+    returned = False
+    ended = []
+
+    def end_view(connection):
+        assert not returned and not connection.in_transaction
+        ended.append(connection)
+
+    opened = observe_readonly_rows(monkeypatch, repository.path, lambda *_: None, end_view)
     page = repository.read_events(_scope(boundary), boundary)
+    returned = True
     assert [event.event_id for event in page.items] == [1, 2]
-    assert statements[0] == "BEGIN"
-    assert statements[-1] == "COMMIT"
+    assert page.exhausted and ended and opened
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
 
 
 async def test_initial_boundary_excludes_later_committed_events(repository):
@@ -344,20 +352,14 @@ async def test_descending_zero_lower_bound_ends_at_first_event(repository):
 
 async def test_continuation_does_not_rescan_the_same_immutable_transaction(repository, monkeypatch):
     boundary = await _seed_plans(repository, 1)
-    statements = []
-    connect = repository._connect
-    def traced_connect():
-        connection = connect()
-        connection.set_trace_callback(statements.append)
-        return connection
-    monkeypatch.setattr(repository, "_connect", traced_connect)
+    aggregates = _observe_group_aggregates(repository.path, monkeypatch)
     first = repository.read_events(_scope(boundary, batch_limit=1), boundary)
     second = repository.read_events(_scope(boundary, batch_limit=1,
                                           previous_position=first.next_cursor), boundary)
     assert [event.event_id for event in first.items + second.items] == [1, 2]
     assert second.exhausted
-    # 完整成员聚合是实际 SQLite 扫描边界，不能随页数重复扫描同一组。
-    assert len([sql for sql in statements if "COUNT(*)" in sql]) == 1
+    # 记录实际执行的完整成员聚合，不推断其他查询的扫描量。
+    assert len(aggregates) == 1
 
 
 async def test_repository_rejects_a_different_database_instance_between_pages(repository):
@@ -386,13 +388,7 @@ async def test_empty_range_only_ends_after_validating_history_boundary(repositor
 @pytest.mark.parametrize("order", [ReadOrder.ASCENDING, ReadOrder.DESCENDING])
 async def test_cross_transaction_continuations_validate_each_group_once(repository, monkeypatch, order):
     boundary = await _seed_plans(repository, 3)
-    statements = []
-    connect = repository._connect
-    def traced_connect():
-        connection = connect()
-        connection.set_trace_callback(statements.append)
-        return connection
-    monkeypatch.setattr(repository, "_connect", traced_connect)
+    aggregates = _observe_group_aggregates(repository.path, monkeypatch)
     position = None
     collected = []
     while True:
@@ -403,7 +399,7 @@ async def test_cross_transaction_continuations_validate_each_group_once(reposito
             break
         position = page.next_cursor
     assert collected == ([1, 2, 3, 4, 5, 6] if order is ReadOrder.ASCENDING else [6, 5, 4, 3, 2, 1])
-    assert len([sql for sql in statements if "COUNT(*)" in sql]) == 3
+    assert len(aggregates) == 3
 
 
 async def test_cached_transaction_metadata_is_checked_on_continuation(repository):
@@ -416,6 +412,55 @@ async def test_cached_transaction_metadata_is_checked_on_continuation(repository
                                       previous_position=first.next_cursor), boundary)
 
 
+def _observe_target_connections(monkeypatch, path, factory):
+    real_connect = sqlite3.connect
+    opened = []
+
+    def connect(database, *args, **kwargs):
+        if kwargs.get("uri") and str(database).startswith("file:"):
+            parts = urlsplit(str(database))
+            file_path = url2pathname(("//" + parts.netloc if parts.netloc else "") + parts.path)
+            if (parse_qs(parts.query).get("mode") == ["ro"] and os.path.exists(file_path)
+                    and os.path.samefile(file_path, path)):
+                assert "factory" not in kwargs
+                kwargs["factory"] = factory
+                connection = real_connect(database, *args, **kwargs)
+                opened.append(connection)
+                return connection
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    return opened
+
+
+def _observe_group_aggregates(path, monkeypatch):
+    aggregates = []
+
+    class ObservedConnection(sqlite3.Connection):
+        def execute(self, *args, **kwargs):
+            functions = set()
+            columns = set()
+
+            def authorize(action, first, second, _database, _source):
+                if action == sqlite3.SQLITE_FUNCTION and second:
+                    functions.add(second.lower())
+                if action == sqlite3.SQLITE_READ and first == "history_events":
+                    columns.add(second)
+                return sqlite3.SQLITE_OK
+
+            self.set_authorizer(authorize)
+            try:
+                cursor = super().execute(*args, **kwargs)
+                if {"count", "min", "max"} <= functions and {"id", "transaction_id"} <= columns:
+                    aggregates.append(True)
+                return cursor
+            finally:
+                self.set_authorizer(None)
+
+    _observe_target_connections(monkeypatch, path, ObservedConnection)
+    return aggregates
+
+
 class _TrackedCursor(sqlite3.Cursor):
     def close(self):
         super().close()
@@ -424,11 +469,36 @@ class _TrackedCursor(sqlite3.Cursor):
 
 class _TrackedConnection(sqlite3.Connection):
     def execute(self, sql, parameters=()):
-        if self.failure is not None and sql.startswith(self.failure):
-            raise self.injected_error
+        denied = False
+
+        def authorize(action, first, second, _database, _source):
+            nonlocal denied
+            if action == sqlite3.SQLITE_TRANSACTION and first == "BEGIN":
+                self.tracking = True
+            if ((action == sqlite3.SQLITE_TRANSACTION and first == self.failure)
+                    or (self.failure == "EVENT_PAGE" and action == sqlite3.SQLITE_READ
+                        and first == "history_events" and second == "body_json")):
+                denied = True
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
         cursor = self.cursor(factory=_TrackedCursor)
-        self.cursors.append(cursor)
-        return cursor.execute(sql, parameters)
+        cursor.was_closed = False
+        self.set_authorizer(authorize)
+        try:
+            try:
+                cursor.execute(sql, parameters)
+            except sqlite3.DatabaseError:
+                cursor.close()
+                if not denied:
+                    raise
+        finally:
+            self.set_authorizer(None)
+            if self.tracking:
+                self.cursors.append(cursor)
+        if denied:
+            raise self.injected_error
+        return cursor
 
     def close(self):
         super().close()
@@ -436,14 +506,17 @@ class _TrackedConnection(sqlite3.Connection):
 
 
 def _track_read_connection(repository, monkeypatch, failure=None):
-    connection = sqlite3.connect(f"{repository.path.as_uri()}?mode=ro", uri=True,
-                                 isolation_level=None, factory=_TrackedConnection)
-    connection.cursors = []
-    connection.was_closed = False
-    connection.failure = failure
-    connection.injected_error = sqlite3.OperationalError("read boundary failure")
-    monkeypatch.setattr(repository, "_connect", lambda: connection)
-    return connection
+    class TrackedConnection(_TrackedConnection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.cursors = []
+            self.tracking = False
+            self.was_closed = False
+            self.failure = failure
+            self.injected_error = injected_error
+
+    injected_error = sqlite3.OperationalError("read boundary failure")
+    return _observe_target_connections(monkeypatch, repository.path, TrackedConnection), injected_error
 
 
 def _assert_resources_released(connection):
@@ -455,29 +528,35 @@ def _assert_resources_released(connection):
 
 async def test_successful_page_owns_data_after_all_read_resources_close(repository, monkeypatch):
     boundary = await _seed_plans(repository, 1)
-    connection = _track_read_connection(repository, monkeypatch)
+    opened, _ = _track_read_connection(repository, monkeypatch)
     page = repository.read_events(_scope(boundary), boundary)
-    _assert_resources_released(connection)
+    assert opened
+    for connection in opened:
+        _assert_resources_released(connection)
     plan = next(row for event in page.items for row in event.rows if row.table == "plans")
     assert plan.row_id == 1
     assert plan.after.values["name"] == "plan-0"
 
 
-@pytest.mark.parametrize("failure", ["BEGIN", "SELECT id, transaction_id", "COMMIT"])
+@pytest.mark.parametrize("failure", ["BEGIN", "EVENT_PAGE", "COMMIT"])
 async def test_sql_failure_preserves_error_and_releases_read_resources(repository, monkeypatch, failure):
     boundary = await _seed_plans(repository, 1)
-    connection = _track_read_connection(repository, monkeypatch, failure)
+    opened, injected_error = _track_read_connection(repository, monkeypatch, failure)
     with pytest.raises(sqlite3.OperationalError) as caught:
         repository.read_events(_scope(boundary), boundary)
-    assert caught.value is connection.injected_error
-    _assert_resources_released(connection)
+    assert caught.value is injected_error
+    assert opened
+    for connection in opened:
+        _assert_resources_released(connection)
 
 
 async def test_decoding_failure_releases_read_resources(repository, monkeypatch):
     boundary = await _seed_plans(repository, 1)
     with sqlite3.connect(repository.path) as connection:
         connection.execute("UPDATE history_events SET body_json = '{}' WHERE id = 1")
-    connection = _track_read_connection(repository, monkeypatch)
+    opened, _ = _track_read_connection(repository, monkeypatch)
     with pytest.raises(ConsistencyError):
         repository.read_events(_scope(boundary), boundary)
-    _assert_resources_released(connection)
+    assert opened
+    for connection in opened:
+        _assert_resources_released(connection)
