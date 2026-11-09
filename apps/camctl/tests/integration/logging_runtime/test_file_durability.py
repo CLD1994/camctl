@@ -39,8 +39,9 @@ def test_error_flushes_before_file_sync_and_syncs_complete_directory_chain(tmp_p
     synced = []
 
     def fsync(fd):
-        synced.append((stat.S_ISREG(os.fstat(fd).st_mode), Path(os.readlink(f"/proc/self/fd/{fd}"))))
-        if synced[-1][0]:
+        info = os.fstat(fd)
+        synced.append((stat.S_IFMT(info.st_mode), info.st_dev, info.st_ino))
+        if stat.S_ISREG(info.st_mode):
             assert messages(path) == ["trigger"]
         return original(fd)
 
@@ -49,9 +50,12 @@ def test_error_flushes_before_file_sync_and_syncs_complete_directory_chain(tmp_p
         result = channel.write_record(record())
         assert result.appended and result.durable
         assert result.completion.delivered_for(LogLevel.ERROR)
-        assert synced[0] == (True, path)
-        expected = [path.parent, *path.parent.parents]
-        assert [name for regular, name in synced if not regular] == expected
+        file_info = path.stat()
+        expected = [(stat.S_IFREG, file_info.st_dev, file_info.st_ino)]
+        for directory in [path.parent, *path.parent.parents]:
+            info = directory.stat()
+            expected.append((stat.S_IFDIR, info.st_dev, info.st_ino))
+        assert synced == expected
     finally:
         channel.close()
 
@@ -129,7 +133,7 @@ def test_copy_target_sync_failure_keeps_original_durable(tmp_path, monkeypatch):
     original = os.fsync
 
     def fsync(fd):
-        if Path(os.readlink(f"/proc/self/fd/{fd}")) == destination:
+        if destination.exists() and _same_file(fd, destination):
             raise OSError("copy sync denied")
         return original(fd)
 
@@ -139,6 +143,7 @@ def test_copy_target_sync_failure_keeps_original_durable(tmp_path, monkeypatch):
         assert result.appended and result.durable
         assert result.sync_error is None and copy_error
         assert not channel.disabled and result.copy_handles_closed
+        assert messages(path) == ["trigger"]
     finally:
         channel.close()
 
