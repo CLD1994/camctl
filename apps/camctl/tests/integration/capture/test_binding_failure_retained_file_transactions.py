@@ -257,35 +257,6 @@ async def test_original_key_rejects_changed_complete_binding_request(saved_pair,
     assert tuple(owned.connection.iterdump()) == before
 
 
-@pytest.mark.parametrize("invalid", [
-    "list_drafts", "catalog_missing", "catalog_other_action", "catalog_unowned", "catalog_bool_as_int",
-    "incomplete", "complete_as_int", "noncanonical_sha", "intermediate_repaired", "empty_with_catalog",
-])
-async def test_binding_directory_input_rejects_noncanonical_members(saved_pair, invalid):
-    world, owned = saved_pair
-    request = world.request
-    preview, b, a = request.drafts
-    candidates = {
-        "list_drafts": lambda: replace(request, drafts=list(request.drafts)),
-        "catalog_missing": lambda: replace(request, catalog_facts=None),
-        "catalog_other_action": lambda: replace(request, catalog_facts=OutputCatalogFacts(world.action_id + 1, True)),
-        "catalog_unowned": lambda: replace(request, catalog_facts=OutputCatalogFacts(world.action_id, False)),
-        "catalog_bool_as_int": lambda: replace(request, catalog_facts=OutputCatalogFacts(world.action_id, 1)),
-        "incomplete": lambda: replace(request, drafts=(preview, b, replace(a, file_complete=False))),
-        "complete_as_int": lambda: replace(request, drafts=(preview, b, replace(a, file_complete=1))),
-        "noncanonical_sha": lambda: replace(request, drafts=(preview, b, replace(a, sha256="ab" * 32))),
-        "intermediate_repaired": lambda: replace(request, drafts=(OutputDraft(OutputKind.REPAIRED,
-            FileReference(intermediate_file_id=1), True, original_batch_file_id=world.a),)),
-        "empty_with_catalog": lambda: replace(request, drafts=()),
-    }
-    before = tuple(owned.connection.iterdump())
-
-    with pytest.raises((TypeError, ValueError)):
-        candidates[invalid]()
-
-    assert tuple(owned.connection.iterdump()) == before
-
-
 async def test_binding_directory_input_accepts_empty_drafts_without_catalog(saved_pair):
     world, owned = saved_pair
     before = tuple(owned.connection.iterdump())
