@@ -24,6 +24,7 @@ from ..support.database import business_database, database_path
 from ..support.public_delivery_cases import prepare_public_delivery
 from ..support.output_storage_cases import observed_operation
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import (
     EventValidationError,
@@ -524,10 +525,8 @@ async def public_file_env(public_work_env):
 
 
 def _cancel_public_delivery(owned, qualification):
-    """通过正式受理、取消仓储及取回收场保存终态。"""
+    """保存目标取回取消，发起者等待后续首次文件清理。"""
     from ..capture.result_consumer_fixtures import ResultCatalog
-    from camctl.cancellation.models import RecordCancelResult, CancelOutcomeChoice, FinishCancelAction
-    from camctl.persistence.repositories.cancellation import CancellationRepository
     from camctl.persistence.repositories.outputs import SettleCanceledObtain
 
     class Catalog(ResultCatalog):
@@ -544,18 +543,24 @@ def _cancel_public_delivery(owned, qualification):
     settled = OutputsRepository().settle_canceled_obtain(
         SettleCanceledObtain(action_id, _NOW + 11, members), new_operation_key(), owned)
     assert settled.kind is DbOutcomeKind.COMPLETED and settled.value.complete, settled.error
-    item_id, origin = owned.connection.execute(
-        "SELECT id,action_id FROM cancel_items WHERE target_action_id=? ORDER BY id DESC LIMIT 1",
-        (action_id,)).fetchone()
-    cancellations = CancellationRepository()
-    recorded = cancellations.record_cancel_result(
-        RecordCancelResult(item_id, _NOW + 11, outcome=CancelOutcomeChoice.CANCELED),
-        new_operation_key(), owned)
-    assert recorded.kind is DbOutcomeKind.COMPLETED, recorded.error
-    finished = cancellations.finish_cancel_action(
-        FinishCancelAction(origin, _NOW + 11), new_operation_key(), owned)
-    assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
-    assert _row(owned, "SELECT status FROM deliveries WHERE id=?", qualification.delivery_id)[0] == 7
+    statuses = owned.connection.execute(
+        "SELECT target.status, d.status, origin.status, ci.status"
+        " FROM actions target JOIN deliveries d ON d.action_id=target.id"
+        " JOIN cancel_items ci ON ci.target_action_id=target.id"
+        " JOIN actions origin ON origin.id=ci.action_id"
+        " WHERE target.id=? AND d.id=?", (action_id, qualification.delivery_id)).fetchone()
+    # 目标已取消；发起取消的动作和明细仍在处理中，尚未汇总结果。
+    assert statuses == (6, 7, 2, 2)
+    run_status, attempts, attempt_status, result_event = owned.connection.execute(
+        "SELECT r.status,r.attempts_used,a.status,a.result_event_id FROM operation_runs r"
+        " JOIN operation_attempts a ON a.run_id=r.id AND a.attempt_no=r.attempts_used"
+        " WHERE r.copy_id=? AND r.kind=?",
+        (qualification.copy_id, int(enum_for("operation_runs.kind").READ_FILE)),
+    ).fetchone()
+    assert (run_status, attempts, attempt_status) == (
+        int(enum_for("operation_runs.status").SUCCEEDED), 1,
+        int(enum_for("operation_attempts.status").SUCCEEDED))
+    assert result_event is not None
 
 
 @pytest.mark.asyncio
