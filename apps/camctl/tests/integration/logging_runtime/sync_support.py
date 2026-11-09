@@ -4,6 +4,8 @@ import os
 import stat
 import threading
 
+from camctl.logging_runtime.copies import MARKER_NAME
+
 
 class FileSyncProbe:
     """仅匹配原日志及其父目录，不干预数据库、标记和副本同步。"""
@@ -46,3 +48,35 @@ class FileSyncProbe:
         result = self._fsync(fd)
         self.events.append((kind, "completed"))
         return result
+
+
+def fail_directory_sync(monkeypatch, directory, *, call, message):
+    """只在指定标记第 call 次放置后的目录同步注错。"""
+    real_fsync = os.fsync
+    real_replace = os.replace
+    calls = []
+    placed = []
+
+    def replace(source, target, *args, **kwargs):
+        result = real_replace(source, target, *args, **kwargs)
+        if os.fspath(target) == os.fspath(directory / MARKER_NAME):
+            placed.append(target)
+        return result
+
+    def sync(fd):
+        opened = os.fstat(fd)
+        try:
+            named = directory.stat()
+        except FileNotFoundError:
+            named = None
+        if (named is not None and stat.S_ISDIR(opened.st_mode)
+                and (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino)):
+            if len(calls) < len(placed):
+                calls.append(fd)
+                if len(calls) == call:
+                    raise OSError(message)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(os, "fsync", sync)
+    return calls

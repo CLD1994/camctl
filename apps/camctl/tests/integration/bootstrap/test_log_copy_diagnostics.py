@@ -18,7 +18,7 @@ from camctl.bootstrap.lifecycle import (
 from camctl.logging_runtime import copies
 from camctl.logging_runtime.clh_adapter import FileChannel, WriteResult
 from camctl.logging_runtime.copies import MarkerStage, SaveOutcome
-from integration.logging_runtime.sync_support import FileSyncProbe
+from integration.logging_runtime.sync_support import FileSyncProbe, fail_directory_sync
 from camctl.reporting.messages import ErrorKind, ResultFailureMessage
 from camctl.reporting.supervisor import (
     GenerationOutcomeKind, WorkerGeneration, WorkerSupervisor,
@@ -129,20 +129,13 @@ async def test_report_copy_sync_failure_keeps_original_receipt_and_consumes_fail
     assert stdout.getvalue() == ""
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 不提供目录同步")
 async def test_default_run_records_marker_progress_failure(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
-    original_sync = copies._fsync_directory
-    marker_syncs = {"count": 0}
-
-    def fail_copied_marker_sync(path):
-        if Path(path) == Path(deps.config.paths.staging).expanduser() / "logs":
-            marker_syncs["count"] += 1
-            if marker_syncs["count"] == 2:
-                raise OSError("bootstrap progress sync failed")
-        return original_sync(path)
-
-    monkeypatch.setattr(copies, "_fsync_directory", fail_copied_marker_sync)
+    logs_dir = Path(deps.config.paths.staging).expanduser() / "logs"
+    fail_directory_sync(monkeypatch, logs_dir, call=2,
+                        message="bootstrap progress sync failed")
 
     try:
         outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
@@ -1115,20 +1108,13 @@ async def test_default_run_records_copy_and_cleanup_failures(
     assert stdout.getvalue() == ""
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 不提供目录同步")
 async def test_unavailable_log_falls_back_to_stderr_without_recursion(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
-    original_sync = copies._fsync_directory
-    marker_syncs = {"count": 0}
-
-    def fail_copied_marker_sync(path):
-        if Path(path) == Path(deps.config.paths.staging).expanduser() / "logs":
-            marker_syncs["count"] += 1
-            if marker_syncs["count"] == 2:
-                raise OSError("diagnostic trigger progress failed")
-        return original_sync(path)
-
-    monkeypatch.setattr(copies, "_fsync_directory", fail_copied_marker_sync)
+    logs_dir = Path(deps.config.paths.staging).expanduser() / "logs"
+    fail_directory_sync(monkeypatch, logs_dir, call=2,
+                        message="diagnostic trigger progress failed")
     original_write = FileChannel.write_record
     diagnostic_writes = {"count": 0}
 
@@ -1158,20 +1144,13 @@ async def test_unavailable_log_falls_back_to_stderr_without_recursion(
     assert len(list(Path(deps.config.paths.ready).glob("log-copy-*.log"))) == 1
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 不提供目录同步")
 async def test_both_log_diagnostic_and_stderr_failure_preserve_report_outcome(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
-    original_sync = copies._fsync_directory
-    marker_syncs = {"count": 0}
-
-    def fail_copied_marker_sync(path):
-        if Path(path) == Path(deps.config.paths.staging).expanduser() / "logs":
-            marker_syncs["count"] += 1
-            if marker_syncs["count"] == 2:
-                raise OSError("diagnostic trigger progress failed")
-        return original_sync(path)
-
-    monkeypatch.setattr(copies, "_fsync_directory", fail_copied_marker_sync)
+    logs_dir = Path(deps.config.paths.staging).expanduser() / "logs"
+    fail_directory_sync(monkeypatch, logs_dir, call=2,
+                        message="diagnostic trigger progress failed")
     original_write = FileChannel.write_record
     diagnostic_writes = {"count": 0}
 

@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from camctl.logging_runtime.clh_adapter import FileChannel
+from integration.logging_runtime.sync_support import fail_directory_sync
 from camctl.logging_runtime.copies import (
     MARKER_NAME,
     CopyOutcome,
@@ -611,6 +612,7 @@ class TestDelivery:
         assert [p.name for p in logs_dir.iterdir()] == [MARKER_NAME]
         channel.close()
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows 不提供目录同步")
     @pytest.mark.parametrize("failed_progress_call,failed_stage", [
         (2, MarkerStage.COPIED),
         (3, MarkerStage.PUBLISHED),
@@ -626,17 +628,8 @@ class TestDelivery:
         staging, ready, logs_dir, log_path = _layout(tmp_path)
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
-        original_sync = copies._fsync_directory
-        calls = {"count": 0}
-
-        def fail_selected_marker_sync(path):
-            if Path(path) == logs_dir:
-                calls["count"] += 1
-                if calls["count"] == failed_progress_call:
-                    raise OSError("injected progress directory sync failure")
-            return original_sync(path)
-
-        monkeypatch.setattr(copies, "_fsync_directory", fail_selected_marker_sync)
+        fail_directory_sync(monkeypatch, logs_dir, call=failed_progress_call,
+                            message="injected progress directory sync failure")
 
         receipt = await copies.deliver_failure_copy(
             _request(staging, ready, channel, marker))
