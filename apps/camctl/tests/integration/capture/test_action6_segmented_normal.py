@@ -7,7 +7,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.capture.baseline_models import BaselineFixSave
-from camctl.capture.handlers import _stop_call, capture_handler
+from camctl.capture.handlers import capture_handler
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver

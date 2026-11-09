@@ -11,7 +11,6 @@ import pytest
 import pytest_asyncio
 
 from camctl.capture.handlers import capture_handler
-from camctl.capture.handlers import _listing_round
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.bindings import BindingResult, BindingStatus
 from camctl.devices.ports import DeviceCallResult, StopDriver

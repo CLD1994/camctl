@@ -9,10 +9,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
-from camctl.capture.handlers import (
-    SessionRecordingState, _finish_listing_result, _listing_round,
-    _stop_call, _stop_confirmed_at, capture_handler,
-)
+from camctl.capture.handlers import SessionRecordingState, capture_handler
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
