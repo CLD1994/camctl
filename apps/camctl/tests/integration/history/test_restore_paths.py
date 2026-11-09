@@ -569,7 +569,7 @@ async def test_snapshot_delivery_rejects_published_state_without_publication_fac
     assert selected == [snapshot_id]
 
 
-def _track_validation_connections(monkeypatch):
+def _track_validation_connections(monkeypatch, *, authorizer=None):
     """跟踪真实内存连接的生命周期，其他真实状态库连接保持原接口。"""
     import sqlite3
     from camctl.persistence import row_validation as module
@@ -590,6 +590,8 @@ def _track_validation_connections(monkeypatch):
         if database == ":memory:":
             kwargs["factory"] = TrackedConnection
             connection = real_connect(database, *args, **kwargs)
+            if authorizer is not None:
+                connection.set_authorizer(authorizer)
             created.append(connection)
             return connection
         return real_connect(database, *args, **kwargs)
@@ -662,15 +664,27 @@ async def test_projection_row_validation_rolls_back_and_measures_1000_rows(
 
 
 def test_projection_row_validation_closes_connection_after_schema_error(monkeypatch):
+    import sqlite3
     from camctl.persistence import row_validation as module
 
-    created = _track_validation_connections(monkeypatch)
-    monkeypatch.setattr(module, "_schema_scripts", lambda: ("INVALID SQL",))
-    with pytest.raises(module.ProjectionRowValidationError):
+    denied = []
+
+    def deny_schema_creation(action, table, _column, _database, _origin):
+        if action == sqlite3.SQLITE_CREATE_TABLE:
+            denied.append(table)
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    created = _track_validation_connections(monkeypatch, authorizer=deny_schema_creation)
+    with pytest.raises(module.ProjectionRowValidationError) as caught:
         with module.ProjectionRowValidator():
-            pytest.fail("无效结构不应进入校验范围")
+            pytest.fail("结构创建被拒绝时不应进入校验范围")
+    assert denied, "SQLite 没有实际尝试创建校验结构"
+    assert isinstance(caught.value.__cause__, sqlite3.DatabaseError)
     assert len(created) == 1
     assert created[0].closed
+    with pytest.raises(sqlite3.ProgrammingError):
+        created[0].execute("SELECT 1")
 
 
 @pytest_asyncio.fixture
