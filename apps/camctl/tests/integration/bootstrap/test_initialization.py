@@ -471,6 +471,10 @@ class TestExistingDatabase:
     def test_binding_mismatch_with_liability_keeps_binding(self, tmp_path: Path) -> None:
         cfg = _config(tmp_path)
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        with sqlite3.connect(cfg.paths.state_db) as connection:
+            original_binding = connection.execute(
+                "SELECT staging_path, ready_path, processing_path FROM database_metadata"
+            ).fetchone()
         # 登记仍为 REQUIRED 的中间文件：原目录责任未结束，拒绝切换。
         connection = sqlite3.connect(cfg.paths.state_db)
         try:
@@ -487,10 +491,9 @@ class TestExistingDatabase:
         assert "REQUIRED" in result.detail
         owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
         try:
-            # 绑定按平台规范字符串保存与核对（Windows 为可逆映射约定）。
-            from camctl.persistence.initialization import _canonical_binding
-
-            assert owned.metadata.staging_path == _canonical_binding(Path(cfg.paths.staging))
+            # 直接比较初始化时保存的绑定，保留各平台的路径表示。
+            assert (owned.metadata.staging_path, owned.metadata.ready_path,
+                    owned.metadata.processing_path) == original_binding
         finally:
             owned.connection.close()
 

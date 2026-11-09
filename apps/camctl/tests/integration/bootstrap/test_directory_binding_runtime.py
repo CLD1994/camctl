@@ -21,7 +21,6 @@ from camctl.cli import main
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.reporting.messages import ErrorKind, ResultFailureMessage
 from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerGeneration, WorkerShutdown, WorkerSupervisor
-from camctl.session.clock import ClockCheckInput
 
 from ..acceptance.test_acceptance import Catalog
 
@@ -196,7 +195,10 @@ def test_adapter_normalizes_expanded_paths_without_directory_access(deployed):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("restricted", [False, True])
 async def test_report_configuration_error_stops_normal_and_restricted_session(deployed, mocker, restricted):
-    cfg = load_config(_document(deployed), ConfigDefaults())
+    document = _document(deployed)
+    if restricted:
+        document["clock"] = {"min_plausible_date": "2100-01-01", "recheck_delay_s": "0.01"}
+    cfg = load_config(document, ConfigDefaults())
     deps = build_runtime(CommandMode.RUN, cfg, catalog=Catalog())
     supervisor = mocker.create_autospec(WorkerSupervisor, instance=True, spec_set=True)
     jobs, events = [], []
@@ -247,9 +249,6 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
 
     mocker.patch("camctl.bootstrap.lifecycle._report_assembly", side_effect=assemble)
     mocker.patch("camctl.reporting.supervisor.WorkerSupervisor", return_value=supervisor)
-    if restricted:
-        mocker.patch("camctl.bootstrap.lifecycle._clock_policy_factory", return_value=lambda _connection:
-                     ClockCheckInput(None, 9_000_000_000_000_000, 0, 0))
     source = ParsedInput("plan.json", json.loads(_plan_file(deployed).read_text()))
     try:
         outcome = await execute_command(deps, source)
@@ -267,3 +266,7 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
         cfg.paths.staging, cfg.paths.ready, cfg.paths.processing)
     with sqlite3.connect(deps.state_db) as connection:
         assert connection.execute("SELECT last_error_json FROM reports").fetchall() == [(None,)]
+        trusted_bound = connection.execute(
+            "SELECT trusted_time_lower_bound FROM runtime_state WHERE id = 1"
+        ).fetchone()[0]
+    assert (trusted_bound is None) is restricted
