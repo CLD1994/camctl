@@ -1,7 +1,10 @@
 """默认取回按最终产物身份排除，保存与恢复沿用原请求。"""
 
 import json
+from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,7 +13,6 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventValidationError
 from camctl.outputs.definitions import SelectionMode
 from camctl.outputs.sources import SelectionSnapshot, select_outputs
-from camctl.outputs.obtain_flow import advance_obtain
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.file_batches import register_file_batch_guards
@@ -24,7 +26,13 @@ from .test_qualification import qualification_environment
 from .test_sources import _NOW, _fixed_resolution
 from ..support.output_planning import EventSequence, capture_operation
 from ..support.output_storage_cases import observe_product_competition, observed_operation
-from ..support.outputs import read_test_runtime
+from ..support.outputs import obtain_factory, output_drivers, submit_output_document
+from ..support.capture import capture_database
+from ..support.capture_media_cases import (
+    CONTENT, ScriptTools, media_cases, recording_environment, recording_media,
+    recording_runtime,
+)
+from ..bootstrap.test_output_binding_changes import Catalog
 from camctl.devices.drivers.hasselblad.driver import EVIDENCE
 from camctl.devices.read_session import ReadSession
 from .test_source_digest_failure_settlement import _ReadStream
@@ -179,25 +187,108 @@ def test_empty_selection_needs_fixed_exclusion_proof(selection_database, invalid
 
 
 @pytest.mark.asyncio
-async def test_obtain_runtime_consumes_saved_default_exclusions(selection_database, tmp_path):
-    owned = selection_database
-    _exclude(owned)
+async def test_obtain_runtime_consumes_saved_default_exclusions(tmp_path, media_cases):
+    from camctl.bootstrap.obtain_assembly import obtain_flow
+    from camctl.capture.handlers import capture_handler
+    from camctl.capture.result_inputs import ObservedFile
+    from camctl.capture.results import FileKind
+    from camctl.host_files.media import MediaProbe, MediaStream
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.session.supervision import Supervisor
+
     register_file_batch_guards()
+    owned, staging = await recording_environment(
+        tmp_path, check_decision=3,
+        check_basis='{"reason": 2, "target_duration_ms": 60000}')
+    photo_bytes = b"independent photo bytes"
+    entries = (
+        ObservedFile(identity="recording.mp4", locator={"path": "/DCIM/recording.mp4"},
+                     evidence={"listing": "recording"}, complete=True,
+                     size_bytes=len(CONTENT), kind=FileKind.VIDEO,
+                     original_name="recording.mp4", media_type="video/mp4", format_id="mp4"),
+        ObservedFile(identity="photo.jpg", locator={"path": "/DCIM/photo.jpg"},
+                     evidence={"listing": "photo"}, complete=True,
+                     size_bytes=len(photo_bytes), kind=FileKind.PHOTO,
+                     original_name="photo.jpg", media_type="image/jpeg", format_id="jpeg"),
+    )
+    tools = ScriptTools(MediaProbe(Decimal("200"), None, (
+        MediaStream(0, "video", "h264", 64, 64, Decimal("200"), False),)))
+
     class Source:
-        calls = []
+        def __init__(self):
+            self.calls = []
+
         async def open_read(self, source, offset, ticket, *, idle_timeout_s):
             self.calls.append(source)
-            return ReadSession(source, offset, _ReadStream(b"x" * source.size_bytes), idle_timeout_s)
+            return ReadSession(source, offset, _ReadStream(photo_bytes[offset:]), idle_timeout_s)
+
     driver = Source()
-    async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
-            occurred_at=lambda: _NOW) as runtime:
-        await advance_obtain(runtime)
-    assert owned.connection.execute(
-        "SELECT output_id FROM obtain_items WHERE selection_id=61 ORDER BY id").fetchall() == [(705,)]
-    assert owned.connection.execute(
-        "SELECT output_id FROM deliveries WHERE action_id=30 ORDER BY id").fetchall() == [(705,)]
-    assert [json.loads(source.file_id) for source in driver.calls] == [
-        ["cam-1", "camctl-adb", "file-0505"]]
+    supervisor = Supervisor()
+    try:
+        media = await recording_media(owned, tools, staging)
+        capture = await recording_runtime(owned, {1: entries}, flow=media)
+        await capture_handler("camera_record")(1, capture)
+        assert tools.calls == ["probe", "repair"]
+        rows = owned.connection.execute(
+            "SELECT o.id,o.kind,d.original_name,o.intermediate_file_id"
+            " FROM outputs o LEFT JOIN device_files d ON d.id=o.device_file_id"
+            " WHERE o.source_action_id=1 ORDER BY o.id").fetchall()
+        video_id, = [row[0] for row in rows if row[1:3] == (1, "recording.mp4")]
+        photo_id, = [row[0] for row in rows if row[1:3] == (1, "photo.jpg")]
+        (repaired_id, repaired_file), = [(row[0], row[3]) for row in rows if row[1] == 2]
+        assert owned.connection.execute(
+            "SELECT original_output_id FROM output_origins WHERE output_id=?",
+            (repaired_id,)).fetchone() == (video_id,)
+        repair_path, = owned.connection.execute(
+            "SELECT relative_path FROM intermediate_files WHERE id=?", (repaired_file,)).fetchone()
+        assert (staging / repair_path).read_bytes() == tools.content
+        selected = select_outputs(_fixed_resolution((1,)), outputs.load_selection_facts(
+            owned.connection, 1), SelectionMode.DEFAULT)
+        assert set(selected.selected_output_ids) == {repaired_id, photo_id}
+
+        database = await capture_database(owned)
+        now = _NOW + 100_000_000
+        instant = datetime.fromtimestamp(now / 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        accepted = await submit_output_document(database, catalog=Catalog(), occurred_at=now, body={
+            "request_id": "2", "created_at": instant, "name": "排除修复成品",
+            "actions": [{"name": "取回", "type": "obtain_action_outputs", "scheduled_at": instant,
+                         "params": {"source": {"action_instance_id": "1"},
+                                    "exclude_output_ids": [str(repaired_id)]}}]})
+        assert accepted.plan_id is not None, accepted
+        action_id, fields = owned.connection.execute(
+            "SELECT id,input_fields_json FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+        assert json.loads(fields)["params"]["exclude_output_ids"] == [str(repaired_id)]
+        ready, processing = tmp_path / "ready", tmp_path / "processing"
+        for directory in (staging, ready, processing):
+            directory.mkdir(parents=True, exist_ok=True)
+        factory = obtain_factory(
+            devices={"cam-1": {"driver": "camctl-adb"}},
+            drivers=output_drivers(driver, EVIDENCE, read=True), staging=staging,
+            ready=ready, processing=processing, occurred_at=lambda: now,
+            monotonic_ns=lambda: 0, segment_size=len(photo_bytes),
+            file_executor=FileTaskExecutor(supervisor))
+        context = SimpleNamespace(database=database)
+        flow = obtain_flow(factory)
+        await flow(context)
+        assert owned.connection.execute(
+            "SELECT i.output_id FROM obtain_items i"
+            " JOIN obtain_source_selections s ON s.id=i.selection_id"
+            " JOIN action_dependencies d ON d.id=s.dependency_id"
+            " WHERE d.action_id=? ORDER BY i.id", (action_id,)).fetchall() == [(photo_id,)]
+        assert owned.connection.execute(
+            "SELECT output_id FROM deliveries WHERE action_id=?", (action_id,)).fetchall() == [(photo_id,)]
+        assert [json.loads(source.file_id) for source in driver.calls] == [
+            ["cam-1", "camctl-adb", "photo.jpg"]]
+        relative, = owned.connection.execute(
+            "SELECT f.relative_path FROM intermediate_files f"
+            " JOIN file_copies c ON c.target_file_id=f.id"
+            " JOIN deliveries d ON d.id=c.delivery_id WHERE d.action_id=?", (action_id,)).fetchone()
+        assert (staging / relative).read_bytes() == photo_bytes
+    finally:
+        try:
+            assert not (await supervisor.drain_required()).failed
+        finally:
+            owned.connection.close()
 
 
 def test_locally_qualified_final_target_is_excluded_even_after_host_cleanup(selection_database):
