@@ -327,25 +327,52 @@ max_query_attempts={max_q}
     def stop(self):
         if self.host is None:
             return
-        identities = []
         host_pid = self.host._host_pid
-        # 先固定主程序的子进程集合，后续收场和验收采用同一组身份。
-        os.kill(host_pid, signal.SIGSTOP)
-        identities.append(process_identity(host_pid))
-        observed = []
-        for path in Path("/proc").glob("[0-9]*/stat"):
+        host_identity = process_identity(host_pid)
+        identities = [host_identity]
+        deadline = time.monotonic() + 15
+        try:
+            os.kill(host_pid, signal.SIGSTOP)
+
+            def frozen():
+                try:
+                    current = process_identity(host_pid)
+                except OSError as error:
+                    raise AssertionError(f"冻结前原 host 消失：{host_identity!r}") from error
+                if current["starttime"] != host_identity["starttime"] or current["state"] in ("Z", "X"):
+                    raise AssertionError(f"冻结前原 host 已退出或身份改变：{host_identity!r}, {current!r}")
+                return current["state"] in ("T", "t")
+
+            wait(frozen, "原 host 未在期限内实际暂停", max(0, deadline - time.monotonic()))
+            # 确认同一主程序暂停后固定子进程集合。
+            observed = []
+            for path in Path("/proc").glob("[0-9]*/stat"):
+                try:
+                    item = process_identity(int(path.parent.name))
+                except (OSError, ValueError):
+                    continue
+                observed.append(item)
+            children = [item for item in observed if item["ppid"] == host_pid]
+            # 每次调用的正式执行组以子进程 PID 为组号；spawn 尚未完成时
+            # /proc 中的临时继承组不能作为该调用的身份。
+            groups = {item["pid"] for item in children}
+            identities.extend(item for item in observed
+                              if item["ppid"] == host_pid or item["pgid"] in groups)
+            log = self.host.log_path.read_bytes() if self.host.log_path.exists() else b""
+            (self.root / f"host-{len(list(self.root.glob('host-*.log')))}.log").write_bytes(log)
+            self.host.stop()
+            self.host = None
+        finally:
             try:
-                item = process_identity(int(path.parent.name))
-            except (OSError, ValueError):
-                continue
-            observed.append(item)
-        groups = {item["pgid"] for item in observed if item["ppid"] == host_pid}
-        identities.extend(item for item in observed
-                          if item["ppid"] == host_pid or item["pgid"] in groups)
-        log = self.host.log_path.read_bytes() if self.host.log_path.exists() else b""
-        (self.root / f"host-{len(list(self.root.glob('host-*.log')))}.log").write_bytes(log)
-        self.host.stop()
-        self.host = None
+                current = process_identity(host_pid)
+            except OSError:
+                pass
+            else:
+                if current["starttime"] == host_identity["starttime"] and current["state"] not in ("Z", "X"):
+                    try:
+                        os.kill(host_pid, signal.SIGCONT)
+                    except ProcessLookupError:
+                        pass
         def active():
             found = []
             for path in Path("/proc").glob("[0-9]*/stat"):
@@ -357,16 +384,26 @@ max_query_attempts={max_q}
                     found.append(item)
             return found
         remaining = []
+        remaining_identities = []
         def settled():
-            nonlocal remaining
+            nonlocal remaining, remaining_identities
             remaining = active()
-            return not remaining
+            remaining_identities = []
+            for old in identities:
+                try:
+                    current = process_identity(old["pid"])
+                except OSError:
+                    continue
+                if current["starttime"] == old["starttime"] and current["state"] not in ("Z", "X"):
+                    remaining_identities.append(current)
+            return not remaining and not remaining_identities
         try:
-            wait(settled, "旧受管组仍有活动成员", 15)
+            wait(settled, "旧受管组仍有活动成员", max(0, deadline - time.monotonic()))
         except AssertionError as error:
             raise AssertionError(
                 f"{error}; 停止前的进程身份={identities!r}; "
-                f"最后观察到的活动成员={remaining!r}"
+                f"最后观察到的活动成员={remaining!r}; "
+                f"仍活动的原身份={remaining_identities!r}"
             ) from error
         for old in identities:
             try:
