@@ -17,7 +17,7 @@ from .test_record_segment_history import (
 )
 
 
-async def _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, previous_paths):
+async def _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, previous_paths, expected_count):
     """重新准备同一边界的快照，检查重复保存和损坏拒绝。"""
     from camctl.history.snapshots import SnapshotMaintenanceError
 
@@ -28,7 +28,7 @@ async def _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, pre
         assert prepared.path.exists() and prepared.length > 65540
         assert prepared.boundary == boundary
         await _save(history, prepared)
-        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0] == 1
+        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0] == expected_count
         assert history.current_boundary() == boundary
         with prepared.path.open('r+b') as source:
             source.seek(65540)
@@ -38,7 +38,9 @@ async def _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, pre
             source.write(b'x' if before != b'x' else b'y')
         with pytest.raises(SnapshotMaintenanceError):
             await _save(history, prepared)
-        snapshot_id = owned.connection.execute('SELECT id FROM entity_snapshots').fetchone()[0]
+        snapshot_id = owned.connection.execute(
+            'SELECT id FROM entity_snapshots WHERE entity_type=? AND entity_id=?',
+            (prepared.entity_type, prepared.entity_id)).fetchone()[0]
         with owned.connection.blobopen('entity_snapshots', 'content', snapshot_id) as blob:
             blob.seek(65540)
             blob.write(b'\xff')
@@ -252,18 +254,6 @@ async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path
         owned, _, repo, ref, history = await _fixture(tmp_path)
 
     boundary = history.current_boundary()
-    refs = [SnapshotRef(1, ref.action_id)]
-    if phase == 'later_source':
-        from camctl.contracts.enums import load_registry
-        file_kind = load_registry()['history_objects']['device_file']['id']
-        file_id = owned.connection.execute('SELECT MIN(id) FROM device_files').fetchone()[0]
-        refs.insert(0, SnapshotRef(file_kind, file_id))
-    progress_before = {
-        (item.entity_type, item.entity_id): owned.connection.execute(
-            'SELECT snapshot_change_count, latest_snapshot_id FROM entity_snapshot_progress'
-            ' WHERE entity_type=? AND entity_id=?', (item.entity_type, item.entity_id)).fetchone()
-        for item in refs
-    }
     temporary = tmp_path / 'snapshot-temporary'
     temporary.mkdir()
     monkeypatch.setattr(tempfile, 'tempdir', str(temporary))
@@ -330,16 +320,14 @@ async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path
         with monkeypatch.context() as patch:
             patch.setattr(sqlite3, 'connect', connect)
             store, executor = await _snapshot_store(history)
-            selected = False
-
-            async def candidates(*_):
-                nonlocal selected
-                if selected:
-                    return ()
-                selected = True
-                return tuple(refs)
-
-            patch.setattr(store, 'snapshot_candidates', candidates)
+            refs = list(await store.snapshot_candidates(1, 3))
+            assert len(refs) == 3 and refs[0] == SnapshotRef(1, ref.action_id)
+            progress_before = {
+                (item.entity_type, item.entity_id): owned.connection.execute(
+                    'SELECT snapshot_change_count, latest_snapshot_id FROM entity_snapshot_progress'
+                    ' WHERE entity_type=? AND entity_id=?', (item.entity_type, item.entity_id)).fetchone()
+                for item in refs
+            }
             task = asyncio.create_task(maintain_snapshots(MaintenanceContext(
                 store=store, state=MaintenanceState(), threshold=1, batch_size=3)))
             try:
@@ -417,7 +405,7 @@ async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path
 
     try:
         if phase == 'middle':
-            await _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, paths)
+            await _assert_same_s_snapshot_bytes(owned, repo, ref, history, boundary, paths, len(refs))
     finally:
         owned.connection.close()
 
@@ -475,8 +463,8 @@ async def test_preparation_uses_separate_worker_and_releases_database_for_busine
     from .test_record_segment_history import _version
     owned,runtime,repo,ref,history=await _fixture(tmp_path)
     store,executor=await _snapshot_store(history)
-    async def candidates(*_):return (module.SnapshotRef(1,ref.action_id),)
-    monkeypatch.setattr(store,'snapshot_candidates',candidates)
+    candidates=await store.snapshot_candidates(1,2)
+    assert len(candidates)==2 and candidates[0]==module.SnapshotRef(1,ref.action_id)
     loop=asyncio.get_running_loop();started=asyncio.Event();release=Event();preparation_threads=[];business_threads=[]
     original=module.prepare_snapshot
     def prepare(image):
@@ -484,7 +472,7 @@ async def test_preparation_uses_separate_worker_and_releases_database_for_busine
         assert release.wait(60),'preparation gate was not released'
         return original(image)
     monkeypatch.setattr(module,'prepare_snapshot',prepare)
-    task=asyncio.create_task(module.maintain_snapshots(module.MaintenanceContext(store=store,state=module.MaintenanceState(),threshold=1,batch_size=2)))
+    task=asyncio.create_task(module.maintain_snapshots(module.MaintenanceContext(store=store,state=module.MaintenanceState(),threshold=1,batch_size=2),max_batches=1))
     try:
         await asyncio.wait_for(started.wait(),60)
         def business(owned):
@@ -495,6 +483,7 @@ async def test_preparation_uses_separate_worker_and_releases_database_for_busine
         assert preparation_threads[0] not in (get_ident(),business_threads[0])
         assert not task.done()
         release.set();result=await task
+        assert tuple(item.ref for item in result.saved)==candidates
         assert result.saved[0].remaining_changes==1
         assert owned.connection.execute('SELECT change_count FROM entity_snapshots WHERE entity_type=1').fetchone()[0] < owned.connection.execute('SELECT change_count FROM actions WHERE id=?',(ref.action_id,)).fetchone()[0]
     finally:
@@ -728,18 +717,46 @@ async def test_cancel_commit_unknown_waits_for_connection_cleanup_and_preserves_
 
 @pytest.mark.asyncio
 async def test_cancel_during_preparation_waits_for_source_owner_to_finish(tmp_path,monkeypatch):
+    import sqlite3
+    import tempfile
+    from urllib.parse import urlsplit
+    from urllib.request import url2pathname
     from camctl.history import snapshots as module
     owned,_,_,ref,history=await _fixture(tmp_path)
+    temporary=tmp_path/'snapshot-temporary'
+    temporary.mkdir()
+    monkeypatch.setattr(tempfile,'tempdir',str(temporary))
+    real_connect=sqlite3.connect
+    loop=asyncio.get_running_loop();started=asyncio.Event();release=Event();derived=[];paths=[]
+    class DerivedConnection(sqlite3.Connection):
+        def close(self):
+            super().close()
+            self.was_closed=True
+    def connect(database,*args,**kwargs):
+        value=str(database)
+        if value.startswith('file:'):
+            parts=urlsplit(value)
+            path=Path(url2pathname(('//'+parts.netloc if parts.netloc else '')+parts.path))
+        else:
+            path=Path(value)
+        if path.is_absolute() and path.is_relative_to(temporary):
+            assert 'factory' not in kwargs
+            connection=real_connect(database,*args,factory=DerivedConnection,**kwargs)
+            connection.was_closed=False
+            derived.append((connection,path))
+            return connection
+        return real_connect(database,*args,**kwargs)
+    monkeypatch.setattr(sqlite3,'connect',connect)
     store,executor=await _snapshot_store(history)
-    async def candidates(*_):return (module.SnapshotRef(1,ref.action_id),)
-    monkeypatch.setattr(store,'snapshot_candidates',candidates)
-    loop=asyncio.get_running_loop();started=asyncio.Event();release=Event();images=[];prepared=[]
+    candidates=await store.snapshot_candidates(1,2)
+    assert len(candidates)==2 and candidates[0]==module.SnapshotRef(1,ref.action_id)
     original=module.prepare_snapshot
     def prepare(image):
-        images.append((image,Path(image._temporary.name)))
-        value=original(image);prepared.append(value)
-        loop.call_soon_threadsafe(started.set)
-        assert release.wait(60),'preparation owner gate was not released'
+        value=original(image)
+        if (value.entity_type,value.entity_id)==(1,ref.action_id):
+            paths.append(value.path)
+            loop.call_soon_threadsafe(started.set)
+            assert release.wait(60),'preparation owner gate was not released'
         return value
     monkeypatch.setattr(module,'prepare_snapshot',prepare)
     task=asyncio.create_task(module.maintain_snapshots(module.MaintenanceContext(store=store,state=module.MaintenanceState(),threshold=1,batch_size=2)))
@@ -747,11 +764,13 @@ async def test_cancel_during_preparation_waits_for_source_owner_to_finish(tmp_pa
         await asyncio.wait_for(started.wait(),60);task.cancel()
         delivered=loop.create_future();loop.call_soon(delivered.set_result,None);await delivered
         task.cancel()
-        assert images[0][1].exists() and prepared[0].path.exists() and not task.done()
+        assert derived and all(connection.was_closed and path.is_file() for connection,path in derived)
+        assert len(paths)==1 and paths[0].is_file() and not task.done()
         release.set()
         with pytest.raises(asyncio.CancelledError):await task
-        assert all(not path.exists() and image._db is None for image,path in images)
-        assert all(not item.path.exists() for item in prepared)
+        assert all(connection.was_closed and not path.exists() and not path.parent.exists()
+                   for connection,path in derived)
+        assert all(not path.exists() for path in paths)
         assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]==0
     finally:
         release.set()
@@ -887,12 +906,13 @@ async def test_cancel_after_job_end_before_delivery_still_receives_original_resu
     owned,_,_,ref,history=await _fixture(tmp_path)
     boundary=history.current_boundary()
     store,executor=await _snapshot_store(history)
-    async def candidates(*_):return (SnapshotRef(1,ref.action_id),)
-    monkeypatch.setattr(store,'snapshot_candidates',candidates)
+    candidates=await store.snapshot_candidates(1,2)
+    assert len(candidates)==2 and candidates[0]==SnapshotRef(1,ref.action_id)
     loop=asyncio.get_running_loop();delayed=asyncio.Event();held=[];paths=[];keys=[];receipts=[]
     original_save=store.save_snapshots
     async def save(prepared):
-        paths.extend(item.path for item in prepared)
+        paths.extend(item.path for item in prepared
+                     if (item.entity_type,item.entity_id)==(1,ref.action_id))
         return await original_save(prepared)
     monkeypatch.setattr(store,'save_snapshots',save)
     original_submit=executor.submit_write
@@ -919,7 +939,7 @@ async def test_cancel_after_job_end_before_delivery_still_receives_original_resu
         # 同一真实工作线程已执行后续读取，证明保存及COMMIT已实际结束。
         later=executor.submit_read(DbJob(new_operation_key(),'confirm saved snapshot',DbJobKind.READ,DbPriority.BUSINESS,
             lambda actual:actual.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]))
-        assert (await later).value==1
+        assert (await later).value==len(candidates)
         assert receipts and not receipts[0].done()
         task.cancel()
         delivered=loop.create_future();loop.call_soon(delivered.set_result,None);await delivered
@@ -928,7 +948,8 @@ async def test_cancel_after_job_end_before_delivery_still_receives_original_resu
         with pytest.raises(asyncio.CancelledError):await task
         assert receipts[0].done() and receipts[0].result().kind.value=='completed'
         assert not paths[0].exists()
-        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]==1
+        assert set(owned.connection.execute('SELECT entity_type,entity_id FROM entity_snapshots'))=={
+            (item.entity_type,item.entity_id) for item in candidates}
         assert history.current_boundary()==boundary
     finally:
         deliver()
