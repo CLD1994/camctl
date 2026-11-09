@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from decimal import Decimal
 from dataclasses import replace
 
 import pytest
@@ -13,8 +12,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError
 from camctl.capture.recovery import RecoveryBoundary
-from camctl.capture.media_flow import run_recording_media
-from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
+from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
 from camctl.devices.read_session import ReadSession
 from camctl.outputs.obtain_flow import advance_obtain
@@ -27,7 +25,6 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
 from .test_qualification import _NOW
-from .test_read_associations import read_targets
 from ..support.capture import capture_database
 from ..support.digest_read_recovery_cases import Driver, factory, prepare_request
 from .test_cleanup_query_commit_recovery import _CommitFaultConnection
@@ -118,19 +115,6 @@ class _ReadDriver:
             "file_id": request.params["file_id"], "sha256": result.digest,
         }),), None)
 
-
-
-class _Digest:
-    def __init__(self, *, digest: str | None = None, error: str | None = None) -> None:
-        self.digest = digest
-        self.error = error
-        self.calls = 0
-
-    async def read_digest(self):
-        from camctl.outputs.copy import SourceDigest
-
-        self.calls += 1
-        return SourceDigest(digest=self.digest, error=self.error)
 
 
 async def test_source_digest_failure_finishes_original_read_and_preserves_sibling_success(
@@ -533,83 +517,3 @@ async def test_reliable_cancellation_wins_after_saved_source_digest_failure(
     assert row[6] is not None
     assert len(driver.calls) == driver.digest_calls == 1
     assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].error is None
-
-
-async def test_internal_read_finishes_successfully_and_fails_processing_on_source_digest_error(
-        read_targets, tmp_path):
-    from camctl.capture.processing import CheckPhase
-
-    owned = read_targets
-    connection = owned.connection
-    connection.execute("UPDATE actions SET status=3 WHERE id IN (12, 32)")
-    connection.execute(
-        "UPDATE device_files SET size_bytes=10, checksum_support=2, sha256=NULL"
-        " WHERE id=501")
-    connection.execute(
-        "UPDATE recording_processing SET check_basis_json=? WHERE id=5",
-        ('{"reason":2,"target_duration_ms":60000}',))
-    connection.commit()
-    staging = tmp_path / "staging"
-    for name in ("deliveries", "recording-inputs", "derived"):
-        (staging / name).mkdir(parents=True)
-    digest = _Digest(error="internal source SHA query failed")
-
-    class _NoTools:
-        async def probe(self, _input):
-            raise AssertionError("来源摘要失败后不得检查未确认副本")
-
-        async def repair(self, _input, _output, *, trim_s):
-            raise AssertionError("来源摘要失败后不得修复未确认副本")
-
-    from camctl.bootstrap.capture_assembly import session_capture_assembly
-    from camctl.capture.timelapse import CaptureWaitConfig
-    from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
-    from camctl.devices.ports import DriverDeclaration
-
-    driver = _ReadDriver()
-    driver.digests = {501: digest}
-    evidence = EvidenceRegistry((
-        EvidenceContract("read_returned", 1, "read", frozenset()),
-        EvidenceContract("file_digest", 1, "digest", frozenset({"file_id", "sha256"}), identity_field="file_id"),
-    ))
-    drivers = DriverRegistry((DriverEntry("camctl-adb", driver, DriverDeclaration(
-        control_supported=True, stop_supported=False, query_supported=False,
-        result_supported=False, read_supported=True, digest_supported=True, delete_supported=False),
-        evidence, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
-    factory = session_capture_assembly(
-        devices={"cam-1": {"driver": "camctl-adb", "copy": {"retry_interval_s": Decimal(0)}}},
-        drivers=drivers, staging=staging, segment_size=10,
-        wall_us=lambda: _NOW + 30_000_000,
-        wait_config=lambda _action: CaptureWaitConfig(60000, 0),
-    )
-    runtime = await factory(await capture_database(owned), "cam-1")
-    assert runtime is not None and runtime.media is not None
-    flow = runtime.media
-    flow.tools = _NoTools()
-
-    step = await run_recording_media(flow, 11, 5, 501)
-
-    assert step.phase.value == "verification_failed"
-    copy_id, = connection.execute(
-        "SELECT id FROM file_copies WHERE processing_id=5").fetchone()
-    row = connection.execute(
-        "SELECT c.committed_bytes,c.verification_state,c.source_sha256,c.target_sha256,"
-        " c.verification_error_json,r.status,r.error_json,a.status,a.result_json,"
-        " c.slot_device_id"
-        " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
-        " JOIN operation_attempts a ON a.run_id=r.id WHERE c.id=?", (copy_id,)
-    ).fetchone()
-    assert row[:4] == (
-        10, int(enum_for("file_copies.verification_state").FAILED), None,
-        hashlib.sha256(_CONTENT).hexdigest(),
-    )
-    assert parse_exact_json(row[4]) == {"reason": str({"reason": digest.error})}
-    assert row[5] == int(enum_for("operation_runs.status").FAILED)
-    assert parse_exact_json(row[6]) == {
-        "code": "source_file_unconfirmed", "stage": "source_read", "details": {}}
-    assert row[7] == int(enum_for("operation_attempts.status").SUCCEEDED)
-    assert row[8] is not None
-    assert row[9] is None
-    assert connection.execute(
-        "SELECT check_state FROM recording_processing WHERE id=5").fetchone()[0] == CheckPhase.FAILED.value
-    assert digest.calls == 1

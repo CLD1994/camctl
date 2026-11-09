@@ -27,6 +27,8 @@ from camctl.bootstrap.capture_assembly import execution_wait_config, session_cap
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+from camctl.contracts.enums import enum_for
+from camctl.contracts.json_values import parse_exact_json
 from camctl.devices.drivers.registry import (
     DriverEntry,
     DriverRegistry,
@@ -69,7 +71,8 @@ _EVIDENCE = EvidenceRegistry(
         EvidenceContract(type="stop_returned", version=1, operation="stop",
                          fields=frozenset()),
         EvidenceContract(type="stop_confirmed", version=1, operation="stop",
-                         fields=frozenset({"activity_id"}), identity_field="activity_id"),
+                         fields=frozenset({"activity_id", "response_payload", "confirmation_basis"}),
+                         identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
         RESULT_FILES_CONTRACT,
@@ -184,6 +187,28 @@ class _SessionDriver:
         )
 
 
+class _DigestFailureDriver(_SessionDriver):
+    def __init__(self, content: bytes) -> None:
+        super().__init__(content)
+        self.sessions = []
+        self.digest_error = "internal source SHA query failed"
+
+    async def stop(self, request) -> DeviceCallResult:
+        result = await super().stop(request)
+        observation, = result.observations
+        return replace(result, observations=(replace(observation, data={**observation.data,
+            "response_payload": "df", "confirmation_basis": "action6_record_ack/v1"}),))
+
+    async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+        session = await super().open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)
+        self.sessions.append(session)
+        return session
+
+    async def digest(self, request) -> DeviceCallResult:
+        self.calls.append(("digest", request.params["file_id"]))
+        return DeviceCallResult((), {"reason": self.digest_error})
+
+
 def _tool(directory: Path, name: str, body: str) -> str:
     """写入可执行的检查/修复工具替身脚本并返回调用路径。"""
     helper = directory / f"{name}.py"
@@ -242,7 +267,14 @@ def _registry(driver, *, read_supported: bool = True) -> DriverRegistry:
     ))
 
 
-def _factory(cfg, registry, results, tools_dir: Path, clock, *, osv=False, executor=None, wall_us=None):
+def _factory(cfg, registry, results, tools_dir: Path, clock, *, osv=False, executor=None, wall_us=None,
+             prohibit_media=False):
+    probe_body = _OSV_PROBE_BODY if osv else _PROBE_BODY
+    repair_body = _REPAIR_BODY
+    if prohibit_media:
+        def sentinel(name):
+            return f"from pathlib import Path\nPath({str(tools_dir / name)!r}).write_text('started')\nraise SystemExit(1)\n"
+        probe_body, repair_body = sentinel("unexpected-probe"), sentinel("unexpected-repair")
     return session_capture_assembly(
         devices=cfg.devices,
         drivers=registry,
@@ -253,9 +285,9 @@ def _factory(cfg, registry, results, tools_dir: Path, clock, *, osv=False, execu
         wall_us=wall_us,
         file_executor=executor,
         probe_request=ProbeRequest(
-            ffprobe=_tool(tools_dir, "ffprobe", _OSV_PROBE_BODY if osv else _PROBE_BODY)),
+            ffprobe=_tool(tools_dir, "ffprobe", probe_body)),
         repair_request=RepairRequest(
-            ffmpeg=_tool(tools_dir, "ffmpeg", _REPAIR_BODY)),
+            ffmpeg=_tool(tools_dir, "ffmpeg", repair_body)),
     )
 
 
@@ -278,10 +310,30 @@ async def _wait_wall_past(db: Path, started_at_us: int, span_s: float) -> None:
         await asyncio.sleep(0.05)
 
 
+async def _wait_failed_check(db: Path, task: asyncio.Task) -> None:
+    from camctl.capture.processing import CheckPhase
+
+    deadline = time.monotonic() + 15.0
+    while True:
+        state = _scalar(db, "SELECT a.status,p.check_state FROM actions a"
+                           " LEFT JOIN recording_processing p ON p.action_id=a.id WHERE a.id=1")
+        if state[1] == CheckPhase.FAILED.value:
+            return
+        if task.done():
+            outcome = await task
+            raise AssertionError(f"会话已结束但录像检查未失败: {state!r}; {outcome!r}")
+        if state[0] in (3, 4, 5, 6):
+            raise AssertionError(f"动作已终态但录像检查未失败: {state!r}")
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"等待录像检查失败超时: {state!r}")
+        await asyncio.sleep(0.05)
+
+
 class TestExcessRepairThroughSessionAssembly:
-    @pytest.mark.parametrize("osv", [False, True], ids=["mp4", "osv"])
+    @pytest.mark.parametrize("osv,digest_failure", [(False, False), (True, False), (False, True)],
+                             ids=["mp4", "osv", "mp4-source-digest-failure"])
     async def test_cross_session_excess_repairs_and_finishes(
-            self, tmp_path: Path, osv) -> None:
+            self, tmp_path: Path, osv, digest_failure) -> None:
         home = tmp_path / "excess"
         home.mkdir()
         cfg = _config(home)
@@ -293,7 +345,7 @@ class TestExcessRepairThroughSessionAssembly:
             tmp_path, cfg, _ShortRecordCatalog(),
             _record_plan("1", _future_schedule(2)))
         db = Path(cfg.paths.state_db)
-        driver = _SessionDriver(_CONTENT)
+        driver = _DigestFailureDriver(_CONTENT) if digest_failure else _SessionDriver(_CONTENT)
         clock = {"ns": time.monotonic_ns()}
         results = ResultsDouble({})
         executor = FileTaskExecutor(Supervisor())
@@ -301,7 +353,8 @@ class TestExcessRepairThroughSessionAssembly:
         # 机；锚点随会话失效。
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
-            cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor))
+            cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor,
+            prohibit_media=digest_failure))
         try:
             await _await_query(
                 db,
@@ -322,9 +375,13 @@ class TestExcessRepairThroughSessionAssembly:
         results.files_by_action[1] = (entry,)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
-            cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor))
+            cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor,
+            prohibit_media=digest_failure))
         try:
-            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            if digest_failure:
+                await _wait_failed_check(db, task)
+            else:
+                await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
         finally:
             await _cancel(task)
             close_runtime(deps)
@@ -332,6 +389,43 @@ class TestExcessRepairThroughSessionAssembly:
         assert ("stop", "stop_recording") in driver.calls
         assert "read" in operations
         assert "digest" in operations
+        if digest_failure:
+            from camctl.capture.processing import CheckDecisionChoice, CheckReason
+
+            check_decision, raw_check_basis = _scalar(db,
+                "SELECT check_decision,check_basis_json FROM recording_processing WHERE action_id=1")
+            check_basis = parse_exact_json(raw_check_basis)
+            assert check_decision == CheckDecisionChoice.REQUIRED.value
+            assert check_basis["reason"] == CheckReason.INSUFFICIENT_TIMING.value
+            assert check_basis["target_duration_ms"] == 1000
+            session, = driver.sessions
+            end = session.poll_stopped()
+            assert end is not None and end.stopped and end.error is None and end.bytes_read == len(_CONTENT) == 10
+            assert operations.count("digest") == 1
+            (committed_bytes, verification_state, source_sha256, target_sha256,
+             verification_error, run_status, run_error, attempt_status,
+             attempt_result, slot_device_id, source_file_id) = _scalar(db,
+                "SELECT c.committed_bytes,c.verification_state,c.source_sha256,c.target_sha256,"
+                " c.verification_error_json,r.status,r.error_json,a.status,a.result_json,c.slot_device_id,"
+                " c.source_device_file_id"
+                " FROM recording_processing p JOIN file_copies c ON c.processing_id=p.id"
+                " JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts a ON a.run_id=r.id"
+                " WHERE p.action_id=1")
+            assert committed_bytes == 10
+            assert verification_state == int(enum_for("file_copies.verification_state").FAILED)
+            assert source_sha256 is None and target_sha256 == hashlib.sha256(_CONTENT).hexdigest()
+            assert parse_exact_json(verification_error) == {"reason": str({"reason": driver.digest_error})}
+            assert run_status == int(enum_for("operation_runs.status").FAILED)
+            assert parse_exact_json(run_error) == {"code": "source_file_unconfirmed", "stage": "source_read", "details": {}}
+            assert attempt_status == int(enum_for("operation_attempts.status").SUCCEEDED)
+            assert parse_exact_json(attempt_result)["settlement"]["evidence"]["type"] == "read_returned"
+            assert slot_device_id is None
+            assert source_file_id > 0
+            assert [(kind, file_id) for kind, file_id in driver.calls if kind == "digest"] == [("digest", str(source_file_id))]
+            assert not (tools_dir / "unexpected-probe").exists()
+            assert not (tools_dir / "unexpected-repair").exists()
+            assert executor.unfinished_files() == ()
+            return
         # 门槛秒数保存实际比较门槛：目标时长（1 秒）加设备配置的
         # 修复余量（2 秒）。
         processing = _scalar(
