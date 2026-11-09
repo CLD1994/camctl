@@ -25,6 +25,7 @@ from ..support.database import business_database, database_path
 from ..support.public_delivery_cases import prepare_public_delivery
 from ..support.output_storage_cases import observed_operation
 from ..support.bootstrap_read_cases import work_file_case, release_work_consumer, segment_input_case
+from ..support.capture_media_cases import media_cases  # noqa: F401
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
@@ -255,24 +256,98 @@ async def test_release_requires_stopped_operations(work_env):
 
 
 @pytest.mark.asyncio
-async def test_promoted_file_is_not_cleaned(work_env):
+async def test_promoted_file_is_not_cleaned(tmp_path, media_cases):
     """已成正式产物（PROMOTED）的中间文件不进入自动清理。"""
-    owned, roots, qualification = work_env
-    async with business_database(database_path(owned)) as database:
-        file_id = qualification.target_file_id
-        owned.connection.execute(
-            "UPDATE intermediate_files SET retention_state=3, cleanup_state=1"
-            " WHERE id=?", (file_id,))
-        owned.connection.commit()
-        result = (await clean_one_work_file(
-            file_id, _context(database, roots)))
+    from decimal import Decimal
+
+    from camctl.capture.handlers import capture_handler
+    from camctl.capture.result_inputs import ObservedFile
+    from camctl.capture.results import FileKind
+    from camctl.host_files.media import MediaProbe, MediaStream
+    from camctl.persistence.repositories.acceptance import register_acceptance_guards
+    from camctl.persistence.repositories.operations import register_operation_guards
+    from camctl.persistence.repositories.outputs import register_outputs_guards
+    from camctl.persistence.repositories.scheduling import register_window_guard
+    from camctl.persistence.repositories.timelapse import register_timelapse_guards
+    from ..support.capture import capture_database
+    from ..support.capture_media_cases import (
+        CONTENT, ScriptTools, media_case, recording_environment,
+        recording_media, recording_runtime,
+    )
+
+    register_acceptance_guards()
+    register_window_guard()
+    register_operation_guards()
+    register_timelapse_guards()
+    register_outputs_guards()
+    owned, staging = await recording_environment(
+        tmp_path, check_decision=3,
+        check_basis='{"reason": 2, "target_duration_ms": 60000}')
+    try:
+        entry = ObservedFile(
+            identity="recording.mp4", locator={"path": "/DCIM/recording.mp4"},
+            evidence={"listing": "recording"}, complete=True,
+            size_bytes=len(CONTENT), kind=FileKind.VIDEO,
+            original_name="recording.mp4", media_type="video/mp4", format_id="mp4")
+        tools = ScriptTools(MediaProbe(Decimal("200"), None, (
+            MediaStream(0, "video", "h264", 64, 64, Decimal("200"), False),)))
+        media = await recording_media(owned, tools, staging)
+        runtime = await recording_runtime(owned, {1: (entry,)}, flow=media)
+        await capture_handler("camera_record")(1, runtime)
+        assert tools.calls == ["probe", "repair"]
+        assert _row(owned, "SELECT status FROM actions WHERE id=1") == (3,)
+        assert _row(owned, "SELECT check_state, repair_state FROM recording_processing WHERE id=1") == (3, 5)
+
+        output_id, file_id, purpose, retention, cleanup, relative = _row(
+            owned,
+            "SELECT o.id, f.id, f.purpose, f.retention_state, f.cleanup_state, f.relative_path"
+            " FROM outputs o JOIN intermediate_files f ON f.id=o.intermediate_file_id"
+            " WHERE o.source_action_id=1 AND o.kind=2")
+        assert (purpose, retention, cleanup) == (4, 3, 1)
+        assert relative.startswith("derived/")
+        assert _row(owned, "SELECT owner_action_id, owner_delivery_id FROM intermediate_files WHERE id=?", file_id) == (1, None)
+        original_id, = _row(owned, "SELECT id FROM outputs WHERE source_action_id=1 AND kind=1")
+        assert _row(owned, "SELECT original_output_id FROM output_origins WHERE output_id=?", output_id) == (original_id,)
+        target = staging / relative
+        assert target.read_bytes() == tools.content
+
+        input_id, = _row(owned, "SELECT target_file_id FROM file_copies WHERE processing_id=1")
+        assert input_id != file_id
+        assert _row(owned, "SELECT purpose, retention_state, cleanup_state FROM intermediate_files WHERE id=?", input_id) == (2, 1, 1)
+        assert _work_path(BoundDirectories(staging=staging), owned, input_id).read_bytes() == CONTENT
+        assert {row[0] for row in owned.connection.execute("SELECT id FROM intermediate_files")} == {input_id, file_id}
+
+        case = media_case(media)
+        settled = await case.executor.drain_required()
+        assert not settled.failed
+        assert case.executor.unfinished_files() == ()
+        database = await capture_database(owned)
+        roots = BoundDirectories(staging=staging)
+
+        def context():
+            return WorkFileContext(
+                repository=OutputsRepository(), database=database, staging=staging,
+                occurred_at=_NOW + 100_000_001,
+                limits=WorkFileLimits(batch_size=32, limit_per_run=128),
+                executor=case.executor)
+
+        cleared = await clean_one_work_file(input_id, context())
+        assert cleared.outcome is WorkFileSingleOutcome.DELETED
+        assert not _work_path(roots, owned, input_id).exists()
+        assert _file_state(owned, input_id)[:2] == (2, 4)
+        result = await clean_one_work_file(file_id, context())
         assert result.decision.action is WorkFileAction.NOT_MANAGED
         assert result.outcome is WorkFileSingleOutcome.NOT_MANAGED
-        assert _work_path(roots, owned, file_id).exists()
+        assert target.read_bytes() == tools.content
         assert _file_state(owned, file_id)[:2] == (3, 1)
-        scan = (await clean_work_files(_context(database, roots)))
+        scan = await clean_work_files(context())
         assert scan.checked == 0
-        assert _work_path(roots, owned, file_id).exists()
+        assert target.read_bytes() == tools.content
+        assert _file_state(owned, file_id)[:2] == (3, 1)
+        assert _row(owned, "SELECT intermediate_file_id FROM outputs WHERE id=?", output_id) == (file_id,)
+        assert _row(owned, "SELECT original_output_id FROM output_origins WHERE output_id=?", output_id) == (original_id,)
+    finally:
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
