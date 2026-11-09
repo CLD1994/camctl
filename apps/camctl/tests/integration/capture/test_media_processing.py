@@ -37,22 +37,18 @@ from camctl.capture.processing import (
     SourceFileSave,
     repair_basis_from_check,
 )
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history.changes import event_report_targets
-from camctl.history.validators import (
-    EventContext, EventValidationError, validate_event,
-)
+from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories import capture as capture_module
 from camctl.persistence.repositories.capture import (
     CaptureRepository, register_capture_guards,
 )
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import TransactionScope
-
 from ..persistence.test_runtime import _create_valid_database
+from ..persistence.transaction_fixtures import decorate_transaction_command
 
 register_capture_guards()
 register_outputs_guards()
@@ -559,174 +555,106 @@ def test_reuse_accepts_actual_progress(environment) -> None:
 # ---- 正式守卫 ----
 
 
-def _proposal(owned, command):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = command.plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    assert plan.events, "提案必须产生事件"
-    return plan
+def _replace_processing_value(plan, name, value):
+    event, = plan.events
+    row, = event.rows
+    assert row.table == "recording_processing"
+    variant = replace(row, after=replace(row.after, values={
+        **row.after.values, name: value,
+    }))
+    return replace(plan, events=(replace(event, rows=(variant,)),))
 
 
-def _validate(plan, events=None, state_rows=None, current_reads=None):
-    """模仿内核按顺序分配报告变化序号并逐事件校验。"""
-    working = {
-        table: {row_id: dict(rows) for row_id, rows in table_rows.items()}
-        for table, table_rows in plan.state_rows.items()
-    }
-    chosen = events if events is not None else plan.events
-    seq = 0
-    for event in chosen:
-        if event_report_targets(event, working):
-            seq += 1
-            event = replace(event, change_seq=seq)
-        context = EventContext(
-            TransactionRange(
-                chosen[0].transaction_id, chosen[0].event_id, chosen[-1].event_id),
-            dict(plan.owners),
-            state_rows if state_rows is not None else plan.state_rows,
-            read_coverage=plan.read_coverage, current_reads=current_reads)
-        validate_event(event, context)
-        for row in event.rows:
-            if row.after.exists:
-                working.setdefault(row.table, {}).setdefault(
-                    row.row_id, {}).update(row.after.values)
+def _assert_guard_rejected(monkeypatch, owned, request, change, reason):
+    """在真实写事务内校验仓储生成的提案及完整回滚。"""
+    before = tuple(owned.connection.iterdump())
+    key = new_operation_key()
+    changed = []
+
+    def transform(command, scope):
+        plan = command.plan(scope)
+        changed.append(True)
+        return change(plan)
+
+    with monkeypatch.context() as scoped:
+        decorate_transaction_command(scoped, capture_module, transform)
+        outcome = _save(owned, request, key=key)
+    assert changed == [True]
+    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(outcome.error, EventValidationError)
+    assert reason in str(outcome.error)
+    assert not owned.connection.in_transaction
+    assert tuple(owned.connection.iterdump()) == before
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+        (str(key),),
+    ).fetchone() == (0,)
 
 
 def test_guard_accepts_real_processing_events(environment) -> None:
-    from camctl.persistence.repositories import capture as capture_module
-
     owned = environment
-    key = new_operation_key()
-    for request, command_type in (
-        (SourceFileSave(1, 11, _NOW + 1),
-         capture_module._SourceFileCommand),
-        (_check_required(_NOW + 2),
-         capture_module._CheckDecisionCommand),
-        (CheckResultSave(1, _completed_observation(), occurred_at=_NOW + 3),
-         capture_module._CheckResultCommand),
-        (_repair_pending(_NOW + 4),
-         capture_module._RepairDecisionCommand),
-        (RepairResultSave(1, RepairOutcome.RUNNING, occurred_at=_NOW + 5),
-         capture_module._RepairResultCommand),
-        (RepairResultSave(
+    for request in (
+        SourceFileSave(1, 11, _NOW + 1),
+        _check_required(_NOW + 2),
+        CheckResultSave(1, _completed_observation(), occurred_at=_NOW + 3),
+        _repair_pending(_NOW + 4),
+        RepairResultSave(1, RepairOutcome.RUNNING, occurred_at=_NOW + 5),
+        RepairResultSave(
             1, RepairOutcome.SUCCEEDED, occurred_at=_NOW + 6,
             output_file_id=700),
-         capture_module._RepairResultCommand),
-        (DiscardProgressSave(1, DiscardPhase.PENDING, occurred_at=_NOW + 7),
-         capture_module._DiscardProgressCommand),
+        DiscardProgressSave(1, DiscardPhase.PENDING, occurred_at=_NOW + 7),
     ):
-        plan = _proposal(owned, command_type(request, key))
-        from camctl.persistence.event_reads import SqlEventReads
-        owned.connection.execute("BEGIN")
-        try:
-            reader = SqlEventReads(owned.connection, plan.plan_read_scope) if plan.plan_read_scope else None
-            _validate(plan, current_reads=reader)
-        finally:
-            owned.connection.rollback()
-        _save(owned, request)
+        _assert_saved(_save(owned, request))
 
 
-def test_guard_rejects_media_state_mismatch(environment) -> None:
+def test_guard_rejects_media_state_mismatch(environment, monkeypatch) -> None:
     """守卫拒绝与保存阶段不一致的媒体结构。"""
-    from camctl.persistence.repositories import capture as capture_module
-
     owned = environment
-    _save(owned, _check_required(_NOW + 1))
-    command = capture_module._CheckResultCommand(
-        CheckResultSave(1, _completed_observation(), occurred_at=_NOW + 2),
-        new_operation_key())
-    plan = _proposal(owned, command)
-    event = plan.events[0]
-    row = event.rows[0]
-    variant = replace(
-        row, after=replace(row.after, values={
-            **row.after.values,
-            "media_json": {
-                "check_status": "completed",
-                "duration": {"status": "unknown"},
-            }}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    _assert_saved(_save(owned, _check_required(_NOW + 1)))
+    request = CheckResultSave(1, _completed_observation(), occurred_at=_NOW + 2)
+    _assert_guard_rejected(monkeypatch, owned, request, lambda plan:
+        _replace_processing_value(plan, "media_json", {
+            "check_status": "completed", "duration": {"status": "unknown"},
+        }), "可靠视频时长")
 
 
-def test_guard_rejects_failed_check_without_error(environment) -> None:
-    from camctl.persistence.repositories import capture as capture_module
-
+def test_guard_rejects_failed_check_without_error(environment, monkeypatch) -> None:
     owned = environment
-    _save(owned, _check_required(_NOW + 1))
-    command = capture_module._CheckResultCommand(
-        CheckResultSave(
-            1, MediaObservation(CheckPhase.FAILED, error=_error()),
-            occurred_at=_NOW + 2),
-        new_operation_key())
-    plan = _proposal(owned, command)
-    event = plan.events[0]
-    row = event.rows[0]
-    variant = replace(
-        row, after=replace(row.after, values={
-            **row.after.values,
-            "media_json": {
-                "check_status": "failed",
-                "duration": {"status": "unknown"},
-            }}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    _assert_saved(_save(owned, _check_required(_NOW + 1)))
+    request = CheckResultSave(
+        1, MediaObservation(CheckPhase.FAILED, error=_error()), occurred_at=_NOW + 2)
+    _assert_guard_rejected(monkeypatch, owned, request, lambda plan:
+        _replace_processing_value(plan, "media_json", {
+            "check_status": "failed", "duration": {"status": "unknown"},
+        }), "必须保存实际错误")
 
 
-def test_guard_rejects_check_basis_without_reason(environment) -> None:
-    from camctl.persistence.repositories import capture as capture_module
+def test_guard_rejects_check_basis_without_reason(environment, monkeypatch) -> None:
+    _assert_guard_rejected(monkeypatch, environment, _check_required(_NOW + 1),
+        lambda plan: _replace_processing_value(plan, "check_basis_json", {
+            "target_duration_ms": 60_000,
+        }), "检查依据来源")
 
+
+def test_guard_rejects_repair_basis_missing_threshold(environment, monkeypatch) -> None:
+    _assert_guard_rejected(monkeypatch, environment, _repair_pending(_NOW + 1),
+        lambda plan: _replace_processing_value(plan, "repair_basis_json", {
+            "reason": 2, "target_duration_ms": 60_000,
+            "actual_duration_s": Decimal("75.125"),
+        }), "精确门槛秒数")
+
+
+def test_guard_rejects_success_without_registered_output(environment, monkeypatch) -> None:
     owned = environment
-    command = capture_module._CheckDecisionCommand(
-        _check_required(_NOW + 1), new_operation_key())
-    plan = _proposal(owned, command)
-    event = plan.events[0]
-    row = event.rows[0]
-    variant = replace(
-        row, after=replace(row.after, values={
-            **row.after.values,
-            "check_basis_json": {"target_duration_ms": 60_000}}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
+    _assert_saved(_save(owned, _repair_pending(_NOW + 1)))
+    _assert_saved(_save(
+        owned, RepairResultSave(1, RepairOutcome.RUNNING, occurred_at=_NOW + 2)))
+    request = RepairResultSave(
+        1, RepairOutcome.SUCCEEDED, occurred_at=_NOW + 3, output_file_id=700)
 
+    def remove_output(plan):
+        rows = {table: dict(entries) for table, entries in plan.state_rows.items()}
+        del rows["intermediate_files"][700]
+        return replace(plan, state_rows=rows)
 
-def test_guard_rejects_repair_basis_missing_threshold(environment) -> None:
-    from camctl.persistence.repositories import capture as capture_module
-
-    owned = environment
-    command = capture_module._RepairDecisionCommand(
-        _repair_pending(_NOW + 1), new_operation_key())
-    plan = _proposal(owned, command)
-    event = plan.events[0]
-    row = event.rows[0]
-    variant = replace(
-        row, after=replace(row.after, values={
-            **row.after.values,
-            "repair_basis_json": {
-                "reason": 2, "target_duration_ms": 60_000,
-                "actual_duration_s": Decimal("75.125")}}))
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(event, rows=(variant,)),))
-
-
-def test_guard_rejects_success_without_registered_output(environment) -> None:
-    from camctl.persistence.repositories import capture as capture_module
-
-    owned = environment
-    _save(owned, _repair_pending(_NOW + 1))
-    _save(owned, RepairResultSave(1, RepairOutcome.RUNNING, occurred_at=_NOW + 2))
-    command = capture_module._RepairResultCommand(
-        RepairResultSave(
-            1, RepairOutcome.SUCCEEDED, occurred_at=_NOW + 3,
-            output_file_id=700),
-        new_operation_key())
-    plan = _proposal(owned, command)
-    tampered = {
-        table: {row_id: dict(rows) for row_id, rows in rows.items()}
-        for table, rows in plan.state_rows.items()
-    }
-    del tampered["intermediate_files"][700]
-    with pytest.raises(EventValidationError):
-        _validate(plan, state_rows=tampered)
+    _assert_guard_rejected(monkeypatch, owned, request, remove_output, "缺少输出文件事实")
