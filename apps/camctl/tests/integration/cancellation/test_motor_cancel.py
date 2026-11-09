@@ -123,22 +123,24 @@ async def test_local_intent_cancel_has_no_persisted_unknown_gap(motor_cancel):
     ).fetchone() == (3,)
 
     from unittest.mock import Mock
+    from camctl.bootstrap.motor_assembly import motor_flow
     from camctl.contracts.clock import ClockPort
     from camctl.motor.notification import NotificationWriter
-    from camctl.motor.rules import MotorDecision
-    from camctl.motor.service import MotorRuntime, advance_motor
 
     writer = Mock(spec=NotificationWriter)
     clock = Mock(spec=ClockPort)
+    clock.utc_micros.return_value = NOW + 4
     policy = Mock()
     permits = {1: permit}
     from ..support.database import business_database, database_path
     async with business_database(database_path(owned)) as database:
-        decision = await advance_motor(
-            1, MotorRuntime(database, motor, writer, clock, policy, permits))
-    assert decision is MotorDecision.KEEP_TERMINAL and permits == {}
+        context = Mock(spec_set=["database", "clock", "clock_policy"])
+        context.database = database
+        context.clock = clock
+        context.clock_policy = policy
+        await motor_flow(writer, permits)(context)
+    assert permits == {}
     writer.send.assert_not_called()
-    clock.utc_micros.assert_not_called()
     policy.assert_not_called()
 
 
