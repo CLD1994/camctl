@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
@@ -400,12 +399,6 @@ class PhotoWorld:
                 self.client_session.close()
             except BaseException as error:
                 errors.append(error)
-        try:
-            with closing(sqlite3.connect(f"file:{self.deployment.state_db}?mode=ro", uri=True)) as source:
-                with closing(sqlite3.connect(self.root / "evidence-state.db")) as target:
-                    source.backup(target)
-        except BaseException as error:
-            errors.append(error)
         if errors:
             raise BaseExceptionGroup("Hasselblad world操作或收场失败", ([primary] if primary else []) + errors)
 
