@@ -41,31 +41,48 @@ def _change(world):
     return world.history.current_boundary().last_event_id
 
 
-async def _snapshot(world):
-    executor = DbExecutor(
-        lambda: open_existing(world.history.path, DbOpenMode.EXISTING_RW, DbConfig()),
-        capacity=4, enqueue_timeout_seconds=9)
+def _close_if_needed(value):
+    close = getattr(value, "close", None)
+    if close is not None:
+        close()
+
+
+async def _load_prepared(store, ref):
+    seed = (await store.load_entity_images((ref,)))[0]
+    prepared = None
     try:
-        store = SqliteSnapshotStore(world.history.path, executor)
-        seed = (await store.load_entity_images((SnapshotRef(9, 1),)))[0]
-        await store.save_snapshots((prepare_snapshot(seed),))
+        prepared = prepare_snapshot(seed)
     finally:
-        await executor.close()
-    return world.owned.connection.execute(
-        "SELECT id FROM entity_snapshots WHERE entity_type = 9 AND entity_id = 1"
-        " ORDER BY boundary_event_id DESC LIMIT 1").fetchone()[0]
+        try:
+            _close_if_needed(seed)
+        except BaseException:
+            if prepared is not None:
+                _close_if_needed(prepared)
+            raise
+    return prepared
+
+
+async def _snapshot(world):
+    snapshot_id, _ = await _save_ref_snapshot(world, SnapshotRef(9, 1))
+    return snapshot_id
 
 
 async def _prepared(world, ref):
     executor = DbExecutor(
         lambda: open_existing(world.history.path, DbOpenMode.EXISTING_RW, DbConfig()),
         capacity=4, enqueue_timeout_seconds=9)
+    prepared = None
     try:
         store = SqliteSnapshotStore(world.history.path, executor)
-        seed = (await store.load_entity_images((ref,)))[0]
-        return prepare_snapshot(seed)
+        prepared = await _load_prepared(store, ref)
     finally:
-        await executor.close()
+        try:
+            await executor.close()
+        except BaseException:
+            if prepared is not None:
+                _close_if_needed(prepared)
+            raise
+    return prepared
 
 
 @pytest.mark.asyncio
@@ -263,46 +280,49 @@ async def test_new_snapshot_after_selection_cannot_replace_fixed_s_and_id(file_w
     boundary = world.history.current_boundary()
     expected = row_facts(world.owned.connection, "device_files", 1)
     late = await _prepared(world, SnapshotRef(9, 1))
-    for _ in range(4):
-        _change(world)
-    from camctl.persistence.repositories import history as module
-    original_read = world.history._read_connection
-    read_count = 0
-    selected = []
-    events = []
-    original_decode, original_snapshot = module.decode_event_row, world.history._snapshot_rows
+    try:
+        for _ in range(4):
+            _change(world)
+        from camctl.persistence.repositories import history as module
+        original_read = world.history._read_connection
+        read_count = 0
+        selected = []
+        events = []
+        original_decode, original_snapshot = module.decode_event_row, world.history._snapshot_rows
 
-    @contextmanager
-    def publish_after_selection():
-        nonlocal read_count
-        with original_read() as connection:
-            yield connection
-        read_count += 1
-        if read_count == 1:
-            connection = world.owned.connection
-            connection.execute("BEGIN IMMEDIATE")
-            module._save_one_snapshot(connection, late)
-            connection.execute("COMMIT")
+        @contextmanager
+        def publish_after_selection():
+            nonlocal read_count
+            with original_read() as connection:
+                yield connection
+            read_count += 1
+            if read_count == 1:
+                connection = world.owned.connection
+                connection.execute("BEGIN IMMEDIATE")
+                module._save_one_snapshot(connection, late)
+                connection.execute("COMMIT")
 
-    def observe_selected(seed):
-        selected.append((seed.snapshot.snapshot_id, seed.snapshot.boundary))
-        return original_snapshot(seed)
+        def observe_selected(seed):
+            selected.append((seed.snapshot.snapshot_id, seed.snapshot.boundary))
+            return original_snapshot(seed)
 
-    def decode(raw):
-        events.append(raw[0])
-        return original_decode(raw)
+        def decode(raw):
+            events.append(raw[0])
+            return original_decode(raw)
 
-    monkeypatch.setattr(world.history, "_read_connection", publish_after_selection)
-    monkeypatch.setattr(world.history, "_snapshot_rows", observe_selected)
-    monkeypatch.setattr(module, "decode_event_row", decode)
-    actual = world.history.restore_entity("device_file", 1, boundary, event_batch_size=1)
-    latest_id = world.owned.connection.execute(
-        "SELECT id FROM entity_snapshots WHERE entity_type = 9 AND entity_id = 1"
-        " ORDER BY boundary_event_id DESC LIMIT 1").fetchone()[0]
-    assert latest_id != original_id
-    assert selected == [(original_id, original_s)]
-    assert events == [forward_id]
-    assert actual == {("device_files", 1): expected}
+        monkeypatch.setattr(world.history, "_read_connection", publish_after_selection)
+        monkeypatch.setattr(world.history, "_snapshot_rows", observe_selected)
+        monkeypatch.setattr(module, "decode_event_row", decode)
+        actual = world.history.restore_entity("device_file", 1, boundary, event_batch_size=1)
+        latest_id = world.owned.connection.execute(
+            "SELECT id FROM entity_snapshots WHERE entity_type = 9 AND entity_id = 1"
+            " ORDER BY boundary_event_id DESC LIMIT 1").fetchone()[0]
+        assert latest_id != original_id
+        assert selected == [(original_id, original_s)]
+        assert events == [forward_id]
+        assert actual == {("device_files", 1): expected}
+    finally:
+        _close_if_needed(late)
 
 
 @pytest.mark.asyncio
@@ -310,21 +330,17 @@ async def test_selected_snapshot_cannot_borrow_missing_owner_chain_from_c(operat
     world = operation_world
     _create_flow(world, "residual_stop")
     boundary = world.history.current_boundary()
-    prepared = await _prepared(world, SnapshotRef(1, 1))
-    from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.repositories import history as module
+    snapshot_id, saved_boundary = await _save_ref_snapshot(world, SnapshotRef(1, 1))
+    assert saved_boundary == boundary
     connection = world.owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    module._save_one_snapshot(connection, prepared)
-    connection.execute("COMMIT")
     # 此分支的 STOP_RESIDUAL 明确由 activity.action_id 归属动作1，
     # 只留下停止与尝试但去掉活动，归属依据已无法在 S 完整成立。
-    original = b"".join(prepared.chunks).decode().splitlines()
+    original = connection.execute(
+        "SELECT content FROM entity_snapshots WHERE id = ?", (snapshot_id,)
+    ).fetchone()[0].decode().splitlines()
     records = [parse_exact_json(line) for line in original]
     kept = [records[0], *(record for record in records[1:]
                           if record["table"] != "device_activities")]
-    snapshot_id = connection.execute(
-        "SELECT id FROM entity_snapshots WHERE entity_type = 1 AND entity_id = 1").fetchone()[0]
     content = ("\n".join(encode_json_value(record) for record in kept) + "\n").encode()
     connection.execute("UPDATE entity_snapshots SET content = ? WHERE id = ?", (content, snapshot_id))
     _create_flow(world, "emergency_stop")
@@ -481,21 +497,29 @@ async def test_snapshot_business_values_keep_legal_null_json_and_precise_integer
 
 
 async def _save_ref_snapshot(world, ref):
-    prepared = await _prepared(world, ref)
-    from camctl.persistence.repositories import history as module
-    connection = world.owned.connection
-    connection.execute("BEGIN IMMEDIATE")
+    executor = DbExecutor(
+        lambda: open_existing(world.history.path, DbOpenMode.EXISTING_RW, DbConfig()),
+        capacity=4, enqueue_timeout_seconds=9)
     try:
-        module._save_one_snapshot(connection, prepared)
-        connection.execute("COMMIT")
-    except BaseException:
-        connection.execute("ROLLBACK")
-        raise
-    snapshot_id = connection.execute(
-        "SELECT id FROM entity_snapshots WHERE entity_type = ? AND entity_id = ?"
-        " AND boundary_event_id = ?", (ref.entity_type, ref.entity_id,
-                                       prepared.boundary.last_event_id)).fetchone()[0]
-    return snapshot_id, prepared.boundary
+        store = SqliteSnapshotStore(world.history.path, executor)
+        prepared = await _load_prepared(store, ref)
+        try:
+            content = b"".join(prepared.chunks)
+            assert len(content) == prepared.length
+            saved = await store.save_snapshots((prepared,))
+            assert len(saved) == 1 and saved[0].ref == ref
+            assert saved[0].remaining_changes == 0
+            row = world.owned.connection.execute(
+                "SELECT id, content, change_count FROM entity_snapshots"
+                " WHERE entity_type = ? AND entity_id = ? AND boundary_event_id = ?",
+                (ref.entity_type, ref.entity_id, prepared.boundary.last_event_id),
+            ).fetchone()
+            assert row is not None and row[1] == content and row[2] == prepared.change_count
+            return row[0], prepared.boundary
+        finally:
+            _close_if_needed(prepared)
+    finally:
+        await executor.close()
 
 
 @pytest.mark.asyncio
