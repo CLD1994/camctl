@@ -32,11 +32,6 @@ def _owner(mocker):
     return owner, database, store, maintain, disabled
 
 
-async def _turns():
-    for _ in range(6):
-        await asyncio.sleep(0)
-
-
 def _store():
     store = create_autospec(SnapshotStore, instance=True, spec_set=True)
     store.snapshot_candidates.return_value = (SnapshotRef(1, 8),)
@@ -69,10 +64,10 @@ async def test_disabled_snapshot_discovery_retains_actual_timeout_diagnostic(moc
     diagnostics = []
     with error_diagnostics_context(None, diagnostics.append):
         await owner.start()
-        await _turns()
         await owner.settle()
         await flush_diagnostics()
 
+    store.return_value.discover_objects.assert_awaited_once_with(None, 64)
     assert len(diagnostics) == 1
     for fact in ("TimeoutError", "数据库队列持续满载", "快照发现未入队", "/state.sqlite", "traceback", "a" * 32):
         assert fact in diagnostics[0]
@@ -91,13 +86,26 @@ async def test_save_queue_timeout_and_cleanup_failure_preserve_both_errors(mocke
     images[-1].close.side_effect = failure
     store.load_entity_images.return_value = images
     store.save_snapshots.side_effect = timeout
-    mocker.patch.object(snapshots, "_prepare_images", autospec=True, return_value=prepared)
+
+    def prepare(image):
+        for source, result in zip(images, prepared, strict=True):
+            if image is source:
+                return result
+        raise AssertionError("收到未知快照来源")
+
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    mocker.patch.object(snapshots, "prepare_snapshot", autospec=True, side_effect=prepare)
+    mocker.patch.object(asyncio, "to_thread", autospec=True, side_effect=run_inline)
 
     with pytest.raises(SnapshotMaintenanceError) as caught:
         await maintain_snapshots(_context(store, state))
 
     assert caught.value is failure
+    assert caught.value.__cause__ is timeout
     assert state.disabled
+    store.save_snapshots.assert_awaited_once_with(tuple(prepared))
     diagnostic = json.dumps(exception_diagnostic(caught.value), ensure_ascii=False)
     assert "快照保存尚未入队" in diagnostic
     assert "临时资源关闭失败" in diagnostic
