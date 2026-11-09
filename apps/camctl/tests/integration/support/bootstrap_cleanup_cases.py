@@ -124,72 +124,31 @@ async def download_obtain_runtime(owned, staging, driver, *, boundary, horizon,
         assert not result.failed, result.failed
 
 
-async def run_download_maintenance(config, monkeypatch, *, boundary, limit=10, after_range=None):
-    """默认会话固定范围并完整完成本轮维护；在后续业务读取前交还观察权。
+async def run_download_maintenance(config, *, boundary, limit=10, after_range=None, horizon=None):
+    """通过实际数据库和会话调用的维护入口执行有限一轮。"""
+    from pathlib import Path
+    from camctl.bootstrap.download_cleanup import ReadDownloadCleanup
+    from .database import business_database
 
-    只有整页所有游标均实际保存后才停止，避免首项完成就掩盖超额处理。
-    文件错误原样抛给会话，错误场景等待真实命令结果和诊断关闭。
-    """
-    import asyncio
-    from dataclasses import replace
-    from camctl.acceptance.service import CommandMode
-    from camctl.bootstrap import download_cleanup
-    from camctl.bootstrap.lifecycle import build_runtime, execute_command, close_runtime
-    from camctl.persistence.business import BusinessDatabase
-
-    class BatchObserved(asyncio.CancelledError):
-        pass
-
-    config = replace(config, cleanup=replace(config.cleanup,
-        work_file_batch_size=1, work_file_limit_per_run=limit))
-    deps = build_runtime(CommandMode.RUN, config, recovery_boundary=boundary)
-    actual_read = BusinessDatabase.read
-    actual_save = download_cleanup.save_download_cursor
-    actual_recover = download_cleanup.recover_download
-    observed = {'candidates': False, 'expected': None, 'batch_done': False,
-        'cursor_writes': [], 'stopped_after_batch': False, 'errors': []}
-
-    async def save(staging, after):
-        try:
-            await actual_save(staging, after)
-        except BaseException as error:
-            observed['errors'].append(error)
-            raise
-        observed['cursor_writes'].append(after)
-        observed['batch_done'] = len(observed['cursor_writes']) == observed['expected']
-
-    async def recover(staging, ticket):
-        try:
-            return await actual_recover(staging, ticket)
-        except BaseException as error:
-            observed['errors'].append(error)
-            raise
-
-    async def read(database, callback, *, description='业务读取'):
-        if observed['batch_done'] and not observed['stopped_after_batch'] and not observed['errors']:
-            observed['stopped_after_batch'] = True
-            raise BatchObserved()
-        value = await actual_read(database, callback, description=description)
-        if description == '中间文件初始范围读取' and after_range is not None:
+    async with business_database(Path(config.paths.state_db)) as database:
+        if horizon is None:
+            horizon = await database.read(
+                lambda owned: owned.connection.execute(
+                    "SELECT COALESCE(MAX(id), 0) FROM history_events").fetchone()[0],
+                description="测试读取恢复上界")
+        maintenance = ReadDownloadCleanup(Path(config.paths.staging), limit=limit, boundary=boundary)
+        await maintenance.initialize(database, horizon=horizon)
+        if after_range is not None:
             await after_range(database)
-        if description == 'READ下载遗留候选读取':
-            observed['candidates'] = True
-            observed['expected'] = len(value)
-            observed['batch_done'] = not value
-        return value
+        await maintenance.run(database)
 
-    with monkeypatch.context() as patch:
-        patch.setattr(BusinessDatabase, 'read', read)
-        patch.setattr(download_cleanup, 'save_download_cursor', save)
-        patch.setattr(download_cleanup, 'recover_download', recover)
-        try:
-            try:
-                observed['outcome'] = await asyncio.wait_for(
-                    execute_command(deps, None, poll_interval_s=0.001), timeout=10)
-            except BatchObserved:
-                observed['outcome'] = None
-            assert observed['candidates'], '默认会话尚未进入下载遗留候选读取'
-            assert len(observed['cursor_writes']) <= limit, '完整一轮维护不得越过部署额度'
-            return observed
-        finally:
-            close_runtime(deps)
+
+async def run_default_download_session(config, *, boundary):
+    """运行完整默认会话，供真实错误与诊断交付用例观察。"""
+    from camctl.acceptance.service import CommandMode
+    from camctl.bootstrap.lifecycle import build_runtime, execute_command, close_runtime
+    deps = build_runtime(CommandMode.RUN, config, recovery_boundary=boundary)
+    try:
+        return await execute_command(deps, None, poll_interval_s=0.001)
+    finally:
+        close_runtime(deps)
