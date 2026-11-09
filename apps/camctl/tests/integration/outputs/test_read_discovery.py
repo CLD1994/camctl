@@ -159,24 +159,6 @@ def published_public_delivery(tmp_path):
         owned.connection.close()
 
 
-def _publish(owned, roots, delivery_id, tmp_path):
-    from camctl.outputs.handoff import DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery
-
-    ready, processing = tmp_path / "ready", tmp_path / "processing"
-    ready.mkdir(exist_ok=True)
-    processing.mkdir(exist_ok=True)
-
-    async def publish():
-        async with _discovery_database(_scope(owned.connection).database) as (database, _):
-            result = await publish_delivery(delivery_id, DeliveryContext(
-                repository=OutputsRepository(), database=database,
-                directories=DeliveryDirectories(staging=roots.staging, ready=ready, processing=processing),
-                occurred_at=_NOW + 10))
-            assert result.phase is DeliveryPhase.PUBLISHED
-
-    asyncio.run(publish())
-
-
 def test_later_registered_earlier_action_wins_without_full_load(two_copies):
     owned, early, late = two_copies
     owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=32", (_NOW - 1_000_000,))
@@ -394,15 +376,17 @@ def test_guard_independently_rejects_skipped_predecessor(competition_database):
 
 
 def test_finishing_obtain_does_not_materialize_plan_siblings(
-    prepared_env, tmp_path, monkeypatch
+    published_public_delivery, monkeypatch
 ):
     from .test_qualification import _seed_action
     from camctl.persistence.repositories.outputs import FinishObtain
 
-    owned, roots, qualification = prepared_env
-    _publish(owned, roots, qualification.delivery_id, tmp_path)
+    owned, qualification = published_public_delivery
+    action_id = qualification.action_id
+    plan_id, = owned.connection.execute(
+        "SELECT plan_id FROM actions WHERE id=?", (action_id,)).fetchone()
     for identity in range(1000, 1131):
-        _seed_action(owned.connection, identity, 1, action_type=2, status=3)
+        _seed_action(owned.connection, identity, plan_id, action_type=2, status=3)
     owned.connection.commit()
     sizes = []
 
@@ -413,7 +397,7 @@ def test_finishing_obtain_does_not_materialize_plan_siblings(
 
     decorate_transaction_command(monkeypatch, outputs, observe)
     result = OutputsRepository().finish_obtain(
-        FinishObtain(31, _NOW + 20), new_operation_key(), owned
+        FinishObtain(action_id, _NOW + 20), new_operation_key(), owned
     )
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     assert sizes and max(sizes) < 10
