@@ -21,6 +21,7 @@ from camctl.persistence.repositories.acceptance import register_acceptance_guard
 from camctl.persistence.repositories.cancellation import register_cancellation_guards
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
@@ -37,6 +38,7 @@ register_acceptance_guards()
 register_cancellation_guards()
 register_capture_guards()
 register_operation_guards()
+register_file_batch_guards()
 
 pytestmark = pytest.mark.asyncio
 
@@ -297,56 +299,175 @@ class _ReadFinishGate(OperationRepository):
         return super().finish_attempt(request, key, owned)
 
 
-async def test_cross_process_without_original_read_end_waits_for_boundary_then_confirms_eof(
-        read_targets, tmp_path, capture_resources):
-    import camctl.outputs.obtain_flow as obtain_flow
+async def test_saved_read_end_and_digest_failure_resume_without_device_calls(tmp_path, capture_resources):
+    import sqlite3
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.session.supervision import Supervisor
+    from ..support.digest_read_recovery_cases import Driver, factory, prepare_request
 
-    owned = read_targets
-    first, failed_digest, _good_digest, _first_driver = await _runtime(
-        owned, tmp_path, sibling=False)
-    gate = _ReadFinishGate()
-    first.operations = gate
-    with pytest.raises(ConsistencyError):
-        await advance_obtain(first)
-    copy_id, = owned.connection.execute(
-        "SELECT id FROM file_copies WHERE source_device_file_id=501").fetchone()
-    assert _first_driver.ends and all(end.stopped and end.error is None for end in _first_driver.ends)
-    assert owned.connection.execute(
-        "SELECT verification_state FROM file_copies WHERE id=?", (copy_id,)
-    ).fetchone()[0] == int(enum_for("file_copies.verification_state").FAILED)
-    assert owned.connection.execute(
-        "SELECT status FROM operation_attempts WHERE run_id="
-        "(SELECT id FROM operation_runs WHERE copy_id=?)", (copy_id,)
-    ).fetchone()[0] == int(enum_for("operation_attempts.status").RUNNING)
+    owned, action, output = await prepare_request(tmp_path, now=_NOW)
+    try:
+        database = await capture_database(owned)
+        denied = []
 
-    await first.database.close()
-    await capture_resources.restart_database(owned)
-    unconfirmed, unconfirmed_digest, _good, blocked_driver = await _runtime(
-        owned, tmp_path, seed=False, sibling=False,
-        recovery_boundary=RecoveryBoundary.UNCONFIRMED)
-    await advance_obtain(unconfirmed)
-    assert blocked_driver.offsets == []
-    assert unconfirmed_digest.calls == 0
-    assert blocked_driver.recovery_diagnostics
-    assert blocked_driver.recovery_diagnostics[-1].reason.value == "unconfirmed_boundary"
-    assert owned.connection.execute(
-        "SELECT status FROM operation_attempts WHERE run_id="
-        "(SELECT id FROM operation_runs WHERE copy_id=?)", (copy_id,)
-    ).fetchone()[0] == int(enum_for("operation_attempts.status").RUNNING)
+        async def deny_attempt_save():
+            def authorize(operation, table, column, _database, _trigger):
+                if operation == sqlite3.SQLITE_UPDATE and table == 'operation_attempts':
+                    denied.append((table, column))
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+            await database.read(lambda current: current.connection.set_authorizer(authorize),
+                                description='注入读取结果保存故障')
 
-    horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
-    recovered, recovered_digest, _good, recovered_driver = await _runtime(
-        owned, tmp_path, seed=False, sibling=False,
-        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-        recovery_max_event_id=horizon)
-    await advance_obtain(recovered)
-    assert recovered_driver.offsets == [10]
-    assert failed_digest.calls == 1
-    assert recovered_digest.calls == 0
-    assert owned.connection.execute(
-        "SELECT status FROM operation_attempts WHERE run_id="
-        "(SELECT id FROM operation_runs WHERE copy_id=?)", (copy_id,)
-    ).fetchone()[0] == int(enum_for("operation_attempts.status").SUCCEEDED)
+        driver = Driver(digest_error='source SHA query failed', on_digest=deny_attempt_save)
+        supervisor = Supervisor()
+        first = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
+                        horizon=None, executor=FileTaskExecutor(supervisor))(database)
+        try:
+            with pytest.raises(ConsistencyError):
+                await advance_obtain(first)
+        finally:
+            await database.read(lambda current: current.connection.set_authorizer(None),
+                                description='恢复数据库授权器')
+        assert denied and len(driver.calls) == 1 and driver.digest_calls == 1
+        row = owned.connection.execute(
+            'SELECT c.id,c.committed_bytes,c.read_end_event_id,c.verification_state,'
+            'c.verification_error_json,r.id,r.attempts_used,a.status FROM file_copies c '
+            'JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts a ON a.run_id=r.id').fetchone()
+        copy_id, committed, end_event, verification, error, run_id, attempts, status = row
+        assert committed == 10 and end_event is not None
+        assert verification == int(enum_for('file_copies.verification_state').FAILED)
+        assert 'source SHA query failed' in error
+        assert attempts == 1 and status == int(enum_for('operation_attempts.status').RUNNING)
+        assert not (await supervisor.drain_required()).failed
+        database = await capture_resources.restart_database(owned)
+        recovered_driver = Driver()
+        recovered_supervisor = Supervisor()
+        recovered = factory(tmp_path, recovered_driver, now=_NOW,
+            boundary=RecoveryBoundary.UNCONFIRMED, horizon=None,
+            executor=FileTaskExecutor(recovered_supervisor))(database)
+        await advance_obtain(recovered)
+        assert recovered_driver.calls == [] and recovered_driver.digest_calls == 0
+        row = owned.connection.execute(
+            'SELECT r.id,r.attempts_used,r.status,a.status,d.status,c.read_end_event_id '
+            'FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id '
+            'JOIN operation_attempts a ON a.run_id=r.id JOIN deliveries d ON d.id=c.delivery_id '
+            'WHERE c.id=?', (copy_id,)).fetchone()
+        assert row == (run_id, 1, int(enum_for('operation_runs.status').FAILED),
+            int(enum_for('operation_attempts.status').SUCCEEDED),
+            int(enum_for('deliveries.status').FAILED), end_event)
+        delivery = owned.connection.execute(
+            'SELECT d.action_id,d.output_id,d.error_json,c.verification_error_json '
+            'FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id WHERE c.id=?',
+            (copy_id,)).fetchone()
+        assert delivery[:2] == (action, output)
+        assert parse_exact_json(delivery[2])['code'] == 'source_file_unconfirmed'
+        assert 'source SHA query failed' in delivery[3]
+        assert not (await recovered_supervisor.drain_required()).failed
+    finally:
+        owned.connection.close()
+
+
+async def test_process_exit_before_read_end_requires_boundary_and_confirms_eof(tmp_path, capture_resources):
+    import asyncio
+    import os
+    import sys
+    from pathlib import Path
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.outputs.read_attempts import running_read_ticket
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    from camctl.session.supervision import Supervisor
+    from ..support.digest_read_recovery_cases import CONTENT, Driver, factory, prepare_request
+
+    owned, action, output = await prepare_request(tmp_path, now=_NOW)
+    path = tmp_path / 'state.db'
+    await capture_resources.close()
+    owned.connection.close()
+    marker = tmp_path / 'read-end-entered'
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+    tests_root = Path(__file__).resolve().parents[2]
+    src_root = tests_root.parent / 'src'
+    env['PYTHONPATH'] = os.pathsep.join((str(tests_root), str(src_root), env.get('PYTHONPATH', '')))
+    process = await asyncio.create_subprocess_exec(sys.executable, '-m',
+        'integration.support.digest_read_recovery_cases', str(path), str(tmp_path), str(marker), str(_NOW),
+        env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        async with asyncio.timeout(20):
+            while not marker.exists():
+                if process.returncode is not None:
+                    _, stderr = await process.communicate()
+                    raise AssertionError(f'读取进程提前退出: {stderr.decode(errors="replace")}')
+                await asyncio.sleep(0.01)
+        assert process.returncode is None
+        observer = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            copy_id, committed, end_event, relative = observer.connection.execute(
+                'SELECT c.id,c.committed_bytes,c.read_end_event_id,f.relative_path FROM file_copies c '
+                'JOIN intermediate_files f ON f.id=c.target_file_id').fetchone()
+            assert committed == len(CONTENT) and end_event is None
+            assert (tmp_path / 'staging' / relative).read_bytes() == CONTENT
+            original, _intent = running_read_ticket(observer, copy_id)
+        finally:
+            observer.connection.close()
+    finally:
+        if process.returncode is None:
+            process.kill()
+        await asyncio.wait_for(process.communicate(), 10)
+    assert process.returncode is not None
+    assert not marker.with_suffix('.digest').exists()
+    owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        database = await capture_database(owned)
+        assert owned.connection.execute(
+            'SELECT committed_bytes,read_end_event_id FROM file_copies WHERE id=?',
+            (copy_id,)).fetchone() == (len(CONTENT), None)
+        assert running_read_ticket(owned, copy_id)[0] == original
+        horizon, = owned.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
+        blocked_driver = Driver()
+        supervisor = Supervisor()
+        blocked = factory(tmp_path, blocked_driver, now=_NOW,
+            boundary=RecoveryBoundary.UNCONFIRMED, horizon=None,
+            executor=FileTaskExecutor(supervisor))(database)
+        await advance_obtain(blocked)
+        assert blocked_driver.calls == [] and blocked_driver.digest_calls == 0
+        assert blocked_driver.diagnostics and blocked_driver.diagnostics[-1].reason.value == 'unconfirmed_boundary'
+        assert running_read_ticket(owned, copy_id)[0] == original
+        assert not (await supervisor.drain_required()).failed
+        await capture_resources.restart_database(owned)
+        database = await capture_database(owned)
+        driver = Driver()
+        supervisor = Supervisor()
+        recovered = factory(tmp_path, driver, now=_NOW,
+            boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, horizon=horizon,
+            executor=FileTaskExecutor(supervisor))(database)
+        await advance_obtain(recovered)
+        assert driver.calls == [(len(CONTENT), original)]
+        assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].bytes_read == 0
+        assert driver.ends[-1].error is None and driver.digest_calls == 1
+        row = owned.connection.execute(
+            'SELECT r.attempts_used,a.status,c.read_end_event_id,c.committed_bytes '
+            'FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id '
+            'JOIN operation_attempts a ON a.run_id=r.id WHERE c.id=?', (copy_id,)).fetchone()
+        assert row[0] == 1 and row[1] == int(enum_for('operation_attempts.status').SUCCEEDED)
+        assert row[2] is not None and row[3] == len(CONTENT)
+        body, = owned.connection.execute('SELECT body_json FROM history_events WHERE id=?', (row[2],)).fetchone()
+        saved = parse_exact_json(body)['evidence']['read_end']
+        assert saved['ticket']['run_id'] == original.run_id
+        assert saved['ticket']['attempt_no'] == original.attempt_id
+        assert saved['end'] == {'stopped': True, 'bytes_read': 0, 'error': None}
+        delivery = owned.connection.execute(
+            'SELECT d.action_id,d.output_id,d.status,c.source_sha256,c.target_sha256,i.source_dependency '
+            'FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id '
+            'JOIN obtain_items i ON i.delivery_id=d.id WHERE c.id=?', (copy_id,)).fetchone()
+        assert delivery[:2] == (action, output)
+        assert delivery[2] in (int(enum_for('deliveries.status').PREPARED),
+                               int(enum_for('deliveries.status').PUBLISHED))
+        assert delivery[3:5] == (hashlib.sha256(CONTENT).hexdigest(),) * 2
+        assert delivery[5] == 0
+        assert (tmp_path / 'staging' / relative).read_bytes() == CONTENT
+        assert not (await supervisor.drain_required()).failed
+    finally:
+        owned.connection.close()
 
 
 async def test_held_clean_read_end_retries_saved_verification_failure_without_digest_requery(
