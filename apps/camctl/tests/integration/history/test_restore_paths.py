@@ -542,7 +542,9 @@ async def test_snapshot_action_and_operation_reject_cross_column_state(
 
 @pytest.mark.asyncio
 async def test_snapshot_delivery_rejects_published_state_without_publication_facts(
-        complete_world, monkeypatch):
+        complete_world):
+    import sqlite3
+
     from camctl.operations.attempts import (
         AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
     )
@@ -578,19 +580,21 @@ async def test_snapshot_delivery_rejects_published_state_without_publication_fac
         new_operation_key(), world.owned)
     assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
     assert begun.value.disposition is BeginDisposition.GRANTED, begun.value
-    assert row_facts(world.owned.connection, "deliveries", delivery_id)["change_count"] > delivery["change_count"]
+    current_delivery = row_facts(world.owned.connection, "deliveries", delivery_id)
+    assert current_delivery["change_count"] > delivery["change_count"]
+    current = world.history.current_boundary()
+    assert current.last_event_id > boundary.last_event_id
+    restored = world.history.restore_entity("delivery", delivery_id, boundary)
+    assert restored[("deliveries", delivery_id)] == delivery
     _rewrite_snapshot_row(world, snapshot_id, "deliveries", delivery_id, {"status": 5})
-    selected = []
-    original = world.history._snapshot_rows
-
-    def read_selected(seed):
-        selected.append(seed.snapshot.snapshot_id)
-        return original(seed)
-
-    monkeypatch.setattr(world.history, "_snapshot_rows", read_selected)
-    with pytest.raises(ConsistencyError):
+    with pytest.raises(ConsistencyError) as caught:
         world.history.restore_entity("delivery", delivery_id, boundary)
-    assert selected == [snapshot_id]
+    error = caught.value
+    while error is not None and not isinstance(error, sqlite3.IntegrityError):
+        error = error.__cause__
+    assert error is not None and error.sqlite_errorcode == sqlite3.SQLITE_CONSTRAINT_CHECK
+    assert world.history.current_boundary() == current
+    assert row_facts(world.owned.connection, "deliveries", delivery_id) == current_delivery
 
 
 def _track_validation_connections(monkeypatch, *, authorizer=None):
@@ -863,13 +867,16 @@ async def test_snapshot_allows_repeated_null_unique_keys(two_item_world, monkeyp
     pytest.param((2, 3), False, id="only_second_applies"),
     pytest.param((3, 3), True, id="both_apply"),
 ])
-def test_projection_row_validation_partial_unique_predicate(statuses, rejected):
+def test_projection_row_validation_partial_unique_predicate(monkeypatch, statuses, rejected):
     """部分索引条件由真实SQLite判断；这里验证校验器自身的行集合边界。"""
     from camctl.persistence.row_validation import ProjectionRowValidationError, ProjectionRowValidator
 
+    connections = _track_validation_connections(monkeypatch)
     with ProjectionRowValidator() as validator:
+        assert len(connections) == 1
+        connection = connections[0]
         # 完整列名来自真实结构，仅显式指定本状态分区必要的业务值。
-        metadata = validator._connection.execute("PRAGMA table_xinfo(cleanup_items)").fetchall()
+        metadata = connection.execute("PRAGMA table_xinfo(cleanup_items)").fetchall()
         empty = {row[1]: None for row in metadata}
         first = {**empty, "id": 1, "action_id": 1, "requested_output_id": 42,
                  "output_id": 42, "status": statuses[0], "restriction_state": 2}
@@ -882,10 +889,8 @@ def test_projection_row_validation_partial_unique_predicate(statuses, rejected):
             corrected = {**second, "requested_output_id": 43, "output_id": 43}
             validator.validate("cleanup_items", corrected)
             validator.validate("cleanup_items", corrected)  # 同物理行、相同键可以重验。
-            caches = validator._connection.execute(
-                "SELECT name FROM sqlite_temp_master WHERE type = 'table'").fetchall()
-            assert caches
-            for (cache,) in caches:
-                assert validator._connection.execute(f"SELECT COUNT(*) FROM {cache}").fetchone()[0] == 2
+            conflicting = {**first, "id": 3, "action_id": 3}
+            with pytest.raises(ProjectionRowValidationError):
+                validator.validate("cleanup_items", conflicting)
         else:
             validator.validate("cleanup_items", second)
