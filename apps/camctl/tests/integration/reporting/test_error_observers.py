@@ -145,12 +145,14 @@ async def test_recovery_diagnoses_every_executed_directory_observation(tmp_path,
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from camctl.acceptance.service import AcceptanceContext, CommandMode
     from camctl.devices.catalog import DriverDefinitions, build_catalog
-    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
     from camctl.reporting.generation import GenerationSpec, generate_report_file
     from camctl.reporting.models import ReportBytes
-    from camctl.reporting.policy import ReportingRepository, record_report_bytes
+    from camctl.reporting.policy import ReportingRepository, record_report_bytes, register_report_guards
     from ..support.acceptance import accept_source
 
+    register_acceptance_guards()
+    register_report_guards()
     world = report_world(tmp_path)
     accepted = await accept_source(_input(), AcceptanceContext(
         mode=CommandMode.RUN, catalog=build_catalog(world.config, DriverDefinitions({})),
