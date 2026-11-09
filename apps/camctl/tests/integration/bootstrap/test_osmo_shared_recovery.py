@@ -32,7 +32,7 @@ from ..support.bootstrap_driver_cases import (driver_world_capture, driver_world
 from ..scheduling.test_start_action import _accept_plan, _start, _SCHEDULED
 from ..support.bootstrap_driver_cases import driver_owned as owned
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("isolated_driver_registries")]
 register_operation_guards()
 from camctl.persistence.repositories.timelapse import register_timelapse_guards
 register_timelapse_guards()
@@ -115,10 +115,8 @@ class Channel:
         return RawToolOutcome(LocalExit(exit_code=7), None, None, None, stderr=b"source interrupted")
 
 
-async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING,
+async def _world(owned, tmp_path, *, finite=False, binding=BINDING,
                  single_original=False):
-    monkeypatch.setattr(definitions_runtime, "_definitions", {})
-    monkeypatch.setattr(drivers_runtime, "_entries", {})
     cfg = load_config({"paths": {name: str(tmp_path / name) for name in ("staging", "ready", "processing")},
         "devices": {"cam-1": {"kind": "camera", "driver": binding.driver_id,
             "video": {"result_mode": "segmented" if binding == BINDING and not single_original else "single_file"},
@@ -182,8 +180,8 @@ def _assert_unknown(world, ticket):
     assert world.owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (1,)
 
 
-async def test_formal_registry_preserves_each_original_operation_and_result_page(owned, tmp_path, monkeypatch):
-    world = await _world(owned, tmp_path, monkeypatch)
+async def test_formal_registry_preserves_each_original_operation_and_result_page(owned, tmp_path):
+    world = await _world(owned, tmp_path)
     from camctl.operations.recovery import recovery_registry
     for operation in ("control", "stop", "result", "read"):
         evidence = recovery_registry(world.registry.entry(BINDING.driver_id), operation)
@@ -203,7 +201,7 @@ async def test_formal_registry_preserves_each_original_operation_and_result_page
 @pytest.mark.parametrize("finite_cancel", [False, True])
 async def test_original_control_stop_recovery_preserves_activity_and_finite_cancel(
         owned, tmp_path, monkeypatch, operation, finite_cancel):
-    world = await _world(owned, tmp_path, monkeypatch, finite=finite_cancel)
+    world = await _world(owned, tmp_path, finite=finite_cancel)
     runtime = await _capture(world)
     if operation == 'control':
         ticket = await interrupt_start_grant(runtime, 1, world.kind, monkeypatch)
@@ -296,7 +294,7 @@ def _saved_actual_page(world, ticket, page_kind):
 
 @pytest.mark.parametrize("pages", ["none", "partial", "terminal", "terminal_error"])
 async def test_original_result_pages_are_consumed_before_new_listing(owned, tmp_path, monkeypatch, pages):
-    world = await _world(owned, tmp_path, monkeypatch)
+    world = await _world(owned, tmp_path)
     runtime, ticket = await _result_attempt(world, monkeypatch, pages=pages)
     original = _saved_actual_page(world, ticket, pages)
     calls = list(world.channel.calls)
@@ -405,7 +403,7 @@ async def _pending_read(world, tmp_path, monkeypatch, *, internal):
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
 async def test_unavailable_original_read_keeps_progress_and_uses_own_consumer(
         owned, tmp_path, monkeypatch, internal, change):
-    world = await _world(owned, tmp_path, monkeypatch, single_original=internal)
+    world = await _world(owned, tmp_path, single_original=internal)
     ticket, source_id, target = await _pending_read(world, tmp_path, monkeypatch, internal=internal)
     source = world.owned.connection.execute("SELECT * FROM device_files WHERE id=?", (source_id,)).fetchone()
     progress = world.owned.connection.execute("SELECT committed_bytes,source_size,round,recopies_used,source_sha256,target_sha256,verification_state"
@@ -452,7 +450,7 @@ async def test_unavailable_original_read_keeps_progress_and_uses_own_consumer(
 async def test_original_recovery_requires_boundary_horizon_and_authorization(
         owned, tmp_path, monkeypatch, consumer, missing, reason):
     from camctl.devices.drivers.registry import DriverRegistry
-    world = await _world(owned, tmp_path, monkeypatch)
+    world = await _world(owned, tmp_path)
     if consumer == "capture":
         original = await _capture(world)
         ticket = await interrupt_start_grant(original, 1, world.kind, monkeypatch)
@@ -491,7 +489,7 @@ async def test_formal_read_recovery_reuses_original_finish_after_real_unknown_co
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.transaction import saved_transaction_events
     from ..cancellation.test_report_sync_lifecycle import _fault_owned
-    world = await _world(owned, tmp_path, monkeypatch)
+    world = await _world(owned, tmp_path)
     ticket, source_id, target = await _pending_read(world, tmp_path, monkeypatch, internal=False)
     horizon = await _reopen(world)
     runtime = await _obtain(world, devices={}, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
@@ -538,7 +536,7 @@ async def test_formal_read_recovery_reuses_original_finish_after_real_unknown_co
 @pytest.mark.parametrize("pages", ["none", "partial"])
 async def test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages(
         owned, tmp_path, monkeypatch, pages):
-    world = await _world(owned, tmp_path, monkeypatch)
+    world = await _world(owned, tmp_path)
     runtime, ticket = await _result_attempt(world, monkeypatch, pages=pages)
     original = _saved_actual_page(world, ticket, pages)
     horizon = await _reopen(world)

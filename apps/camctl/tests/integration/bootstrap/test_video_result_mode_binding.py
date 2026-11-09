@@ -9,7 +9,6 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.json_values import parse_exact_json
 from camctl.devices import definitions_runtime
 from camctl.devices.catalog import build_catalog
-from camctl.devices.drivers import runtime as drivers_runtime
 from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
@@ -18,9 +17,8 @@ from ..acceptance.test_adb_camera_definitions import _params
 from ..scheduling.test_start_action import _accept_plan, owned
 
 
-def catalog(monkeypatch, driver, modes):
-    monkeypatch.setattr(definitions_runtime, "_definitions", {})
-    monkeypatch.setattr(drivers_runtime, "_entries", {})
+def catalog(reset_registries, driver, modes):
+    reset_registries()
     config = load_config({"devices": {
         f"cam-{index}": {"kind": "camera", "driver": driver,
                          "adb": {"serial": f"serial-{index}"},
@@ -40,8 +38,8 @@ def definitions(owned):
 @pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
 async def test_camera_modes_are_independent_and_accepted_definitions_stay_frozen(
-        owned, tmp_path, monkeypatch, driver, action_type):
-    initial = catalog(monkeypatch, driver, ("single_file", "segmented"))
+        owned, tmp_path, isolated_driver_registries, driver, action_type):
+    initial = catalog(isolated_driver_registries, driver, ("single_file", "segmented"))
     body = _plan_body()
     action = body["actions"][0]
     action.update(type=action_type, params=_params(driver, action_type))
@@ -52,7 +50,7 @@ async def test_camera_modes_are_independent_and_accepted_definitions_stay_frozen
     assert [spec["video_result_mode"] for _, spec in frozen] == ["single_file", "segmented"]
     assert frozen[0][1].get("result_policy") is None
     assert frozen[1][1]["result_policy"]
-    changed = catalog(monkeypatch, driver, ("segmented", "single_file"))
+    changed = catalog(isolated_driver_registries, driver, ("segmented", "single_file"))
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     restarted = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:

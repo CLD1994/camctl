@@ -15,14 +15,7 @@ from camctl.devices.drivers.hasselblad.registration import (
     register_builtin_hasselblad_driver,
 )
 from camctl.devices.drivers import runtime as drivers_runtime
-from camctl.devices import definitions_runtime
 from camctl.devices.tasks import CaptureStorage
-
-
-@pytest.fixture
-def isolated_hasselblad_registration(monkeypatch):
-    monkeypatch.setattr(definitions_runtime, "_definitions", {})
-    monkeypatch.setattr(drivers_runtime, "_entries", {})
 
 
 def _camera(serial: str, output_storage: str | None = None) -> dict:
@@ -50,7 +43,7 @@ def _config(tmp_path, devices: dict):
 
 
 def test_hasselblad_catalog_and_task_binding_resolve_each_device_source(
-    tmp_path, isolated_hasselblad_registration
+    tmp_path, isolated_driver_registries
 ):
     config = _config(tmp_path, {
         "hb-default": _camera("serial-default"),
@@ -104,7 +97,7 @@ def test_hasselblad_catalog_and_task_binding_resolve_each_device_source(
 
 
 def test_invalid_hasselblad_source_rejects_registration_and_catalog_atomically(
-    tmp_path, isolated_hasselblad_registration
+    tmp_path, isolated_driver_registries
 ):
     from camctl.devices.drivers.hasselblad.definitions import driver_definition
 

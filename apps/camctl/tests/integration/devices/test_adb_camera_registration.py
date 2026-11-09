@@ -46,14 +46,8 @@ from .adb_camera_fixtures import software_contract
 from .result_page_storage import allow_dispatch
 
 
-@pytest.fixture
-def isolated_registration(monkeypatch):
-    monkeypatch.setattr(definitions_runtime, "_definitions", {})
-    monkeypatch.setattr(drivers_runtime, "_entries", {})
-
-
 @pytest.mark.parametrize("model", list(CameraModel))
-def test_static_and_runtime_registration_share_complete_contract_and_refresh_binding(isolated_registration, monkeypatch, model):
+def test_static_and_runtime_registration_share_complete_contract_and_refresh_binding(isolated_driver_registries, monkeypatch, model):
     contract = software_contract(model)
     monkeypatch.setattr(registration, "builtin_camera_contracts", lambda: (contract,))
     def config(serial):
@@ -80,7 +74,7 @@ def test_static_and_runtime_registration_share_complete_contract_and_refresh_bin
     assert entry.driver.devices is current.devices
 
 
-def test_builtin_adb_contracts_keep_device_source_and_declared_delete_value(isolated_registration):
+def test_builtin_adb_contracts_keep_device_source_and_declared_delete_value(isolated_driver_registries):
     config = load_config({"devices": {
         "action6": {"kind": "camera", "driver": CameraModel.ACTION6,
                     "adb": {"serial": "serial-action6"}},
@@ -103,7 +97,7 @@ def test_builtin_adb_contracts_keep_device_source_and_declared_delete_value(isol
 
 
 @pytest.mark.parametrize("missing", [CameraCall.SETTING, CameraCall.START, CameraCall.RESULT, "task", "files", "evidence"])
-def test_incomplete_contract_contents_are_filtered_even_with_task_factory(isolated_registration, monkeypatch, missing):
+def test_incomplete_contract_contents_are_filtered_even_with_task_factory(isolated_driver_registries, monkeypatch, missing):
     from camctl.devices.evidence import EvidenceRegistry
     contract = software_contract(CameraModel.ACTION6)
     if isinstance(missing, CameraCall):
@@ -118,7 +112,7 @@ def test_incomplete_contract_contents_are_filtered_even_with_task_factory(isolat
     assert build_catalog(config, definitions_runtime.current_driver_definitions()).describe_document()["devices"][0]["actions"] == []
 
 
-def test_collision_is_rejected_before_either_registry_changes(isolated_registration, monkeypatch):
+def test_collision_is_rejected_before_either_registry_changes(isolated_driver_registries, monkeypatch):
     contracts = tuple(software_contract(model) for model in CameraModel)
     monkeypatch.setattr(registration, "builtin_camera_contracts", lambda: contracts)
     foreign = DriverDefinition(CameraModel.OSMO360II,
@@ -131,7 +125,7 @@ def test_collision_is_rejected_before_either_registry_changes(isolated_registrat
     assert drivers_runtime.current_registry().entry(CameraModel.ACTION6) is None
 
 
-def test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_query(isolated_registration):
+def test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_query(isolated_driver_registries):
     config = load_config(None, ConfigDefaults())
 
     registration.register_builtin_camera_drivers(config)
@@ -145,7 +139,7 @@ def test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", [CameraModel.ACTION6, CameraModel.OSMO360II])
-async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolated_registration, tmp_path, model):
+async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolated_driver_registries, tmp_path, model):
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
     from camctl.acceptance.service import CommandMode
     from camctl.persistence.initialization import initialize_state, InitOutcome

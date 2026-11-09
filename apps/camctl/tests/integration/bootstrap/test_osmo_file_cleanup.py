@@ -15,7 +15,6 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.session.supervision import Supervisor
 from camctl.contracts.workflow_errors import item_error_id
-from camctl.devices import definitions_runtime
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers import runtime as drivers_runtime
 from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
@@ -83,11 +82,9 @@ class FileChannel(LocalAdbChannel):
 
 
 @pytest_asyncio.fixture
-async def world(tmp_path, monkeypatch, request, capture_resources):
+async def world(tmp_path, request, capture_resources, isolated_driver_registries):
     """仅预置已登记源；清理受理、意图、结果及交接全部执行生产事务。"""
     binding = DeviceBinding("cam-1", getattr(request, "param", BINDING.driver_id))
-    monkeypatch.setattr(definitions_runtime, "_definitions", {})
-    monkeypatch.setattr(drivers_runtime, "_entries", {})
     register_capture_guards()
     register_cancellation_guards()
     register_file_batch_guards()
