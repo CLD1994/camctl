@@ -1001,7 +1001,6 @@ async function browserPhotoExport(
     );
     if (index < 0) throw new Error(`安装 Schema 无精确选项 ${key}`);
     await choose(control, String(index));
-    await settled();
     receipt.selected_options.push({
       field: key,
       selected_index: index,
@@ -1039,7 +1038,6 @@ async function browserPhotoExport(
         }),
         `branch:${index}`,
       );
-      await settled();
       for (const key of Object.keys(params[name]).filter(
         (key) => key !== "mode",
       )) {
@@ -1063,10 +1061,11 @@ async function browserPhotoExport(
           await section
             .getByLabel(label, { exact: true })
             .fill(stringifyJson(params[name][key]));
-          await settled();
         }
       }
     }
+    // 连续填写参数后统一确认草稿保存。
+    await settled();
     receipt.source_draft_text = (await session.state()).drafts.find(
       (item: Draft) => item.id === source.id,
     ).content.text;
