@@ -5,9 +5,12 @@ from __future__ import annotations
 import sqlite3
 import asyncio
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Event
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import url2pathname
 
 import pytest
 
@@ -217,6 +220,98 @@ class BeginObserver:
         self.connection.close()
 
 
+def _observe_submit_connection(monkeypatch, database, *, begin=None, commit_reached=None):
+    """在本次提交的真实 SQLite 连接上观察事务和可选的提交回执故障。"""
+    original_connect = sqlite3.connect
+    database_path = os.path.normcase(os.path.realpath(database))
+    observed = []
+    error = sqlite3.OperationalError("未取得提交结果")
+
+    class SubmitConnection(sqlite3.Connection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.plan_written = False
+            self.begin_count = self.commit_attempts = self.commits = 0
+            self.failures = self.close_count = 0
+            self.closed = False
+            self.injected_error = None
+
+        def execute(self, statement, parameters=()):
+            operations = set()
+            denied = False
+
+            def authorize(action, argument, _column, _database, _source):
+                nonlocal denied
+                operations.add((action, argument))
+                if action == sqlite3.SQLITE_TRANSACTION and argument == "BEGIN":
+                    self.begin_count += 1
+                    if begin is not None:
+                        begin.set()
+                if (action == sqlite3.SQLITE_TRANSACTION and argument == "COMMIT"
+                        and self.plan_written and commit_reached is False):
+                    self.commit_attempts += 1
+                    self.failures += 1
+                    self.injected_error = error
+                    denied = True
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            self.set_authorizer(authorize)
+            try:
+                try:
+                    result = super().execute(statement, parameters)
+                except sqlite3.DatabaseError as failure:
+                    if denied:
+                        raise error from failure
+                    raise
+            finally:
+                self.set_authorizer(None)
+            if (sqlite3.SQLITE_INSERT, "plans") in operations:
+                self.plan_written = True
+            if (sqlite3.SQLITE_TRANSACTION, "COMMIT") in operations and self.plan_written:
+                self.commit_attempts += 1
+                self.commits += 1
+                if commit_reached is True:
+                    self.failures += 1
+                    self.injected_error = error
+                    raise error
+            return result
+
+        def close(self):
+            result = super().close()
+            self.close_count += 1
+            try:
+                super().execute("SELECT 1")
+            except sqlite3.ProgrammingError:
+                self.closed = True
+            return result
+
+    def connect(path, *args, **kwargs):
+        uri = kwargs.get("uri", args[6] if len(args) > 6 else False)
+        factory = kwargs.get("factory", args[4] if len(args) > 4 else sqlite3.Connection)
+        if not uri or not isinstance(path, (str, bytes, os.PathLike)):
+            return original_connect(path, *args, **kwargs)
+        try:
+            parts = urlsplit(os.fsdecode(path))
+            matches = (parts.scheme == "file" and parts.netloc in ("", "localhost")
+                       and parse_qs(parts.query).get("mode") == ["rw"]
+                       and os.path.normcase(os.path.realpath(url2pathname(parts.path))) == database_path)
+        except (OSError, TypeError, ValueError):
+            return original_connect(path, *args, **kwargs)
+        if not matches or factory is not sqlite3.Connection:
+            return original_connect(path, *args, **kwargs)
+        if len(args) > 4:
+            args = (*args[:4], SubmitConnection, *args[5:])
+        else:
+            kwargs["factory"] = SubmitConnection
+        connection = original_connect(path, *args, **kwargs)
+        observed.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    return observed, error
+
+
 def test_submit_before_close_keeps_acceptor_responsible(runtime, monkeypatch):
     lease = acquire_admission(runtime.admission_lock)
     queried, close_attempted = Event(), Event()
@@ -257,17 +352,8 @@ def test_submit_before_close_keeps_acceptor_responsible(runtime, monkeypatch):
 
 
 def test_close_before_submit_requests_later_run(runtime, monkeypatch):
-    from camctl.bootstrap import lifecycle
-
     lease = acquire_admission(runtime.admission_lock)
     closing, submit_attempted = Event(), Event()
-    original_open = lifecycle._open_connection
-
-    def observe_submit(path, config):
-        owned = original_open(path, config)
-        return OwnedConnection(BeginObserver(owned.connection, submit_attempted), owned.metadata)
-
-    monkeypatch.setattr(lifecycle, "_open_connection", observe_submit)
 
     def close_query(connection):
         closing.set()
@@ -287,15 +373,20 @@ def test_close_before_submit_requests_later_run(runtime, monkeypatch):
         with ThreadPoolExecutor(max_workers=2) as pool:
             closed = pool.submit(close)
             assert closing.wait(timeout=10)
-            submitted = pool.submit(lambda: asyncio.run(execute_command(
-                runtime, ParsedInput("plan.json", _plan_body()),
-            )))
-            closing_result = closed.result(timeout=20)
-            result = submitted.result(timeout=20)
+            with monkeypatch.context() as scoped:
+                observed, _ = _observe_submit_connection(scoped, runtime.state_db, begin=submit_attempted)
+                submitted = pool.submit(lambda: asyncio.run(execute_command(
+                    runtime, ParsedInput("plan.json", _plan_body()),
+                )))
+                closing_result = closed.result(timeout=20)
+                result = submitted.result(timeout=20)
         assert closing_result.kind is DbOutcomeKind.COMPLETED
         assert closing_result.value.admission_closed is True
         assert result.succeeded is True
         assert result.needs_run is True
+        assert len(observed) == 1
+        assert observed[0].begin_count == 1
+        assert observed[0].close_count >= 1 and observed[0].closed
     finally:
         lease.close()
 
@@ -303,41 +394,23 @@ def test_close_before_submit_requests_later_run(runtime, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("commit_reached_database", [False, True])
 async def test_submit_unknown_commit_does_not_return_handoff_success(runtime, monkeypatch, commit_reached_database):
-    from camctl.bootstrap import lifecycle
-
-    original_open = lifecycle._open_connection
-
-    class LostCommitResponse:
-        def __init__(self, connection):
-            self.connection = connection
-
-        @property
-        def in_transaction(self):
-            return self.connection.in_transaction
-
-        @property
-        def total_changes(self):
-            return self.connection.total_changes
-
-        def execute(self, statement, parameters=()):
-            if statement == "COMMIT":
-                if commit_reached_database:
-                    self.connection.execute(statement, parameters)
-                raise sqlite3.OperationalError("未取得提交结果")
-            return self.connection.execute(statement, parameters)
-
-        def close(self):
-            self.connection.close()
-
-    def open_fault(path, config):
-        owned = original_open(path, config)
-        return OwnedConnection(LostCommitResponse(owned.connection), owned.metadata)
-
-    monkeypatch.setattr(lifecycle, "_open_connection", open_fault)
-    outcome = await execute_command(runtime, ParsedInput("plan.json", _plan_body()))
+    with monkeypatch.context() as scoped:
+        observed, error = _observe_submit_connection(
+            scoped, runtime.state_db, commit_reached=commit_reached_database,
+        )
+        outcome = await execute_command(runtime, ParsedInput("plan.json", _plan_body()))
     assert outcome.succeeded is False
     assert outcome.reason == "state_db_error"
     assert outcome.needs_run is None
+    assert outcome.details["unknown_commit"] is True
+    assert str(error) in outcome.details["message"]
+    assert len(observed) == 1
+    connection = observed[0]
+    assert connection.plan_written
+    assert connection.commit_attempts == connection.failures == 1
+    assert connection.commits == int(commit_reached_database)
+    assert connection.injected_error is error
+    assert connection.close_count >= 1 and connection.closed
     assert _saved_counts(runtime.state_db)["plans"] == int(commit_reached_database)
 
 
