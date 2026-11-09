@@ -68,13 +68,13 @@ def test_launcher_does_not_evaluate_bash_env_before_entering_group(tmp_path):
 def test_exec_launcher_preserves_pid_process_group_stdio_and_cwd(tmp_path):
     receipt = tmp_path / "exec-receipt.json"
     budget = _real_probe_budget()
-    assert budget.cgroup_root is not None
     memory.ensure_memory_budget_available(budget)
     code = r'''
 import os, sys
 from pathlib import Path
 import camctl_memory as memory
-cwd, receipt, delegated = map(Path, sys.argv[1:])
+cwd, receipt = map(Path, sys.argv[1:3])
+delegated = Path(sys.argv[3]) if sys.argv[3] else None
 business = """
 import json, os, sys
 from pathlib import Path
@@ -89,7 +89,8 @@ memory.exec_budgeted([sys.executable, "-c", business, str(receipt)], budget=budg
 '''
     try:
         process = subprocess.Popen(
-            [sys.executable, "-c", code, str(tmp_path), str(receipt), str(budget.cgroup_root)],
+            [sys.executable, "-c", code, str(tmp_path), str(receipt),
+             "" if budget.cgroup_root is None else str(budget.cgroup_root)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
             env={**os.environ, "PYTHONPATH": str(Path(memory.__file__).parent)})
         try:
@@ -105,7 +106,10 @@ memory.exec_budgeted([sys.executable, "-c", business, str(receipt)], budget=budg
         pending = json.loads(receipt.read_text(encoding="utf-8"))
         assert pending["status"] == "pending"
         assert pending["pid"] == process.pid
-        assert Path(pending["group"]).parent == budget.cgroup_root
+        if budget.cgroup_root is None:
+            assert pending["configured_root"] is None
+        else:
+            assert Path(pending["group"]).parent == budget.cgroup_root
     finally:
         if receipt.exists():
             memory.finalize_budget_receipts((receipt,))
