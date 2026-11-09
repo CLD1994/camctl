@@ -18,21 +18,6 @@ def history_body(event):
     })
 
 
-class CompleteResultCommand:
-    """接收公开仓储交给 commit_operation 的 AtomicCommand，增加协议回调。"""
-
-    def __init__(self, delegate, callback, *, read_only):
-        self.delegate, self.callback, self.read_only = delegate, callback, read_only
-        self.plans = []
-
-    def plan(self, scope):
-        plan = self.delegate.plan(scope)
-        assert plan.read_only is self.read_only
-        assert bool(plan.events) == (not self.read_only)
-        self.plans.append(plan)
-        return replace(plan, complete_result=self.callback)
-
-
 @asynccontextmanager
 async def host_cleanup(owned, staging):
     """清理仓储专项使用正式工厂、真实worker与文件执行器，并完整关闭。"""
