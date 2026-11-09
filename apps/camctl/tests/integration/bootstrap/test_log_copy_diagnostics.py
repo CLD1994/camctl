@@ -1312,82 +1312,6 @@ async def test_both_log_diagnostic_and_stderr_failure_preserve_report_outcome(
     assert b"controlled report generation failure" in ready_files[0].read_bytes()
 
 
-async def test_unconfirmed_copy_unlock_uses_stderr_directly(
-        tmp_path: Path, monkeypatch) -> None:
-    deps = await _runtime(tmp_path)
-    stderr = io.StringIO()
-    stdout = io.StringIO()
-    monkeypatch.setattr(sys, "stderr", stderr)
-    monkeypatch.setattr(sys, "stdout", stdout)
-
-    def copy_with_uncertain_unlock(self, record, destination):
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(record.message.encode() + b"\n")
-        return (WriteResult(
-            appended=True, rotated=True,
-            coordination_error="coordination_unlock_failed: unlock lost",
-            close_error="coordination_close_failed: close unknown",
-            copy_handles_closed=True,
-            durable=True,
-        ), None)
-
-    monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_unlock)
-    try:
-        outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
-    finally:
-        close_runtime(deps)
-
-    assert outcome.reason == "report_error"
-    assert report_called["count"] == 1
-    assert "coordination_unlock_failed" in stderr.getvalue()
-    assert "coordination_close_failed" in stderr.getvalue()
-    assert stdout.getvalue() == ""
-    ready_files = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
-    assert len(ready_files) == 1
-    assert b"controlled report generation failure" in ready_files[0].read_bytes()
-    log_path = Path(deps.config.paths.log_file)
-    if log_path.exists():
-        log = log_path.read_text(encoding="utf-8")
-        assert "报告失败的日志副本诊断" not in log
-
-
-async def test_unknown_copy_close_disables_later_file_logging(
-        tmp_path: Path, monkeypatch) -> None:
-    deps = await _runtime(tmp_path)
-    stderr = io.StringIO()
-    stdout = io.StringIO()
-    monkeypatch.setattr(sys, "stderr", stderr)
-    monkeypatch.setattr(sys, "stdout", stdout)
-
-    def copy_with_uncertain_close(self, record, destination):
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(record.message.encode() + b"\n")
-        return (WriteResult(
-            appended=True, rotated=True,
-            coordination_error="coordination_unlock_failed: unlock unknown",
-            close_error="coordination_close_failed: close unknown",
-            copy_handles_closed=True,
-            durable=True,
-        ), None)
-
-    monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_close)
-    try:
-        outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
-    finally:
-        close_runtime(deps)
-
-    assert outcome.reason == "report_error"
-    assert report_called["count"] == 1
-    assert "coordination_close_failed" in stderr.getvalue()
-    _assert_report_failure(stderr.getvalue())
-    assert stdout.getvalue() == ""
-    log_path = Path(deps.config.paths.log_file)
-    assert not log_path.exists() or not _session_failures(log_path.read_text(
-        encoding="utf-8"))
-    assert deps.log_runtime.path_unsafe is True
-    assert deps.log_runtime.channel.disabled is True
-
-
 async def test_default_copy_program_error_keeps_original_channel_failure_facts(
         tmp_path: Path, monkeypatch) -> None:
     import shutil
@@ -1567,25 +1491,37 @@ async def test_failure_wiring_does_not_reopen_failed_helper_channel(
     monkeypatch.setattr(FileChannel, "__init__", create)
     monkeypatch.setattr(FileChannel, "copy_with_write", copy)
     stderr = io.StringIO()
+    stdout = io.StringIO()
     monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(sys, "stdout", stdout)
     try:
         outcome, called = await _run_with_report_failure(deps, monkeypatch)
         assert outcome.reason == "report_error" and called["count"] == 2
         assert len(channels) == len(results) == 1
         result, copy_error = results[0]
-        assert result.appended is True and copy_error is None
+        assert result.appended is True and result.durable is True and copy_error is None
         assert result.coordination_error is not None and result.close_error is not None
         assert channels[0].disabled is True and channels[0].closed is False
-        assert "unlock result unavailable" in stderr.getvalue()
-        assert "close result unavailable" in stderr.getvalue()
+        assert deps.log_runtime.path_unsafe is True
+        assert deps.log_runtime.channel.disabled is True
         assert result.copy_handles_closed is True
-        ready = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
-        assert len(ready) == 1
-        assert b"controlled report generation failure" in ready[0].read_bytes()
     finally:
         for handler in unclosed_handlers:
             original_close(handler)
         close_runtime(deps)
+
+    assert "unlock result unavailable" in stderr.getvalue()
+    assert "close result unavailable" in stderr.getvalue()
+    assert "coordination_unlock_failed" in stderr.getvalue()
+    assert "coordination_close_failed" in stderr.getvalue()
+    _assert_report_failure(stderr.getvalue())
+    assert stdout.getvalue() == ""
+    log = primary_path.read_text(encoding="utf-8")
+    assert "报告失败的日志副本诊断" not in log
+    assert not _session_failures(log)
+    ready = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+    assert len(ready) == 1
+    assert b"controlled report generation failure" in ready[0].read_bytes()
 
 
 async def test_default_failure_wiring_shares_marker_owner(tmp_path: Path, monkeypatch) -> None:
