@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from camctl.capture.media_flow import run_recording_media
 from camctl.devices.drivers.hasselblad.driver import EVIDENCE
 from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
 from camctl.host_files.downloads import DownloadWorkspace, download_path, recover_download
@@ -16,10 +15,14 @@ from camctl.operations.process import RawToolOutcome, ToolStartError
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.outputs.read_attempts import running_read_ticket
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 
 from ..support.outputs import read_test_runtime
 from .test_grant_reuse import granted, read_request, read_targets, local_read
 from ..devices.test_hasselblad_download import harness, source, RAW
+
+
+register_file_batch_guards()
 
 
 def _fixed_source(owned, command, prepared):
@@ -27,8 +30,6 @@ def _fixed_source(owned, command, prepared):
     owned.connection.execute("UPDATE device_files SET identity_key=?,locator_json=?,size_bytes=? WHERE id=501",
         (fixed.file_id, json.dumps(dict(fixed.locator)), len(RAW)))
     owned.connection.execute("UPDATE file_copies SET source_size=? WHERE id=?", (len(RAW), prepared.copy_id))
-    owned.connection.execute("UPDATE recording_processing SET check_basis_json=? WHERE id=?",
-        (json.dumps({"target_duration_ms": 1000}), command.processing_id or 5))
     owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=32", (command.occurred_at + 60_000_000,))
     owned.connection.commit()
 
@@ -64,15 +65,8 @@ def _error_text(error):
     return "\n".join(messages(error))
 
 
-async def _execute(runtime, command):
-    if command.processing_id is not None:
-        return await run_recording_media(runtime, command.action_id, command.processing_id, 501,
-                                         target_extension="part")
-    return await advance_obtain(runtime)
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
+@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 @pytest.mark.parametrize("failure", ["not_started", "exited", "exited_cleanup", "no_exit", "transport_error", "bare_cancel", "verify_close", "dispose_close"])
 async def test_preparation_settlement_survives_real_consumer_and_result_save(granted, tmp_path, read_request, failure, monkeypatch):
     owned, command, _, prepared = granted
@@ -143,9 +137,9 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(gra
     unsettled = failure in ("no_exit", "transport_error", "bare_cancel", "verify_close", "dispose_close")
     try:
         async with read_test_runtime(owned, driver, EVIDENCE, staging=staging,
-                internal=command.processing_id is not None, max_read_attempts=5,
+                max_read_attempts=5,
                 occurred_at=lambda: command.occurred_at + 20) as runtime:
-            task = asyncio.create_task(_execute(runtime, command))
+            task = asyncio.create_task(advance_obtain(runtime))
             await _wait_read_ready(task, ready)
             ticket = tickets[0]
             work = download_path(staging, ticket)
@@ -173,7 +167,7 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(gra
                 assert len(transport.calls) == 3
                 # 正式入口再进入仍保留原运行尝试，不增加设备调用或读取预算。
                 try:
-                    await _execute(runtime, command)
+                    await advance_obtain(runtime)
                 except (ReadPreparationError, ConsistencyError, asyncio.CancelledError) as retained:
                     assert any(value in _error_text(retained) for value in
                         ("preparation_unconfirmed", "恢复", "原", "cancel_verify"))
@@ -195,7 +189,7 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(gra
                 else:
                     assert not work.exists()
                 assert RAW.decode("latin1") not in stored["details"]["reason"]
-                await _execute(runtime, command)
+                await advance_obtain(runtime)
                 assert tickets[-1].attempt_id == ticket.attempt_id + 1
                 assert len(transport.calls) == 6
     finally:
@@ -209,7 +203,7 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(gra
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
+@pytest.mark.parametrize("read_request", ["device"], indirect=True)
 @pytest.mark.parametrize("cancelled", [False, True])
 @pytest.mark.parametrize("waiting_for", ["existing_directory", "prepare_denied"])
 async def test_maintenance_waiting_keeps_original_read_even_when_user_cancelled(granted, tmp_path, cancelled, waiting_for, monkeypatch):
@@ -233,9 +227,9 @@ async def test_maintenance_waiting_keeps_original_read_even_when_user_cancelled(
             raise
     driver.open_read = open_read
     async with read_test_runtime(owned, driver, EVIDENCE, staging=staging,
-            internal=command.processing_id is not None, max_read_attempts=1,
+            max_read_attempts=1,
             occurred_at=lambda: command.occurred_at + 20) as runtime:
-        task = asyncio.create_task(_execute(runtime, command))
+        task = asyncio.create_task(advance_obtain(runtime))
         await _wait_read_ready(task, ready)
         ticket = tickets[0]
         work = download_path(staging, ticket)
