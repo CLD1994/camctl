@@ -167,6 +167,9 @@ async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails
     write_calls = {"count": 0}
     marker_fds: dict[int, Path] = {}
     failed_temp: dict[str, Path] = {}
+    closed_temps: list[Path] = []
+    cleanup_observations = []
+    primary_error = OSError("progress marker write failed after sync")
 
     def track_marker_temp(path, flags, *args, **kwargs):
         fd = original_open(path, flags, *args, **kwargs)
@@ -182,16 +185,20 @@ async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails
             assert written == len(data)
             assert json.loads(bytes(data))["stage"] == "copied"
             original_fsync(fd)
-            failed_temp["path"] = marker_fds.pop(fd)
-            raise OSError("progress marker write failed after sync")
+            failed_temp["path"] = marker_fds[fd]
+            raise primary_error
         return written
 
     def close_marker_temp(fd):
-        marker_fds.pop(fd, None)
-        return original_close(fd)
+        path = marker_fds.pop(fd, None)
+        result = original_close(fd)
+        if path is not None:
+            closed_temps.append(path)
+        return result
 
     def fail_owned_temp_cleanup(path, *args, **kwargs):
         if Path(path) == failed_temp.get("path"):
+            cleanup_observations.append((Path(path) in closed_temps, sys.exception()))
             raise OSError("progress temp cleanup denied")
         return original_unlink(path, *args, **kwargs)
 
@@ -208,6 +215,9 @@ async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails
     assert outcome.reason == "report_error"
     assert report_called["count"] == 1
     assert write_calls["count"] == 3
+    assert len(cleanup_observations) == 1
+    assert cleanup_observations[0][0] is True
+    assert cleanup_observations[0][1] is primary_error
     assert failed_temp["path"].is_file()
     ready_files = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
     assert len(ready_files) == 1
