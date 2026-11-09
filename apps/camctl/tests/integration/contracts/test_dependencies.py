@@ -158,6 +158,19 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
     """对一条内部边应用依赖方向规则；返回违规描述。"""
     if _starts_with(name, ENTRY_PREFIXES):
         return []
+    # 有限检查、原结果保存和目录绑定各自使用的窄协作端口。
+    named_ports = {
+        ("camctl.operations.availability", "camctl.persistence.business"): "SharedSave",
+        ("camctl.operations.availability_owner", "camctl.persistence.business"): "SharedSave",
+        ("camctl.operations.availability", "camctl.scheduling.notifications"): "WakeReason",
+        ("camctl.outputs.withdrawal", "camctl.persistence.runtime"): "canonical_directory_binding",
+    }
+    for (source, module), symbol in named_ports.items():
+        if name == source and (
+            (target == module and names and names <= {symbol})
+            or (target == f"{module}.{symbol}" and not names)
+        ):
+            return []
     # 该历史仓储适配器只创建可重建的派生库；不授予整个 history 包
     # SQLite 权限，也不允许它直接打开业务状态库。
     if name in {"camctl.history.bounded", "camctl.reporting.failure_index"} and (
@@ -245,9 +258,16 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
             return [f"{name} -> {target}（业务流程不直接使用 sqlite3）"]
         if target.startswith("camctl.persistence.runtime."):
             # 成员拼接边：类型判定由 runtime 基础边的名字集表达。
+            if name == "camctl.outputs.withdrawal" and (
+                target.removeprefix("camctl.persistence.runtime.") not in RUNTIME_TYPE_ONLY
+            ):
+                return [f"{name} -> {target}（业务流程不依赖连接层内部实现）"]
             return []
         if target == "camctl.persistence.runtime":
-            if names and names <= RUNTIME_TYPE_ONLY:
+            allowed_names = RUNTIME_TYPE_ONLY
+            if name == "camctl.outputs.withdrawal":
+                allowed_names = RUNTIME_TYPE_ONLY | {"canonical_directory_binding"}
+            if names and names <= allowed_names:
                 return []
             return [
                 f"{name} -> {target}"
@@ -362,6 +382,40 @@ class TestCheckerDetectsViolations:
             ),
         }
         assert _forbidden_edges(graph) == []
+
+    def test_named_cooperation_ports_allow_aliases_and_expanded_members(self) -> None:
+        for source, module, symbol in (
+            ("camctl.operations.availability", "camctl.persistence.business", "SharedSave"),
+            ("camctl.operations.availability_owner", "camctl.persistence.business", "SharedSave"),
+            ("camctl.operations.availability", "camctl.scheduling.notifications", "WakeReason"),
+            ("camctl.outputs.withdrawal", "camctl.persistence.runtime", "canonical_directory_binding"),
+        ):
+            imports = _imported_modules(source, f"from {module} import {symbol} as port\n")
+            assert imports[module] == {symbol}
+            assert f"{module}.{symbol}" in imports
+            assert _forbidden_edges({source: imports}) == []
+        source = "camctl.outputs.withdrawal"
+        imports = _imported_modules(source, "from camctl.persistence.runtime import canonical_directory_binding as path, OwnedConnection as connection\n")
+        assert _forbidden_edges({source: imports}) == []
+
+    def test_named_cooperation_ports_do_not_allow_other_members(self) -> None:
+        for source, module, allowed, forbidden in (
+            ("camctl.operations.availability", "camctl.persistence.business", "SharedSave", "BusinessDatabase"),
+            ("camctl.operations.availability_owner", "camctl.persistence.business", "SharedSave", "BusinessDatabase"),
+            ("camctl.operations.availability", "camctl.scheduling.notifications", "WakeReason", "WorkNotifier"),
+            ("camctl.outputs.withdrawal", "camctl.persistence.runtime", "canonical_directory_binding", "open_existing"),
+        ):
+            imports = _imported_modules(source, f"from {module} import {allowed} as port, {forbidden} as other\n")
+            violations = _forbidden_edges({source: imports})
+            assert any(f"{source} -> {module}" in edge for edge in violations)
+
+        for source, dependency in (
+            ("camctl.operations.availability", "from camctl.persistence.repositories.operations import OperationRepository\n"),
+            ("camctl.operations.availability_owner", "from camctl.persistence.repositories.operations import OperationRepository\n"),
+            ("camctl.operations.fake", "from camctl.persistence.business import SharedSave\n"),
+            ("camctl.outputs.withdrawal", "import camctl.persistence.runtime.open_existing as connect\n"),
+        ):
+            assert _forbidden_edges({source: _imported_modules(source, dependency)})
 
     @pytest.mark.parametrize("source", ["camctl.devices.fake", "camctl.logging_runtime.fake"])
     def test_adapter_may_use_declared_schema_port_but_not_acceptance_flow(self, source):
