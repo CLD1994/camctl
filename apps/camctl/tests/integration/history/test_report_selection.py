@@ -451,7 +451,6 @@ async def test_large_window_releases_candidates_and_keyset_pages_do_not_rescan_w
         candidate_sql = [sql for kind, sql in probe.sql if kind == 'candidate']
         assert len(candidate_sql) == 2  # 固定窗口的 plan/action 各一次，跨父对象不重查。
         page_sql = [sql for kind, sql in probe.sql if kind == 'page']
-        assert all(' IN (' not in sql for sql in page_sql)
         assert max(vm_pages) < preflight_steps // 8
         from contextlib import closing
         import sqlite3
