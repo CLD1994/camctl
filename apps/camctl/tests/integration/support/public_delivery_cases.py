@@ -17,7 +17,9 @@ from camctl.host_files.models import BoundDirectories
 from camctl.outputs.handoff import DeliveryDirectories
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.persistence.repositories.file_batches import register_file_batch_guards
+from camctl.persistence.runtime import verify_directory_binding
 
+from ..bootstrap.test_media_assembly import _config
 from ..capture.result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog, consumer_world
 from ..capture.test_capture_contract import ResultsDouble
 from .capture import capture_database
@@ -55,19 +57,25 @@ class _ReadDriver:
 async def prepare_public_delivery(tmp_path, *, content, now, missing_output_id=None):
     """执行真实读取；可同时通过精确请求准备一个不存在的产物。"""
     register_file_batch_guards()
+    cfg = _config(tmp_path)
+    staging = Path(cfg.paths.staging)
+    ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)
+
     def capture_options(owned, _driver, _defaults):
         action_id, = owned.connection.execute("SELECT id FROM actions").fetchone()
         entry = ObservedFile(
             identity="delivery-source", locator={"path": "/DCIM/source.jpg"},
             evidence={"listing": "source"}, complete=True, size_bytes=len(content),
             kind=FileKind.PHOTO, original_name="source.jpg", media_type="image/jpeg")
-        return {"results": ResultsDouble({action_id: (entry,)}),
+        return {"staging": staging, "results": ResultsDouble({action_id: (entry,)}),
                 "evidence": RESULT_EVIDENCE.with_contract(RESULT_PAGE_CONTRACT)}
 
     owned, capture, source_id, handler = await consumer_world(
         tmp_path, "photo", catalog=_Catalog(), start=False,
         now_us=now, runtime_options=capture_options)
     try:
+        verify_directory_binding(owned.metadata, cfg.paths.staging,
+                                 cfg.paths.ready, cfg.paths.processing)
         await capture_handler(handler)(source_id, capture)
         output_id, = owned.connection.execute(
             "SELECT id FROM outputs WHERE source_action_id=?", (source_id,)).fetchone()
@@ -80,8 +88,6 @@ async def prepare_public_delivery(tmp_path, *, content, now, missing_output_id=N
         action_id, _ = prepare_obtain_selection(
             owned, catalog=_Catalog(), now=now, source_id=source_id,
             mode=mode, request_id=2)
-        staging = Path(owned.metadata.staging_path)
-        ready, processing = Path(owned.metadata.ready_path), Path(owned.metadata.processing_path)
         for directory in (staging, ready, processing):
             directory.mkdir(parents=True, exist_ok=True)
         driver = _ReadDriver(content)
