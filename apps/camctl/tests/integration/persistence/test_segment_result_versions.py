@@ -185,34 +185,53 @@ async def test_canceled_result_rebuilds_all_original_inputs_and_recovers_exact_v
 
 @pytest.mark.parametrize('bounded',[False,True])
 @pytest.mark.parametrize('changed',['omit_predecessor','canceled_predecessor'])
-async def test_cancel_create_guard_requires_original_unpublished_predecessor(tmp_path,monkeypatch,bounded,changed):
-    from camctl.persistence.repositories import segment_result_sets as storage
+async def test_cancel_create_guard_requires_original_unpublished_predecessor(tmp_path,bounded,changed):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.history.validators import EventValidationError
     owned,runtime,repository,previous=await _two_scan_result(tmp_path)
     try:
         cancel=_cancel(owned,runtime,previous.action_id)
         request=_request(repository,previous,owned,runtime,cancel)
         if changed=='canceled_predecessor':
             prior=_ok(repository.create_result_set(request,new_operation_key(),owned))
-            request=replace(request,predecessor_set_id=prior.set_id)
+            predecessor=prior.set_id
         else:
-            request=replace(request,predecessor_set_id=None)
-        before=tuple(owned.connection.execute('SELECT * FROM segment_sets'))
-        events=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
+            predecessor=None
+        before=tuple(owned.connection.iterdump())
         key=new_operation_key()
+        assert owned.connection.execute(
+            'SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',(str(key),)).fetchone()==(0,)
+        planned=[]
         class Command:
             def plan(self,scope):
-                with monkeypatch.context() as patch:
-                    patch.setattr(storage,'_publication',lambda *args:None)
-                    plan=capture_operation_command(segment_storage,lambda: SegmentRepository().create_result_set(request,key,owned)).plan(scope)
-                if not bounded:return plan
-                return BoundedCommandPlan(plan.events,
+                plan=capture_operation_command(segment_storage,lambda: SegmentRepository().create_result_set(request,key,owned)).plan(scope)
+                event,=plan.events
+                row,=event.rows
+                assert row.table=='segment_sets'
+                assert row.after.values['predecessor_set_id']==previous.set_id
+                raw=event.evidence['segment_request']
+                assert raw['input']['predecessor_set_id']==previous.set_id
+                assert plan.segment_read_scope is not None
+                event=replace(event,rows=(replace(row,after=replace(row.after,values={
+                    **row.after.values,'predecessor_set_id':predecessor})),),
+                    evidence={**event.evidence,'segment_request':{
+                        **raw,'input':{**raw['input'],'predecessor_set_id':predecessor}}})
+                planned.append(plan.result)
+                if not bounded:return replace(plan,events=(event,))
+                return BoundedCommandPlan((event,),
                     lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
                         current_reads=SqlEventReads(scope.connection,plan.segment_read_scope)),
                     plan.result,lambda connection:None)
         receipt=commit_operation(Command(),key,owned)
-        assert receipt.kind=='rolled_back' and '未发布' in str(receipt.error),receipt.error
-        assert tuple(owned.connection.execute('SELECT * FROM segment_sets'))==before
-        assert owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()==events
+        assert len(planned)==1
+        assert receipt.kind=='rolled_back' and isinstance(receipt.error,EventValidationError),receipt.error
+        assert isinstance(receipt.error.__cause__,ConsistencyError)
+        message='必须明确原前版' if changed=='omit_predecessor' else '没有接手同一原动作'
+        assert message in str(receipt.error.__cause__)
+        assert not owned.connection.in_transaction
+        assert tuple(owned.connection.iterdump())==before
+        assert owned.connection.execute(
+            'SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',(str(key),)).fetchone()==(0,)
     finally:
         owned.connection.close()
 
