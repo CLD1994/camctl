@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from camctl.bootstrap.config import ConfigDefaults, load_config
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.host_files.paths import PURPOSE_DIRECTORIES
 from camctl.persistence.initialization import InitOutcome, initialize_state
@@ -41,6 +42,8 @@ from camctl.session.locks import (
 from ..persistence.test_transactions import PlanCreateCommand, plan_guards
 from ..persistence.test_runtime import _create_legacy_v1_database
 from ..support.distribution import prepare_project_metadata
+from ..support.capture import capture_test_session
+from ..support.public_delivery_cases import prepare_public_delivery
 
 
 def _expected_staging_subdirs() -> tuple[str, ...]:
@@ -468,23 +471,44 @@ class TestExistingDatabase:
         assert result.outcome is InitOutcome.FAILED
         assert target.read_bytes() == b""
 
-    def test_binding_mismatch_with_liability_keeps_binding(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_binding_mismatch_with_liability_keeps_binding(self, tmp_path: Path) -> None:
         cfg = _config(tmp_path)
-        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
-        with sqlite3.connect(cfg.paths.state_db) as connection:
-            original_binding = connection.execute(
-                "SELECT staging_path, ready_path, processing_path FROM database_metadata"
-            ).fetchone()
-        # 登记仍为 REQUIRED 的中间文件：原目录责任未结束，拒绝切换。
-        connection = sqlite3.connect(cfg.paths.state_db)
-        try:
-            connection.execute(
-                "INSERT INTO intermediate_files (id,owner_action_id,purpose,relative_path,"
-                "retention_state,cleanup_state,created_event_id,last_event_id,change_count)"
-                " VALUES (1,1,2,'derived/1.bin',1,1,1,1,1)")
-            connection.commit()
-        finally:
-            connection.close()
+        content = b"prepared delivery file"
+        async with capture_test_session():
+            owned, roots, directories, qualification = await prepare_public_delivery(
+                tmp_path, content=content, now=1_750_000_000_000_000)
+            try:
+                original_binding = (owned.metadata.staging_path, owned.metadata.ready_path,
+                                    owned.metadata.processing_path)
+                responsibility = owned.connection.execute(
+                    "SELECT * FROM intermediate_files WHERE id=?",
+                    (qualification.target_file_id,),
+                ).fetchone()
+                row = owned.connection.execute(
+                    "SELECT i.relative_path, i.retention_state, d.status, d.published_event_id "
+                    "FROM intermediate_files i "
+                    "JOIN deliveries d ON d.id=i.owner_delivery_id "
+                    "JOIN actions a ON a.id=d.action_id "
+                    "JOIN history_events c ON c.id=i.created_event_id "
+                    "JOIN history_events l ON l.id=i.last_event_id "
+                    "WHERE i.id=? AND d.id=? AND a.id=?",
+                    (qualification.target_file_id, qualification.delivery_id,
+                     qualification.action_id),
+                ).fetchone()
+                assert row is not None
+                relative_path, retention, delivery_status, published_event = row
+                assert retention == int(enum_for("intermediate_files.retention_state").REQUIRED)
+                assert delivery_status == int(enum_for("deliveries.status").PREPARED)
+                assert published_event is None
+                assert owned.connection.execute("PRAGMA foreign_key_check").fetchall() == []
+                file_path = roots.staging / relative_path
+                assert file_path.read_bytes() == content
+                assert not tuple(directories.ready.iterdir())
+                assert not tuple(directories.processing.iterdir())
+            finally:
+                owned.connection.close()
+
         moved = _config(tmp_path, prefix="new-")
         result = initialize_state(moved, Path(moved.paths.state_db))
         assert result.outcome is InitOutcome.FAILED
@@ -494,6 +518,14 @@ class TestExistingDatabase:
             # 直接比较初始化时保存的绑定，保留各平台的路径表示。
             assert (owned.metadata.staging_path, owned.metadata.ready_path,
                     owned.metadata.processing_path) == original_binding
+            assert owned.connection.execute(
+                "SELECT * FROM intermediate_files WHERE id=?",
+                (qualification.target_file_id,),
+            ).fetchone() == responsibility
+            assert owned.connection.execute("PRAGMA foreign_key_check").fetchall() == []
+            assert file_path.read_bytes() == content
+            assert not tuple(directories.ready.iterdir())
+            assert not tuple(directories.processing.iterdir())
         finally:
             owned.connection.close()
 
