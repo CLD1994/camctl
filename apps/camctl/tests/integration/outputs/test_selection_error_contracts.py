@@ -64,8 +64,13 @@ def _legacy_source_error_event(owned, details):
     connection = owned.connection
     connection.execute("DELETE FROM output_origins WHERE output_id=702")
     connection.execute("DELETE FROM outputs WHERE id=702")
+    connection.execute("UPDATE plans SET status=2 WHERE id=1")
     connection.commit()
     _request(connection, SelectionMode.PREVIEW)
+    assert connection.execute("SELECT status FROM plans WHERE id=1").fetchone() == (2,)
+    assert connection.execute(
+        "SELECT id,plan_id,status,execution_started FROM actions WHERE plan_id=1 ORDER BY id"
+    ).fetchall() == [(11, 1, 3, 1), (12, 1, 2, 1), (30, 1, 2, 1)]
     # 存储格式专项：这里只核对完整业务前态及事件保存，不以夹具的占位历史验证重放。
     # 旧判定在两个原片均无预览时保存来源错误及两个失败项。
     # 可选 original_output_id 按公共错误登记构造，不代表旧生产者曾写出该字段。
