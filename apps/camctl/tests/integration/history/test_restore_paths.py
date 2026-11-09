@@ -1,6 +1,8 @@
 """对象恢复固定依据，按相关次数选路径，并在读事务外应用事件。"""
 
-from contextlib import contextmanager
+import asyncio
+import threading
+from contextlib import closing
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -213,38 +215,59 @@ def test_projection_and_range_keep_c_when_commit_occurs_between_pages(file_world
     boundary = world.history.current_boundary()
     expected = row_facts(world.owned.connection, "device_files", 1)
     fixed_events = [_change(world) for _ in range(3)]
-    original_read = world.history._read_connection
-    read_count = 0
+    with closing(world.owned.connection.execute("SELECT * FROM device_files WHERE id = 1")) as cursor:
+        projection_columns = tuple(column[0] for column in cursor.description)
+        projection = cursor.fetchone()
+    event_bodies = dict(world.owned.connection.execute(
+        "SELECT id, body_json FROM history_events"))
+    known_bodies = set(event_bodies.values())
     committed = []
+    observed = []
+    views = {}
+    projections = []
 
-    # _change 取得边界使用另一个仓储，避免测试的同步点递归。
     from camctl.persistence.repositories.history import HistoryRepository
     world_for_write = SimpleNamespace(
         owned=world.owned, capture=world.capture, history=HistoryRepository(world.history.path))
 
-    @contextmanager
-    def fixed_interleave():
-        nonlocal read_count
-        with original_read() as connection:
-            yield connection
-        read_count += 1
-        if read_count in (1, 2):
+    def record(cursor, row):
+        names = tuple(column[0] for column in cursor.description)
+        connection = cursor.connection
+        if set(names) == set(projection_columns):
+            assert all(names.count(name) == 1 for name in projection_columns)
+            projected = tuple(row[names.index(name)] for name in projection_columns)
+            assert projected == projection and not projections and not committed
+            assert connection not in views
+            projections.append(projected)
+            views[connection] = "projection"
+        body_columns = [index for index, name in enumerate(names)
+                        if name == "body_json" or row[index] in known_bodies]
+        if body_columns:
+            assert len(body_columns) == 1 and names[body_columns[0]] == "body_json"
+            assert names.count("id") == 1
+            event = (row[names.index("id")], row[body_columns[0]])
+            if not observed:
+                assert len(committed) == 1 and connection not in views
+                views[connection] = "first_event"
+            else:
+                assert len(committed) == 2
+            observed.append(event)
+
+    def end_view(connection):
+        marker = views.pop(connection, None)
+        if marker == "projection":
+            assert not committed
+            committed.append(_change(world_for_write))
+        elif marker == "first_event":
+            assert len(committed) == 1 and len(observed) == 1
             committed.append(_change(world_for_write))
 
-    monkeypatch.setattr(world.history, "_read_connection", fixed_interleave)
-    from camctl.persistence.repositories import history as module
-    original_decode = module.decode_event_row
-    read_ids = []
-
-    def record(raw):
-        read_ids.append(raw[0])
-        return original_decode(raw)
-
-    monkeypatch.setattr(module, "decode_event_row", record)
+    opened = observe_readonly_rows(monkeypatch, world.history.path, record, end_view)
     assert world.history.restore_entity("device_file", 1, boundary, event_batch_size=1) == {
         ("device_files", 1): expected}
+    assert opened and projections == [projection] and not views
     assert len(committed) == 2
-    assert read_ids == list(reversed(fixed_events))
+    assert observed == [(event_id, event_bodies[event_id]) for event_id in reversed(fixed_events)]
 
 
 @pytest.mark.asyncio
@@ -289,49 +312,104 @@ async def test_new_snapshot_after_selection_cannot_replace_fixed_s_and_id(file_w
     boundary = world.history.current_boundary()
     expected = row_facts(world.owned.connection, "device_files", 1)
     late = await _prepared(world, SnapshotRef(9, 1))
+    executor = None
+    restore_task = None
+    release = threading.Event()
     try:
+        assert late.boundary == boundary
         for _ in range(4):
             _change(world)
-        from camctl.persistence.repositories import history as module
-        original_read = world.history._read_connection
-        read_count = 0
+        original = world.owned.connection.execute(
+            "SELECT entity_type, entity_id, boundary_event_id, change_count, format_version, content"
+            " FROM entity_snapshots WHERE id = ?", (original_id,)).fetchone()
+        assert original is not None and original[:3] == (9, 1, original_s.last_event_id)
+        metadata = (original_id, original_s.last_event_id, original[3], original[4])
+        forward_body = world.owned.connection.execute(
+            "SELECT body_json FROM history_events WHERE id = ?", (forward_id,)).fetchone()[0]
+        loop = asyncio.get_running_loop()
+        selected_ready = asyncio.Event()
+        late_committed = False
+        selected_views = set()
         selected = []
+        snapshots = []
         events = []
-        original_decode, original_snapshot = module.decode_event_row, world.history._snapshot_rows
+        columns = ("entity_type", "entity_id", "boundary_event_id", "change_count", "format_version", "content")
+        metadata_columns = ("id", "boundary_event_id", "change_count", "format_version")
 
-        @contextmanager
-        def publish_after_selection():
-            nonlocal read_count
-            with original_read() as connection:
-                yield connection
-            read_count += 1
-            if read_count == 1:
-                connection = world.owned.connection
-                connection.execute("BEGIN IMMEDIATE")
-                module._save_one_snapshot(connection, late)
-                connection.execute("COMMIT")
+        def record(cursor, row):
+            names = tuple(column[0] for column in cursor.description)
+            if set(names) == set(metadata_columns):
+                assert all(names.count(name) == 1 for name in metadata_columns)
+                selected_metadata = tuple(row[names.index(name)] for name in metadata_columns)
+                assert selected_metadata == metadata and not selected
+                selected.append(selected_metadata)
+                selected_views.add(cursor.connection)
+            content_columns = [index for index, name in enumerate(names)
+                               if name == "content" or row[index] == original[-1]]
+            if content_columns:
+                assert late_committed
+                assert len(content_columns) == 1 and names[content_columns[0]] == "content"
+                assert all(names.count(name) == 1 for name in columns)
+                snapshots.append(tuple(row[names.index(name)] for name in columns))
+            body_columns = [index for index, name in enumerate(names)
+                            if name == "body_json" or row[index] == forward_body]
+            if body_columns:
+                assert len(body_columns) == 1 and names[body_columns[0]] == "body_json"
+                assert names.count("id") == 1
+                events.append((row[names.index("id")], row[body_columns[0]]))
 
-        def observe_selected(seed):
-            selected.append((seed.snapshot.snapshot_id, seed.snapshot.boundary))
-            return original_snapshot(seed)
+        def end_view(connection):
+            if connection in selected_views:
+                selected_views.remove(connection)
+                loop.call_soon_threadsafe(selected_ready.set)
+                assert release.wait(30), "等待迟到快照保存超时"
 
-        def decode(raw):
-            events.append(raw[0])
-            return original_decode(raw)
-
-        monkeypatch.setattr(world.history, "_read_connection", publish_after_selection)
-        monkeypatch.setattr(world.history, "_snapshot_rows", observe_selected)
-        monkeypatch.setattr(module, "decode_event_row", decode)
-        actual = world.history.restore_entity("device_file", 1, boundary, event_batch_size=1)
-        latest_id = world.owned.connection.execute(
-            "SELECT id FROM entity_snapshots WHERE entity_type = 9 AND entity_id = 1"
-            " ORDER BY boundary_event_id DESC LIMIT 1").fetchone()[0]
-        assert latest_id != original_id
-        assert selected == [(original_id, original_s)]
-        assert events == [forward_id]
+        from camctl.persistence.repositories.history import HistoryRepository
+        opened = observe_readonly_rows(monkeypatch, world.history.path, record, end_view)
+        restore_task = asyncio.create_task(asyncio.to_thread(
+            lambda: HistoryRepository(world.history.path).restore_entity(
+                "device_file", 1, boundary, event_batch_size=1)))
+        ready_task = asyncio.create_task(selected_ready.wait())
+        try:
+            done, _ = await asyncio.wait((ready_task, restore_task), timeout=30,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if restore_task in done:
+                await restore_task
+                pytest.fail("恢复在选中快照的读视图结束前完成")
+            assert ready_task in done, "等待选中快照的读视图结束超时"
+        finally:
+            if not ready_task.done():
+                ready_task.cancel()
+            await asyncio.gather(ready_task, return_exceptions=True)
+        executor = DbExecutor(
+            lambda: open_existing(world.history.path, DbOpenMode.EXISTING_RW, DbConfig()),
+            capacity=4, enqueue_timeout_seconds=9)
+        store = SqliteSnapshotStore(world.history.path, executor)
+        saved = await store.save_snapshots((late,))
+        assert len(saved) == 1 and saved[0].ref == SnapshotRef(9, 1)
+        latest = world.owned.connection.execute(
+            "SELECT id, boundary_event_id FROM entity_snapshots WHERE entity_type = 9 AND entity_id = 1"
+            " AND boundary_event_id = ?", (boundary.last_event_id,)).fetchone()
+        assert latest is not None and latest[1] == boundary.last_event_id
+        assert latest[0] != original_id and boundary.last_event_id > original_s.last_event_id
+        late_committed = True
+        release.set()
+        actual = await asyncio.shield(restore_task)
+        assert opened and selected == [metadata] and not selected_views
+        assert snapshots == [original]
+        assert events == [(forward_id, forward_body)]
         assert actual == {("device_files", 1): expected}
     finally:
-        _close_if_needed(late)
+        release.set()
+        try:
+            if restore_task is not None:
+                await asyncio.shield(restore_task)
+        finally:
+            try:
+                if executor is not None:
+                    await executor.close()
+            finally:
+                _close_if_needed(late)
 
 
 @pytest.mark.asyncio

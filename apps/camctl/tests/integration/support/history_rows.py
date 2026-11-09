@@ -1,7 +1,7 @@
 """观察目标数据库只读连接向 Python 交付的行。"""
 
 
-def observe_readonly_rows(monkeypatch, database_path, observe):
+def observe_readonly_rows(monkeypatch, database_path, observe, on_view_end=None):
     import os
     import sqlite3
     from urllib.parse import parse_qs, urlsplit
@@ -20,6 +20,17 @@ def observe_readonly_rows(monkeypatch, database_path, observe):
                 return row if original_factory is None else original_factory(cursor, row)
 
             self.row_factory = record
+
+        def execute(self, *args, **kwargs):
+            was_in_transaction = self.in_transaction
+            cursor = super().execute(*args, **kwargs)
+            if on_view_end is not None and was_in_transaction and not self.in_transaction:
+                try:
+                    on_view_end(self)
+                except BaseException:
+                    cursor.close()
+                    raise
+            return cursor
 
     def connect(database, *args, **kwargs):
         if kwargs.get("uri") and str(database).startswith("file:"):
