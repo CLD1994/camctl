@@ -21,7 +21,7 @@ from camctl.acceptance.service import CommandMode
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.session import SessionRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import DbConfig, DbOpenMode, DirectoryBindingError, open_existing
 from camctl.session.clock import ClockCheckInput, register_clock_guard
 from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
 from camctl.session.service import StateDbFailure, SessionContext, SessionPaths, run_session
@@ -654,13 +654,24 @@ class TestRunCompletion:
         assert "RuntimeError" in diagnostics[0]
         assert "copy request factory failed" in diagnostics[0]
 
-    async def test_state_db_failure_stops_remaining_flows(self, environment):
+    @pytest.mark.parametrize("failure_kind", ["state_db", "directory_binding"])
+    async def test_fatal_failure_stops_remaining_flows(self, environment, failure_kind):
         context, recorder, holder, _ = environment
-        context.flows = {"a": recorder.fails_db, "b": recorder.ok}
+        async def fail_binding(_context):
+            recorder.calls.append("binding")
+            raise DirectoryBindingError("ready: 原路径 /old，配置新路径 /new")
+
+        failure = recorder.fails_db if failure_kind == "state_db" else fail_binding
+        context.flows = {"a": failure, "b": recorder.ok}
         outcome = await _run(context)
         assert outcome.succeeded is False
-        assert outcome.reason == "state_db_error"
-        assert recorder.calls == ["db"]
+        if failure_kind == "state_db":
+            assert outcome.reason == "state_db_error"
+            assert recorder.calls == ["db"]
+        else:
+            assert outcome.reason == "configuration_error"
+            assert "/old" in str(outcome.details) and "/new" in str(outcome.details)
+            assert recorder.calls == ["binding"]
 
     async def test_close_failure_reports_state_db_error(self, environment):
         context, recorder, holder, _ = environment

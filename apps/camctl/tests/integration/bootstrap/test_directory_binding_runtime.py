@@ -13,7 +13,6 @@ import pytest
 
 from camctl.bootstrap.config import ConfigDefaults, ConfigError, load_config
 from camctl.bootstrap.application import ConfigAdapter
-from camctl.bootstrap import lifecycle
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
@@ -211,10 +210,7 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
                 job_id=job.job_id, instance_id=job.instance_id, error_kind=ErrorKind.REPORT,
                 error_code="configuration_error", error_message="ready: 原路径 /old，配置新路径 /new"))
 
-    async def device(_context):
-        events.append("device")
-
-    # 观察真实报告流程消费回执并抛出配置错误的边界；此前设备调用允许。
+    # 观察真实报告流程消费回执并抛出配置错误的边界。
     from camctl.bootstrap import flows as bootstrap_flows
     from camctl.persistence.runtime import DirectoryBindingError
     original_report_flow = bootstrap_flows.report_flow
@@ -236,18 +232,6 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
     mocker.patch.object(bootstrap_flows, "report_flow", side_effect=observe_report_flow)
     supervisor.generate.side_effect = reject
     supervisor.stop.return_value = WorkerShutdown(exitcode=0, forced=False)
-    original_assembly = lifecycle._report_assembly
-
-    def assemble(runtime_deps, failure_log, logging_owner=None):
-        flows, report_supervisor = original_assembly(
-            runtime_deps, failure_log, logging_owner)
-        return {
-            "report": flows["report"],
-            "device": device,
-            **{name: flow for name, flow in flows.items() if name != "report"},
-        }, report_supervisor
-
-    mocker.patch("camctl.bootstrap.lifecycle._report_assembly", side_effect=assemble)
     mocker.patch("camctl.reporting.supervisor.WorkerSupervisor", return_value=supervisor)
     source = ParsedInput("plan.json", json.loads(_plan_file(deployed).read_text()))
     try:
@@ -259,8 +243,6 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
     assert outcome.reason == "configuration_error"
     assert "/old" in str(outcome.details) and "/new" in str(outcome.details)
     assert events.count("configuration_error_observed") == 1
-    observed_at = events.index("configuration_error_observed")
-    assert "device" not in events[observed_at + 1:]
     assert len(jobs) == 1
     assert (jobs[0].staging_root, jobs[0].ready_root, jobs[0].processing_root) == (
         cfg.paths.staging, cfg.paths.ready, cfg.paths.processing)
