@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -160,26 +161,29 @@ async def test_default_run_records_marker_progress_failure(
 async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
-    original_write = copies._write_synced
-    original_unlink = copies._unlink
+    logs_dir = Path(deps.config.paths.staging).expanduser() / "logs"
+    marker_path = logs_dir / copies.MARKER_NAME
+    original_replace, original_unlink = os.replace, os.unlink
     write_calls = {"count": 0}
     failed_temp: dict[str, Path] = {}
 
-    def fail_copied_progress_after_real_write(path, data):
-        write_calls["count"] += 1
-        if write_calls["count"] == 2:
-            failed_temp["path"] = Path(path)
-            original_write(path, data)
-            raise OSError("progress marker write failed after close")
-        return original_write(path, data)
+    def fail_copied_progress_after_real_write(source, target, *args, **kwargs):
+        if Path(target) == marker_path:
+            write_calls["count"] += 1
+            if write_calls["count"] == 2:
+                failed_temp["path"] = Path(source)
+                assert json.loads(Path(source).read_bytes())["stage"] == "copied"
+                raise OSError("progress marker write failed after close")
+        return original_replace(source, target, *args, **kwargs)
 
-    def fail_owned_temp_cleanup(path):
-        if copies.is_marker_temp_name(Path(path).name):
+    def fail_owned_temp_cleanup(path, *args, **kwargs):
+        candidate = Path(path)
+        if candidate == failed_temp.get("path"):
             raise OSError("progress temp cleanup denied")
-        return original_unlink(path)
+        return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(copies, "_write_synced", fail_copied_progress_after_real_write)
-    monkeypatch.setattr(copies, "_unlink", fail_owned_temp_cleanup)
+    monkeypatch.setattr(os, "replace", fail_copied_progress_after_real_write)
+    monkeypatch.setattr(os, "unlink", fail_owned_temp_cleanup)
 
     try:
         outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
@@ -205,6 +209,7 @@ async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails
     assert "temp_cleanup=failed" in log
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 不提供目录同步")
 async def test_default_run_reports_saved_marker_close_error_and_keeps_report_result(
         tmp_path: Path, monkeypatch) -> None:
     import os
@@ -265,6 +270,7 @@ async def test_default_run_reports_saved_marker_close_error_and_keeps_report_res
     assert "report_error" in log
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 不提供目录同步")
 async def test_default_recovery_reports_delete_close_error_after_confirmed_sync(
         tmp_path: Path, monkeypatch) -> None:
     import os
@@ -274,21 +280,43 @@ async def test_default_recovery_reports_delete_close_error_after_confirmed_sync(
     logs_dir = Path(deps.config.paths.staging) / "logs"
     marker = MarkerStore(logs_dir)
     assert marker.create("recovery-close", "log-copy-recovery-close.log").outcome is SaveOutcome.SAVED
-    real_close = os.close
+    real_open, real_fsync, real_close = os.open, os.fsync, os.close
+    directory_fds: set[int] = set()
+    synced_fds: set[int] = set()
+    close_followed_sync = []
+
+    def open_directory(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        if Path(path) == logs_dir:
+            directory_fds.add(fd)
+        return fd
+
+    def sync_directory(fd):
+        result = real_fsync(fd)
+        if fd in directory_fds:
+            synced_fds.add(fd)
+        return result
 
     def close_directory_then_report_error(fd):
-        target = Path(os.readlink(f"/proc/self/fd/{fd}"))
+        tracked = fd in directory_fds
+        if tracked:
+            directory_fds.remove(fd)
         real_close(fd)
-        if target == logs_dir:
+        if tracked:
+            close_followed_sync.append(fd in synced_fds)
+            synced_fds.discard(fd)
             raise OSError("recovery directory close result unconfirmed")
 
-    monkeypatch.setattr(copies.os, "close", close_directory_then_report_error)
+    monkeypatch.setattr(os, "open", open_directory)
+    monkeypatch.setattr(os, "fsync", sync_directory)
+    monkeypatch.setattr(os, "close", close_directory_then_report_error)
     monkeypatch.setattr(WorkerSupervisor, "generate", generate_valid_report)
     try:
         outcome = await execute_command(deps, None)
     finally:
         close_runtime(deps)
     assert outcome.succeeded is True
+    assert close_followed_sync == [True]
     assert list(Path(deps.config.paths.ready).glob("status-report-*.json"))
     assert marker.check().presence.value == "absent"
     log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
@@ -325,20 +353,20 @@ async def test_default_run_records_marker_progress_check_failure(
     cause = ("marker_content_invalid" if check_failure == "invalid"
              else f"progress {check_failure} denied")
     if check_failure == "stat":
-        original = copies._exists
+        original = Path.stat
         calls = {"count": 0}
 
-        def fail_progress_stat(path):
+        def fail_progress_stat(path, *args, **kwargs):
             if Path(path) == marker_path:
                 calls["count"] += 1
                 if calls["count"] == 2:
                     raise PermissionError(cause)
-            return original(path)
+            return original(path, *args, **kwargs)
 
-        monkeypatch.setattr(copies, "_exists", fail_progress_stat)
+        monkeypatch.setattr(Path, "stat", fail_progress_stat)
         expected_presence = "check_error"
     elif check_failure == "read":
-        original = copies._read_bytes
+        original = Path.read_bytes
         calls = {"count": 0}
 
         def fail_progress_read(path):
@@ -348,10 +376,10 @@ async def test_default_run_records_marker_progress_check_failure(
                     raise PermissionError(cause)
             return original(path)
 
-        monkeypatch.setattr(copies, "_read_bytes", fail_progress_read)
+        monkeypatch.setattr(Path, "read_bytes", fail_progress_read)
         expected_presence = "exists"
     else:
-        original = copies._read_bytes
+        original = Path.read_bytes
         calls = {"count": 0}
 
         def return_invalid_progress(path):
@@ -361,7 +389,7 @@ async def test_default_run_records_marker_progress_check_failure(
                     return b"{invalid progress marker"
             return original(path)
 
-        monkeypatch.setattr(copies, "_read_bytes", return_invalid_progress)
+        monkeypatch.setattr(Path, "read_bytes", return_invalid_progress)
         expected_presence = "exists"
 
     try:
@@ -1076,15 +1104,15 @@ async def test_default_run_records_copy_and_cleanup_failures(
             durable=True,
         ), "snapshot read failed")
 
-    original_unlink = copies._unlink
+    original_unlink = os.unlink
 
-    def fail_copy_cleanup(path):
-        if copies.is_copy_file_name(Path(path).name):
+    def fail_copy_cleanup(path, *args, **kwargs):
+        if Path(path) == destination_box.get("path"):
             raise OSError("staging copy cleanup denied")
-        return original_unlink(path)
+        return original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(FileChannel, "copy_with_write", failed_copy)
-    monkeypatch.setattr(copies, "_unlink", fail_copy_cleanup)
+    monkeypatch.setattr(os, "unlink", fail_copy_cleanup)
 
     try:
         outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
