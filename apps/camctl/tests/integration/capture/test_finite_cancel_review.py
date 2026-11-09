@@ -134,8 +134,7 @@ async def test_optional_preview_observations_do_not_replace_or_block_required_os
 
 @pytest.mark.parametrize('state', ['missing_pair','completion_unknown','zero_size','metadata_failed'])
 @pytest.mark.parametrize('required_by', ['min','exact'])
-@pytest.mark.parametrize('entry', ['qualification','save','guard'])
-async def test_required_preview_gaps_remain_blocked_in_all_completion_entries(tmp_path, capture_resources, monkeypatch, state, required_by, entry):
+async def test_required_preview_gaps_remain_blocked_in_all_completion_entries(tmp_path, capture_resources, monkeypatch, state, required_by):
     from ..support.capture_cancellation_cases import stored_result_case, store_result_end, finite_end_proposal
     from camctl.history.validators import validate_event
     rule = {'kind': 'video', 'format_id': 'lrf', 'min_count': 1 if required_by == 'min' else 0,
@@ -144,38 +143,46 @@ async def test_required_preview_gaps_remain_blocked_in_all_completion_entries(tm
         prior_entries=[_osv()], extra_rules=(rule,), notes=[_preview_note(state)])
     try:
         receipt = await store_result_end(world, finalized=True)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        scenario = f'state={state}, required_by={required_by}'
+        assert receipt.kind is DbOutcomeKind.COMPLETED, (scenario, receipt.error)
         from camctl.persistence.repositories.capture import CaptureRepository
         first_ticket, current_ticket = world.actual_result_calls
         first = CaptureRepository().read_last_result_page(first_ticket, world.owned)
         current = world.result_page
-        assert first_ticket != current_ticket and current.ref.ticket == current_ticket
-        assert first.page.outcome.error is not None and current.page.outcome.error is None
-        assert current.page.scan_complete and current.page.set_finalized
-        assert first.file_ids == current.file_ids and len(current.file_ids) == 1
+        assert first_ticket != current_ticket and current.ref.ticket == current_ticket, scenario
+        assert first.page.outcome.error is not None and current.page.outcome.error is None, scenario
+        assert current.page.scan_complete and current.page.set_finalized, scenario
+        assert first.file_ids == current.file_ids and len(current.file_ids) == 1, scenario
         file_id = current.file_ids[0][1]
         assert world.owned.connection.execute(
             'SELECT source_action_id,completion_state,size_bytes FROM device_files WHERE id=?',
-            (file_id,)).fetchone() == (world.action_id, 3, 50)
+            (file_id,)).fetchone() == (world.action_id, 3, 50), scenario
         assert world.owned.connection.execute(
             'SELECT attempts_used,max_attempts_used,timeout_s_json,retry_interval_s_json FROM operation_runs WHERE id=?',
-            (current_ticket.run_id,)).fetchone() == (2, 3, '10', '3')
+            (current_ticket.run_id,)).fetchone() == (2, 3, '10', '3'), scenario
         request = finite.FiniteCancelEndSave(world.action_id, world.result_page.ref, world.wall[0])
         before = tuple(world.owned.connection.iterdump())
-        if entry == 'qualification':
-            assert not finite.read_finite_cancel_assessment(request, world.owned).is_complete
-        elif entry == 'save':
-            receipt = finite.save_finite_cancel_end(request, new_operation_key(), world.owned)
-            assert receipt.kind is DbOutcomeKind.ROLLED_BACK, receipt.error
-        else:
-            event, context = finite_end_proposal(world)
-            world.owned.connection.execute('BEGIN')
+        for entry in ('qualification', 'guard', 'save'):
             try:
-                with pytest.raises(EventValidationError, match='文件|产物|扫描'):
-                    validate_event(event, context)
-            finally:
-                world.owned.connection.execute('ROLLBACK')
-        assert tuple(world.owned.connection.iterdump()) == before
+                assert not world.owned.connection.in_transaction
+                if entry == 'qualification':
+                    assert not finite.read_finite_cancel_assessment(request, world.owned).is_complete
+                elif entry == 'guard':
+                    event, context = finite_end_proposal(world)
+                    world.owned.connection.execute('BEGIN')
+                    try:
+                        with pytest.raises(EventValidationError, match='文件|产物|扫描'):
+                            validate_event(event, context)
+                    finally:
+                        world.owned.connection.execute('ROLLBACK')
+                else:
+                    receipt = finite.save_finite_cancel_end(request, new_operation_key(), world.owned)
+                    assert receipt.kind is DbOutcomeKind.ROLLED_BACK, receipt.error
+                assert not world.owned.connection.in_transaction
+                assert tuple(world.owned.connection.iterdump()) == before
+            except BaseException as error:
+                error.add_note(f'{scenario}, entry={entry}')
+                raise
     finally:
         await world.close()
 
