@@ -81,7 +81,7 @@ python scripts/run-integration.py --scope camctl \
 
 共享配置及资源组执行器位于 `scripts/camctl_memory.py`，pytest 参数与跨组件启动接缝位于 `scripts/camctl_memory_plugin.py`。正常子进程接口使用预算代理；需要保留 host 持有的 PID 和进程组身份时，启动器入组后直接替换为原入口。后者由组外 pytest 读取最终证据。启动握手需要 Linux 环境中的 `/bin/bash`。
 
-执行器的真实内核专项位于 `tests/integration/test_memory_budget_launcher.py` 中，包括两个 `test_real_cgroup_*` 用例及直接执行入口的进程身份用例。它们使用固定的 `64MiB` 校准预算，验证整棵进程树收场、父子合计超限时仍被拒绝，以及直接执行时的进程身份和实际入组。该小预算只用于验证计量工具；业务容量用例继续使用统一参数。其余启动握手辅助测试使用受控文件，不代表真实内核预算验收。
+执行器的真实内核专项位于 `tests/integration/test_memory_budget_launcher.py` 中，包括两个 `test_real_cgroup_*` 用例、直接执行入口的进程身份用例，以及启动握手、环境隔离和入组失败用例。它们使用固定的 `64MiB` 校准预算，验证整棵进程树收场、父子合计超限时仍被拒绝、直接执行时的进程身份和实际入组，以及握手和启动失败处理。该小预算只用于验证计量工具；业务容量用例继续使用统一参数。
 
 ## 严格无交换的独立验收
 

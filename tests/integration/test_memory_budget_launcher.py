@@ -4,10 +4,10 @@ from contextlib import ExitStack
 import os
 import json
 from pathlib import Path
+import stat
 import subprocess
 import shutil
 import sys
-from types import SimpleNamespace
 
 import pytest
 
@@ -16,8 +16,8 @@ from camctl_memory_plugin import finalize_receipts, memory_launcher_command
 
 
 def test_launcher_handshake_and_close_support_high_file_descriptors(tmp_path, monkeypatch):
-    control = tmp_path / "cgroup.procs"
-    control.write_text("", encoding="ascii")
+    budget = _real_probe_budget()
+    receipt = tmp_path / "handshake-receipt.json"
     environment = dict(os.environ)
     original_pipe = os.pipe
     handshake = []
@@ -34,35 +34,46 @@ def test_launcher_handshake_and_close_support_high_file_descriptors(tmp_path, mo
         for _ in range(16):
             descriptor = os.open(os.devnull, os.O_RDONLY)
             stack.callback(os.close, descriptor)
-        monkeypatch.setattr(memory.os, "pipe", pipe)
-        code = ("import os; fd=int(os.environ['CAMCTL_TEST_HANDSHAKE_FD']); "
+        monkeypatch.setattr(os, "pipe", pipe)
+        code = ("import json,os,sys; from pathlib import Path; "
+                "r=json.loads(Path(sys.argv[1]).read_text()); "
+                "assert str(os.getpid()) in (Path(r['group'])/'cgroup.procs').read_text().split(); "
+                "fd=int(os.environ['CAMCTL_TEST_HANDSHAKE_FD']); "
                 "print(os.getpid()); "
                 "print(os.path.exists('/proc/self/fd/'+str(fd)))")
-        process = memory._start_process(
-            [sys.executable, "-c", code], SimpleNamespace(path=tmp_path),
-            {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True,
-             "env": environment},
-        )
-        stdout, stderr = process.communicate(timeout=5)
+        with memory.BudgetedPopen(
+                [sys.executable, "-c", code, str(receipt)], budget=budget, receipt_path=receipt,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment) as process:
+            stdout, stderr = process.communicate(timeout=5)
 
     assert handshake[1] > 9
     assert process.returncode == 0, stderr
     assert stdout.splitlines() == [str(process.pid), "False"]
-    assert control.read_text(encoding="ascii").strip() == str(process.pid)
+    final = json.loads(receipt.read_text(encoding="utf-8"))
+    assert final["pid"] == process.pid and final["status"] == "completed"
+    assert final["group_removed"] is True and not Path(final["group"]).exists()
 
 
 def test_launcher_does_not_evaluate_bash_env_before_entering_group(tmp_path):
-    (tmp_path / "cgroup.procs").write_text("", encoding="ascii")
+    budget = _real_probe_budget()
+    receipt = tmp_path / "bash-env-receipt.json"
     marker = tmp_path / "unexpected-startup"
     startup = tmp_path / "startup.sh"
     startup.write_text(f"touch '{marker}'\n", encoding="ascii")
-    process = memory._start_process(
-        [sys.executable, "-c", "pass"], SimpleNamespace(path=tmp_path),
-        {"env": {**os.environ, "BASH_ENV": str(startup)}},
-    )
+    code = ("import json,os,sys; from pathlib import Path; "
+            "r=json.loads(Path(sys.argv[1]).read_text()); "
+            "assert str(os.getpid()) in (Path(r['group'])/'cgroup.procs').read_text().split(); "
+            "print(os.getpid())")
+    result = memory.run_budgeted(
+        [sys.executable, "-c", code, str(receipt)], budget=budget, receipt_path=receipt,
+        env={**os.environ, "BASH_ENV": str(startup)}, capture_output=True, text=True,
+        timeout=5, check=True)
 
-    assert process.wait(timeout=5) == 0
     assert not marker.exists()
+    final = json.loads(receipt.read_text(encoding="utf-8"))
+    assert result.stdout.strip() == str(final["pid"])
+    assert final["status"] == "completed" and final["group_removed"] is True
+    assert not Path(final["group"]).exists()
 
 
 def test_exec_launcher_preserves_pid_process_group_stdio_and_cwd(tmp_path):
@@ -139,20 +150,41 @@ def test_final_receipt_is_ready_before_world_archive(tmp_path):
     assert json.loads(receipt.read_text()) == final
 
 
-def test_failed_group_entry_never_executes_the_business_command(tmp_path):
+def test_failed_group_entry_never_executes_the_business_command(tmp_path, monkeypatch):
+    budget = _real_probe_budget()
+    receipt = tmp_path / "failed-entry-receipt.json"
     marker = tmp_path / "business-started"
-    group = SimpleNamespace(path=tmp_path / "missing-group")
-    try:
-        memory._start_process(
-            [sys.executable, "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(marker)],
-            group, {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE},
-        )
-    except memory.BudgetEnvironmentError:
-        pass
-    else:
-        raise AssertionError("failed entry must reject the launch")
+    real_popen = subprocess.Popen
+    children, controls = [], []
 
+    def deny_group_entry(*args, **kwargs):
+        pending = json.loads(receipt.read_text(encoding="utf-8"))
+        assert pending["status"] == "pending" and "baseline" in pending
+        control = Path(pending["group"]) / "cgroup.procs"
+        mode = stat.S_IMODE(control.stat().st_mode)
+        controls.append((control, mode))
+        control.chmod(mode & ~0o222)
+        assert not stat.S_IMODE(control.stat().st_mode) & 0o222
+        child = real_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", deny_group_entry)
+    try:
+        with pytest.raises(memory.BudgetEnvironmentError, match="启动 shell 未能在执行业务前进入专属资源组"):
+            memory.run_budgeted(
+                [sys.executable, "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(marker)],
+                budget=budget, receipt_path=receipt, capture_output=True, text=True, timeout=5)
+    finally:
+        for control, mode in controls:
+            if control.exists():
+                control.chmod(mode)
+
+    assert len(children) == 1 and children[0].poll() is not None
     assert not marker.exists()
+    final = json.loads(receipt.read_text(encoding="utf-8"))
+    assert final["status"] == "environment_error" and final["group_removed"] is True
+    assert not Path(final["group"]).exists()
 
 
 def _real_probe_budget():
