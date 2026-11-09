@@ -367,8 +367,12 @@ class TestStopRetryWithinBudget:
             # 流程累计；停止间隔到时后第二次停止调用成功并结束流程。
             await _await_query(
                 db,
-                "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'stop/1'", (2, 1))
+                "SELECT r.status, r.attempts_used, r.retry_wait_required,"
+                " EXISTS(SELECT 1 FROM operation_attempts t WHERE t.run_id = r.id"
+                " AND t.attempt_no = 1 AND t.status = 3"
+                " AND t.result_event_id IS NOT NULL)"
+                " FROM operation_runs r WHERE r.responsibility_key = 'stop/1'",
+                (2, 1, 1, 1), task=task)
             clock["ns"] += 3_000_000_000
             await _await_query(
                 db,
