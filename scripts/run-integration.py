@@ -264,12 +264,13 @@ def managed_wait_sync(process):
 
 
 def collect_and_shard(args, tasks, output, seed, python, versions, identity):
-    """当前收集清单决定覆盖；历史记录决定分片候选与均衡权重。"""
+    """当前收集清单决定覆盖；历史记录用于自动选择及均衡权重。"""
     costs, _ = case_history(seed)
     result = []
     for task in tasks:
         if (task['scope'] != 'root' or args.root_shards == 1 or
-                (task['estimated_seconds'] < ROOT_SHARD_SECONDS and not task['historical_failure_observed'])):
+                (not args.force_root_shards and task['estimated_seconds'] < ROOT_SHARD_SECONDS
+                 and not task['historical_failure_observed'])):
             result.append(task)
             continue
         directory = output / 'collection' / task['id'].replace('/', '-')
@@ -555,6 +556,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jobs', type=int, default=4, help='最多同时运行的隔离任务数（默认 4）')
     parser.add_argument('--root-shards', type=int, help='历史长模块或曾失败根pytest模块最多分为几片（默认随jobs，1禁用）')
+    parser.add_argument('--force-root-shards', action='store_true',
+                        help='对本次所选根pytest模块收集并分片，不受历史时长和失败记录限制')
     parser.add_argument('--scope', choices=('all', 'camctl', 'root', 'node'), default='all')
     parser.add_argument('--target', action='append', default=[], help='仓库相对目录、文件或 pytest nodeid，可重复')
     parser.add_argument('--python', type=Path, default=Path(sys.executable), help='已准备测试依赖的外部 Python 3.11')
@@ -568,7 +571,7 @@ def main():
                         help='可创建专属预算组的 Linux 委派目录')
     preview = parser.add_mutually_exclusive_group()
     preview.add_argument('--list', action='store_true', help='只列出发现并选择的模块任务，不执行测试')
-    preview.add_argument('--plan-only', action='store_true', help='冻结源码并收集长根模块的真实分片计划，不执行测试')
+    preview.add_argument('--plan-only', action='store_true', help='冻结源码并收集根pytest模块的实际分片计划，不执行测试')
     args = parser.parse_args()
     output = None
     try:

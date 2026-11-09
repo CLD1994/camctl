@@ -368,6 +368,76 @@ class IntegrationRunnerTest(unittest.TestCase):
                 if historical_status == 'passed':
                     self.assertFalse((output / 'collection').exists())
 
+    def test_explicit_root_sharding_uses_selected_current_nodes(self):
+        target = 'tests/integration/test_matrix.py::test_value'
+        expected = [target + '[' + name + ']' for name in ('a', 'b', 'new')]
+        cases = (
+            ('default', (), 1),
+            ('forced', ('--force-root-shards',), 2),
+            ('one-shard', ('--force-root-shards', '--root-shards', '1'), 1),
+            ('one-node', ('--force-root-shards', '--target', expected[0]), 1),
+        )
+        for case, options, count in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / 'input'
+                self._fixture_repository(source, 'test_matrix.py',
+                    'import pytest\n'
+                    '@pytest.mark.parametrize("value", range(3), ids=["a","b","new"])\n'
+                    'def test_value(value):\n    assert value >= 0\n', history=True)
+                timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
+                (timing / 'cross-component-cases.csv').write_text(
+                    'nodeid,status,total_s\n' + ''.join(
+                        f'{node},passed,1\n' for node in expected[:2]))
+                selection = () if case == 'one-node' else (
+                    '--target', target, '--target', expected[0])
+                preview = () if case == 'forced' else ('--plan-only',)
+                result, output = self._run_fixture(root, source, '--scope', 'root',
+                    '--root-shards', '2', *selection, *options, *preview)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                plan = json.loads((output / 'plan.json').read_text())
+                self.assertEqual(len(plan), count)
+                self.assertTrue(all(not task['historical_failure_observed'] for task in plan))
+                if case == 'forced':
+                    assigned = [node for task in plan for node in task['targets']]
+                    self.assertCountEqual(assigned, expected)
+                    self.assertEqual(len(assigned), len(set(assigned)))
+                    inventory = json.loads((Path(plan[0]['collection']) / 'inventory.json').read_text())
+                    self.assertCountEqual(inventory, expected)
+                    summary = json.loads((output / 'summary.json').read_text())
+                    actual = [node for task in summary['tasks'] for node in json.loads(
+                        (Path(task['artifacts']) / 'inventory.json').read_text())]
+                    self.assertCountEqual(actual, expected)
+                    self.assertEqual(len(actual), len(set(actual)))
+                elif case == 'one-node':
+                    self.assertEqual(plan[0]['targets'], [expected[0]])
+                    collected = json.loads((output / 'collection/root-test_matrix/artifacts/inventory.json').read_text())
+                    self.assertEqual(collected, [expected[0]])
+                else:
+                    self.assertEqual(plan[0]['targets'], [target])
+                    self.assertFalse((output / 'collection').exists())
+
+    def test_force_sharding_only_changes_selected_root_tasks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_matrix.py',
+                'import pytest\n'
+                '@pytest.mark.parametrize("value", [1, 2])\n'
+                'def test_value(value):\n    assert value\n')
+            component = source / 'apps/camctl/tests/integration/example'
+            component.mkdir()
+            (component / 'test_component.py').write_text('def test_value():\n    assert True\n')
+            (source / 'tests/integration/example.test.mjs').write_text('// Node task\n')
+            result, output = self._run_fixture(root, source, '--force-root-shards',
+                                               '--root-shards', '2', '--plan-only')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            plan = json.loads((output / 'plan.json').read_text())
+            self.assertEqual([task['scope'] for task in plan].count('root'), 2)
+            for scope in ('camctl', 'node'):
+                task, = [task for task in plan if task['scope'] == scope]
+                self.assertEqual(task['targets'], [task['path']])
+                self.assertNotIn('shard', task)
+
     def _fixture_repository(self, source, filename, content, history=False):
         for directory in ('apps/camctl/tests/integration', 'apps/client', 'protocol', 'tests/integration'):
             (source / directory).mkdir(parents=True, exist_ok=True)

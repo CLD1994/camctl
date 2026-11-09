@@ -31,13 +31,17 @@
 
 入口从 Git 已跟踪文件与未忽略的新文件冻结源码，包括当前未提交的修改；删除的文件保持删除。`--source` 可指定另一 Git 工作区。快照保留正式源码、协议、构建文件、测试素材和文档，但不复制 `docs/camctl/verification-data/` 中的历史验证输出；该目录中用于调度的 `camctl-files.csv`、`cross-component-files.csv` 和 `cross-component-cases.csv` 仍按当前工作区内容纳入快照。本轮输出目录即使位于源工作区内也不会纳入。生成目录、依赖和缓存不作为源码快照输入。每个任务取得独立源码副本；Git 索引基于原 HEAD，因此排除的已跟踪文件在副本的 Git 状态中显示为删除，不能将副本视为完整或干净的仓库。`source.json` 记录来源 HEAD、原工作区状态、快照范围、实际纳入文件的摘要和整体摘要；它不把 Git 索引描述为原工作区的暂存状态。快照只接受普通源码文件；发现符号链接时明确报错，不跟随链接访问外部对象。已有逐文件测量仅用于优先调度较长任务，未测目标照常执行。
 
-根 pytest 中，历史所选节点估算至少 600 秒，或逐实例历史 CSV 的 `status` 曾为 `failed` 的模块，先在独立源码副本执行 `--collect-only`；本次收集多于一个节点时按当前清单分片。没有历史失败的短模块保持单进程与一次准备。`--root-shards` 默认取 `--jobs`，限制每个模块的片数；设置为 1 可保持模块单进程。历史失败只计到实际失败步骤，其耗时是完整成本的下界，不能与已完成用例的耗时视为可比的完整成本；`historical_failure_observed` 在计划中标识这类模块。历史逐实例耗时仍作为均衡权重，不是精确负载预测，历史未登记的新节点仍会分配；各片的并集必须与本次收集清单一致且互不重复。每片独立构建／安装和执行，容量规模及完整 Hasselblad 十二组正常链保持。窄目标只估算并收集所选节点，不会因同模块的其他慢例而扩大覆盖。
+根 pytest 中，历史所选节点估算至少 600 秒，或逐实例历史 CSV 的 `status` 曾为 `failed` 的模块，先在独立源码副本执行 `--collect-only`；本次收集多于一个节点时按当前清单分片。没有历史失败的短模块默认保持单进程与一次准备。显式指定 `--force-root-shards` 时，本次所选根 pytest 模块不受历史时长或失败记录的候选条件限制；该选项不改变组件目录或 Node 任务。`--root-shards` 默认取 `--jobs`，限制每个模块的片数；设置为 1 可保持模块单进程，即使指定强制选项也不分片。实际只收集到一个节点时也保持单任务。历史失败只计到实际失败步骤，其耗时是完整成本的下界，不能与已完成用例的耗时视为可比的完整成本；`historical_failure_observed` 在计划中标识这类模块。历史逐实例耗时仍作为均衡权重，不是精确负载预测，历史未登记的新节点仍会分配；各片的并集必须与本次收集清单一致且互不重复。每片独立构建／安装和执行，容量规模及完整 Hasselblad 十二组正常链保持。窄目标只估算并收集所选节点，不会因同模块的其他慢例而扩大覆盖。强制分片会增加收集与各片准备成本，是否缩短墙钟取决于实际工作量和并发。
 
 `--list` 只展示发现与选择的模块任务；需要审查实际分片时，用 `--plan-only` 冻结源码并生成 `plan.json`，分片候选的真实收集清单与命令保存在 `collection/`。此模式不执行测试，也不代表测试通过：
 
 ```bash
 /absolute/venv/bin/python scripts/run-integration.py --plan-only \
   --jobs 4 --output /tmp/camctl-integration-plan
+
+/absolute/venv/bin/python scripts/run-integration.py --plan-only \
+  --scope root --target 'tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip' \
+  --force-root-shards --root-shards 4 --jobs 4 --output /tmp/camctl-forced-plan
 ```
 
 每个执行槽按任务需要准备独立的 uv 缓存、uv 项目环境和客户端 `node_modules` 副本；同一槽依次复用，槽间不共享写入。Node 任务只准备源码、临时目录和客户端依赖，不复制 uv 缓存或创建 Python 环境，也不同步 Python 包资源。同一槽随后执行 Python 任务时再准备这些资源。复制使用 `cp -a --reflink=auto`，支持时由文件系统写时复制，否则复制普通文件，不建立硬链接。每个任务另有自己的源码、`_resources`、客户端 `dist`、pytest 临时根、SQLite、交接文件与安装环境。任务的 `.venv311` 使用标准库创建，不安装包，以 `.pth` 只读引用外部测试环境的依赖；源码通过该任务的 `PYTHONPATH` 导入。每槽的 `PYTHONPYCACHEPREFIX` 位于源码之外，创建虚拟环境、同步资源、pytest 与安装版 CLI 共同使用该私有字节码缓存；collection 使用自己源码副本外的私有前缀。入口清除继承的两个字节码缓存环境变量，版本核验另外使用 `-B`，不向共享依赖写入字节码。缓存改变不影响安装模块的来源和 wheel 的自包含边界。跨组件辅助中的 C 构建仍使用其随机唯一目录或 pytest 临时目录；现有 `/tmp/camctl-host-build-*` 不受 pytest 临时根管理。Hasselblad 联合链的每个任务还在源码副本之外，从同一快照创建独立客户端候选，保留客户端、协议与测试驱动的相对布局，使用该槽私有依赖执行真实 `npm run build`，并设置 `CAMCTL_HB_TEST_CLIENT_ROOT`。候选的源码与 `dist` 都不引用用户共享工作区。系统工具、外部测试依赖和已安装 Chromium 只读复用。入口面向 Linux 开发容器，要求 Git、GNU cp、uv 与 Node 已可用；不会安装系统工具，也不代替目标设备验收。
