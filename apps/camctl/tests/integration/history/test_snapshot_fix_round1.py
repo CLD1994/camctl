@@ -68,17 +68,25 @@ def _snapshot_matches_initial(owned, history, ref, prepared):
     return snapshot_rows == replay_rows
 
 
+def _finish_recording(owned, runtime, repo, ref):
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.repositories.segment_transactions import FinishSegmentRecording
+
+    row = repo.read_set(ref, owned)
+    request = FinishSegmentRecording(ref, row['activity_id'], row['run_id'], runtime.wall_us())
+    result = CaptureRepository().finish_segment_recording(request, new_operation_key(), owned)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('damage',['assessment_null','member_count_null','marker_null','marker_scope_null'])
 async def test_snapshot_acceptance_compares_write_once_values_with_independent_replay(tmp_path,damage):
     if damage.startswith('marker'):
-        from ..persistence.test_segment_storage import _assessed_world,_completion_command
+        from ..persistence.test_segment_storage import _assessed_world
         from camctl.capture.segment_models import DefaultScopeState
-        from camctl.persistence.transaction import commit_operation
         owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
-        key=new_operation_key()
-        result=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
-        assert result.kind == 'completed',result.error
+        _finish_recording(owned,runtime,repo,ref)
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
     else:
         owned,runtime,repo,ref,history=await _fixture(tmp_path)
@@ -151,9 +159,8 @@ async def test_snapshot_acceptance_compares_assessment_at_s_with_independent_rep
 @pytest.mark.asyncio
 @pytest.mark.parametrize('future',['marker_and_outputs','outputs_only'])
 async def test_snapshot_acceptance_compares_publication_at_s_with_independent_replay(tmp_path,future):
-    from ..persistence.test_segment_storage import _assessed_world,_completion_command
+    from ..persistence.test_segment_storage import _assessed_world
     from camctl.capture.segment_models import DefaultScopeState
-    from camctl.persistence.transaction import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
     try:
@@ -161,9 +168,7 @@ async def test_snapshot_acceptance_compares_publication_at_s_with_independent_re
         with history.open_segment_history(ref.action_id,before) as handle:prepared=prepare_snapshot(handle)
         try:
             await _save(history,prepared)
-            key=new_operation_key()
-            result=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
-            assert result.kind=='completed',result.error
+            _finish_recording(owned,runtime,repo,ref)
             marker=repo.read_set(ref,owned)['published_event_id']
             outputs=dict(owned.connection.execute('SELECT id,output_id FROM segment_scope_members'))
             def change(records):
@@ -1046,12 +1051,28 @@ async def test_framed_invalid_large_row_is_rejected_as_one_record(tmp_path):
 @pytest.mark.asyncio
 async def test_snapshot_line_tempfile_failure_or_upper_validation_closes_all_resources(tmp_path,monkeypatch,failure):
     import errno
+    import sqlite3
+    import tempfile
     from camctl.history import snapshot_stream as module
-    from camctl.history.bounded import SegmentHistoryHandle
     owned,_,_,ref,history=await _fixture(tmp_path)
     boundary=history.current_boundary()
     with history.open_segment_history(ref.action_id,boundary) as handle:prepared=prepare_snapshot(handle)
-    opened=[];handles=[];original_file=module.TemporaryFile;original_init=SegmentHistoryHandle.__init__
+    temporary=tmp_path/'history-temporary'
+    temporary.mkdir()
+    opened=[];derived=[];original_file=module.TemporaryFile;real_connect=sqlite3.connect
+    class DerivedConnection(sqlite3.Connection):
+        def close(self):
+            super().close()
+            self.was_closed=True
+    def connect(database,*args,**kwargs):
+        path=Path(database) if isinstance(database,(str,Path)) else None
+        if path is not None and path.is_absolute() and path.is_relative_to(temporary):
+            assert 'factory' not in kwargs
+            connection=real_connect(database,*args,factory=DerivedConnection,**kwargs)
+            connection.was_closed=False
+            derived.append((connection,path,path.is_file()))
+            return connection
+        return real_connect(database,*args,**kwargs)
     class FailingRowFile:
         def __init__(self,inner):self.inner=inner;self.calls={'write':0,'read':0,'truncate':0}
         def __enter__(self):return self
@@ -1066,17 +1087,17 @@ async def test_snapshot_line_tempfile_failure_or_upper_validation_closes_all_res
         def truncate(self,*args):return self._call('truncate',*args)
     def create(*args,**kwargs):
         value=FailingRowFile(original_file(*args,**kwargs));opened.append(value);return value
-    def capture(self,*args,**kwargs):
-        original_init(self,*args,**kwargs);handles.append((self,Path(self._temporary.name)))
     try:
         await _save(history,prepared)
         if failure=='header':_change_snapshot(owned,prepared,lambda records:records[0].update(entity_id=999))
+        monkeypatch.setattr(tempfile,'tempdir',str(temporary))
+        monkeypatch.setattr(sqlite3,'connect',connect)
         monkeypatch.setattr(module,'TemporaryFile',create)
-        monkeypatch.setattr(SegmentHistoryHandle,'__init__',capture)
         with pytest.raises(ConsistencyError if failure=='header' else OSError):
             history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=2)
         assert opened and all(value.inner.closed for value in opened)
-        assert handles and all(handle._db is None and not directory.exists() for handle,directory in handles)
+        assert derived and all(existed and connection.was_closed and not path.exists() and not path.parent.exists()
+                               for connection,path,existed in derived)
         assert history.current_boundary()==boundary
     finally:prepared.close();owned.connection.close()
 
