@@ -9,6 +9,8 @@ from copy import deepcopy
 from decimal import Decimal
 from hashlib import sha256
 import json
+import multiprocessing
+import traceback
 
 import pytest
 
@@ -101,25 +103,60 @@ def test_real_acceptance_projection_encoding_matches_independent_bytes(accepted_
         assert decoded["plans"][0]["actions"][0]["effective_params"]["quality"] == Decimal("1.5")
 
 
-def test_shared_registration_field_reordering_preserves_bytes(accepted_report, monkeypatch):
-    document, facts = accepted_report
-    original_read = public_projection.resource_bytes
-    registration = json.loads(original_read("registry/report-dependencies.json"))
-    for definition in registration["projections"].values():
-        definition["fields"] = dict(reversed(list(definition["fields"].items())))
-    altered = json.dumps(registration, ensure_ascii=False).encode("utf-8")
-    def read(name):
-        return altered if name == "registry/report-dependencies.json" else original_read(name)
-    monkeypatch.setattr(public_projection, "resource_bytes", read)
-    public_projection._dependencies.cache_clear()
+def _encode_with_reordered_registration(connection, document, facts):
     try:
-        assert encode_report(document, facts) == _EXPECTED
-        assert public_projection.projection_structure("report").entity_fields == (
-            ("plans", "plan"), ("plan_file_diagnostics", "diagnostic"))
-        assert public_projection.projection_structure("action").entity_fields == (
-            ("outputs", "output"), ("deliveries", "delivery"))
+        original_read = public_projection.resource_bytes
+        registration = json.loads(original_read("registry/report-dependencies.json"))
+        for definition in registration["projections"].values():
+            definition["fields"] = dict(reversed(list(definition["fields"].items())))
+        altered = json.dumps(registration, ensure_ascii=False).encode("utf-8")
+        reads = []
+
+        def read(name):
+            if name == "registry/report-dependencies.json":
+                reads.append(name)
+                return altered
+            return original_read(name)
+
+        public_projection.resource_bytes = read
+        connection.send(("ok", encode_report(document, facts),
+                         public_projection.projection_structure("report").entity_fields,
+                         public_projection.projection_structure("action").entity_fields,
+                         len(reads)))
+    except BaseException:
+        connection.send(("error", traceback.format_exc()))
+        raise
     finally:
-        public_projection._dependencies.cache_clear()
+        connection.close()
+
+
+def test_shared_registration_field_reordering_preserves_bytes(accepted_report):
+    document, facts = accepted_report
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe(duplex=False)
+    process = context.Process(target=_encode_with_reordered_registration, args=(child, document, facts))
+    process.start()
+    child.close()
+    try:
+        assert parent.poll(10), "报告编码进程未在期限内返回"
+        result = parent.recv()
+        process.join(10)
+        assert result[0] == "ok", result[1]
+        assert not process.is_alive(), "报告编码进程未在期限内退出"
+        assert process.exitcode == 0
+        assert result[1] == _EXPECTED
+        assert result[2] == (("plans", "plan"), ("plan_file_diagnostics", "diagnostic"))
+        assert result[3] == (("outputs", "output"), ("deliveries", "delivery"))
+        assert result[4] == 1, "报告编码未读取重排后的字段登记"
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(10)
+        if process.is_alive():
+            process.kill()
+            process.join(10)
+        parent.close()
+        process.close()
 
 
 def test_successful_unit_projection_examples_match_real_schema():
