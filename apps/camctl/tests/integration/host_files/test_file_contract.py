@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import os
 import shutil
+import sys
 import threading
 from decimal import Decimal
 from pathlib import Path
@@ -21,7 +22,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
-import camctl.host_files.handoff as handoff
+from .file_boundary_helpers import fail_fd_operation
 import camctl.host_files.io as file_io
 from camctl.devices.read_session import SourceFile, open_read
 from camctl.host_files.handoff import (
@@ -227,47 +228,36 @@ class TestBoundaryEffects:
         roots = BoundDirectories(staging=staging.parent)
 
         # 截断失败：不能继续，文件保持观察到的原状。
-        def failing_truncate(fd: int, length: int) -> None:
-            raise OSError("injected truncate failure")
-
-        monkeypatch.setattr(file_io, "_ftruncate", failing_truncate)
-        blocked = file_io.prepare_target(ref, roots, 10)
+        with monkeypatch.context() as patch:
+            fail_fd_operation(patch, "ftruncate", target_path, OSError("injected truncate failure"))
+            blocked = file_io.prepare_target(ref, roots, 10)
         assert blocked.truncated is False
         assert blocked.can_continue is False
         assert blocked.error is not None
-        assert len(target_path.read_bytes()) == 20
-        monkeypatch.undo()
+        assert target_path.read_bytes() == b"0123456789abcdefghij"
 
-        # 截断成功：文件观察立即反映目标长度。
         prepared = file_io.prepare_target(ref, roots, 10)
         assert prepared.truncated is True
         assert prepared.can_continue is True
         assert prepared.error is None
         assert target_path.read_bytes() == b"0123456789"
 
-        # 文件同步失败：目录同步不尝试，文件事实保留。
-        def failing_fsync(fd: int) -> None:
-            raise OSError("injected fsync failure")
-
-        monkeypatch.setattr(file_io, "_fsync", failing_fsync)
-        failed = file_io.sync_target(ref, roots)
+        with monkeypatch.context() as patch:
+            fail_fd_operation(patch, "fsync", target_path, OSError("injected fsync failure"))
+            failed = file_io.sync_target(ref, roots)
         assert failed.file_synced is False
         assert failed.directory is DirectorySyncStage.NOT_ATTEMPTED
         assert failed.error is not None
         assert target_path.read_bytes() == b"0123456789"
 
-        # 文件同步成功、目录同步失败：两个阶段分别表达。
-        def failing_directory(path: Path):
-            raise OSError("injected directory sync failure")
-
-        monkeypatch.setattr(file_io, "_fsync", lambda fd: None)
-        monkeypatch.setattr(file_io, "_DIRECTORY_SYNC_SUPPORTED", True)
-        monkeypatch.setattr(file_io, "_sync_directory", failing_directory)
-        synced = file_io.sync_target(ref, roots)
-        assert synced.file_synced is True
-        assert synced.directory is DirectorySyncStage.FAILED
-        assert synced.error is not None
-        assert target_path.read_bytes() == b"0123456789"
+        if sys.platform != "win32":
+            with monkeypatch.context() as patch:
+                fail_fd_operation(patch, "fsync", target_path.parent, OSError("injected directory sync failure"))
+                synced = file_io.sync_target(ref, roots)
+            assert synced.file_synced is True
+            assert synced.directory is DirectorySyncStage.FAILED
+            assert synced.error is not None
+            assert target_path.read_bytes() == b"0123456789"
 
     async def test_publish_stages_match_observed_locations(
             self, tmp_path: Path, monkeypatch) -> None:
@@ -287,24 +277,19 @@ class TestBoundaryEffects:
         assert not source.exists()
 
         # 移动成功但目录同步失败：已移动事实保留，文件实际在 ready。
-        # 模拟支持目录同步的平台注入同步失败。
-        staging2, ready2, _, source2 = _handoff_dirs(tmp_path / "case2", b"second")
-        ref2, roots2 = _staging_ref(staging2)
-
-        def failing_directory(path: Path):
-            raise OSError("injected directory sync failure")
-
-        monkeypatch.setattr(handoff, "_DIRECTORY_SYNC_SUPPORTED", True)
-        monkeypatch.setattr(handoff, "_sync_directory", failing_directory)
-        result2 = await publish_file(
-            ref2, roots2, HandoffDirectories(staging=staging2, ready=ready2),
-            ReadyName("7.bin"),
-        )
-        assert result2.stage is PublishStage.MOVED
-        assert result2.directory is DirectorySyncStage.FAILED
-        assert (ready2 / "7.bin").read_bytes() == b"second"
-        assert not source2.exists()
-        monkeypatch.undo()
+        if sys.platform != "win32":
+            staging2, ready2, _, source2 = _handoff_dirs(tmp_path / "case2", b"second")
+            ref2, roots2 = _staging_ref(staging2)
+            with monkeypatch.context() as patch:
+                fail_fd_operation(patch, "fsync", source2.parent, OSError("injected directory sync failure"))
+                result2 = await publish_file(
+                    ref2, roots2, HandoffDirectories(staging=staging2, ready=ready2),
+                    ReadyName("7.bin"),
+                )
+            assert result2.stage is PublishStage.MOVED
+            assert result2.directory is DirectorySyncStage.FAILED
+            assert (ready2 / "7.bin").read_bytes() == b"second"
+            assert not source2.exists()
 
         # 同名目标不覆盖：未移动，两侧内容保持。
         staging3, ready3, _, source3 = _handoff_dirs(tmp_path / "case3", b"third")

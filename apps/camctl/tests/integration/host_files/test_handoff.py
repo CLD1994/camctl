@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import errno
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
 
+from .file_boundary_helpers import fail_fd_operation
 from camctl.host_files.handoff import (
     HandoffDirectories,
     HandoffIdentity,
@@ -75,18 +78,12 @@ async def test_source_missing_before_move(tmp_path: Path) -> None:
     assert not (ready / "7.bin").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="目录同步不适用于 Windows")
 async def test_directory_sync_failure_keeps_moved_fact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import camctl.host_files.handoff as handoff_module
-
     ref, roots, dirs, source, ready, _ = _setup(tmp_path)
-
-    def fail_sync(directory: Path) -> None:
-        raise OSError(5, "io")
-
-    monkeypatch.setattr(handoff_module, "_DIRECTORY_SYNC_SUPPORTED", True)
-    monkeypatch.setattr(handoff_module, "_sync_directory", fail_sync)
+    fail_fd_operation(monkeypatch, "fsync", source.parent, OSError(errno.EIO, "io"))
     result = await publish_file(ref, roots, dirs, ReadyName("7.bin"))
     assert result.stage is PublishStage.MOVED
     assert result.directory is DirectorySyncStage.FAILED

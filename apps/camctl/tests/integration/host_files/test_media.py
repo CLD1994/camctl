@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import errno
 import hashlib
-import os
 import shutil
 import subprocess
 import sys
@@ -18,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-import camctl.host_files.io as file_io
+from .file_boundary_helpers import fail_fd_operation
 from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.media import (
     ProbeRequest,
@@ -349,11 +348,10 @@ async def test_repair_real_file_sync_error_keeps_digest(
     input_ref, output_ref, roots, _, output_path = _setup(tmp_path)
     tool = _tool(tmp_path, "repair", _REPAIR_BODY)
 
-    def fail_sync(*args):
-        raise OSError(errno.EIO, "sync disk")
-
-    monkeypatch.setattr(file_io, "_DIRECTORY_SYNC_SUPPORTED", True)
-    monkeypatch.setattr(file_io, "_fsync" if phase == "file" else "_sync_directory", fail_sync)
+    if phase == "directory" and sys.platform == "win32":
+        pytest.skip("目录同步不适用于 Windows")
+    target = output_path if phase == "file" else output_path.parent
+    fail_fd_operation(monkeypatch, "fsync", target, OSError(errno.EIO, "sync disk"))
     result = await repair_media(input_ref, output_ref, roots, RepairRequest(ffmpeg=tool))
     assert result.exists is True
     assert result.complete is True
@@ -371,11 +369,7 @@ async def test_repair_keeps_both_real_close_errors(
     input_ref, output_ref, roots, _, output_path = _setup(tmp_path)
     tool = _tool(tmp_path, "repair", _REPAIR_BODY)
 
-    def close_then_report_error(fd: int) -> None:
-        os.close(fd)
-        raise OSError(errno.EIO, "close disk")
-
-    monkeypatch.setattr(file_io, "_close", close_then_report_error)
+    fail_fd_operation(monkeypatch, "close", output_path, OSError(errno.EIO, "close disk"), after=True)
     result = await repair_media(input_ref, output_ref, roots, RepairRequest(ffmpeg=tool))
     assert result.complete is False
     assert result.digest == hashlib.sha256(output_path.read_bytes()).hexdigest()

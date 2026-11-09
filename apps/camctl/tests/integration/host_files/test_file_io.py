@@ -9,13 +9,12 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
-import stat
 import sys
 from pathlib import Path
 
 import pytest
 
-import camctl.host_files.io as file_io
+from .file_boundary_helpers import fail_fd_operation
 from camctl.host_files.io import (
     DirectorySyncStage,
     prepare_target,
@@ -91,34 +90,27 @@ async def test_real_sync_and_injected_call_failures(
     else:
         assert real.directory is DirectorySyncStage.SYNCED
 
-    def fail_fsync(fd: int) -> None:
-        raise OSError(errno.EIO, "io")
-
-    monkeypatch.setattr(file_io, "_fsync", fail_fsync)
-    failed = sync_target(ref, roots)
+    with monkeypatch.context() as patch:
+        fail_fd_operation(patch, "fsync", path, OSError(errno.EIO, "io"))
+        failed = sync_target(ref, roots)
     assert failed.file_synced is False
     assert failed.directory is DirectorySyncStage.NOT_ATTEMPTED
     assert failed.error is not None
 
-    monkeypatch.setattr(file_io, "_fsync", os.fsync)
-    monkeypatch.setattr(file_io, "_DIRECTORY_SYNC_SUPPORTED", True)
+    if sys.platform != "win32":
+        with monkeypatch.context() as patch:
+            fail_fd_operation(patch, "fsync", path.parent, OSError(errno.EIO, "io"))
+            staged = sync_target(ref, roots)
+        assert staged.file_synced is True
+        assert staged.directory is DirectorySyncStage.FAILED
+        assert staged.error is not None
 
-    def fail_directory(directory_path: Path) -> None:
-        raise OSError(errno.EIO, "io")
-
-    monkeypatch.setattr(file_io, "_sync_directory", fail_directory)
-    staged = sync_target(ref, roots)
-    assert staged.file_synced is True
-    assert staged.directory is DirectorySyncStage.FAILED
-    assert staged.error is not None
-
-    def fail_truncate(fd: int, length: int) -> None:
-        raise OSError(errno.ENOSPC, "no space")
-
-    monkeypatch.setattr(file_io, "_ftruncate", fail_truncate)
-    blocked = prepare_target(ref, roots, 4096)
+    with monkeypatch.context() as patch:
+        fail_fd_operation(patch, "ftruncate", path, OSError(errno.ENOSPC, "no space"))
+        blocked = prepare_target(ref, roots, 4096)
     assert blocked.truncated is False
     assert blocked.can_continue is False
+    assert path.read_bytes() == b"data"
 
 
 async def test_async_wrapper_uses_file_tasks(tmp_path: Path) -> None:
@@ -161,11 +153,7 @@ async def test_close_error_keeps_real_file_effect(
     ref, roots, path = _setup(tmp_path)
     path.write_bytes(b"abcdef")
 
-    def close_then_report_error(fd: int) -> None:
-        os.close(fd)
-        raise OSError(errno.EIO, "close device")
-
-    monkeypatch.setattr(file_io, "_close", close_then_report_error)
+    fail_fd_operation(monkeypatch, "close", path, OSError(errno.EIO, "close device"), after=True)
     if operation == "prepare":
         result = prepare_target(ref, roots, 3)
         assert result.created is False
@@ -189,15 +177,7 @@ async def test_directory_close_error_keeps_completed_directory_sync(
 ) -> None:
     ref, roots, path = _setup(tmp_path)
     path.write_bytes(b"data")
-    real_close = os.close
-
-    def close_directory_with_error(fd: int) -> None:
-        is_directory = stat.S_ISDIR(os.fstat(fd).st_mode)
-        real_close(fd)
-        if is_directory:
-            raise OSError(errno.EIO, "close directory")
-
-    monkeypatch.setattr(file_io.os, "close", close_directory_with_error)
+    fail_fd_operation(monkeypatch, "close", path.parent, OSError(errno.EIO, "close directory"), after=True)
     result = sync_target(ref, roots)
     assert result.file_synced is True
     assert result.directory is DirectorySyncStage.SYNCED
