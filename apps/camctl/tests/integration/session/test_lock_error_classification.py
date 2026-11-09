@@ -5,17 +5,19 @@ from __future__ import annotations
 import asyncio
 import errno
 import json
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import url2pathname
 
 import pytest
 
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import AcceptanceStateError, CommandMode
 from camctl.bootstrap import application
-from camctl.bootstrap import lifecycle as lifecycle_module
 from camctl.bootstrap.lifecycle import execute_command
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
@@ -223,18 +225,87 @@ def _receipt_for_control(control: BaseException, expected_kind: str):
     return receipt
 
 
-def _wrap_runtime_connection(monkeypatch, factory):
-    original = lifecycle_module._open_runtime_connection
-    proxies: list[_ConnectionProxy] = []
+def _observe_submit_rollback(monkeypatch, database, backend, rollback_error=None):
+    """只观察本次提交中探测锁失败后的真实 SQLite 回滚。"""
+    original_connect = sqlite3.connect
+    database_path = os.path.normcase(os.path.realpath(database))
+    observed = []
 
-    def open_wrapped(deps):
-        owned = original(deps)
-        proxy = factory(owned.connection)
-        proxies.append(proxy)
-        return OwnedConnection(proxy, owned.metadata)
+    class SubmitConnection(sqlite3.Connection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.rollback_attempts = self.rollbacks = self.failures = 0
+            self.in_transaction_at_rollback = False
+            self.close_count = 0
+            self.closed = False
+            self.in_transaction_before_close = None
 
-    monkeypatch.setattr(lifecycle_module, "_open_runtime_connection", open_wrapped)
-    return proxies
+        def execute(self, statement, parameters=()):
+            rollback = denied = False
+
+            def authorize(action, argument, _column, _database, _source):
+                nonlocal rollback, denied
+                if (action == sqlite3.SQLITE_TRANSACTION and argument == "ROLLBACK"
+                        and backend.calls["try_lock"]):
+                    rollback = True
+                    self.rollback_attempts += 1
+                    self.in_transaction_at_rollback = self.in_transaction
+                    if rollback_error is not None and self.failures == 0:
+                        self.failures += 1
+                        denied = True
+                        return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            self.set_authorizer(authorize)
+            try:
+                try:
+                    result = super().execute(statement, parameters)
+                except sqlite3.DatabaseError:
+                    if not denied:
+                        raise
+            finally:
+                self.set_authorizer(None)
+            if denied:
+                raise rollback_error
+            if rollback:
+                self.rollbacks += 1
+            return result
+
+        def close(self):
+            if self.close_count == 0:
+                self.in_transaction_before_close = self.in_transaction
+            result = super().close()
+            self.close_count += 1
+            try:
+                super().execute("SELECT 1")
+            except sqlite3.ProgrammingError:
+                self.closed = True
+            return result
+
+    def connect(path, *args, **kwargs):
+        uri = kwargs.get("uri", args[6] if len(args) > 6 else False)
+        factory = kwargs.get("factory", args[4] if len(args) > 4 else sqlite3.Connection)
+        if not uri or not isinstance(path, (str, bytes, os.PathLike)):
+            return original_connect(path, *args, **kwargs)
+        try:
+            parts = urlsplit(os.fsdecode(path))
+            matches = (parts.scheme == "file" and parts.netloc in ("", "localhost")
+                       and parse_qs(parts.query).get("mode") == ["rw"]
+                       and os.path.normcase(os.path.realpath(url2pathname(parts.path))) == database_path)
+        except (OSError, TypeError, ValueError):
+            return original_connect(path, *args, **kwargs)
+        if not matches or factory is not sqlite3.Connection:
+            return original_connect(path, *args, **kwargs)
+        if len(args) > 4:
+            args = (*args[:4], SubmitConnection, *args[5:])
+        else:
+            kwargs["factory"] = SubmitConnection
+        connection = original_connect(path, *args, **kwargs)
+        observed.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    return observed
 
 
 def _wrap_context_connection(context, holder, factory) -> list[_ConnectionProxy]:
@@ -726,24 +797,20 @@ async def test_submit_lock_program_error_keeps_cause_and_transaction(
         "submit probe rollback result not confirmed"
     )
     seen = _watch_acceptance_error(monkeypatch)
-    proxies = _wrap_runtime_connection(
-        monkeypatch,
-        lambda connection: _ConnectionProxy(
-            connection,
-            fail_rollbacks=1 if fail_rollback else 0,
-            rollback_error=rollback_error,
-        ),
-    )
-
     monkeypatch.setattr(
         session_service,
         "probe_admission",
         lambda lock_path: locks.probe_admission(lock_path, backend=backend),
     )
-    outcome = await execute_command(
-        runtime,
-        ParsedInput("ack.json", _plan_body(request_id="42", ack=str(report_id))),
-    )
+    with monkeypatch.context() as scoped:
+        observed = _observe_submit_rollback(
+            scoped, runtime.state_db, backend,
+            rollback_error if fail_rollback else None,
+        )
+        outcome = await execute_command(
+            runtime,
+            ParsedInput("ack.json", _plan_body(request_id="42", ack=str(report_id))),
+        )
 
     assert outcome.succeeded is False
     assert outcome.reason == "internal_error"
@@ -783,7 +850,18 @@ async def test_submit_lock_program_error_keeps_cause_and_transaction(
     assert backend.calls["open"] == backend.calls["try_lock"] == 1
     assert backend.calls["unlock"] == 0
     assert backend.calls["close"] == 1
-    assert proxies[0].rollback_attempts == 1
+    assert len(observed) == 1
+    connection = observed[0]
+    assert connection.rollback_attempts == 1
+    assert connection.in_transaction_at_rollback
+    assert connection.rollbacks == int(not fail_rollback)
+    assert connection.failures == int(fail_rollback)
+    assert connection.close_count >= 1 and connection.closed
+    assert connection.in_transaction_before_close is fail_rollback
+    if fail_rollback:
+        assert rollback_error.__cause__ is None
+        assert not isinstance(rollback_error.__context__, sqlite3.DatabaseError)
+    assert locks.probe_admission(path).is_free
     assert _database_snapshot_at(runtime.state_db) == before
 
 
@@ -827,22 +905,19 @@ async def test_lock_failure_and_rollback_failure_keep_unknown_transaction(
     rollback_error = sqlite3.OperationalError("rollback result not confirmed")
     backend = _FaultingLockBackend("try_lock", failure)
     seen = _watch_acceptance_error(monkeypatch)
-    proxies = _wrap_runtime_connection(
-        monkeypatch,
-        lambda connection: _ConnectionProxy(
-            connection, fail_rollbacks=1, rollback_error=rollback_error,
-        ),
-    )
-
     monkeypatch.setattr(
         session_service,
         "probe_admission",
         lambda lock_path: locks.probe_admission(lock_path, backend=backend),
     )
-    outcome = await execute_command(
-        runtime,
-        ParsedInput("ack.json", _plan_body(request_id="42", ack=str(report_id))),
-    )
+    with monkeypatch.context() as scoped:
+        observed = _observe_submit_rollback(
+            scoped, runtime.state_db, backend, rollback_error,
+        )
+        outcome = await execute_command(
+            runtime,
+            ParsedInput("ack.json", _plan_body(request_id="42", ack=str(report_id))),
+        )
 
     _assert_lock_outcome(
         outcome, path, errno.EACCES, transaction_status="unknown",
@@ -863,7 +938,15 @@ async def test_lock_failure_and_rollback_failure_keep_unknown_transaction(
     assert len(secondary) == 1
     assert secondary[0]["reason"] == "state_db_error"
     assert "secondary_errors" not in secondary[0]["details"]
-    assert proxies[0].rollback_attempts == 1
+    assert len(observed) == 1
+    connection = observed[0]
+    assert connection.rollback_attempts == connection.failures == 1
+    assert connection.in_transaction_at_rollback and connection.rollbacks == 0
+    assert connection.close_count >= 1 and connection.closed
+    assert connection.in_transaction_before_close is True
+    assert rollback_error.__cause__ is None
+    assert not isinstance(rollback_error.__context__, sqlite3.DatabaseError)
+    assert locks.probe_admission(path).is_free
     assert _database_snapshot_at(runtime.state_db) == before
 
 
