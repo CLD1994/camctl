@@ -25,13 +25,13 @@ from .test_osmo_shared_recovery import (
     _world,
 )
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("isolated_driver_registries")]
 
 
 async def test_single_file_result_reader_uses_frozen_mode_after_deployment_change(
     owned, tmp_path, monkeypatch
 ):
-    world = await _world(owned, tmp_path, monkeypatch, single_original=True)
+    world = await _world(owned, tmp_path, single_original=True)
     try:
         osv_path = world.channel.result_path
         lrf_path = osv_path.rsplit(".", 1)[0] + ".LRF"
@@ -104,7 +104,7 @@ async def test_single_file_result_reader_uses_frozen_mode_after_deployment_chang
 async def test_osmo_single_file_resume_dispatches_automatic_media_repair(
     owned, tmp_path, monkeypatch
 ):
-    world = await _world(owned, tmp_path, monkeypatch, single_original=True)
+    world = await _world(owned, tmp_path, single_original=True)
     try:
         action = world.owned.connection.execute(
             "SELECT execution_spec_json FROM actions WHERE id=1"
@@ -155,7 +155,7 @@ async def test_osmo_single_file_resume_dispatches_automatic_media_repair(
 async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls(
     owned, tmp_path, monkeypatch
 ):
-    world = await _world(owned, tmp_path, monkeypatch, finite=True)
+    world = await _world(owned, tmp_path, finite=True)
     try:
         frozen = json.loads(
             world.owned.connection.execute(

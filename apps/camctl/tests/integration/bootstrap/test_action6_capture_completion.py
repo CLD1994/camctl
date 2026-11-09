@@ -16,7 +16,7 @@ from camctl.devices.catalog import build_catalog
 from camctl.devices import definitions_runtime
 from ..support.bootstrap_driver_cases import driver_owned as owned
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("isolated_driver_registries")]
 BINDING = DeviceBinding("cam-1", "dji-action6")
 
 
@@ -37,7 +37,7 @@ class Action6Channel(Channel):
 
 
 async def _action6_world(owned, tmp_path, monkeypatch, stop_payload="00"):
-    world = await _world(owned, tmp_path, monkeypatch, finite=True, binding=BINDING)
+    world = await _world(owned, tmp_path, finite=True, binding=BINDING)
     world.channel = Action6Channel(stop_payload)
     world.entry.driver.transport = world.channel
     waits = []
