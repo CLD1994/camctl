@@ -79,18 +79,22 @@ async def test_cursor_rejects_different_scope_or_parent_role(finished_photo, fie
         assert cursor is not None
         with pytest.raises(ConsistencyError):
             selection.read_page('plan', cursor=replace(cursor, **{field: value}))
-        assert selection._cache == {}
         with pytest.raises(ConsistencyError):
             selection.read_page('plan')
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('error_type', [RuntimeError, asyncio.CancelledError])
-async def test_session_scope_is_readonly_and_exception_exit_releases_candidates(finished_photo, error_type):
+async def test_session_scope_is_readonly_and_exception_exit_releases_candidates(finished_photo, monkeypatch, error_type):
+    import gc
+    import sqlite3
+
     owned, path = finished_photo
     await _submit(owned, path, '1')
     request = ReportScopeRequest(_boundary(owned.connection), 0, _to_wm(owned.connection), 1)
-    selection = HistoryRepository(path / 'state.db').open_report_selection(request)
+    repository = HistoryRepository(path / 'state.db')
+    probe = _QueryProbe(repository, monkeypatch)
+    selection = repository.open_report_selection(request)
     with pytest.raises(error_type):
         with selection:
             assert _read(selection, 'plan') == [1]
@@ -98,9 +102,14 @@ async def test_session_scope_is_readonly_and_exception_exit_releases_candidates(
                 with pytest.raises(AttributeError):
                     setattr(selection, field, None)
             raise error_type('writer stopped')
-    assert selection._cache == {}
     with pytest.raises(ConsistencyError):
         selection.read_page('plan')
+    gc.collect()
+    assert probe.candidates and all(reference() is None for reference in probe.candidates)
+    assert probe.connections
+    for connection in probe.connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute('SELECT 1')
 
 
 @pytest.mark.asyncio
@@ -117,10 +126,7 @@ async def test_missing_materialized_target_is_not_silently_omitted(finished_phot
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('cache_budget', [4096, 1])
-async def test_delivery_target_only_fills_obtain_ancestors_not_source_entities(two_item_world, monkeypatch, cache_budget):
-    from camctl.history import report_selection
-    monkeypatch.setattr(report_selection, '_CACHE_LIMIT', cache_budget)
+async def test_delivery_target_only_fills_obtain_ancestors_not_source_entities(two_item_world):
     world = two_item_world
     _grant_item(world, world.item_ids[0])
     from_wm = _to_wm(world.owned.connection)
@@ -133,13 +139,9 @@ async def test_delivery_target_only_fills_obtain_ancestors_not_source_entities(t
         assert _read(selection, 'delivery', 2) == [2]
         assert _read(selection, 'action', 1) == []
         assert _read(selection, 'output', 1) == []
-        if cache_budget == 1:
-            assert selection._cache['plan'] is None
-            assert selection._cache['action'] is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('cache_budget', [4096, 0])
 @pytest.mark.parametrize('entity,table,row_id,parent', [
     ('action', 'plans', 1, 1),
     ('output', 'actions', 1, 1), ('output', 'plans', 1, 1),
@@ -150,10 +152,8 @@ async def test_delivery_target_only_fills_obtain_ancestors_not_source_entities(t
     ('diagnostic', 'plan_file_diagnostics', 2, None),
 ])
 async def test_independent_entry_rejects_missing_target_or_any_required_owner(
-    two_item_world, tmp_path, monkeypatch, cache_budget, entity, table, row_id, parent,
+    two_item_world, tmp_path, monkeypatch, entity, table, row_id, parent,
 ):
-    from camctl.history import report_selection
-    monkeypatch.setattr(report_selection, '_CACHE_LIMIT', cache_budget)
     world = two_item_world
     for item in world.item_ids:
         _grant_item(world, item)
@@ -167,7 +167,6 @@ async def test_independent_entry_rejects_missing_target_or_any_required_owner(
         # 每个入口都是第一次读取；不依赖先读根对象，也不交付部分 Page。
         with pytest.raises(ConsistencyError):
             selection.read_page(entity, parent_id=parent)
-        assert selection._cache == {}
         with pytest.raises(ConsistencyError):
             selection.read_page(entity, parent_id=parent)
     import gc
@@ -180,12 +179,9 @@ async def test_independent_entry_rejects_missing_target_or_any_required_owner(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('cache_budget', [4096, 0])
 async def test_all_five_targets_keep_pages_parent_filter_and_legal_empty(
-    two_item_world, tmp_path, monkeypatch, cache_budget,
+    two_item_world, tmp_path,
 ):
-    from camctl.history import report_selection
-    monkeypatch.setattr(report_selection, '_CACHE_LIMIT', cache_budget)
     world = two_item_world
     for item in world.item_ids:
         _grant_item(world, item)
@@ -199,7 +195,6 @@ async def test_all_five_targets_keep_pages_parent_filter_and_legal_empty(
         with world.history.open_report_selection(request) as selection:
             for parent, expected in parents:
                 assert _read(selection, entity, parent) == expected
-            assert (selection._cache[entity] is None) == (cache_budget == 0)
         # 无窗口候选时，即使 caller 的父 ID 不存在也仍是合法空页。
         with world.history.open_report_selection(replace(request, from_wm=request.to_wm)) as selection:
             assert _read(selection, entity, 999 if parents[0][0] is not None else None) == []
@@ -207,9 +202,7 @@ async def test_all_five_targets_keep_pages_parent_filter_and_legal_empty(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('table', ['actions', 'plans'])
-async def test_late_corruption_is_visible_before_candidate_limit(finished_photo, monkeypatch, table):
-    from camctl.history import report_selection
-    monkeypatch.setattr(report_selection, '_CACHE_LIMIT', 1)
+async def test_late_corruption_is_visible_before_first_page(finished_photo, table):
     owned, path = finished_photo
     _submit_many(owned, 8, 1)
     await _finish_many(owned, 8)
@@ -221,10 +214,9 @@ async def test_late_corruption_is_visible_before_candidate_limit(finished_photo,
     repository = HistoryRepository(path / 'state.db')
     for entity, parent in [('action', 1), ('output', 1)]:
         with repository.open_report_selection(request) as selection:
-            # 正常候选已超过 LIMIT=2，损坏 ID 更晚；第一页也必须先失败。
+            # 损坏对象位于较晚的位置；第一页也必须先失败。
             with pytest.raises(ConsistencyError):
                 selection.read_page(entity, parent_id=parent)
-            assert selection._cache == {}
 
 
 @pytest.mark.asyncio
@@ -400,7 +392,7 @@ async def test_real_source_preparation_preserves_large_report_selection(finished
 
 
 @pytest.mark.asyncio
-async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window(report_selection_sample, monkeypatch):
+async def test_large_window_releases_candidates_and_keyset_pages_do_not_rescan_window(report_selection_sample, monkeypatch):
     import gc
     import time
     from camctl.history.report_selection import ReportEntitySelection
@@ -437,15 +429,14 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
     probe = _QueryProbe(repository, monkeypatch)
     with repository.open_report_selection(request) as selection:
         assert _read(selection, 'plan') == [1, 2, 3]
+        action_candidates_start = len(probe.candidates)
         probe.steps = 0
         first = selection.read_page('action', parent_id=2)
         preflight_steps = probe.steps
         assert first.items == tuple(range(4, 21))
-        assert selection._cache['action'] is None
-        assert sum(len(rows) for rows in selection._cache.values() if rows is not None) <= 4096
         gc.collect()
-        # 仅三份计划候选保留；超限的动作候选已在返回第一页前释放。
-        assert sum(reference() is not None for reference in probe.candidates) == 3
+        action_candidates = probe.candidates[action_candidates_start:]
+        assert action_candidates and all(reference() is None for reference in action_candidates)
         cursor = first.next_cursor
         vm_pages = []
         actual = list(first.items)
@@ -546,7 +537,6 @@ async def test_read_failure_and_database_replacement_close_bound_session(finishe
             with pytest.raises(OSError, match='read page failure'):
                 selection.read_page('plan', cursor=cursor)
         assert len(attempts) == 1
-        assert selection._cache == {}
         with pytest.raises(ConsistencyError):
             selection.read_page('plan')
 
@@ -579,7 +569,6 @@ async def test_read_failure_and_database_replacement_close_bound_session(finishe
             os.replace(replacement_path, state_path)
             with pytest.raises(ConsistencyError):
                 selection.read_page('plan', cursor=cursor)
-            assert selection._cache == {}
             with pytest.raises(ConsistencyError):
                 selection.read_page('plan', cursor=cursor)
     finally:
