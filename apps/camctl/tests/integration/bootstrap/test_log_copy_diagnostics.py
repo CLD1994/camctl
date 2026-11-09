@@ -162,27 +162,42 @@ async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
     logs_dir = Path(deps.config.paths.staging).expanduser() / "logs"
-    marker_path = logs_dir / copies.MARKER_NAME
-    original_replace, original_unlink = os.replace, os.unlink
+    original_open, original_write = os.open, os.write
+    original_fsync, original_close, original_unlink = os.fsync, os.close, os.unlink
     write_calls = {"count": 0}
+    marker_fds: dict[int, Path] = {}
     failed_temp: dict[str, Path] = {}
 
-    def fail_copied_progress_after_real_write(source, target, *args, **kwargs):
-        if Path(target) == marker_path:
+    def track_marker_temp(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        candidate = Path(path)
+        if candidate.parent == logs_dir and copies.is_marker_temp_name(candidate.name):
+            marker_fds[fd] = candidate
             write_calls["count"] += 1
-            if write_calls["count"] == 2:
-                failed_temp["path"] = Path(source)
-                assert json.loads(Path(source).read_bytes())["stage"] == "copied"
-                raise OSError("progress marker write failed after close")
-        return original_replace(source, target, *args, **kwargs)
+        return fd
+
+    def fail_copied_progress_after_real_write(fd, data):
+        written = original_write(fd, data)
+        if fd in marker_fds and write_calls["count"] == 2:
+            assert written == len(data)
+            assert json.loads(bytes(data))["stage"] == "copied"
+            original_fsync(fd)
+            failed_temp["path"] = marker_fds.pop(fd)
+            raise OSError("progress marker write failed after sync")
+        return written
+
+    def close_marker_temp(fd):
+        marker_fds.pop(fd, None)
+        return original_close(fd)
 
     def fail_owned_temp_cleanup(path, *args, **kwargs):
-        candidate = Path(path)
-        if candidate == failed_temp.get("path"):
+        if Path(path) == failed_temp.get("path"):
             raise OSError("progress temp cleanup denied")
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(os, "replace", fail_copied_progress_after_real_write)
+    monkeypatch.setattr(os, "open", track_marker_temp)
+    monkeypatch.setattr(os, "write", fail_copied_progress_after_real_write)
+    monkeypatch.setattr(os, "close", close_marker_temp)
     monkeypatch.setattr(os, "unlink", fail_owned_temp_cleanup)
 
     try:
@@ -199,11 +214,15 @@ async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails
     assert b"controlled report generation failure" in ready_files[0].read_bytes()
     marker_path = (Path(deps.config.paths.staging).expanduser()
                    / "logs" / copies.MARKER_NAME)
-    assert json.loads(marker_path.read_text(encoding="utf-8"))["stage"] == (
-        MarkerStage.PUBLISHED.value)
+    marker_state = json.loads(marker_path.read_text(encoding="utf-8"))
+    temp_state = json.loads(failed_temp["path"].read_bytes())
+    assert marker_state["stage"] == MarkerStage.PUBLISHED.value
+    assert temp_state["stage"] == MarkerStage.COPIED.value
+    assert (temp_state["round_id"], temp_state["copy_name"]) == (
+        marker_state["round_id"], marker_state["copy_name"])
     log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
-    assert "marker_progress[copied]" in log
-    assert "progress marker write failed after close" in log
+    assert "marker_progress[copied]: outcome=failed_not_created" in log
+    assert "progress marker write failed after sync" in log
     assert "progress temp cleanup denied" in log
     assert failed_temp["path"].name in log
     assert "temp_cleanup=failed" in log
@@ -386,7 +405,12 @@ async def test_default_run_records_marker_progress_check_failure(
             if Path(path) == marker_path:
                 calls["count"] += 1
                 if calls["count"] == 1:
-                    return b"{invalid progress marker"
+                    saved = original(path)
+                    try:
+                        path.write_bytes(b"{invalid progress marker")
+                        return original(path)
+                    finally:
+                        path.write_bytes(saved)
             return original(path)
 
         monkeypatch.setattr(Path, "read_bytes", return_invalid_progress)
@@ -1588,12 +1612,12 @@ async def test_current_copy_and_temp_survive_overlapping_sweep(
     copied_temp_paths: list[Path] = []
     lstat_paths: list[Path] = []
     unlink_paths: list[Path] = []
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
     original_sweep = copies.startup_sweep
-    original_write_synced = copies._write_synced
+    original_replace = os.replace
     original_copy = FileChannel.copy_with_write
-    original_lstat = copies._lstat
-    original_unlink = copies._unlink
+    original_lstat = Path.lstat
+    original_unlink = os.unlink
 
     def blocked_listdir(path: Path):
         if Path(path) == logs_dir:
@@ -1605,13 +1629,15 @@ async def test_current_copy_and_temp_survive_overlapping_sweep(
             return names
         return original_listdir(path)
 
-    def block_copied_progress_temp(path: Path, data: bytes) -> None:
-        original_write_synced(path, data)
-        if b'"stage":"copied"' in data:
-            copied_temp_paths.append(Path(path))
+    def block_copied_progress_temp(source, target, *args, **kwargs):
+        source, target = Path(source), Path(target)
+        if (target == logs_dir / copies.MARKER_NAME
+                and json.loads(source.read_bytes())["stage"] == "copied"):
+            copied_temp_paths.append(source)
             loop.call_soon_threadsafe(copied_temp_ready.set)
             if not release_copied_temp.wait(timeout=10):
                 raise TimeoutError("copied marker temp test gate was not released")
+        return original_replace(source, target, *args, **kwargs)
 
     def observe_sweep(*args, **kwargs):
         result = original_sweep(*args, **kwargs)
@@ -1623,20 +1649,22 @@ async def test_current_copy_and_temp_survive_overlapping_sweep(
         current_copy_names.append(Path(destination).name)
         return result
 
-    def record_lstat(path: Path):
-        lstat_paths.append(Path(path))
-        return original_lstat(path)
+    def record_lstat(path: Path, *args, **kwargs):
+        if path.parent == logs_dir:
+            lstat_paths.append(path)
+        return original_lstat(path, *args, **kwargs)
 
-    def record_unlink(path: Path) -> None:
-        unlink_paths.append(Path(path))
-        original_unlink(path)
+    def record_unlink(path, *args, **kwargs):
+        if Path(path).parent == logs_dir:
+            unlink_paths.append(Path(path))
+        return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
-    monkeypatch.setattr(copies, "_write_synced", block_copied_progress_temp)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
+    monkeypatch.setattr(os, "replace", block_copied_progress_temp)
     monkeypatch.setattr(copies, "startup_sweep", observe_sweep)
     monkeypatch.setattr(FileChannel, "copy_with_write", record_copy)
-    monkeypatch.setattr(copies, "_lstat", record_lstat)
-    monkeypatch.setattr(copies, "_unlink", record_unlink)
+    monkeypatch.setattr(Path, "lstat", record_lstat)
+    monkeypatch.setattr(os, "unlink", record_unlink)
 
     async def fail_generation(self, job):
         failure = ResultFailureMessage(
@@ -1728,7 +1756,7 @@ async def test_write_result_disables_log_before_followup_wait(
     scan_started = asyncio.Event()
     logs_dir = Path(deps.config.paths.staging) / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
     def startup_failure(path):
         if Path(path) == logs_dir:
@@ -1738,11 +1766,11 @@ async def test_write_result_disables_log_before_followup_wait(
             raise OSError("parallel startup diagnostic after write result")
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", startup_failure)
+    monkeypatch.setattr(os, "listdir", startup_failure)
     cleanup_names: list[str] = []
     helper_channels: list[FileChannel] = []
     log_deliveries: list[str] = []
-    original_unlink = copies._unlink
+    original_unlink = os.unlink
     original_file_channel_init = FileChannel.__init__
     original_check_stream = clh_adapter._TrackingHandler._check_stream
     original_deliver = deps.log_runtime.channel.deliver_important
@@ -1758,14 +1786,14 @@ async def test_write_result_disables_log_before_followup_wait(
             raise OSError("controlled copy channel stream failure")
         return original_check_stream(handler)
 
-    def block_copy_cleanup(path: Path) -> None:
+    def block_copy_cleanup(path, *args, **kwargs):
         path = Path(path)
-        if copies.is_copy_file_name(path.name):
+        if path.parent == logs_dir and copies.is_copy_file_name(path.name):
             cleanup_names.append(path.name)
             loop.call_soon_threadsafe(cleanup_started.set)
             if not release_cleanup.wait(timeout=10):
                 raise TimeoutError("copy cleanup test gate was not released")
-        original_unlink(path)
+        return original_unlink(path, *args, **kwargs)
 
     async def count_log_delivery(record):
         log_deliveries.append(record.message)
@@ -1774,7 +1802,7 @@ async def test_write_result_disables_log_before_followup_wait(
     monkeypatch.setattr(FileChannel, "__init__", count_file_channel_init)
     monkeypatch.setattr(
         clh_adapter._TrackingHandler, "_check_stream", fail_copy_stream_check)
-    monkeypatch.setattr(copies, "_unlink", block_copy_cleanup)
+    monkeypatch.setattr(os, "unlink", block_copy_cleanup)
     monkeypatch.setattr(
         deps.log_runtime.channel, "deliver_important", count_log_delivery)
 

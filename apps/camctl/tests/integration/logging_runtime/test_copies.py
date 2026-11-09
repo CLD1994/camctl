@@ -309,9 +309,15 @@ class TestDelivery:
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
         from camctl.logging_runtime import copies
-        monkeypatch.setattr(
-            copies, "_write_synced",
-            lambda path, data: (_ for _ in ()).throw(OSError("disk full")))
+        original_open = os.open
+
+        def fail_marker_open(path, flags, *args, **kwargs):
+            candidate = Path(path)
+            if candidate.parent == logs_dir and is_marker_temp_name(candidate.name):
+                raise OSError("disk full")
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", fail_marker_open)
         receipt = await copies.deliver_failure_copy(
             _request(staging, ready, channel, marker))
         assert receipt.outcome is CopyOutcome.MARKER_CREATE_FAILED
@@ -1153,21 +1159,23 @@ class TestRecovery:
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
         service = FailureLogService(marker)
-        original_write = copies._write_synced
+        original_replace = os.replace
         progress_temp_ready = threading.Event()
         release_progress = threading.Event()
         paused = {"done": False}
 
-        def pause_after_writing_progress_temp(path, data):
-            original_write(path, data)
-            state = json.loads(data.decode())
-            if state["stage"] == MarkerStage.COPIED.value and not paused["done"]:
-                paused["done"] = True
-                progress_temp_ready.set()
-                if not release_progress.wait(timeout=10):
-                    raise TimeoutError("test did not release marker progress")
+        def pause_after_writing_progress_temp(source, target, *args, **kwargs):
+            source, target = Path(source), Path(target)
+            if target == logs_dir / MARKER_NAME:
+                state = json.loads(source.read_bytes())
+                if state["stage"] == MarkerStage.COPIED.value and not paused["done"]:
+                    paused["done"] = True
+                    progress_temp_ready.set()
+                    if not release_progress.wait(timeout=10):
+                        raise TimeoutError("test did not release marker progress")
+            return original_replace(source, target, *args, **kwargs)
 
-        monkeypatch.setattr(copies, "_write_synced", pause_after_writing_progress_temp)
+        monkeypatch.setattr(os, "replace", pause_after_writing_progress_temp)
 
         first_task = asyncio.create_task(service.on_report_failure(
             _request(staging, ready, channel, marker, "first report failure")))
@@ -1288,13 +1296,17 @@ class TestStartupSweep:
             self, tmp_path: Path, monkeypatch) -> None:
         from camctl.logging_runtime import copies
 
-        missing = tmp_path / "staging" / "logs"
+        logs_dir = tmp_path / "staging" / "logs"
+        logs_dir.mkdir(parents=True)
+        original_listdir = os.listdir
 
-        def deny_listing(_path: Path):
-            raise PermissionError("logs directory denied")
+        def deny_listing(path):
+            if Path(path) == logs_dir:
+                raise PermissionError("logs directory denied")
+            return original_listdir(path)
 
-        monkeypatch.setattr(copies, "_listdir", deny_listing)
-        result = startup_sweep(missing)
+        monkeypatch.setattr(os, "listdir", deny_listing)
+        result = startup_sweep(logs_dir)
         assert result.error is not None
 
     def test_sweep_treats_missing_directory_as_completed_absence(
