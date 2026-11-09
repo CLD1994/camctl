@@ -13,12 +13,13 @@ from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.outputs import FixSelection, load_selection_facts
 from camctl.persistence.transaction import commit_operation, row_facts
 from camctl.history.validators import EventValidationError
-from ..support.output_planning import EventSequence, capture_operation, validate_static_event as validate_event
+from camctl.history.decoding import decode_event_row
+from ..support.output_planning import EventSequence, capture_operation, proposal_state
 from ..support.output_storage_cases import observed_operation
 from camctl.outputs.sources import SelectionMode, select_outputs
 
 from .test_sources import _NOW, _prepared_selection, _fixed_resolution, _seed_output, _set_selection_request
-from .test_selection_guard import _proposal, selection_database, family_database
+from .test_selection_guard import selection_database, family_database
 from .test_selection_authority import _request
 
 
@@ -64,11 +65,34 @@ def _legacy_source_error_event(owned, details):
     connection.execute("DELETE FROM output_origins WHERE output_id=702")
     connection.execute("DELETE FROM outputs WHERE id=702")
     connection.commit()
-    event, context = _proposal(owned, SelectionMode.PREVIEW)
-    row = event.rows[0]
-    assert row.after.values["error_code"] == 2
-    row = replace(row, after=replace(row.after, values={**row.after.values, "error_details_json": details}))
-    return replace(event, rows=(row, *event.rows[1:])), context
+    _request(connection, SelectionMode.PREVIEW)
+    # 存储格式专项：这里只核对完整业务前态及事件保存，不以夹具的占位历史验证重放。
+    # 旧判定在两个原片均无预览时保存来源错误及两个失败项。
+    # 可选 original_output_id 按公共错误登记构造，不代表旧生产者曾写出该字段。
+    rows = [{
+        "table": "obtain_source_selections", "id": 61,
+        "before": {"exists": True, "values": {
+            "status": 1, "error_code": None, "error_details_json": None}},
+        "after": {"exists": True, "values": {
+            "status": 2, "error_code": 2, "error_details_json": details}},
+    }]
+    for row_id, original in enumerate((701, 705), 1):
+        rows.append({
+            "table": "obtain_items", "id": row_id, "before": {"exists": False},
+            "after": {"exists": True, "values": {
+                "selection_id": 61, "requested_output_id": None, "output_id": None,
+                "basis": 3, "original_output_id": original, "preview_output_id": None,
+                "preview_size": None, "repaired_size": None, "status": 4,
+                "source_dependency": 0, "delivery_id": None, "error_code": 8,
+                "error_details_json": {"source_action_instance_id": "11",
+                                       "original_output_id": str(original)},
+            }},
+        })
+    body = {"reason": 1, "evidence": {}, "rows": rows}
+    event = decode_event_row((2, 2, 4, 1, _NOW, 1, None, json.dumps(body)))
+    owners = {("obtain_source_selections", 61): ("action", 30),
+              ("obtain_items", 1): ("action", 30), ("obtain_items", 2): ("action", 30)}
+    return event, proposal_state(owned, owners=owners)
 
 
 def _current_preview_proposal(owned):
@@ -169,5 +193,49 @@ def test_no_outputs_accepts_empty_source_error_details(selection_database):
     {"source_action_instance_id": "11", "original_output_id": "701"},
 ])
 def test_legacy_source_error_accepts_registered_details_for_actual_source(selection_database, details):
-    event, context = _legacy_source_error_event(selection_database, details)
-    validate_event(event, context)
+    event, proposal = _legacy_source_error_event(selection_database, details)
+    receipt = commit_operation(EventSequence((event,), proposal), new_operation_key(), selection_database)
+    assert receipt.kind == "completed", receipt.error
+    saved = outputs.load_selection(selection_database.connection, 61)
+    assert saved.source_error_code == 2
+    assert [(item.original_output_id, item.error_code) for item in saved.items] == [(701, 8), (705, 8)]
+    assert row_facts(selection_database.connection, "obtain_source_selections", 61)["error_details_json"] == details
+    version, body = selection_database.connection.execute(
+        "SELECT event_version,body_json FROM history_events ORDER BY id DESC LIMIT 1").fetchone()
+    body = json.loads(body)
+    assert version == 1 and body["evidence"] == {}
+    assert len(body["rows"]) == 3
+    assert not selection_database.connection.in_transaction
+
+
+@pytest.mark.parametrize("details", [
+    {"source_action_instance_id": "12", "original_output_id": "701"},
+    {"source_action_instance_id": "11", "original_output_id": "704"},
+    {"source_action_instance_id": "11", "original_output_id": "703"},
+    {"source_action_instance_id": "11", "original_output_id": "999"},
+], ids=["other-source", "other-source-original", "repaired", "missing"])
+def test_legacy_source_error_rejects_invalid_references(selection_database, details):
+    owned = selection_database
+    other = outputs.load_output_family(owned.connection, 704)
+    assert other.source_action_id == 12 and other.original.output_id == 704
+    source = outputs.load_output_family(owned.connection, 703)
+    assert source.source_action_id == 11 and source.repaired.output_id == 703
+    assert owned.connection.execute("SELECT id FROM outputs WHERE id=999").fetchone() is None
+    event, proposal = _legacy_source_error_event(owned, details)
+    valid_row = event.rows[0]
+    valid_row = replace(valid_row, after=replace(valid_row.after, values={
+        **valid_row.after.values, "error_details_json": {"source_action_instance_id": "11"}}))
+    valid = replace(event, rows=(valid_row, *event.rows[1:]))
+    def control(actual):
+        result = commit_operation(EventSequence((valid,), proposal), new_operation_key(), actual)
+        assert result.kind == "completed", result.error
+    observed_operation(owned, control)
+    before = tuple(owned.connection.iterdump())
+    receipt = commit_operation(EventSequence((event,), proposal), new_operation_key(), owned)
+    assert receipt.kind == "rolled_back", receipt.error
+    assert isinstance(receipt.error, EventValidationError), receipt.error
+    expected = ("来源错误必须指向实际固定来源" if details["source_action_instance_id"] == "12"
+                else "来源错误中的原片必须属于实际固定来源")
+    assert expected in str(receipt.error)
+    assert not owned.connection.in_transaction
+    assert tuple(owned.connection.iterdump()) == before
