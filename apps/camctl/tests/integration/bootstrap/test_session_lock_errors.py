@@ -710,8 +710,16 @@ async def test_original_error_survives_later_lock_error(
     "program_error", [False, True], ids=["system-lock-error", "program-lock-error"])
 async def test_late_clock_lock_failure_uses_original_emergency_qualification(
         tmp_path: Path, monkeypatch, program_error: bool) -> None:
+    import time
+    from datetime import timedelta
+
+    from camctl.bootstrap import capture_assembly
+    from camctl.bootstrap.clocks import SystemClock
+    from camctl.contracts.values import to_utc_micros
     from camctl.devices.drivers import runtime as drivers_runtime
     from camctl.devices.drivers.registry import DriverRegistry
+    from camctl.motor.notification import NotificationWriter
+    from camctl.reporting.maintenance import MaintenanceLimits
     from .test_production_flows import _ProductionDriver, _entry_for_driver
     from .test_recording_stop import (
         _RecordCatalog,
@@ -730,11 +738,17 @@ async def test_late_clock_lock_failure_uses_original_emergency_qualification(
     entry = registry.entry("camctl-adb")
     assert entry is not None and entry.declaration.result_supported
     monkeypatch.setattr(drivers_runtime, "current_registry", lambda: registry)
+
+    class Catalog(_RecordCatalog):
+        def action_types(self):
+            return super().action_types() | {"motor_control"}
+
+    catalog = Catalog()
     await _submit_plan(
-        tmp_path, config, _RecordCatalog(),
+        tmp_path, config, catalog,
         _record_plan("710005", _future_schedule(0)),
     )
-    deps = build_runtime(CommandMode.RUN, config, catalog=_RecordCatalog())
+    deps = build_runtime(CommandMode.RUN, config, catalog=catalog)
     session_path = Path(deps.session_lock)
     admission_path = Path(deps.admission_lock)
     release_failure = (
@@ -743,16 +757,57 @@ async def test_late_clock_lock_failure_uses_original_emergency_qualification(
         OSError(errno.EIO, "late-clock admission release failure")
     )
     unlock_reached = threading.Event()
+    generation_calls: list[str] = []
+    generations_at_unlock: list[tuple[str, ...]] = []
+
+    def observe_unlock():
+        generations_at_unlock.append(tuple(generation_calls))
+        unlock_reached.set()
+
     backend = _FaultingLockBackend(
-        "unlock", release_failure, on_unlock=unlock_reached.set)
+        "unlock", release_failure, on_unlock=observe_unlock)
     _patch_lock_acquisition(
         monkeypatch, session_path=session_path, admission_path=admission_path,
         admission_backend=backend,
     )
-    original_assembly = lifecycle._report_assembly
-    late_clock_calls: list[str] = []
+    original_utc_micros = SystemClock.utc_micros
+    clock_reading = {"utc": None}
 
-    async def wait_for_started_recording() -> None:
+    def controlled_utc_micros(clock):
+        if clock_reading["utc"] is not None:
+            return clock_reading["utc"]
+        return original_utc_micros(clock)
+
+    monkeypatch.setattr(SystemClock, "utc_micros", controlled_utc_micros)
+    frozen_monotonic = {"ns": None}
+    original_capture_assembly = capture_assembly.session_capture_assembly
+
+    def capture_monotonic_ns():
+        if frozen_monotonic["ns"] is not None:
+            return frozen_monotonic["ns"]
+        return time.monotonic_ns()
+
+    def capture_factory(**kwargs):
+        return original_capture_assembly(**kwargs, monotonic_ns=capture_monotonic_ns)
+
+    monkeypatch.setattr(capture_assembly, "session_capture_assembly", capture_factory)
+    original_generate = WorkerSupervisor.generate
+
+    async def observe_generate(supervisor, job):
+        generation_calls.append(job.job_id)
+        return await original_generate(supervisor, job)
+
+    monkeypatch.setattr(WorkerSupervisor, "generate", observe_generate)
+    motor_sends: list[bytes] = []
+    original_send = NotificationWriter.send
+
+    def observe_send(writer, message):
+        motor_sends.append(message)
+        return original_send(writer, message)
+
+    monkeypatch.setattr(NotificationWriter, "send", observe_send)
+
+    async def wait_for_started_recording(task) -> None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _GATE_TIMEOUT
         last_row = None
@@ -762,35 +817,12 @@ async def test_late_clock_lock_failure_uses_original_emergency_qualification(
                     "SELECT started_at IS NOT NULL, activity_state"
                     " FROM device_activities WHERE id = 1",
                 ).fetchone()
-            if last_row == (1, 2) and deps.capture_recording_anchors:
+            if last_row == (1, 2):
                 return
+            if task.done():
+                raise AssertionError(f"会话在录像启动前结束：{await task!r}")
             await asyncio.sleep(0.05)
-        raise AssertionError(
-            "等待实际录像启动事实及会话计时锚点超时："
-            f"activity={last_row!r}, anchors={deps.capture_recording_anchors!r}"
-        )
-
-    async def late_clock(_context):
-        await wait_for_started_recording()
-        late_clock_calls.append("raised")
-        raise ClockBecameUntrusted("ordinary flow observed the late clock change")
-
-    def assemble_capture_then_late_clock(*args, **kwargs):
-        flows, supervisor = original_assembly(*args, **kwargs)
-        ordered = {"scheduling": flows["scheduling"], "late_clock": late_clock}
-        ordered.update((name, flow) for name, flow in flows.items()
-                       if name != "scheduling")
-        return ordered, supervisor
-
-    monkeypatch.setattr(
-        lifecycle, "_report_assembly", assemble_capture_then_late_clock)
-    generation_calls: list[str] = []
-
-    async def must_not_run_report(_self, job):
-        generation_calls.append(job.job_id)
-        return await _worker_report_failure(_self, job)
-
-    monkeypatch.setattr(WorkerSupervisor, "generate", must_not_run_report)
+        raise AssertionError(f"等待实际录像启动事实超时：activity={last_row!r}")
     held_during_stop: list[bool] = []
     original_stop = driver.stop
 
@@ -805,14 +837,44 @@ async def test_late_clock_lock_failure_uses_original_emergency_qualification(
         return await original_stop(request)
 
     driver.stop = stop_while_session_locked
+    limits = MaintenanceLimits.defaults()
+    completion_budget = _GATE_TIMEOUT + 2 * (
+        limits.startup_seconds + limits.total_seconds + limits.stop_grace_seconds)
+    task = asyncio.create_task(execute_command(deps, None))
     try:
-        outcome = await execute_command(deps, None)
+        await wait_for_started_recording(task)
+        frozen_monotonic["ns"] = time.monotonic_ns()
+        rolled_back_date = config.clock.min_plausible_date - timedelta(days=1)
+        assert rolled_back_date < config.clock.min_plausible_date
+        rolled_back_time = f"{rolled_back_date.isoformat()} 00:00:00"
+        clock_reading["utc"] = to_utc_micros(rolled_back_time)
+        motor_plan = _record_plan("710006", rolled_back_time)
+        motor_plan["actions"] = [{
+            "name": "late-clock-motor",
+            "type": "motor_control",
+            "scheduled_at": rolled_back_time,
+            "params": {"position": 1},
+            "policy": {"max_delay_ms": 5000},
+        }]
+        await _submit_plan(tmp_path, config, catalog, motor_plan)
+        outcome = await asyncio.wait_for(asyncio.shield(task), completion_budget)
     finally:
-        close_runtime(deps)
+        try:
+            if not task.done():
+                task.cancel()
+                original_error = sys.exception()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(task, return_exceptions=True), completion_budget)
+                except asyncio.TimeoutError:
+                    if original_error is None:
+                        raise
+                    original_error.add_note("取消会话后等待收场超时")
+        finally:
+            close_runtime(deps)
 
     assert unlock_reached.is_set()
-    assert late_clock_calls == ["raised"]
-    assert deps.capture_recording_anchors
+    assert generations_at_unlock == [tuple(generation_calls)]
     assert outcome.succeeded is False
     assert outcome.reason == ("internal_error" if program_error else "lock_error")
     details = dict(outcome.details)
@@ -828,8 +890,15 @@ async def test_late_clock_lock_failure_uses_original_emergency_qualification(
     else:
         assert details["errno"] == errno.EIO
     assert "transaction_status" not in details
-    assert "ordinary flow observed the late clock change" in repr(details)
-    assert generation_calls == []
+    assert isinstance(details["clock_error"], str) and details["clock_error"]
+    assert _rows(
+        database,
+        "SELECT a.type, a.status, a.scheduled_at FROM actions a"
+        " JOIN plans p ON p.id = a.plan_id WHERE p.request_id = ?",
+        ("710006",),
+    ) == [(8, 1, to_utc_micros(rolled_back_time))]
+    assert _scalar(database, "SELECT COUNT(*) FROM motor_notifications") == (0,)
+    assert motor_sends == []
     assert held_during_stop == [True]
     assert [call for call in driver.calls if call[0] == "control"]
     assert [call for call in driver.calls if call[0] == "stop"]
