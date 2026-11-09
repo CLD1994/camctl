@@ -15,8 +15,8 @@ from ..bootstrap.test_binding_transactions import _CommitFailure
 from ..support.outputs import SqliteOperationFault
 from ..support.database import business_database
 from .test_work_files import (
-    _cancel_delivery, _context, _file_state, _release_ok, _work_path,
-    local_read, read_targets, storage_work_env as work_env,  # noqa: F401
+    _cancel_public_delivery, _context, _file_state, _release_ok, _work_path,
+    public_file_env, public_work_env,  # noqa: F401
 )
 
 
@@ -25,14 +25,15 @@ from .test_work_files import (
 @pytest.mark.parametrize("delete_failed", [False, True])
 @pytest.mark.parametrize("historical", [False, True])
 async def test_reopen_preserves_actual_cleanup_result_and_original_key(
-        work_env, monkeypatch, phase, delete_failed, historical):
-    owned, roots, qualification = work_env
+        public_file_env, monkeypatch, phase, delete_failed, historical):
+    owned, roots, qualification = public_file_env
     file_id = qualification.target_file_id
-    _cancel_delivery(owned, qualification.delivery_id)
+    _cancel_public_delivery(owned, qualification)
     _release_ok(owned, file_id)
     database = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     async with business_database(database) as original_database:
         context = _context(original_database, roots)
+        original_occurred_at = context.occurred_at
         target = _work_path(roots, owned, file_id)
         observe, remove = Path.stat, Path.unlink
         observations, removals, saves = [], [], []
@@ -78,7 +79,8 @@ async def test_reopen_preserves_actual_cleanup_result_and_original_key(
     reopened = open_existing(database, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         async with business_database(database) as resumed_database:
-            context = replace(context, database=resumed_database)
+            context = replace(context, database=resumed_database,
+                              occurred_at=original_occurred_at + 1)
 
             result = await clean(context)
 
@@ -89,6 +91,16 @@ async def test_reopen_preserves_actual_cleanup_result_and_original_key(
             else:
                 assert result.outcome is expected
             assert saves == [saves[0], saves[0]], "原实际结果、时刻与操作键必须完整复用"
+            request, key = saves[0]
+            assert request.file_id == file_id
+            assert request.occurred_at == original_occurred_at
+            assert request.occurred_at != context.occurred_at
+            assert reopened.connection.execute(
+                "SELECT COUNT(*), MIN(e.occurred_at), MAX(e.occurred_at)"
+                " FROM history_events e JOIN history_transactions t ON t.id=e.transaction_id"
+                " WHERE t.operation_key=? AND e.event_type=26"
+                " AND json_extract(e.body_json, '$.reason')=4", (str(key),)
+            ).fetchone() == (1, request.occurred_at, request.occurred_at)
             assert len(observations) == len(removals) == 1
             assert _file_state(reopened, file_id)[:2] == (2, 5 if delete_failed else 4)
             before = tuple(reopened.connection.iterdump())

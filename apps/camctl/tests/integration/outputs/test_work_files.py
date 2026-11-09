@@ -11,6 +11,7 @@
 import asyncio
 import hashlib
 import json
+import threading
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +31,7 @@ from camctl.history.validators import (
     EventValidationError,
 )
 from camctl.host_files.models import BoundDirectories
+from camctl.host_files.tasks import FileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.copy import CompletionContext, CompletionPhase, complete_copy
 from camctl.outputs.handoff import (
     DeliveryContext, DeliveryPhase, publish_delivery,
@@ -44,6 +46,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import commit_operation
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.session.supervision import Supervisor
 
 from .test_copy_resume import _command, _qualified
 from .test_copy_segments import _CONTENT, _drive
@@ -446,28 +449,58 @@ async def test_first_cleanup_does_not_consume_history_budget(storage_work_env):
 
 
 @pytest.mark.asyncio
-async def test_same_run_reuses_first_attempt_for_same_file(storage_work_env):
+async def test_same_run_reuses_first_attempt_for_same_file(public_file_env):
     """首次入口已处理的文件被历史扫描再次发现时复用结果不重试。"""
-    owned, roots, qualification = storage_work_env
+    owned, roots, qualification = public_file_env
     async with business_database(database_path(owned)) as database:
         file_id = qualification.target_file_id
-        # 交付保持活跃：首次清理判定保留，文件不动。
-        owned.connection.execute(
-            "UPDATE intermediate_files SET retention_state=2, cleanup_state=2"
-            " WHERE id=?", (file_id,))
-        owned.connection.commit()
-        context = _context(database, roots)
-        first = (await clean_one_work_file(file_id, context))
-        assert first.outcome is WorkFileSingleOutcome.KEPT
-        events_before = _events(owned, 26, 3)
-        scan = (await clean_work_files(context))
-        assert scan.checked == 1
-        assert scan.kept == 1
-        # 没有发起第二次清理尝试，也没有保存意图。
-        assert _events(owned, 26, 3) == events_before
-        assert _work_path(roots, owned, file_id).exists()
-        assert _row(
-            owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == file_id
+        _cancel_public_delivery(owned, qualification)
+        _release_ok(owned, file_id)
+        supervisor = Supervisor()
+        executor = FileTaskExecutor(supervisor)
+        started, release = threading.Event(), threading.Event()
+
+        def hold_file(_stop):
+            started.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("文件任务等待释放超时")
+            return "actual file task ended"
+
+        class Owner:
+            async def take_over(self, task):
+                await task.pending.wait()
+
+        running = asyncio.create_task(executor.run_file_task(FileTask(
+            task_id=FileTaskId("media/reused-cleanup"), file_id=file_id,
+            stage="media", business="original file", body=hold_file), Owner()))
+        try:
+            assert await asyncio.to_thread(started.wait, 10)
+            assert executor.unfinished_files() == (file_id,)
+            context = replace(_context(database, roots), executor=executor)
+            first = await clean_one_work_file(file_id, context)
+            assert first.outcome is WorkFileSingleOutcome.KEPT
+            events_before = (_events(owned, 26, 3), _events(owned, 26, 4))
+            # 实际任务结束后再扫描，证明复用首次保留结果而非再次判定占用。
+            release.set()
+            finished = await asyncio.wait_for(running, timeout=10)
+            assert finished.ran and finished.value == "actual file task ended"
+            settled = await asyncio.wait_for(supervisor.drain_required(), timeout=10)
+            assert not settled.failed
+            assert executor.unfinished_files() == ()
+            scan = await clean_work_files(context)
+            assert (scan.checked, scan.kept) == (1, 1)
+            assert (_events(owned, 26, 3), _events(owned, 26, 4)) == events_before
+            assert _file_state(owned, file_id)[:2] == (2, 2)
+            assert _work_path(roots, owned, file_id).read_bytes() == _CONTENT
+            assert _row(
+                owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == file_id
+        finally:
+            release.set()
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(running, return_exceptions=True), timeout=10)
+            finally:
+                await asyncio.wait_for(supervisor.drain_required(), timeout=10)
 
 
 @pytest.mark.asyncio
