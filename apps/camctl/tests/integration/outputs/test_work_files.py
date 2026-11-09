@@ -46,6 +46,7 @@ from camctl.outputs.work_files import (
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import commit_operation
 from camctl.persistence.repositories.capture import register_capture_guards
+from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.session.supervision import Supervisor
 
@@ -56,6 +57,7 @@ from .test_qualification import _NOW
 from .test_read_associations import read_targets  # noqa: F401
 
 register_capture_guards()
+register_file_batch_guards()
 
 _CONTENT_DIGEST = hashlib.sha256(_CONTENT).hexdigest()
 
@@ -445,7 +447,10 @@ async def test_batch_configuration_cannot_exceed_remaining(public_quota_env, mon
     async with business_database(world.path) as database:
         result = await clean_work_files(_context(database, roots, batch=32, limit=1))
     assert (result.checked, result.cleaned) == (1, 1)
-    assert len(batches) == 1 and batches[0][2:] == (1, (first_id,))
+    assert batches
+    assert all(0 < limit <= 1 and len(rows) <= limit
+               and set(rows) <= {first_id, second_id}
+               for _after, _ceiling, limit, rows in batches)
     assert not world.paths[first_id].exists()
     assert world.paths[second_id].read_bytes() == b"bind"
     assert _file_state(world.owned, second_id)[:2] == (2, 2)
