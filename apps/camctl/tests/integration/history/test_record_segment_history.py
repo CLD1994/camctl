@@ -373,20 +373,36 @@ async def test_current_restores_old_h_when_new_version_arrives_between_candidate
 @pytest.mark.asyncio
 async def test_snapshot_maintenance_uses_stream_source(tmp_path):
     from camctl.history.snapshots import SnapshotRef,prepare_snapshot
+    from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.repositories.history import SqliteSnapshotStore
     from camctl.persistence.executor import DbExecutor
     from camctl.persistence.runtime import open_existing,DbOpenMode,DbConfig
     owned,runtime,repo,ref,history = await _fixture(tmp_path)
     executor=DbExecutor(lambda:open_existing(history.path,DbOpenMode.EXISTING_RW,DbConfig()),capacity=4,enqueue_timeout_seconds=9)
     try:
+        boundary = history.current_boundary()
+        with history.open_segment_history(ref.action_id,boundary,strategy='initial') as initial:
+            expected = {(row.table,row.row_id):dict(row.values) for row in initial.iter_rows()}
         images=await SqliteSnapshotStore(history.path,executor).load_entity_images((SnapshotRef(1,ref.action_id),))
         try:
             prepared=prepare_snapshot(images[0])
             try:
                 assert not isinstance(prepared.chunks,tuple)
-                assert sum(map(len,prepared.chunks)) == prepared.length
-                await SqliteSnapshotStore(history.path,executor).save_snapshots((prepared,))
+                content = b''.join(prepared.chunks)
+                assert len(content) == prepared.length
+                assert prepared.boundary == boundary
+                records = [parse_exact_json(line) for line in content.decode('utf-8').splitlines()]
+                header, rows = records[0], records[1:]
+                assert header == {'format_version':prepared.format_version,
+                    'entity_type':1,'entity_id':ref.action_id,
+                    'boundary_event_id':boundary.last_event_id,'change_count':prepared.change_count}
+                actual = {(record['table'],record['row']['id']):record['row'] for record in rows}
+                assert len(rows) == len(expected) and actual == expected
+                saved = await SqliteSnapshotStore(history.path,executor).save_snapshots((prepared,))
+                assert len(saved) == 1 and saved[0].ref == SnapshotRef(1,ref.action_id)
+                assert saved[0].remaining_changes == 0
             finally:prepared.close()
+            assert not prepared.path.exists()
         finally:images[0].close()
     finally:
         await executor.close()

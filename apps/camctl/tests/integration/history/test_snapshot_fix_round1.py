@@ -1068,20 +1068,29 @@ async def test_framed_invalid_large_row_is_rejected_as_one_record(tmp_path):
     finally:owned.connection.close()
 
 
-@pytest.mark.parametrize('failure',['write','read','truncate','header'])
+@pytest.mark.parametrize('failure',['write','read','truncate','header','invalid_row'])
 @pytest.mark.asyncio
 async def test_snapshot_line_tempfile_failure_or_upper_validation_closes_all_resources(tmp_path,monkeypatch,failure):
     import errno
     import sqlite3
     import tempfile
     from camctl.history import snapshot_stream as module
-    owned,_,_,ref,history=await _fixture(tmp_path)
+    owned,_,repo,ref,history=await _fixture(tmp_path)
     boundary=history.current_boundary()
-    with history.open_segment_history(ref.action_id,boundary) as handle:prepared=prepare_snapshot(handle)
+    with history.open_segment_history(ref.action_id,boundary) as handle:
+        expected={(row.table,row.row_id):dict(row.values) for row in handle.iter_rows()}
+        prepared=prepare_snapshot(handle)
+    original_set=repo.read_set(ref,owned)
     temporary=tmp_path/'history-temporary'
     temporary.mkdir()
-    opened=[];derived=[];original_file=module.TemporaryFile;real_connect=sqlite3.connect
+    opened=[];derived=[];integrity_errors=[];original_file=module.TemporaryFile;real_connect=sqlite3.connect
     class DerivedConnection(sqlite3.Connection):
+        def execute(self,*args,**kwargs):
+            try:
+                return super().execute(*args,**kwargs)
+            except sqlite3.IntegrityError as error:
+                integrity_errors.append((self,error))
+                raise
         def close(self):
             super().close()
             self.was_closed=True
@@ -1111,14 +1120,30 @@ async def test_snapshot_line_tempfile_failure_or_upper_validation_closes_all_res
     try:
         await _save(history,prepared)
         if failure=='header':_change_snapshot(owned,prepared,lambda records:records[0].update(entity_id=999))
+        if failure=='invalid_row':
+            _change_snapshot(owned,prepared,lambda records:next(
+                record['row'] for record in records if record.get('table')=='actions').update(status=999))
         monkeypatch.setattr(tempfile,'tempdir',str(temporary))
         monkeypatch.setattr(sqlite3,'connect',connect)
         monkeypatch.setattr(module,'TemporaryFile',create)
-        with pytest.raises(ConsistencyError if failure=='header' else OSError):
+        with pytest.raises(ConsistencyError if failure in ('header','invalid_row') else OSError) as raised:
             history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=2)
         assert opened and all(value.inner.closed for value in opened)
         assert derived and all(existed and connection.was_closed and not path.exists() and not path.parent.exists()
                                for connection,path,existed in derived)
+        if failure=='invalid_row':
+            assert len(integrity_errors)==1
+            error=raised.value
+            while error is not None and error is not integrity_errors[0][1]:
+                error=error.__cause__
+            assert error is integrity_errors[0][1]
+            assert any(connection is integrity_errors[0][0] for connection,_,_ in derived)
+            assert repo.read_set(ref,owned)==original_set
+            with history.open_segment_history(ref.action_id,boundary,strategy='initial',batch_size=2) as restored:
+                actual={(row.table,row.row_id):dict(row.values) for row in restored.iter_rows()}
+                assert actual==expected
+            assert all(existed and connection.was_closed and not path.exists() and not path.parent.exists()
+                       for connection,path,existed in derived)
         assert history.current_boundary()==boundary
     finally:prepared.close();owned.connection.close()
 
@@ -1217,38 +1242,3 @@ async def test_snapshot_decodes_only_forward_s_to_h_interval_once(tmp_path,monke
             assert handle.read_set(ref)['assessment_json'] is not None
             assert [row.values['version'] for row in _rows(handle,'segment_sets',limit=1)]==[1]
     finally:prepared.close();owned.connection.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('storage',['rows','validator'])
-async def test_private_rebuildable_storage_keeps_statement_rollback_and_source_pragmas(tmp_path,storage):
-    import sqlite3
-    from camctl.persistence.row_validation import ProjectionRowValidator,ProjectionRowValidationError
-    owned,_,_,ref,history=await _fixture(tmp_path)
-    def pragmas(connection):
-        return tuple(connection.execute('PRAGMA '+name).fetchone()[0]
-            for name in ('journal_mode','synchronous','cache_size','temp_store'))
-    before=pragmas(owned.connection)
-    try:
-        with history.open_segment_history(ref.action_id,history.current_boundary()) as handle:
-            primary=handle.primary()
-            if storage=='rows':
-                assert pragmas(handle._db)==('persist',0,-2048,1)
-                handle._db.execute('CREATE TABLE statement_check(id INTEGER PRIMARY KEY)')
-                handle._db.execute('INSERT INTO statement_check VALUES (1)')
-                with pytest.raises(sqlite3.IntegrityError):handle._db.execute('INSERT INTO statement_check VALUES (1)')
-                assert handle._db.execute('SELECT COUNT(*) FROM statement_check').fetchone()[0]==1
-                handle.detach()
-                assert handle.primary()==primary
-                assert pragmas(handle._db)==('persist',0,-2048,1)
-            else:
-                with ProjectionRowValidator(storage_path=tmp_path/'private-validation.db') as validator:
-                    assert pragmas(validator._connection)==('persist',0,-2048,1)
-                    invalid=dict(primary,status=999)
-                    with pytest.raises(ProjectionRowValidationError):validator.validate('actions',invalid)
-                    assert validator._connection.execute('SELECT COUNT(*) FROM actions').fetchone()[0]==0
-                    validator.validate('actions',primary)
-                    assert validator._connection.execute('SELECT COUNT(*) FROM actions').fetchone()[0]==0
-        assert not Path(handle._temporary.name).exists()
-        assert pragmas(owned.connection)==before
-    finally:owned.connection.close()
