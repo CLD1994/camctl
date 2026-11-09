@@ -17,7 +17,7 @@ from ..support.outputs import SqliteOperationFault
 from ..support.database import business_database
 from .test_work_files import (
     _cancel_delivery, _context, _file_state, _release_ok,
-    local_read, read_targets, work_env,  # noqa: F401
+    local_read, read_targets, storage_work_env as work_env,  # noqa: F401
 )
 
 

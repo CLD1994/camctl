@@ -30,7 +30,7 @@ from ..support.database import business_database, database_path
 from ..support.outputs import output_operation, prepare_cancel_target, submit_output_document
 from .test_cleanup_delete_save_recovery import _prepared, _configured
 from .test_read_associations import read_targets  # noqa: F401  work_env 的依赖
-from .test_work_files import work_env, _cancel_delivery
+from .test_work_files import storage_work_env as work_env, _cancel_delivery
 
 pytestmark = pytest.mark.asyncio
 

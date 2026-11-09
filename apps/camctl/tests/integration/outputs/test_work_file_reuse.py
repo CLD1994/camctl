@@ -12,12 +12,11 @@ from camctl.outputs.work_files import (
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.transaction import TransactionError
-from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories import outputs
 
 from .test_work_files import (
-    _cancel_delivery, _proposal, _release_ok, _seed_action_candidate, _validate,
-    local_read, read_targets, work_env,  # noqa: F401
+    _cancel_delivery, _proposal, _release_ok, _seed_action_candidate, _commit_proposal,
+    local_read, read_targets, storage_work_env as work_env,  # noqa: F401
 )
 
 
@@ -95,8 +94,10 @@ def test_cleanup_result_guard_requires_exact_boolean_request(work_env, evidence)
                                1_736_935_210_000_000, False)
     plan = _proposal(owned, OutputsRepository().save_cleanup_result, request)
 
-    with pytest.raises(EventValidationError):
-        _validate(plan, events=(replace(plan.events[0], evidence=evidence),))
+    _commit_proposal(
+        owned, plan, (replace(plan.events[0], evidence=evidence),),
+        rejection="精确布尔 advance_cursor")
+    _commit_proposal(owned, plan)
 
 
 @pytest.mark.parametrize("advance_cursor", [False, True])

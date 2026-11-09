@@ -11,7 +11,7 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from ..support.outputs import output_operation
 from ..support.database import business_database, database_path
 from .test_copy_complete import complete_env
-from .test_work_files import work_env, _cancel_delivery
+from .test_work_files import storage_work_env as work_env, _cancel_delivery
 from .test_read_associations import read_targets
 
 
