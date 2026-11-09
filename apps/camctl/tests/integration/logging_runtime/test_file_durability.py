@@ -542,21 +542,51 @@ def test_rotation_always_retains_formal_names_for_kept_content(tmp_path, monkeyp
     channel = FileChannel(path, max_bytes=1, file_count=4)
     for name in ("oldest", "older", "newer", "current"):
         assert channel.write_record(record(name)).appended
-    original_rename = os.rename
-    missing_at_rename = []
+    real_link, real_unlink = os.link, os.unlink
     protected = {"older", "newer", "current"}
+    observed = []
 
-    def rename(source, target, *args, **kwargs):
-        value = original_rename(source, target, *args, **kwargs)
-        available = {message for group in formal_contents(path).values() for message in group}
-        if protected - available:
-            missing_at_rename.append(protected - available)
-        return value
+    def is_formal(candidate):
+        try:
+            candidate = Path(candidate)
+        except TypeError:
+            return False
+        if candidate == path:
+            return True
+        prefix = path.name + "."
+        return (candidate.parent == path.parent and candidate.name.startswith(prefix)
+                and candidate.name[len(prefix):].isdecimal())
 
-    monkeypatch.setattr(os, "rename", rename)
+    def snapshot():
+        return {message for group in formal_contents(path).values() for message in group}
+
+    def link(source, target, *args, **kwargs):
+        if is_formal(source) and is_formal(target):
+            before = snapshot()
+            result = real_link(source, target, *args, **kwargs)
+            observed.append(("link", Path(source), Path(target), before, snapshot()))
+            return result
+        return real_link(source, target, *args, **kwargs)
+
+    def unlink(target, *args, **kwargs):
+        if is_formal(target):
+            before = snapshot()
+            result = real_unlink(target, *args, **kwargs)
+            observed.append(("unlink", Path(target), None, before, snapshot()))
+            return result
+        return real_unlink(target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", link)
+    monkeypatch.setattr(os, "unlink", unlink)
     try:
         assert channel.write_record(record("later", LogLevel.INFO)).appended
-        assert missing_at_rename == []
+        assert {step[0] for step in observed} == {"link", "unlink"}
+        assert any(operation == "link" and source == path
+                   and target == Path(f"{path}.1")
+                   for operation, source, target, _, _ in observed)
+        for operation, source, target, before, after in observed:
+            assert protected <= before, (operation, source, target, "before")
+            assert protected <= after, (operation, source, target, "after")
     finally:
         channel.close()
 

@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -61,6 +63,54 @@ def _request(staging: Path, ready: Path, channel: FileChannel,
     )
 
 
+def _capture_copy_destination(channel, monkeypatch):
+    """记录本次公开复制调用拥有的目标路径。"""
+    destinations = []
+    real_copy = channel.copy_with_write
+
+    def capture(record, destination):
+        destinations.append(Path(destination))
+        return real_copy(record, destination)
+
+    monkeypatch.setattr(channel, "copy_with_write", capture)
+    return destinations
+
+
+def _hold_snapshot(monkeypatch, source_path, destination, entered, release):
+    real_copy = shutil.copyfileobj
+    snapshots = []
+
+    def copy(source, target, *args, **kwargs):
+        source_name = getattr(source, "name", None)
+        target_name = getattr(target, "name", None)
+        if (isinstance(source_name, (str, os.PathLike))
+                and isinstance(target_name, (str, os.PathLike))
+                and Path(source_name) == source_path and Path(target_name) == destination):
+            snapshots.append(source_path.read_bytes())
+            entered.set()
+            if not release.wait(timeout=30):
+                raise TimeoutError("测试未释放持锁的日志副本操作")
+        return real_copy(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copyfileobj", copy)
+    return snapshots
+
+
+def _start_copy_thread(channel, destination):
+    result = Future()
+
+    def copy():
+        try:
+            result.set_result(channel.copy_with_write(
+                LogRecord(level=LogLevel.ERROR, message=_TRIGGER), destination))
+        except BaseException as error:
+            result.set_exception(error)
+
+    thread = threading.Thread(target=copy, daemon=True)
+    thread.start()
+    return thread, result
+
+
 # ---- 锁内写入与复制 --------------------------------------------------
 
 
@@ -83,78 +133,184 @@ class TestLockedCopy:
         channel.close()
 
     async def test_copy_contains_trigger_before_rotation(
-            self, tmp_path: Path) -> None:
-        """另一进程竞争轮换：副本仍包含触发记录，各条记录完整。"""
+            self, tmp_path: Path, monkeypatch) -> None:
+        """复制持锁时，另一进程的写入被阻挡，之后完成真实轮换。"""
+        import concurrent_log_handler
+
         staging, ready, logs_dir, log_path = _layout(tmp_path)
-        channel = _channel(log_path)
-        script = (
-            "from camctl.logging_runtime.clh_adapter import FileChannel\n"
-            "from camctl.logging_runtime.models import LogLevel\n"
-            "from camctl.logging_runtime.service import LogRecord\n"
-            "import sys\n"
-            "channel = FileChannel(sys.argv[1], max_bytes=128, file_count=3)\n"
-            "for index in range(40):\n"
-            "    result = channel.write_record(LogRecord(level=LogLevel.INFO,"
-            " message=f'proc-line-{index:03d}'))\n"
-            "    assert result.appended\n"
-            "channel.close()\n"
-        )
-        first = subprocess.run(
-            [sys.executable, "-c", script, str(log_path)],
-            capture_output=True, text=True, timeout=60,
-            cwd=str(Path(__file__).parents[3]))
-        assert first.returncode == 0, first.stderr
-        # 竞争写手在副本复制期间持续追加并轮换。
-        competitor = subprocess.Popen(
-            [sys.executable, "-c", script, str(log_path)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            cwd=str(Path(__file__).parents[3]))
+        channel = _channel(log_path, max_bytes=128)
+        assert channel.write_record(LogRecord(
+            level=LogLevel.INFO, message="before copy")).appended
         destination = logs_dir / "log-copy-r1.log"
-        write_result, copy_error = channel.copy_with_write(
-            LogRecord(level=LogLevel.ERROR, message=_TRIGGER), destination)
-        out, err = competitor.communicate(timeout=60)
-        assert competitor.returncode == 0, err
-        assert copy_error is None and write_result.appended is True
-        copied = destination.read_bytes().decode()
-        # 触发记录完整存在；锁内快照结束于完整记录边界。
-        assert _TRIGGER in copied
-        assert copied.endswith("\n")
-        channel.close()
+        entered, release = threading.Event(), threading.Event()
+        blocked, acquired = threading.Event(), threading.Event()
+        snapshots = _hold_snapshot(monkeypatch, log_path, destination, entered, release)
+        lock_dir, lock_name = concurrent_log_handler.ConcurrentRotatingFileHandler.baseLockFilename(str(log_path))
+        lock_path = str(Path(lock_dir) / lock_name)
+        script = r"""
+import sys
+import concurrent_log_handler as clh
+import portalocker
+from camctl.logging_runtime.clh_adapter import FileChannel
+from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.service import LogRecord
+
+path, expected_lock = sys.argv[1:]
+real_lock = clh.lock
+probed = False
+
+def lock(stream, flags):
+    global probed
+    if not probed:
+        assert str(stream.name) == expected_lock
+        try:
+            real_lock(stream, flags | portalocker.LOCK_NB)
+        except portalocker.exceptions.AlreadyLocked:
+            print("blocked", flush=True)
+        else:
+            portalocker.unlock(stream)
+            raise AssertionError("竞争日志锁意外取得成功")
+        probed = True
+        result = real_lock(stream, flags)
+        print("acquired", flush=True)
+        return result
+    return real_lock(stream, flags)
+
+clh.lock = lock
+channel = FileChannel(path, max_bytes=128, file_count=3)
+try:
+    for index in range(40):
+        result = channel.write_record(LogRecord(
+            level=LogLevel.INFO, message=f"proc-line-{index:03d}"))
+        assert result.appended
+finally:
+    channel.close()
+"""
+        competitor = None
+        output_lines = []
+        reader = None
+        copy_thread, copy_result = _start_copy_thread(channel, destination)
+        try:
+            assert entered.wait(10), "副本没有进入持锁复制"
+            competitor = subprocess.Popen(
+                [sys.executable, "-c", script, str(log_path), lock_path],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                cwd=str(Path(__file__).parents[3]))
+
+            def read_events():
+                for line in competitor.stdout:
+                    output_lines.append(line.strip())
+                    if line.strip() == "blocked":
+                        blocked.set()
+                    elif line.strip() == "acquired":
+                        acquired.set()
+
+            reader = threading.Thread(target=read_events, daemon=True)
+            reader.start()
+            assert blocked.wait(10), "子进程未证实文件锁竞争"
+            assert not acquired.is_set()
+            assert not copy_result.done()
+            release.set()
+            write_result, copy_error = copy_result.result(timeout=30)
+            assert competitor.wait(timeout=30) == 0, competitor.stderr.read()
+            reader.join(timeout=10)
+            assert not reader.is_alive()
+            assert output_lines == ["blocked", "acquired"]
+            assert copy_error is None and write_result.appended is True
+            copied = destination.read_bytes()
+            assert snapshots == [copied]
+            assert _TRIGGER.encode() in copied
+            for line in copied.splitlines():
+                json.loads(line)
+            assert copied.endswith(b"\n")
+            archives = [Path(f"{log_path}.{index}") for index in (1, 2)]
+            assert any(item.is_file() and any(
+                json.loads(line)["message"].startswith("proc-line-")
+                for line in item.read_text().splitlines()) for item in archives)
+            assert json.loads(log_path.read_text().splitlines()[-1])["message"] == "proc-line-039"
+            assert destination.read_bytes() == copied
+        finally:
+            release.set()
+            if competitor is not None:
+                if competitor.poll() is None:
+                    competitor.kill()
+                    competitor.wait(timeout=10)
+                if reader is not None:
+                    reader.join(timeout=10)
+                competitor.stdout.close()
+                competitor.stderr.close()
+            copy_thread.join(timeout=10)
+            if not copy_thread.is_alive():
+                channel.close()
+            assert not copy_thread.is_alive(), "日志副本线程未结束"
 
     async def test_records_stay_complete_during_copy(
-            self, tmp_path: Path) -> None:
-        """复制期间同进程线程并发追加：副本内没有半条记录。"""
+            self, tmp_path: Path, monkeypatch) -> None:
+        """同一通道的线程在副本结束后继续完整写入。"""
         staging, ready, logs_dir, log_path = _layout(tmp_path)
         channel = _channel(log_path, max_bytes=512)
-        stop = threading.Event()
-        errors: list[str] = []
-
-        def churn() -> None:
-            index = 0
-            while not stop.is_set():
-                result = channel.write_record(LogRecord(
-                    level=LogLevel.INFO, message=f"churn-{index:04d}" + "x" * 40))
-                if not result.appended:
-                    errors.append(result.append_error or "append failed")
-                index += 1
-
-        worker = threading.Thread(target=churn, daemon=True)
-        worker.start()
+        assert channel.write_record(LogRecord(
+            level=LogLevel.INFO, message="before copy")).appended
         destination = logs_dir / "log-copy-r1.log"
-        write_result, copy_error = channel.copy_with_write(
-            LogRecord(level=LogLevel.ERROR, message=_TRIGGER), destination)
-        stop.set()
-        worker.join(timeout=10)
-        assert copy_error is None and write_result.appended is True
-        copied = destination.read_bytes().decode()
-        assert _TRIGGER in copied
-        assert not errors
-        # 锁保证：副本是某一时刻的完整文件，任何行都不会缺尾。
-        for line in copied.splitlines():
-            record = json.loads(line)
-            assert record["message"].startswith(("churn-", _TRIGGER, "camctl"))
-            assert record["level"] in ("INFO", "ERROR")
-        channel.close()
+        entered, release, write_started = threading.Event(), threading.Event(), threading.Event()
+        snapshots = _hold_snapshot(monkeypatch, log_path, destination, entered, release)
+
+        real_write = channel.write_record
+
+        def observe_write(record):
+            write_started.set()
+            return real_write(record)
+
+        monkeypatch.setattr(channel, "write_record", observe_write)
+
+        def write_same_channel():
+            return [channel.write_record(LogRecord(
+                level=LogLevel.INFO, message=f"churn-{index:04d}" + "x" * 40))
+                    for index in range(12)]
+
+        writer_result = Future()
+        writer = None
+
+        def run_writer():
+            try:
+                writer_result.set_result(write_same_channel())
+            except BaseException as error:
+                writer_result.set_exception(error)
+
+        copy_thread, copy_result = _start_copy_thread(channel, destination)
+        try:
+            assert entered.wait(10), "副本没有进入持锁复制"
+            writer = threading.Thread(target=run_writer, daemon=True)
+            writer.start()
+            assert write_started.wait(10)
+            assert not writer_result.done() and not copy_result.done()
+            release.set()
+            write_result, copy_error = copy_result.result(timeout=30)
+            assert all(result.appended for result in writer_result.result(timeout=30))
+            assert copy_error is None and write_result.appended is True
+            copied = destination.read_bytes()
+            assert snapshots == [copied]
+            assert _TRIGGER.encode() in copied
+            for line in copied.splitlines():
+                record = json.loads(line)
+                assert record["message"].startswith(("before copy", "churn-", _TRIGGER, "camctl"))
+                assert record["level"] in ("INFO", "ERROR")
+            assert copied.endswith(b"\n")
+            archives = [Path(f"{log_path}.{index}") for index in (1, 2)]
+            assert any(item.is_file() and any(
+                json.loads(line)["message"].startswith("churn-")
+                for line in item.read_text().splitlines()) for item in archives)
+            assert json.loads(log_path.read_text().splitlines()[-1])["message"].startswith("churn-0011")
+            assert destination.read_bytes() == copied
+        finally:
+            release.set()
+            copy_thread.join(timeout=10)
+            if writer is not None:
+                writer.join(timeout=10)
+            if not copy_thread.is_alive() and (writer is None or not writer.is_alive()):
+                channel.close()
+            assert not copy_thread.is_alive(), "日志副本线程未结束"
+            assert writer is None or not writer.is_alive(), "日志写入线程未结束"
 
     @pytest.mark.parametrize(("target_error_type", "source_error_type", "kind"), [
         (OSError, RuntimeError, "group"),
@@ -166,8 +322,6 @@ class TestLockedCopy:
             target_error_type, source_error_type, kind: str) -> None:
         """真实快照句柄的关闭异常保留主对象／次序和typed通道事实。"""
         import builtins
-
-        from camctl.logging_runtime import clh_adapter
 
         staging, ready, logs_dir, log_path = _layout(tmp_path)
         channel = _channel(log_path)
@@ -198,15 +352,19 @@ class TestLockedCopy:
 
         def open_with_close_fault(path, mode="r", *args, **kwargs):
             stream = actual_open(path, mode, *args, **kwargs)
-            candidate = Path(path)
-            if candidate == channel._path:
+            if not isinstance(path, (str, os.PathLike)):
+                return stream
+            try:
+                candidate = Path(path)
+            except TypeError:
+                return stream
+            if candidate == log_path and mode == "rb":
                 return CloseFaultStream(stream, "source")
-            if candidate == destination:
+            if candidate == destination and mode == "wb":
                 return CloseFaultStream(stream, "target")
             return stream
 
-        monkeypatch.setattr(clh_adapter, "open", open_with_close_fault,
-                            raising=False)
+        monkeypatch.setattr(builtins, "open", open_with_close_fault)
         try:
             with pytest.raises(BaseException) as caught:
                 channel.copy_with_write(
@@ -357,11 +515,12 @@ class TestDelivery:
         """真实副本句柄关闭未确认时保留 staging 与正式标记。"""
         import builtins
 
-        from camctl.logging_runtime import clh_adapter, copies
+        from camctl.logging_runtime import copies
 
         staging, ready, logs_dir, log_path = _layout(tmp_path)
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
+        destinations = _capture_copy_destination(channel, monkeypatch)
         close_calls: list[str] = []
         actual_open = builtins.open
 
@@ -393,16 +552,19 @@ class TestDelivery:
 
         def open_with_close_fault(path, mode="r", *args, **kwargs):
             stream = actual_open(path, mode, *args, **kwargs)
-            candidate = Path(path)
-            if candidate == channel._path:
+            if not isinstance(path, (str, os.PathLike)):
+                return stream
+            try:
+                candidate = Path(path)
+            except TypeError:
+                return stream
+            if candidate == log_path and mode == "rb":
                 return CloseFaultStream(stream, "source")
-            if (candidate.parent == logs_dir
-                    and candidate.name.startswith("log-copy-")):
+            if destinations and candidate == destinations[0] and mode == "wb":
                 return CloseFaultStream(stream, "target")
             return stream
 
-        monkeypatch.setattr(clh_adapter, "open", open_with_close_fault,
-                            raising=False)
+        monkeypatch.setattr(builtins, "open", open_with_close_fault)
         try:
             receipt = await copies.deliver_failure_copy(
                 _request(staging, ready, channel, marker))
@@ -437,11 +599,12 @@ class TestDelivery:
         import builtins
         import shutil
 
-        from camctl.logging_runtime import clh_adapter, copies
+        from camctl.logging_runtime import copies
 
         staging, ready, logs_dir, log_path = _layout(tmp_path)
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
+        destinations = _capture_copy_destination(channel, monkeypatch)
         close_calls: list[str] = []
         actual_open = builtins.open
 
@@ -472,18 +635,22 @@ class TestDelivery:
 
         def open_with_close_fault(path, mode="r", *args, **kwargs):
             stream = actual_open(path, mode, *args, **kwargs)
-            candidate = Path(path)
-            if candidate == channel._path:
+            if not isinstance(path, (str, os.PathLike)):
+                return stream
+            try:
+                candidate = Path(path)
+            except TypeError:
+                return stream
+            if candidate == log_path and mode == "rb":
                 return CloseFaultStream(stream, "source")
-            if candidate.parent == logs_dir and candidate.name.startswith("log-copy-"):
+            if destinations and candidate == destinations[0] and mode == "wb":
                 return CloseFaultStream(stream, "target")
             return stream
 
         def fail_copy(source, target, *args, **kwargs):
             raise OSError("copy operation failed")
 
-        monkeypatch.setattr(clh_adapter, "open", open_with_close_fault,
-                            raising=False)
+        monkeypatch.setattr(builtins, "open", open_with_close_fault)
         monkeypatch.setattr(shutil, "copyfileobj", fail_copy)
         try:
             receipt = await copies.deliver_failure_copy(
@@ -514,11 +681,12 @@ class TestDelivery:
         import builtins
         import shutil
 
-        from camctl.logging_runtime import clh_adapter, copies
+        from camctl.logging_runtime import copies
 
         staging, ready, logs_dir, log_path = _layout(tmp_path)
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
+        destinations = _capture_copy_destination(channel, monkeypatch)
         primary: BaseException = (
             asyncio.CancelledError("snapshot worker cancellation")
             if failure_kind == "worker_cancel" else
@@ -535,18 +703,24 @@ class TestDelivery:
                 self._side = side
 
             def close(self):
+                result = self._stream.close()
                 close_calls.append(self._side)
-                return self._stream.close()
+                return result
 
             def __getattr__(self, name):
                 return getattr(self._stream, name)
 
         def open_counting_copy_handles(path, mode="r", *args, **kwargs):
             stream = actual_open(path, mode, *args, **kwargs)
-            candidate = Path(path)
-            if candidate == channel._path:
+            if not isinstance(path, (str, os.PathLike)):
+                return stream
+            try:
+                candidate = Path(path)
+            except TypeError:
+                return stream
+            if candidate == log_path and mode == "rb":
                 return CloseCountingStream(stream, "source")
-            if candidate.parent == logs_dir and is_copy_file_name(candidate.name):
+            if destinations and candidate == destinations[0] and mode == "wb":
                 return CloseCountingStream(stream, "target")
             return stream
 
@@ -556,11 +730,11 @@ class TestDelivery:
         def observe_cleanup(path, *args, **kwargs):
             candidate = Path(path)
             if candidate.parent == logs_dir and is_copy_file_name(candidate.name):
+                assert close_calls == ["target", "source"]
                 cleanup_calls.append(candidate)
             return original_unlink(path, *args, **kwargs)
 
-        monkeypatch.setattr(clh_adapter, "open", open_counting_copy_handles,
-                            raising=False)
+        monkeypatch.setattr(builtins, "open", open_counting_copy_handles)
         monkeypatch.setattr(shutil, "copyfileobj", fail_snapshot_copy)
         monkeypatch.setattr(os, "unlink", observe_cleanup)
         try:
