@@ -8,14 +8,13 @@ from pathlib import Path
 import shutil
 import sqlite3
 import stat
-import tempfile
 import time
 
 import pytest
 from camctl_memory_plugin import finalize_receipts
 
 from _cleanup_roundtrip_support import (
-    ARTIFACTS, World, json_write, process_identity, records, rows, sha,
+    World, json_write, process_identity, records, rows, sha,
 )
 
 
@@ -133,7 +132,6 @@ class CompletedOsmoSource:
         self.baseline = parent / "baseline"
         self.package = package
         self.host_demo = host_demo
-        self.consumers = []
         self.busy = False
         started = time.monotonic()
         with pytest.MonkeyPatch.context() as patch:
@@ -223,11 +221,7 @@ class CompletedOsmoSource:
     def consumer(self, tmp_path, monkeypatch):
         assert not self.busy, "同一完成来源只能串行恢复消费者"
         self.busy = True
-        started = time.monotonic()
         world = None
-        evidence = {"case": tmp_path.name,
-                    "nodeid": os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", 1)[0],
-                    "baseline_digest": self.proof["baseline_digest"]}
         try:
             # 删除前离开旧目录；相同 pathname 重建后仍须重新进入其新 inode。
             monkeypatch.chdir(self.parent)
@@ -237,16 +231,13 @@ class CompletedOsmoSource:
             shutil.copytree(self.baseline, self.root)
             for relative, entry in self.restore_inventory.items():
                 (self.root / relative).chmod(entry["mode"])
-            restored_layouts = {}
             for relative, expected in self.database_digests.items():
                 database = self.root / relative
-                restored_layouts[relative] = _database_layout(database)
-                assert restored_layouts[relative] == self.database_layouts[relative]
+                assert _database_layout(database) == self.database_layouts[relative]
                 assert _root_users(self.root) == []
                 _remove_closed_sidecars(database)
                 assert _database_digest(database, immutable=True) == expected
             assert _inventory(self.root) == self.restore_inventory
-            evidence["restored_database_layouts"] = restored_layouts
             world = World(self.package, self.parent, self.host_demo, monkeypatch,
                           prepared=self.template, case_id=tmp_path.name)
             assert Path.cwd().samefile(self.root)
@@ -263,14 +254,9 @@ class CompletedOsmoSource:
             assert world.calls() == [] and rows(world.db, "SELECT id FROM cleanup_items") == []
             assert json.loads(world.clock.read_text()) == self.proof["clock"]
             assert world.sources == self.template.sources
-            evidence["restore_seconds"] = time.monotonic() - started
             with world:
                 world.start()
-                body_started = time.monotonic()
-                try:
-                    yield world
-                finally:
-                    evidence["body_seconds"] = time.monotonic() - body_started
+                yield world
         finally:
             monkeypatch.chdir(self.parent)
             try:
@@ -278,22 +264,14 @@ class CompletedOsmoSource:
                 if world is not None:
                     # 每例保留完整世界；下一次恢复不能覆盖故障门、DB 或调用日志。
                     shutil.copytree(self.root, tmp_path / "world")
-                    evidence.update(consumer_seconds=time.monotonic() - started,
-                                    final_inventory_digest=_digest(_inventory(self.root)))
-                    json_write(tmp_path / "source-reuse.json", evidence)
-                    self.consumers.append(evidence)
+                    _inventory(self.root)
                 self._assert_baseline()
             finally:
                 self.busy = False
 
-    def archive(self):
+    def verify_after_consumers(self):
         assert not self.busy and _root_users(self.root) == []
         self._assert_baseline()
-        target = Path(tempfile.mkdtemp(
-            prefix=f"{self.parent.name}-completed-source-", dir=ARTIFACTS))
-        shutil.copytree(self.baseline, target / "baseline")
-        json_write(target / "source-proof.json", self.proof)
-        json_write(target / "consumers.json", self.consumers)
 
 
 @pytest.fixture(scope="module")
@@ -303,4 +281,4 @@ def cleanup_osmo_source(cleanup_package, host_demo, tmp_path_factory):
     try:
         yield source
     finally:
-        source.archive()
+        source.verify_after_consumers()

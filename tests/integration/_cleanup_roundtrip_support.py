@@ -34,7 +34,6 @@ from camctl_fixtures import Deployment
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-ARTIFACTS = REPO / ".local/r6/artifacts"
 OSV = "/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV"
 LRF = "/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF"
 SERIAL = "r6-osmo-serial"
@@ -189,15 +188,7 @@ print(json.dumps({"version":importlib.metadata.version("camctl"),"distribution":
             },
         },
     )
-    try:
-        yield Package(root, python, root / "venv/bin/camctl", env, logs)
-    finally:
-        archive = ARTIFACTS / (root.parent.name + "-" + root.name)
-        archive.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(logs, archive / "commands", dirs_exist_ok=True)
-        shutil.copy2(root / "provenance.json", archive)
-        shutil.copy2(root / "requirements.txt", archive)
-        shutil.copytree(root / "dist", archive / "dist", dirs_exist_ok=True)
+    return Package(root, python, root / "venv/bin/camctl", env, logs)
 
 
 class World:
@@ -270,13 +261,7 @@ class World:
 
     def __exit__(self, *exc):
         self.stop()
-        try:
-            finalize_receipts(self.root)
-        finally:
-            if self.db.exists():
-                json_write(self.root / "final-db.json", self.snapshot())
-            archive = ARTIFACTS / (self.case_id + "-" + str(os.getpid()))
-            shutil.copytree(self.root, archive, dirs_exist_ok=True)
+        finalize_receipts(self.root)
 
     def write_config(self, max_d=3, max_q=3, timeout="10", interval="0", query_timeout="10",
                      terminate_grace=None):
