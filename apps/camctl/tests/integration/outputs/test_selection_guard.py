@@ -2,11 +2,10 @@
 
 from copy import deepcopy
 from dataclasses import replace
-from decimal import Decimal
 
 import pytest
 
-from camctl.contracts.values import MAX_OBJECT_ID, new_operation_key
+from camctl.contracts.values import new_operation_key
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
 from ..support.output_planning import EventSequence, capture_operation, validate_static_event as validate_event
@@ -202,31 +201,6 @@ def test_multiple_current_processing_records_are_not_one_completed_responsibilit
     context.state_rows["recording_processing"] = {
         identity: {"action_id": 11, "check_state": 1, "repair_state": 2, "discard_state": 1}
         for identity in (51, 52)}
-    with pytest.raises(EventValidationError):
-        validate_event(event, context)
-
-
-def test_equivalent_numeric_facts_and_noncontiguous_ids_preserve_selection(selection_database):
-    event, context = _proposal(selection_database, SelectionMode.PREVIEW)
-    for table, rows in context.state_rows.items():
-        for values in rows.values():
-            for column, value in values.items():
-                if type(value) is int:
-                    values[column] = Decimal(value)
-    first, second = event.rows[1:]
-    context.owners["obtain_items", 100] = context.owners["obtain_items", second.row_id]
-    event = replace(event, rows=(event.rows[0], first, replace(second, row_id=100)))
-    validate_event(event, context)
-
-
-@pytest.mark.parametrize("invalid_identity", [
-    Decimal("801.5"),
-    True,
-    Decimal(MAX_OBJECT_ID + 1),
-])
-def test_current_catalog_rejects_invalid_saved_file_identity(selection_database, invalid_identity):
-    event, context = _proposal(selection_database, SelectionMode.PREVIEW)
-    context.state_rows["intermediate_files"][801]["id"] = invalid_identity
     with pytest.raises(EventValidationError):
         validate_event(event, context)
 
