@@ -261,12 +261,11 @@ def _assert_repaired_delivery(deployment: Deployment) -> None:
 
 @_MEDIA_TOOLS
 def test_insufficient_timing_checks_repairs_and_delivers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """计时证据不足的检查链：受限会话保守停止保存等待阶段，正常会
     话拷贝原片以真实 ffprobe 确认时长、超过门槛后无重编码修复，修
     复成品登记提升并由默认取回交付。"""
-    monkeypatch.setenv("CAMCTL_TEST_TRACE_DISPATCH", "1")
     deployment = Deployment(tmp_path, recording_margin_s="0.5", controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
@@ -344,7 +343,6 @@ def test_excess_recording_repairs_without_probing(
 ) -> None:
     """可信计时多录的对账链：跨会话对账停止确认录制严格超过门槛后
     固定多录决定，不取回探测时长直接修复，修复成品由默认取回交付。"""
-    monkeypatch.setenv("CAMCTL_TEST_TRACE_DISPATCH", "1")
     # 冻结准备后，业务 UTC 可以落后于系统钟。显式保留这个差距，
     # 使本例能拒绝用系统当前时间等待业务 started_at 的错误同步。
     initial_utc_us = whole_second_utc_us() - 60_000_000

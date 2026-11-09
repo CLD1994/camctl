@@ -108,8 +108,7 @@ class MotorHost:
                    str(initial)]
         if hold:
             command.append("hold")
-        environment = {**os.environ, "CAMCTL_TEST_TRACE_DISPATCH": "1",
-                       "CAMCTL_TEST_TRACE_CALLS": "1"}
+        environment = {**os.environ, "CAMCTL_TEST_TRACE_CALLS": "1"}
         self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, bufsize=0, env=environment)
         self.wait(lambda: any(e["event"] == "initialized" for e in self.events),
