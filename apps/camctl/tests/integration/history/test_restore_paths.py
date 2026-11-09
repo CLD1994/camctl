@@ -93,6 +93,11 @@ async def _prepared(world, ref):
 ])
 async def test_cost_path_reads_only_selected_event_range(file_world, monkeypatch,
                                                         path, before, after, has_snapshot):
+    import os
+    import sqlite3
+    from urllib.parse import parse_qs, urlsplit
+    from urllib.request import url2pathname
+
     world = file_world
     if has_snapshot:
         await _snapshot(world)
@@ -100,15 +105,45 @@ async def test_cost_path_reads_only_selected_event_range(file_world, monkeypatch
     boundary = world.history.current_boundary()
     expected = row_facts(world.owned.connection, "device_files", 1)
     reverse_ids = [_change(world) for _ in range(after)]
+    event_bodies = dict(world.owned.connection.execute(
+        "SELECT id, body_json FROM history_events"))
+    known_bodies = set(event_bodies.values())
     observed = []
-    from camctl.persistence.repositories import history as module
-    original = module.decode_event_row
+    opened = []
+    real_connect = sqlite3.connect
 
-    def record(raw):
-        observed.append(raw[0])
-        return original(raw)
+    class EventRowsConnection(sqlite3.Connection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            original_factory = self.row_factory
 
-    monkeypatch.setattr(module, "decode_event_row", record)
+            def record(cursor, row):
+                names = [column[0] for column in cursor.description]
+                body_columns = [index for index, name in enumerate(names)
+                                if name == "body_json" or row[index] in known_bodies]
+                if body_columns:
+                    assert len(body_columns) == 1 and names[body_columns[0]] == "body_json"
+                    id_columns = [index for index, name in enumerate(names) if name == "id"]
+                    assert len(id_columns) == 1
+                    observed.append((row[id_columns[0]], row[body_columns[0]]))
+                return row if original_factory is None else original_factory(cursor, row)
+
+            self.row_factory = record
+
+    def connect(database, *args, **kwargs):
+        if kwargs.get("uri") and str(database).startswith("file:"):
+            parts = urlsplit(str(database))
+            file_path = url2pathname(("//" + parts.netloc if parts.netloc else "") + parts.path)
+            if (parse_qs(parts.query).get("mode") == ["ro"] and os.path.exists(file_path)
+                    and os.path.samefile(file_path, world.history.path)):
+                assert "factory" not in kwargs
+                kwargs["factory"] = EventRowsConnection
+                connection = real_connect(database, *args, **kwargs)
+                opened.append(connection)
+                return connection
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
     actual = world.history.restore_entity("device_file", 1, boundary, event_batch_size=1)
     if path in ("current", "exact"):
         wanted = []
@@ -117,7 +152,8 @@ async def test_cost_path_reads_only_selected_event_range(file_world, monkeypatch
     else:
         wanted = list(reversed(reverse_ids))
     assert actual == {("device_files", 1): expected}
-    assert observed == wanted
+    assert opened
+    assert observed == [(event_id, event_bodies[event_id]) for event_id in wanted]
 
 
 class _Cursor:
