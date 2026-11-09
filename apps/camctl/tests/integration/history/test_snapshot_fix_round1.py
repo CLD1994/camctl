@@ -501,26 +501,43 @@ async def test_preparation_uses_separate_worker_and_releases_database_for_busine
 @pytest.mark.asyncio
 async def test_cancel_queued_snapshot_load_withdraws_without_late_resources(tmp_path,monkeypatch):
     from camctl.history.snapshots import SnapshotRef
-    from camctl.persistence.models import DbPriority
+    from camctl.persistence.models import DbOutcomeKind,DbPriority,WithdrawalStatus
     owned,_,_,ref,history=await _fixture(tmp_path)
     store,executor=await _snapshot_store(history)
     release,blocked=await _block_business(executor)
-    admitted=asyncio.Event();restored=[]
+    admitted=asyncio.Event();restored=[];submitted=[];withdrawals=[]
     original_submit=executor.submit_read
     def submit(job):
         result=original_submit(job)
-        if job.priority is DbPriority.SNAPSHOT:admitted.set()
+        if job.priority is DbPriority.SNAPSHOT:
+            submitted.append((job.key,result));admitted.set()
         return result
     monkeypatch.setattr(executor,'submit_read',submit)
-    monkeypatch.setattr(HistoryRepository,'open_segment_history',lambda *a,**k:restored.append(True))
+    original_withdraw=executor.withdraw
+    async def withdraw(key,*,expected_result=None):
+        result=await original_withdraw(key,expected_result=expected_result)
+        withdrawals.append((result,expected_result))
+        return result
+    monkeypatch.setattr(executor,'withdraw',withdraw)
+    original_restore=HistoryRepository.open_segment_history
+    def restore(self,*args,**kwargs):
+        restored.append(True)
+        return original_restore(self,*args,**kwargs)
+    monkeypatch.setattr(HistoryRepository,'open_segment_history',restore)
     task=asyncio.create_task(store.load_entity_images((SnapshotRef(1,ref.action_id),)))
     try:
-        await asyncio.wait_for(admitted.wait(),60);task.cancel()
+        await asyncio.wait_for(admitted.wait(),60)
+        assert len(submitted)==1 and not submitted[0][1].done()
+        task.cancel()
         with pytest.raises(asyncio.CancelledError):await task
+        key,future=submitted[0]
+        assert withdrawals and withdrawals[0][0].key==key
+        assert withdrawals[0][0].status is WithdrawalStatus.WITHDRAWN
+        assert withdrawals[0][1] is future
+        assert (await asyncio.shield(future)).kind is DbOutcomeKind.NOT_EXECUTED
         release.set();await blocked
         await executor.close()
         assert restored==[]
-        assert not executor._results
     finally:
         release.set();await blocked
         await executor.close();owned.connection.close()
@@ -528,15 +545,54 @@ async def test_cancel_queued_snapshot_load_withdraws_without_late_resources(tmp_
 
 @pytest.mark.asyncio
 async def test_cancel_started_load_receives_and_closes_late_detached_handle(tmp_path,monkeypatch):
+    import sqlite3
+    import tempfile
     from camctl.history.snapshots import SnapshotRef
     from camctl.history.bounded import SegmentHistoryHandle
+    from camctl.persistence.models import DbPriority,ReadReceipt
     owned,_,_,ref,history=await _fixture(tmp_path)
     store,executor=await _snapshot_store(history)
-    loop=asyncio.get_running_loop();started=asyncio.Event();release=Event();opened=[]
+    temporary=tmp_path/'history-temporary'
+    temporary.mkdir()
+    loop=asyncio.get_running_loop();started=asyncio.Event();release=Event();opened=[];closed=[];derived=[];submitted=[]
+    real_connect=sqlite3.connect
+    class DerivedConnection(sqlite3.Connection):
+        def close(self):
+            super().close()
+            self.was_closed=True
+            try:
+                self.execute('SELECT 1')
+            except sqlite3.ProgrammingError:
+                self.closed_query_rejected=True
+            else:
+                raise AssertionError('派生连接关闭后仍可查询')
+    def connect(database,*args,**kwargs):
+        path=Path(database) if isinstance(database,(str,Path)) else None
+        if path is not None and path.is_absolute() and path.is_relative_to(temporary):
+            assert 'factory' not in kwargs
+            connection=real_connect(database,*args,factory=DerivedConnection,**kwargs)
+            connection.was_closed=False
+            derived.append((connection,path))
+            return connection
+        return real_connect(database,*args,**kwargs)
+    monkeypatch.setattr(tempfile,'tempdir',str(temporary))
+    monkeypatch.setattr(sqlite3,'connect',connect)
+    original_submit=executor.submit_read
+    def submit(job):
+        future=original_submit(job)
+        if job.priority is DbPriority.SNAPSHOT:submitted.append((job.key,future))
+        return future
+    monkeypatch.setattr(executor,'submit_read',submit)
+    original_close=SegmentHistoryHandle.close
+    def close(handle):
+        result=original_close(handle)
+        closed.append(handle)
+        return result
+    monkeypatch.setattr(SegmentHistoryHandle,'close',close)
     original=HistoryRepository.open_segment_history
     def restore(self,*args,**kwargs):
         handle=original(self,*args,**kwargs)
-        opened.append((handle,Path(handle._temporary.name)))
+        opened.append(handle)
         loop.call_soon_threadsafe(started.set)
         assert release.wait(60),'load gate was not released'
         return handle
@@ -546,11 +602,24 @@ async def test_cancel_started_load_receives_and_closes_late_detached_handle(tmp_
         await asyncio.wait_for(started.wait(),60);task.cancel()
         delivered=loop.create_future();loop.call_soon(delivered.set_result,None);await delivered
         task.cancel()
-        assert opened[0][1].exists() and not task.done()
+        assert len(opened)==1 and derived
+        active=[(connection,path) for connection,path in derived if not connection.was_closed]
+        assert active and all(path.is_file() and path.parent.is_dir()
+                              for connection,path in active)
+        pending=[future for _,future in submitted if not future.done()]
+        assert pending and not task.done()
         release.set()
         with pytest.raises(asyncio.CancelledError):await task
-        assert all(handle._db is None and not directory.exists() for handle,directory in opened)
-        assert not executor._results
+        assert all(future.done() and not future.cancelled() for _,future in submitted)
+        receipts=[future.result() for future in pending]
+        delivered=[receipt for receipt in receipts if isinstance(receipt,ReadReceipt)
+                   and receipt.error is None and receipt.value==(opened[0],)]
+        assert len(delivered)==1
+        assert all(any(actual is handle for actual in closed) for handle in opened)
+        assert all(connection.was_closed and connection.closed_query_rejected
+                   and not path.exists() and not path.parent.exists()
+                   for connection,path in derived)
+        await executor.close()
     finally:
         release.set()
         if not task.done():
