@@ -334,7 +334,8 @@ def test_host_restarts_interrupted_cli_without_repeating_notification(
     path, _ = deployment.export_plan_with_client(body)
     host = MotorHost(deployment, motor_host_driver, launcher, path)
     try:
-        host.wait(lambda: "result=abnormal" in host.log.read_text(), "异常 CLI 未被真实 host 回收")
+        host.wait(lambda: host.log.exists() and "result=abnormal" in host.log.read_text(),
+                  "异常 CLI 未被真实 host 回收")
         host.wait(lambda: host.run_completions() >= 1, "host 未自动重启真实 CLI 并完成恢复")
         text = host.log.read_text()
         interrupted = re.search(r"command=run pid=(\d+) result=abnormal .*exit=91", text)
