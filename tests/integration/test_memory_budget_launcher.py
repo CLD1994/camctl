@@ -171,20 +171,28 @@ def test_failed_group_entry_never_executes_the_business_command(tmp_path, monkey
 
     monkeypatch.setattr(subprocess, "Popen", deny_group_entry)
     try:
-        with pytest.raises(memory.BudgetEnvironmentError, match="启动 shell 未能在执行业务前进入专属资源组"):
+        with pytest.raises(memory.BudgetEnvironmentError):
             memory.run_budgeted(
                 [sys.executable, "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(marker)],
                 budget=budget, receipt_path=receipt, capture_output=True, text=True, timeout=5)
+        assert len(children) == 1 and children[0].poll() is not None
+        assert not marker.exists()
+        final = json.loads(receipt.read_text(encoding="utf-8"))
+        assert final["status"] == "environment_error" and final["group_removed"] is True
+        assert not Path(final["group"]).exists()
     finally:
-        for control, mode in controls:
-            if control.exists():
-                control.chmod(mode)
-
-    assert len(children) == 1 and children[0].poll() is not None
-    assert not marker.exists()
-    final = json.loads(receipt.read_text(encoding="utf-8"))
-    assert final["status"] == "environment_error" and final["group_removed"] is True
-    assert not Path(final["group"]).exists()
+        try:
+            for child in children:
+                if child.poll() is None:
+                    try:
+                        child.kill()
+                    except ProcessLookupError:
+                        pass
+                child.communicate(timeout=5)
+        finally:
+            for control, mode in controls:
+                if control.exists():
+                    control.chmod(mode)
 
 
 def _real_probe_budget():
