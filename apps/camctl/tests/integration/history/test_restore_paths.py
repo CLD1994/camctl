@@ -803,7 +803,9 @@ def _grant_item(world, item_id):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duplicate", ["output", "delivery"])
-async def test_snapshot_rejects_duplicate_mutable_unique_key(two_item_world, monkeypatch, duplicate):
+async def test_snapshot_rejects_duplicate_mutable_unique_key(two_item_world, duplicate):
+    import sqlite3
+
     world = two_item_world
     first, second = world.item_ids
     if duplicate == "delivery":
@@ -814,20 +816,24 @@ async def test_snapshot_rejects_duplicate_mutable_unique_key(two_item_world, mon
     changes = ({"output_id": originals[first]["output_id"]} if duplicate == "output" else {
         "status": 3, "source_dependency": 1, "delivery_id": delivery_id,
     })
-    _rewrite_snapshot_row(world, snapshot_id, "obtain_items", second, changes)
     _grant_item(world, first if duplicate == "output" else second)
     assert row_facts(world.owned.connection, "actions", 2)["last_event_id"] > boundary.last_event_id
-    selected = []
-    original = world.history._snapshot_rows
-
-    def read_selected(seed):
-        selected.append(seed.snapshot.snapshot_id)
-        return original(seed)
-
-    monkeypatch.setattr(world.history, "_snapshot_rows", read_selected)
-    with pytest.raises(ConsistencyError):
+    current = world.history.current_boundary()
+    assert current.last_event_id > boundary.last_event_id
+    current_items = {identity: row_facts(world.owned.connection, "obtain_items", identity)
+                     for identity in world.item_ids}
+    restored = world.history.restore_entity("action", 2, boundary)
+    assert {identity: restored[("obtain_items", identity)] for identity in world.item_ids} == originals
+    _rewrite_snapshot_row(world, snapshot_id, "obtain_items", second, changes)
+    with pytest.raises(ConsistencyError) as caught:
         world.history.restore_entity("action", 2, boundary)
-    assert selected == [snapshot_id]
+    error = caught.value
+    while error is not None and not isinstance(error, sqlite3.IntegrityError):
+        error = error.__cause__
+    assert error is not None and error.sqlite_errorcode == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+    assert world.history.current_boundary() == current
+    assert {identity: row_facts(world.owned.connection, "obtain_items", identity)
+            for identity in world.item_ids} == current_items
 
 
 @pytest.mark.asyncio
