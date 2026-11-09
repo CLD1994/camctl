@@ -140,38 +140,74 @@ async def test_new_activity_retries_staging_sync_after_parent_sync_failure(
 async def test_cancel_waits_for_started_file_io_worker_to_finish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    roots, _ = await _prepared_workspace(tmp_path)
+    roots, workspace = await _prepared_workspace(tmp_path)
+    source = workspace / _RAW_SPEC.original_name
+    source.write_bytes(_RAW)
+    original_stat = source.stat()
     entered = threading.Event()
     release = threading.Event()
-    finished = threading.Event()
+    read_bytes = bytearray()
+    reached_eof = threading.Event()
+    synced = threading.Event()
+    closed = threading.Event()
+    real_read, real_fsync, real_close = os.read, os.fsync, os.close
+    source_fd = None
 
-    def blocked_verification(
-        _roots: BoundDirectories,
-        _path: Path,
-        _specs: tuple[CaptureFileSpec, ...],
-        _trusted_preview_name: str | None,
-    ) -> tuple[CapturedArtifact, ...]:
-        entered.set()
-        release.wait()
-        finished.set()
-        return ()
+    def gated_read(fd: int, size: int) -> bytes:
+        nonlocal source_fd
+        observed = os.fstat(fd)
+        if (observed.st_dev, observed.st_ino) == (original_stat.st_dev, original_stat.st_ino):
+            source_fd = fd
+            if not entered.is_set():
+                entered.set()
+                if not release.wait(10):
+                    raise TimeoutError("等待释放原图读取超时")
+            block = real_read(fd, size)
+            read_bytes.extend(block)
+            if not block:
+                reached_eof.set()
+            return block
+        return real_read(fd, size)
 
-    monkeypatch.setattr(capture_sources, "_verify_capture_files", blocked_verification)
+    def record_sync(fd: int) -> None:
+        real_fsync(fd)
+        if fd == source_fd:
+            synced.set()
+
+    def record_close(fd: int) -> None:
+        real_close(fd)
+        if fd == source_fd:
+            closed.set()
+
+    monkeypatch.setattr(capture_sources.os, "read", gated_read)
+    monkeypatch.setattr(capture_sources.os, "fsync", record_sync)
+    monkeypatch.setattr(capture_sources.os, "close", record_close)
     task = asyncio.create_task(verify_capture_files(roots, "42", (_RAW_SPEC,)))
-    assert await asyncio.to_thread(entered.wait, 2)
-
-    task.cancel()
+    cancellation = None
     try:
-        await asyncio.sleep(0)
-        remained_pending = not task.done()
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        # 等待取消请求交给事件循环处理，再检查文件读取仍在进行。
+        turn = asyncio.get_running_loop().create_future()
+        asyncio.get_running_loop().call_soon(turn.set_result, None)
+        await turn
+        assert not task.done()
+        assert not closed.is_set()
     finally:
         release.set()
+        if not task.cancelling():
+            task.cancel()
+        try:
+            await asyncio.wait_for(task, 10)
+        except asyncio.CancelledError as error:
+            cancellation = error
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    assert remained_pending
-    assert await asyncio.to_thread(finished.wait, 2)
+    assert cancellation is not None and cancellation.__cause__ is None
+    assert bytes(read_bytes) == _RAW
+    assert reached_eof.is_set() and synced.is_set() and closed.is_set()
+    after = source.stat()
+    assert (after.st_dev, after.st_ino) == (original_stat.st_dev, original_stat.st_ino)
+    assert source.read_bytes() == _RAW
 
 
 async def test_captured_artifact_json_has_exactly_the_recovery_fields() -> None:
