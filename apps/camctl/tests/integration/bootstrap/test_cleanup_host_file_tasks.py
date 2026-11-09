@@ -175,18 +175,17 @@ class _FailingOwner:
 
 
 @pytest.mark.parametrize("business_cancel", [False, True])
-async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
+@pytest.mark.asyncio(loop_scope="function")
+async def test_registered_host_delete_wait_cancellation_saves_not_dispatched_once(
         host_environment, monkeypatch, business_cancel):
-    """排队撤回保存真实 ran=False；等待取消不成为业务取消或重放原票据。"""
+    """已登记且未开始的任务撤回保存真实 ran=False，不重放原票据。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
-    loop = asyncio.get_running_loop()
-    previous_pool = loop._default_executor
-    pool = ThreadPoolExecutor(max_workers=1)
-    loop.set_default_executor(pool)
     gate = threading.Event()
     started = asyncio.Event()
     owner = _Owner()
@@ -217,6 +216,7 @@ async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
         FileTaskId("r4-test-pool-blocker"), 999_001, "test", "pool_blocker", occupy_pool)
     blocker_task = asyncio.create_task(
         executor.run_file_task(blocker, owner))
+    cleanup = None
     try:
         await asyncio.wait_for(started.wait(), timeout=5)
         factory = session_cleanup_assembly(
@@ -231,7 +231,7 @@ async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
         if business_cancel:
             await apply_host_cleanup_cancel(cfg, owned, context)
         cleanup.cancel()
-        # 取消先让执行器在同一锁内撤回排队任务；blocker 放行后才会完成共享 drain。
+        # 取消先撤回已登记且未开始的任务；blocker 放行后才会完成共享 drain。
         await _wait_until(lambda: 900 not in executor.unfinished_files())
         gate.set()
         with pytest.raises(asyncio.CancelledError) as interrupted:
@@ -307,25 +307,25 @@ async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
         assert submitted[1][0].task_id != submitted[0][0].task_id
         assert len(requests) == 2
     finally:
+        if cleanup is not None and not cleanup.done():
+            cleanup.cancel()
         gate.set()
-        if not blocker_task.done():
-            await asyncio.gather(blocker_task, return_exceptions=True)
-        loop._default_executor = previous_pool
-        pool.shutdown(wait=True)
+        await asyncio.gather(
+            *(task for task in (cleanup, blocker_task) if task is not None),
+            return_exceptions=True)
 
 
-async def test_queued_host_query_wait_cancellation_keeps_original_consumer(
+@pytest.mark.asyncio(loop_scope="function")
+async def test_registered_host_query_wait_cancellation_keeps_original_consumer(
         host_environment, monkeypatch):
-    """排队 QUERY 撤回沿原 AFTER_DELETE consumer 保存真实 NOT_DISPATCHED。"""
+    """已登记且未开始的 QUERY 撤回沿原 consumer 保存 NOT_DISPATCHED。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
-    loop = asyncio.get_running_loop()
-    previous_pool = loop._default_executor
-    pool = ThreadPoolExecutor(max_workers=1)
-    loop.set_default_executor(pool)
     gate = threading.Event()
     blocker_started = asyncio.Event()
     owner = _Owner()
@@ -340,30 +340,31 @@ async def test_queued_host_query_wait_cancellation_keeps_original_consumer(
         "test", "pool_blocker", occupy_pool)
     blocker_task = asyncio.create_task(
         executor.run_file_task(blocker, owner))
-    original_run = original_host_calls()
-    operations = []
-    submitted = []
-    run_file_task = executor.run_file_task
-
-    async def fail_delete_capture_query(self, request):
-        operations.append(request.operation)
-        if request.operation == "delete":
-            return DeviceCallResult((), {
-                "code": "local_io_failed", "stage": "delete"})
-        return await original_run(self, request)
-
-    async def track_task(task, task_owner, **kwargs):
-        if task.business == "host_artifact_cleanup":
-            submitted.append(task)
-        return await run_file_task(task, task_owner, **kwargs)
-
-    observe_host_calls(monkeypatch, fail_delete_capture_query)
-    monkeypatch.setattr(executor, "run_file_task", track_task)
-    active_calls = set()
-    factory = _cleanup_factory(
-        cfg, driver, executor, active_calls=active_calls)
-    cleanup = asyncio.create_task(advance_cleanup_once(factory, context))
+    cleanup = None
     try:
+        original_run = original_host_calls()
+        operations = []
+        submitted = []
+        run_file_task = executor.run_file_task
+
+        async def fail_delete_capture_query(self, request):
+            operations.append(request.operation)
+            if request.operation == "delete":
+                return DeviceCallResult((), {
+                    "code": "local_io_failed", "stage": "delete"})
+            return await original_run(self, request)
+
+        async def track_task(task, task_owner, **kwargs):
+            if task.business == "host_artifact_cleanup":
+                submitted.append(task)
+            return await run_file_task(task, task_owner, **kwargs)
+
+        observe_host_calls(monkeypatch, fail_delete_capture_query)
+        monkeypatch.setattr(executor, "run_file_task", track_task)
+        active_calls = set()
+        factory = _cleanup_factory(
+            cfg, driver, executor, active_calls=active_calls)
+        cleanup = asyncio.create_task(advance_cleanup_once(factory, context))
         await asyncio.wait_for(blocker_started.wait(), timeout=5)
         await _wait_until(lambda: 900 in executor.unfinished_files())
         item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
@@ -376,11 +377,12 @@ async def test_queued_host_query_wait_cancellation_keeps_original_consumer(
         with pytest.raises(asyncio.CancelledError):
             await cleanup
     finally:
+        if cleanup is not None and not cleanup.done():
+            cleanup.cancel()
         gate.set()
-        if not blocker_task.done():
-            await asyncio.gather(blocker_task, return_exceptions=True)
-        loop._default_executor = previous_pool
-        pool.shutdown(wait=True)
+        await asyncio.gather(
+            *(task for task in (cleanup, blocker_task) if task is not None),
+            return_exceptions=True)
 
     observed = context.open_connection()
     try:
