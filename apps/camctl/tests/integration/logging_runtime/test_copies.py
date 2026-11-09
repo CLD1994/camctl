@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -519,7 +520,7 @@ class TestDelivery:
         close_calls: list[str] = []
         cleanup_calls: list[Path] = []
         actual_open = builtins.open
-        original_unlink = copies._unlink
+        original_unlink = os.unlink
 
         class CloseCountingStream:
             def __init__(self, stream, side: str) -> None:
@@ -545,16 +546,16 @@ class TestDelivery:
         def fail_snapshot_copy(_source, _target, *args, **kwargs):
             raise primary
 
-        def observe_cleanup(path):
+        def observe_cleanup(path, *args, **kwargs):
             candidate = Path(path)
             if candidate.parent == logs_dir and is_copy_file_name(candidate.name):
                 cleanup_calls.append(candidate)
-            return original_unlink(path)
+            return original_unlink(path, *args, **kwargs)
 
         monkeypatch.setattr(clh_adapter, "open", open_counting_copy_handles,
                             raising=False)
         monkeypatch.setattr(shutil, "copyfileobj", fail_snapshot_copy)
-        monkeypatch.setattr(copies, "_unlink", observe_cleanup)
+        monkeypatch.setattr(os, "unlink", observe_cleanup)
         try:
             if failure_kind == "worker_cancel":
                 with pytest.raises(asyncio.CancelledError) as caught:
@@ -666,7 +667,7 @@ class TestDelivery:
         marker = MarkerStore(logs_dir)
         primary = RuntimeError("injected copied progress failure")
         original_update = marker.update_stage
-        original_unlink = copies._unlink
+        original_unlink = os.unlink
         cleanup_calls: list[Path] = []
         publisher_calls: list[Path] = []
 
@@ -675,21 +676,21 @@ class TestDelivery:
                 raise primary
             return original_update(stage, **kwargs)
 
-        def controlled_unlink(path):
+        def controlled_unlink(path, *args, **kwargs):
             path = Path(path)
             if path.parent == logs_dir and is_copy_file_name(path.name):
                 cleanup_calls.append(path)
                 if cleanup_mode == "already_absent":
-                    original_unlink(path)
+                    original_unlink(path, *args, **kwargs)
                     raise FileNotFoundError(path)
-            return original_unlink(path)
+            return original_unlink(path, *args, **kwargs)
 
         async def publisher(source, _directories, _target):
             publisher_calls.append(Path(source))
             raise AssertionError("publish must not follow COPIED exception")
 
         monkeypatch.setattr(marker, "update_stage", fail_copied_progress)
-        monkeypatch.setattr(copies, "_unlink", controlled_unlink)
+        monkeypatch.setattr(os, "unlink", controlled_unlink)
         try:
             with pytest.raises(RuntimeError) as caught:
                 await copies.deliver_failure_copy(
@@ -730,6 +731,7 @@ class TestDelivery:
         marker = MarkerStore(logs_dir)
         primary = RuntimeError("primary copied progress failure")
         original_update = marker.update_stage
+        original_unlink = os.unlink
         cleanup_calls: list[Path] = []
         publisher_calls: list[Path] = []
 
@@ -738,19 +740,19 @@ class TestDelivery:
                 raise primary
             return original_update(stage, **kwargs)
 
-        def fail_cleanup(path):
+        def fail_cleanup(path, *args, **kwargs):
             path = Path(path)
             if path.parent == logs_dir and is_copy_file_name(path.name):
                 cleanup_calls.append(path)
                 raise cleanup_failure
-            return None
+            return original_unlink(path, *args, **kwargs)
 
         async def publisher(source, _directories, _target):
             publisher_calls.append(Path(source))
             raise AssertionError("publish must not follow COPIED exception")
 
         monkeypatch.setattr(marker, "update_stage", fail_copied_progress)
-        monkeypatch.setattr(copies, "_unlink", fail_cleanup)
+        monkeypatch.setattr(os, "unlink", fail_cleanup)
         try:
             with pytest.raises(RuntimeError) as caught:
                 await copies.deliver_failure_copy(
@@ -790,7 +792,7 @@ class TestDelivery:
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
         original_copy = channel.copy_with_write
-        original_unlink = copies._unlink
+        original_unlink = os.unlink
         cleanup_failure = cleanup_type("cleanup after returned copy error")
         cleanup_calls: list[Path] = []
 
@@ -810,15 +812,15 @@ class TestDelivery:
                 "controlled NOT_MOVED result",
             )
 
-        def fail_cleanup(path):
+        def fail_cleanup(path, *args, **kwargs):
             candidate = Path(path)
             if candidate.parent == logs_dir and is_copy_file_name(candidate.name):
                 cleanup_calls.append(candidate)
                 raise cleanup_failure
-            return original_unlink(path)
+            return original_unlink(path, *args, **kwargs)
 
         monkeypatch.setattr(channel, "copy_with_write", return_copy_error)
-        monkeypatch.setattr(copies, "_unlink", fail_cleanup)
+        monkeypatch.setattr(os, "unlink", fail_cleanup)
         try:
             with pytest.raises(cleanup_type) as caught:
                 kwargs = {"publish": not_moved} if termination == "not_moved" else {}
@@ -865,7 +867,7 @@ class TestDelivery:
         channel = _channel(log_path)
         marker = MarkerStore(logs_dir)
         original_update = marker.update_stage
-        original_unlink = copies._unlink
+        original_unlink = os.unlink
         stopped = {"value": False}
         cleanup_failure = cleanup_type("cleanup after ordinary stop")
         cleanup_calls: list[Path] = []
@@ -886,12 +888,12 @@ class TestDelivery:
                 stopped["value"] = True
             return result
 
-        def fail_cleanup(path):
+        def fail_cleanup(path, *args, **kwargs):
             candidate = Path(path)
             if candidate.parent == logs_dir and is_copy_file_name(candidate.name):
                 cleanup_calls.append(candidate)
                 raise cleanup_failure
-            return original_unlink(path)
+            return original_unlink(path, *args, **kwargs)
 
         async def publisher(source, _directories, _target):
             publish_calls.append(Path(source))
@@ -900,7 +902,7 @@ class TestDelivery:
 
         monkeypatch.setattr(channel, "copy_with_write", stop_after_copy_write)
         monkeypatch.setattr(marker, "update_stage", stop_after_copied_progress)
-        monkeypatch.setattr(copies, "_unlink", fail_cleanup)
+        monkeypatch.setattr(os, "unlink", fail_cleanup)
         try:
             with pytest.raises(cleanup_type) as caught:
                 await copies.deliver_failure_copy(
@@ -958,7 +960,7 @@ class TestDelivery:
         marker = MarkerStore(logs_dir)
         original_copy = channel.copy_with_write
         original_update = marker.update_stage
-        original_unlink = copies._unlink
+        original_unlink = os.unlink
         primary = primary_type(f"raw {primary_stage} primary")
         cleanup_failure = cleanup_type("cleanup raw-primary secondary")
         cleanup_calls: list[Path] = []
@@ -975,18 +977,18 @@ class TestDelivery:
                 raise primary
             return original_update(stage, **kwargs)
 
-        def fail_cleanup(path):
+        def fail_cleanup(path, *args, **kwargs):
             candidate = Path(path)
             if candidate.parent == logs_dir and is_copy_file_name(candidate.name):
                 cleanup_calls.append(candidate)
                 raise cleanup_failure
-            return original_unlink(path)
+            return original_unlink(path, *args, **kwargs)
 
         if primary_stage == "copy_write":
             monkeypatch.setattr(channel, "copy_with_write", raw_copy_write_error)
         else:
             monkeypatch.setattr(marker, "update_stage", fail_progress)
-        monkeypatch.setattr(copies, "_unlink", fail_cleanup)
+        monkeypatch.setattr(os, "unlink", fail_cleanup)
         try:
             if expected == "group":
                 with pytest.raises(ExceptionGroup) as caught:
@@ -1053,21 +1055,25 @@ class TestDelivery:
         primary = RuntimeError("injected published progress failure")
         original_update = marker.update_stage
         cleanup_calls: list[Path] = []
-        original_unlink = copies._unlink
+        original_unlink = os.unlink
+        progress_failed = False
 
         def fail_published_progress(stage, **kwargs):
+            nonlocal progress_failed
             if stage is MarkerStage.PUBLISHED:
+                progress_failed = True
                 raise primary
             return original_update(stage, **kwargs)
 
-        def observe_unlink(path):
+        def observe_unlink(path, *args, **kwargs):
             candidate = Path(path)
-            if candidate.parent == logs_dir and is_copy_file_name(candidate.name):
+            if (progress_failed and candidate.parent == logs_dir
+                    and is_copy_file_name(candidate.name)):
                 cleanup_calls.append(candidate)
-            return original_unlink(path)
+            return original_unlink(path, *args, **kwargs)
 
         monkeypatch.setattr(marker, "update_stage", fail_published_progress)
-        monkeypatch.setattr(copies, "_unlink", observe_unlink)
+        monkeypatch.setattr(os, "unlink", observe_unlink)
         try:
             with pytest.raises(RuntimeError) as caught:
                 await copies.deliver_failure_copy(
