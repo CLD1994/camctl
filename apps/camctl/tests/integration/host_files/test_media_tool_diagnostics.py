@@ -70,14 +70,24 @@ async def _public_probe(tmp_path: Path, tool: str, *, stopped=False):
             return await super().run_async_file_task(task, owner)
 
     executor = StopBeforeExecution(supervisor) if stopped else FileTaskExecutor(supervisor)
-    result = await media.probe_media(
+    identity = FileTaskId("probe-diagnostics")
+    waiting = asyncio.create_task(media.probe_media(
         FileRef(1, FilePurpose.RECORDING_INPUT, "recording-inputs/1.mp4", staging),
         BoundDirectories(staging=staging), media.ProbeRequest(ffprobe=tool),
-        executor=executor, task_id=FileTaskId("probe-diagnostics"), owner=ProbeOwner())
-    assert result.ran and result.error is None
-    assert executor.unfinished_files() == ()
-    assert not (await supervisor.drain_required()).failed
-    assert source.read_bytes() == _VIDEO
+        executor=executor, task_id=identity, owner=ProbeOwner()))
+    try:
+        # 这是测试保护时间，不改变工具本身的运行期限。
+        async with asyncio.timeout(10):
+            result = await asyncio.shield(waiting)
+        assert result.ran and result.error is None
+        assert executor.unfinished_files() == ()
+        assert source.read_bytes() == _VIDEO
+    finally:
+        executor.request_stop(identity)
+        async with asyncio.timeout(15):
+            await asyncio.shield(asyncio.gather(waiting, return_exceptions=True))
+            drained = await supervisor.drain_required()
+    assert not drained.failed
     return result.value
 
 
@@ -99,12 +109,25 @@ sys.exit(7)
     assert probe.tool_diagnostics.exception is None
 
 
-async def test_probe_start_failure_keeps_original_exception_graph(tmp_path):
+async def test_probe_start_failure_keeps_original_exception_graph(tmp_path, monkeypatch):
+    real_execute_tool = media.execute_tool
+    observed = []
+
+    async def observe_start_error(*args, **kwargs):
+        try:
+            return await real_execute_tool(*args, **kwargs)
+        except ToolStartError as error:
+            observed.append((error, error.__cause__))
+            raise
+
+    monkeypatch.setattr(media, "execute_tool", observe_start_error)
     missing = str(tmp_path / "missing-ffprobe")
     probe = await _public_probe(tmp_path, missing)
     assert probe.error is not None and probe.error.startswith("tool_unavailable")
     error = probe.tool_diagnostics.exception
     assert isinstance(error, ToolStartError)
+    assert len(observed) == 1 and error is observed[0][0]
+    assert error.__cause__ is observed[0][1]
     assert isinstance(error.__cause__, OSError)
     assert error.__cause__.errno == errno.ENOENT
     assert probe.tool_diagnostics.outcome is None
