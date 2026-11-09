@@ -19,6 +19,12 @@ from ..support.capture_media_cases import (
     processing_success_event, promotion_event, validate_media_event, capture_finish_request, media_cases,
 )
 
+_OUTPUT_PROBE_FAULTS = (
+    "missing_probe", "tool_error", "container", "short_container",
+    "missing_video", "extra_video", "cover", "codec", "dimensions", "missing_audio",
+    "audio_codec", "short_video", "short_audio", "unknown_duration",
+)
+
 
 async def prepared_repair(tmp_path, *, check_required=False):
     owned, runtime, flow, source_id, source, tools, entry = (await prepared_input(tmp_path, check_required, "valid"))
@@ -88,9 +94,37 @@ def alter_source_history(owned, change):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entry", ["complete", "result"])
-@pytest.mark.parametrize("fault", ["missing_probe", "tool_error", "container", "short_container",
-    "missing_video", "extra_video", "cover", "codec", "dimensions", "missing_audio",
-    "audio_codec", "short_video", "short_audio", "unknown_duration", "source_missing",
+async def test_both_success_commands_reject_invalid_output_probes(tmp_path, entry):
+    owned, output_id, source, output = await prepared_repair(tmp_path)
+    try:
+        if entry == "result":
+            owned.connection.execute("UPDATE intermediate_files SET size_bytes=2048,sha256=? WHERE id=?", ("a"*64, output_id))
+            owned.connection.commit()
+        before = tuple(owned.connection.iterdump())
+        for fault in _OUTPUT_PROBE_FAULTS:
+            try:
+                candidate = mutate(output, fault)
+                if entry == "complete":
+                    command = RepairSuccess(1, output_id, 2048, "a"*64, _NOW+200, output_probe=candidate)
+                    save = CaptureRepository().complete_repair_output
+                else:
+                    command = RepairResultSave(1, RepairOutcome.SUCCEEDED, _NOW+200,
+                        output_file_id=output_id, output_probe=candidate)
+                    save = CaptureRepository().save_repair_result
+                outcome = save(command, new_operation_key(), owned)
+                assert outcome.kind is DbOutcomeKind.ROLLED_BACK, (entry, fault, outcome.error)
+                assert not owned.connection.in_transaction, (entry, fault, "事务未结束")
+                assert tuple(owned.connection.iterdump()) == before, (entry, fault, "状态库发生变化")
+            except Exception as error:
+                error.add_note(f"entry={entry}, fault={fault}")
+                raise
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["complete", "result"])
+@pytest.mark.parametrize("fault", ["source_missing",
     "source_short", "source_unknown", "source_tool_error", "source_container", "source_stream_short",
     "source_identity", "copy_missing", "copy_unverified", "copy_path", "copy_size", "wrong_output"])
 async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(tmp_path, entry, fault):
@@ -123,8 +157,6 @@ async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(t
             owned.connection.execute("INSERT INTO intermediate_files (id,owner_action_id,purpose,relative_path,retention_state,cleanup_state,size_bytes,sha256,created_event_id,last_event_id,change_count) VALUES (?,1,4,?,1,1,NULL,NULL,1,1,1)",
                 (output_id, f"derived/{output_id}.mp4"))
             owned.connection.commit()
-        if not fault.startswith(("source_", "copy_")) and fault != "wrong_output":
-            output = mutate(output, fault)
         if entry == "complete":
             command = RepairSuccess(1, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
             save = CaptureRepository().complete_repair_output
@@ -252,9 +284,7 @@ async def test_qualified_success_reopens_and_replays_original_probe_without_new_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["missing_probe", "tool_error", "container", "short_container",
-    "missing_video", "extra_video", "cover", "codec", "dimensions", "missing_audio",
-    "audio_codec", "short_video", "short_audio", "unknown_duration"])
+@pytest.mark.parametrize("fault", _OUTPUT_PROBE_FAULTS)
 async def test_promotion_and_reuse_recheck_saved_media_qualification(tmp_path, fault):
     from camctl.history.reads import PlanReadScope
     from camctl.persistence.event_reads import SqlEventReads
