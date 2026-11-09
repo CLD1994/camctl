@@ -104,18 +104,18 @@ def install() -> None:
         original_init = LocalSourceReader.__init__
         original = LocalSourceReader.read_chunk
         initial_source_paths = set()
+        reader_sources = {}
 
         def observe_init(self, path, offset):
             original_init(self, path, offset)
-            self._action6_test_source_path = str(Path(path).resolve())
-            self._action6_test_initial_offset = offset
+            reader_sources[id(self)] = (str(Path(path).resolve()), offset)
 
         def observe(self, limit):
             position_before = self.position()
             result = original(self, limit)
             if result.data is None or position_before != 0 or marker.exists():
                 return result
-            source_path = self._action6_test_source_path
+            source_path, initial_offset = reader_sources[id(self)]
             if source_path not in initial_source_paths:
                 initial_source_paths.add(source_path)
                 return result
@@ -133,7 +133,7 @@ def install() -> None:
                 "position": self.position(),
                 "bytes_read": len(result.data),
                 "source_path": source_path,
-                "initial_offset": self._action6_test_initial_offset,
+                "initial_offset": initial_offset,
                 "utc_ns": time.time_ns(),
             }
             temporary = marker.with_suffix(".new")
