@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import stat
 import threading
 from pathlib import Path
 
@@ -95,16 +97,16 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
 
     monkeypatch.setattr(FileChannel, "copy_with_write", copy_then_wait)
 
-    real_unlink = copies._unlink
+    real_unlink = os.unlink
 
-    def fail_cancelled_copy_cleanup(path):
-        target = Path(path)
-        if copies.is_copy_file_name(target.name):
+    def fail_cancelled_copy_cleanup(path, *args, **kwargs):
+        target = Path(os.fsdecode(path))
+        if kwargs.get("dir_fd") is None and target in staging_targets:
             cleanup_attempts.append(target)
             raise OSError("controlled cancellation cleanup failure")
-        return real_unlink(path)
+        return real_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(copies, "_unlink", fail_cancelled_copy_cleanup)
+    monkeypatch.setattr(os, "unlink", fail_cancelled_copy_cleanup)
 
     real_marker_delete = MarkerStore.delete
 
@@ -252,6 +254,7 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
         lifecycle.close_runtime(deps)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="需要真实目录同步")
 async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_unlock(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
@@ -284,17 +287,20 @@ async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_u
 
     monkeypatch.setattr(MarkerStore, "delete", track_single_marker_delete)
 
-    real_sync = copies._fsync_directory
+    real_sync = os.fsync
+    directory = logs_dir.stat()
 
-    def pause_marker_directory_sync(path):
-        if Path(path).resolve() == logs_dir.resolve():
+    def pause_marker_directory_sync(fd):
+        opened = os.fstat(fd)
+        if (stat.S_ISDIR(opened.st_mode)
+                and (opened.st_dev, opened.st_ino) == (directory.st_dev, directory.st_ino)):
             loop.call_soon_threadsafe(sync_started.set)
             if not release_sync.wait(timeout=10):
                 raise TimeoutError("受控标记目录同步等待未获释放")
             raise OSError("controlled recovery marker directory sync failure")
-        return real_sync(path)
+        return real_sync(fd)
 
-    monkeypatch.setattr(copies, "_fsync_directory", pause_marker_directory_sync)
+    monkeypatch.setattr(os, "fsync", pause_marker_directory_sync)
 
     async def generate_and_observe(supervisor, job):
         generated_reports.append(job.report_id)
@@ -458,18 +464,17 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
                 "controlled transition after file task start")
         raise StateDbFailure("controlled state database fatal after file task start")
 
-    real_listdir = copies._listdir
+    real_listdir = os.listdir
 
-    def block_startup_scan(path):
-        target = Path(path)
-        if target == logs_dir:
+    def block_startup_scan(path="."):
+        if path is not None and not isinstance(path, int) and Path(os.fsdecode(path)) == logs_dir:
             loop.call_soon_threadsafe(scan_started.set)
             if not release_scan.wait(timeout=10):
                 raise TimeoutError("受控启动扫描等待未获释放")
             raise OSError("controlled startup diagnostic after internal control")
         return real_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", block_startup_scan)
+    monkeypatch.setattr(os, "listdir", block_startup_scan)
 
     real_logger_start = LoggingOwner.start_session
 
