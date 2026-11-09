@@ -4,27 +4,23 @@ from decimal import Decimal
 import json
 
 import pytest
-from adb_metadata_fixtures import collect_fake_metadata_many
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from ..persistence.result_page_fixtures import begin_result_check
-from .result_page_storage import result_page_storage, allow_dispatch, SavedDirectoryScan
+from .result_page_storage import result_page_storage, allow_dispatch, ResultPageTransport
 from camctl.capture.result_pages import ResultPageSave
-from camctl.contracts.pages import Page
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.catalog import DriverDefinition, DriverDefinitions, build_catalog
-from camctl.devices.directory import DirectoryCursor, DirectoryRead
+from camctl.devices.directory import DirectoryCursor
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
-from camctl.devices.drivers.adb_cameras.filesystem import FileAccessRead
 from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
 from camctl.devices.ports import ControlRequest
 from camctl.devices.tasks import StartReturn
 from camctl.operations.attempts import (AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget,
     OperationKind, RunFinish, RunOutcome)
-from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
@@ -38,35 +34,6 @@ pytestmark = pytest.mark.asyncio
 ROOT = "/mnt/media_rw/emulated/DCIM"
 BINDING = DeviceBinding("cam-1", "dji-osmo360-ii")
 
-
-class Filesystem:
-    def __init__(self, paths):
-        self.paths = sorted(paths)
-        self.directory_calls = []
-
-    def directory_scan(self, request):
-        return SavedDirectoryScan(self)
-
-    async def read_directory(self, request, *, stop):
-        self.directory_calls.append(request)
-        after = None if request.cursor is None else request.cursor.after_path
-        remaining = [path for path in self.paths if after is None or path > after]
-        selected = remaining[:request.batch]
-        cursor = (DirectoryCursor(BINDING, request.directories, 0, selected[-1])
-                  if len(remaining) > len(selected) else None)
-        return DirectoryRead(None, None, Page(tuple(FileIdentity(BINDING, path) for path in selected), cursor))
-
-    async def metadata(self, identity, *, timeout_s, stop):
-        return FileAccessRead(None, 10, None)
-
-    async def metadata_many(self, identities, *, timeout_s, stop):
-        return await collect_fake_metadata_many(self, identities, timeout_s=timeout_s, stop=stop)
-
-
-class Transport:
-    async def run(self, spec, stop):
-        return RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n",
-            None, None, stderr=b"")
 
 
 async def _world(owned, tmp_path, baseline, monkeypatch):
@@ -96,7 +63,7 @@ async def _world(owned, tmp_path, baseline, monkeypatch):
     async def sleep(seconds):
         clock[0] += int(seconds * 1_000_000_000)
     monkeypatch.setattr(asyncio, "sleep", sleep)
-    driver = AdbCameraDriver(contract, config.devices, Transport(), terminate_grace_s=Decimal("1"),
+    driver = AdbCameraDriver(contract, config.devices, ResultPageTransport(), terminate_grace_s=Decimal("1"),
         monotonic_ns=lambda: clock[0])
     operations = OperationRepository()
     ticket = granted.value.ticket
@@ -137,8 +104,8 @@ async def test_driver_pages_preserve_raw_range_order_and_actual_baseline_differe
     paths, baseline, expected = ([ROOT + "/" + name for name in values]
                                 for values in (paths, baseline, expected))
     driver, runtime, ticket, context = await _world(owned, tmp_path, baseline, monkeypatch)
-    fs = Filesystem(paths)
-    monkeypatch.setattr(driver, "_filesystem", lambda binding: fs)
+    transport = driver.transport
+    transport.paths = paths
     cursor, page_no, saved_refs = None, 1, []
     video_result_mode = runtime.action(1)["execution_spec_json"]["video_result_mode"]
     while True:
@@ -167,7 +134,7 @@ async def test_driver_pages_preserve_raw_range_order_and_actual_baseline_differe
     assert pages[-1].page.set_finalized is True
     previews = [entry for page in pages for entry in page.page.entries if entry.format_id == "lrf"]
     assert all(entry.paired_identity is None for entry in previews)
-    assert len(fs.directory_calls) == len(pages)
+    assert len(transport.directory_calls) == len(pages)
     for preview in previews:
         original_identity = preview.identity.rsplit(".", 1)[0] + ".OSV"
         original = runtime.capture.read_result_file_input(saved_refs[-1], original_identity,
@@ -180,14 +147,15 @@ async def test_driver_pages_preserve_raw_range_order_and_actual_baseline_differe
 
 
 async def test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_disappears(
-        owned, tmp_path, monkeypatch):
+        owned, tmp_path, monkeypatch, request):
     paths = [ROOT + f"/a/{index:03}.OSV" for index in range(31)]
     original, preview = ROOT + "/z/Clip.OSV", ROOT + "/z/Clip.lrf"
     driver, runtime, ticket, context = await _world(owned, tmp_path, [], monkeypatch)
-    filesystem = Filesystem([*paths, original, preview, ROOT + "/z/Z.tmp"])
-    monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
+    transport = driver.transport
+    transport.paths = [*paths, original, preview, ROOT + "/z/Z.tmp"]
     adapter = DriverResultListing(driver, BINDING, driver.contract.evidence,
         capture_repository=runtime.capture, database=runtime.database)
+    request.addfinalizer(lambda current=adapter, original=ticket: current.close_scan(original))
     output_scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     video_result_mode = runtime.action(1)["execution_spec_json"]["video_result_mode"]
 
@@ -201,7 +169,7 @@ async def test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_d
     context["prior_completion"] = {"result_page_event_id": first_save.value.event_id,
         "evidence": first.outcome.settlement.evidence.data["file_completion"]}
 
-    filesystem.paths = sorted([*paths, preview, ROOT + "/z/Z.tmp"])
+    transport.paths = [*paths, preview, ROOT + "/z/Z.tmp"]
     second = await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
         output_scope=output_scope, completion_context=context, video_result_mode=video_result_mode)
 
@@ -212,7 +180,7 @@ async def test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_d
     assert page["set_finalized"] is True
     assert [entry["identity"] for entry in page["entries"]] == [preview]
     assert page["entries"][0]["paired_identity"] is None
-    assert len(filesystem.directory_calls) == 2
+    assert len(transport.directory_calls) == 1
     second_save = runtime.capture.save_result_page(ResultPageSave(ticket, 2, first.next_cursor,
         validate_outcome(ticket, second.outcome, driver.contract.evidence), _SCHEDULED + 4),
         new_operation_key(), owned)
