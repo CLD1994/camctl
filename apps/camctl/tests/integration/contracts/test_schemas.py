@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import subprocess
+import sys
 
 import pytest
 
@@ -38,3 +40,37 @@ def test_packaged_plan_local_reference_accepts_decimal_integer() -> None:
 
 def test_packaged_capabilities_schema_is_available() -> None:
     validate_document("protocol/capabilities.schema.json", {"devices": []})
+
+
+def test_workflow_error_registry_first_load_preserves_resource_failure() -> None:
+    script = r'''
+import camctl.resources as resources
+
+original = resources.resource_bytes
+hits = []
+failure = None
+
+def read(name):
+    if name == "protocol/workflow-codes.json":
+        hits.append(name)
+        if failure is not None:
+            raise failure
+    return original(name)
+
+resources.resource_bytes = read
+from camctl.contracts.workflow_errors import registered_error
+from camctl.contracts.schemas import SchemaRuleError
+assert not hits
+for failure in (resources.ResourceError("资源不可读取"), OSError("读取出错")):
+    try:
+        registered_error("capture_result_unconfirmed")
+    except SchemaRuleError as error:
+        assert error.__cause__ is failure
+    else:
+        raise AssertionError("登记资源错误未传播")
+failure = None
+assert registered_error("capture_result_unconfirmed")["stage"] == "execution"
+assert hits
+'''
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import sqlite3
 from pathlib import Path
 
@@ -528,6 +529,55 @@ class TestAllocationContract:
 
 
 class TestAtomicRollback:
+    @pytest.mark.parametrize("read_only", [False, True], ids=["write-result", "read-only-result"])
+    def test_complete_result_rule_failure_rolls_back(self, tmp_path, plan_guards, read_only):
+        from camctl.contracts.schemas import SchemaRuleError, create_validator
+        from camctl.persistence.transaction import CommandPlan
+
+        _create_valid_database(tmp_path / "state.db")
+        owned = _open(tmp_path)
+        try:
+            if read_only:
+                assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+            before = tuple(owned.connection.iterdump())
+            observed = []
+            planned = []
+
+            def complete_result(connection, result):
+                assert connection is owned.connection
+                assert connection.in_transaction
+                assert result is planned[0].result
+                observed.append(connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0])
+                try:
+                    create_validator({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "invalid"})
+                except SchemaRuleError as error:
+                    observed.append(error)
+                    raise
+
+            class ResultCommand:
+                def plan(self, scope):
+                    if read_only:
+                        plan = CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
+                            result={"source": "read-only-result"}, complete_result=complete_result)
+                    else:
+                        plan = replace(PlanCreateCommand((1,)).plan(scope), complete_result=complete_result)
+                    planned.append(plan)
+                    return plan
+
+            with pytest.raises(SchemaRuleError) as raised:
+                commit_operation(ResultCommand(), new_operation_key(), owned)
+            assert observed == [1, raised.value]
+            assert not owned.connection.in_transaction
+            assert tuple(owned.connection.iterdump()) == before
+            owned.connection.close()
+            reopened = _open(tmp_path)
+            try:
+                assert tuple(reopened.connection.iterdump()) == before
+            finally:
+                reopened.connection.close()
+        finally:
+            owned.connection.close()
+
     @pytest.mark.parametrize(
         "fail_prefix",
         [

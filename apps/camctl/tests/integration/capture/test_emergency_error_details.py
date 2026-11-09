@@ -369,32 +369,40 @@ async def test_unchanged_activity_keeps_valid_new_flow_error(tmp_path, outcome, 
         owned.connection.close()
 
 
-async def test_error_registry_resource_failure_rolls_back_without_becoming_bad_instance(
+async def test_error_rule_failure_rolls_back_without_becoming_bad_instance(
         tmp_path, monkeypatch):
-    from camctl.contracts import workflow_errors
-    from camctl.contracts.schemas import SchemaRuleError
-    from camctl.resources import ResourceError
+    from camctl.contracts.schemas import SchemaRuleError, create_validator
+    from camctl.persistence.repositories import capture as capture_module
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
     owned = await _world(tmp_path)
     try:
         before = _facts(owned)
-        original = workflow_errors.resource_bytes
-        cause = ResourceError("测试控制的公共错误登记读取失败")
+        database_path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+        with pytest.raises(SchemaRuleError) as invalid:
+            create_validator({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "invalid"})
+        failure = invalid.value
+        original = capture_module.validate_public_error
+        hits = []
 
-        def read(name):
-            if name == "protocol/workflow-codes.json":
-                assert owned.connection.in_transaction
-                raise cause
-            return original(name)
+        def validate(value):
+            original(value)
+            hits.append(owned.connection.in_transaction)
+            raise failure
 
-        workflow_errors._registry.cache_clear()
-        monkeypatch.setattr(workflow_errors, "resource_bytes", read)
+        monkeypatch.setattr(capture_module, "validate_public_error", validate)
         with pytest.raises(SchemaRuleError) as raised:
             _save(owned, EmergencyRecord(
                 EmergencyOutcome.NOT_ATTEMPTED, 0, 3, reason=_REASON))
-        assert raised.value.__cause__ is cause
+        assert raised.value is failure
+        assert hits and all(hits)
         assert not owned.connection.in_transaction
         assert _facts(owned) == before
+        owned.connection.close()
+        reopened = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            assert _facts(reopened) == before
+        finally:
+            reopened.connection.close()
     finally:
-        workflow_errors._registry.cache_clear()
         owned.connection.close()

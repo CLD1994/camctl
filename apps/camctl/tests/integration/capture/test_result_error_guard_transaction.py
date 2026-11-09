@@ -10,15 +10,13 @@ from decimal import Decimal
 import json
 from pathlib import Path
 import sqlite3
-import traceback
 
 import pytest
 
 from camctl.capture.handlers import capture_handler
 from camctl.capture.models import ActivityConcludeSave, ResultSetPhase, ResultSetSave
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.contracts import workflow_errors
-from camctl.contracts.schemas import SchemaRuleError
+from camctl.contracts.schemas import SchemaRuleError, create_validator
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.evidence import DeviceObservation
 from camctl.history.validators import EventValidationError
@@ -38,7 +36,6 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .result_consumer_fixtures import result_driver
 from ..support.result_cases import result_case, result_case_for
-from ..support.capture_guard_cases import CompleteResultCommand
 
 pytestmark = pytest.mark.asyncio
 register_capture_guards()
@@ -390,28 +387,21 @@ async def test_begin_original_key_replay_recovers_basis_before_later_completion(
         owned.connection.close()
 
 
-def _clear_error_resources():
-    workflow_errors._registry.cache_clear()
-    workflow_errors._details_validator.cache_clear()
-    workflow_errors._public_json_registry.cache_clear()
-    workflow_errors._public_json_validator.cache_clear()
-
-
-def _resource_failure(monkeypatch, connection):
-    """只控制稳定包资源端口，记录事务内实际触发的校验位置。"""
-    original = workflow_errors.resource_bytes
-    failure = OSError("workflow-code 包资源不可读取")
+def _rule_failure(monkeypatch, connection):
+    """在公开错误校验协作边界交付真实规则异常。"""
+    from camctl.persistence.repositories import capture as capture_module
+    with pytest.raises(SchemaRuleError) as invalid:
+        create_validator({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "invalid"})
+    failure = invalid.value
+    original = capture_module.validate_public_error
     hits = []
 
-    def read(name):
-        if name == "protocol/workflow-codes.json":
-            hits.append((connection.in_transaction,
-                         tuple(frame.name for frame in traceback.extract_stack())))
-            raise failure
-        return original(name)
+    def validate(value):
+        original(value)
+        hits.append(connection.in_transaction)
+        raise failure
 
-    monkeypatch.setattr(workflow_errors, "resource_bytes", read)
-    _clear_error_resources()
+    monkeypatch.setattr(capture_module, "validate_public_error", validate)
     return failure, hits
 
 
@@ -452,21 +442,25 @@ async def test_schema_rule_failure_after_begin_releases_public_owned_transaction
     try:
         before = _database_facts(world.owned)
         calls = world.calls()
-        failure, hits = _resource_failure(monkeypatch, world.owned.connection)
+        database_path = Path(world.owned.connection.execute("PRAGMA database_list").fetchone()[2])
+        failure, hits = _rule_failure(monkeypatch, world.owned.connection)
 
         with pytest.raises(SchemaRuleError) as raised:
             returned = world.save(world.command, new_operation_key())
-            pytest.fail(f"资源故障没有原样传播: {returned!r}; 实际资源调用={hits!r}")
+            pytest.fail(f"规则故障没有原样传播: {returned!r}; 实际校验调用={hits!r}")
 
-        assert raised.value.__cause__ is failure
-        assert len(hits) == 1 and hits[0][0] is True, hits
-        assert "commit_operation" in hits[0][1]
-        assert world.entry in hits[0][1], hits
+        assert raised.value is failure
+        assert hits and all(hits)
         assert world.owned.connection.in_transaction is False
         assert _database_facts(world.owned) == before
         assert world.calls() == calls
+        world.owned.connection.close()
+        reopened = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            assert _database_facts(reopened) == before
+        finally:
+            reopened.connection.close()
     finally:
-        _clear_error_resources()
         world.owned.connection.close()
 
 
@@ -478,19 +472,17 @@ async def test_schema_rule_failure_and_failed_rollback_return_unknown_with_both_
         before = _database_facts(world.owned)
         calls = world.calls()
         database_path = Path(connection.execute("PRAGMA database_list").fetchone()[2])
-        failure, hits = _resource_failure(monkeypatch, connection)
+        failure, hits = _rule_failure(monkeypatch, connection)
         proxy = _RollbackFailure(connection)
         world.owned = replace(world.owned, connection=proxy)
 
         receipt = world.save(world.command, new_operation_key())
 
         assert receipt.kind is DbOutcomeKind.UNKNOWN, receipt.error
-        assert len(hits) == 1 and hits[0][0] is True, hits
-        assert "commit_operation" in hits[0][1]
+        assert hits and all(hits)
         assert proxy.rollback_calls == 1
         diagnostics = _exception_chain(receipt.error)
         assert any(error is proxy.failure for error in diagnostics), diagnostics
-        assert any(isinstance(error, SchemaRuleError) for error in diagnostics), diagnostics
         assert any(error is failure for error in diagnostics), diagnostics
         assert connection.in_transaction is True
         assert world.calls() == calls
@@ -503,62 +495,4 @@ async def test_schema_rule_failure_and_failed_rollback_return_unknown_with_both_
         finally:
             reopened.connection.close()
     finally:
-        _clear_error_resources()
         connection.close()
-
-
-@pytest.mark.parametrize("read_only", [False, True], ids=["write-result", "read-only-result"])
-async def test_complete_result_schema_failure_releases_owned_transaction(tmp_path, monkeypatch, read_only):
-    """验证通用 complete_result 协议；capture 当前没有该生产回调。"""
-    world = await _world(tmp_path, "confirm_result_set")
-    try:
-        key = new_operation_key()
-        if read_only:
-            original = world.save(world.command, key)
-            assert original.kind is DbOutcomeKind.COMPLETED, original.error
-        before = _database_facts(world.owned)
-        calls = world.calls()
-        callback_calls, faults = [], []
-        error = deepcopy(world.command.error)
-
-        def complete_result(connection, result):
-            callback_calls.append((connection is world.owned.connection, connection.in_transaction,
-                                   result, _database_facts(world.owned)))
-            failure, hits = _resource_failure(monkeypatch, connection)
-            faults.append((failure, hits))
-            # 故障只在回调中启用。此前真实 planner、事件守卫、历史和
-            # 投影写入均使用合法资源，不改变真实计划的事件或响应。
-            workflow_errors.validate_public_error(error)
-            raise AssertionError("真实错误校验必须遭遇包资源故障")
-
-        import camctl.persistence.repositories.capture as capture_module
-        original_commit = capture_module.commit_operation
-        submitted = []
-
-        def commit(delegate, actual_key, current):
-            command = CompleteResultCommand(delegate, complete_result, read_only=read_only)
-            submitted.append(command)
-            return original_commit(command, actual_key, current)
-
-        monkeypatch.setattr(capture_module, "commit_operation", commit)
-        with pytest.raises(SchemaRuleError) as raised:
-            returned = world.save(world.command, key)
-            pytest.fail(
-                f"完整响应资源故障没有原样传播: {returned!r}; "
-                f"回调次数={len(callback_calls)}, 实际资源故障={faults!r}")
-        command, = submitted
-
-        assert len(command.plans) == len(callback_calls) == len(faults) == 1
-        assert callback_calls[0][:2] == (True, True)
-        assert callback_calls[0][2] is command.plans[0].result
-        assert (callback_calls[0][3] == before) is read_only
-        failure, hits = faults[0]
-        assert raised.value.__cause__ is failure
-        assert len(hits) == 1 and hits[0][0] is True, hits
-        assert "complete_result" in hits[0][1] and "validate_public_error" in hits[0][1], hits
-        assert world.owned.connection.in_transaction is False
-        assert _database_facts(world.owned) == before
-        assert world.calls() == calls
-    finally:
-        _clear_error_resources()
-        world.owned.connection.close()
