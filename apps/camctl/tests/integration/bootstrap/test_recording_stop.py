@@ -478,6 +478,16 @@ class TestStopBudgetExhausted:
                 "SELECT status, attempts_used FROM operation_runs"
                 " WHERE responsibility_key = 'stop/1'", (2, 1))
             for expected in (2, 3):
+                # 只有上一停止调用的失败结果和重试等待已可靠保存，
+                # 才从其实际返回时刻推进原有的三秒间隔。
+                await _await_query(
+                    db,
+                    "SELECT r.status, r.attempts_used, r.retry_wait_required,"
+                    " EXISTS(SELECT 1 FROM operation_attempts t WHERE t.run_id = r.id"
+                    " AND t.attempt_no = r.attempts_used AND t.status = 3"
+                    " AND t.result_event_id IS NOT NULL)"
+                    " FROM operation_runs r WHERE r.responsibility_key = 'stop/1'",
+                    (2, expected - 1, 1, 1), task=task)
                 clock["ns"] += 3_000_000_000
                 await _await_query(
                     db,

@@ -543,27 +543,29 @@ class TestResidualWinddown:
             deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
             await _exhaust_original_stop(db, clock, task=task)
-            await _await_query(
-                db,
-                "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (2, 1), task=task)
+            await _await_followup_result(db, 1, task=task)
         finally:
             await _cancel_task(task)
         close_runtime(deps)
-        # 触发动作在首停发出后取消：收场按已保存意图继续使用剩余次
-        # 数处理残留录像。
+        # 首停失败结果可靠保存后取消触发动作；下一会话沿原停止责任
+        # 和剩余次数继续处理残留录像。
         await _submit_plan(
             tmp_path, cfg, _WinddownCatalog(), _cancel_plan("2", 2))
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
+        settled_round = asyncio.Event()
         task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock))
+            deps, cfg, _winddown_factory(driver, stopper, query, clock),
+            settled_round=settled_round)
         try:
             await _await_query(db, "SELECT status FROM actions WHERE id = 2", (6,), task=task)
+            deadline = time.monotonic() + 20.0
+            await _await_settled_round(settled_round, task, timeout_s=20.0)
             clock["ns"] += 3_000_000_000
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (3, 2), task=task)
+                " WHERE responsibility_key = 'followup/2/1'", (3, 2), task=task,
+                timeout_s=max(0.0, deadline - time.monotonic()))
             assert len(stopper.calls) == 5
             await _await_query(
                 db,
