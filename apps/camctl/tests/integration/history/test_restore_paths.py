@@ -85,6 +85,43 @@ async def _prepared(world, ref):
     return prepared
 
 
+def _observe_readonly_rows(monkeypatch, database_path, observe):
+    import os
+    import sqlite3
+    from urllib.parse import parse_qs, urlsplit
+    from urllib.request import url2pathname
+
+    opened = []
+    real_connect = sqlite3.connect
+
+    class ObservedConnection(sqlite3.Connection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            original_factory = self.row_factory
+
+            def record(cursor, row):
+                observe(cursor, row)
+                return row if original_factory is None else original_factory(cursor, row)
+
+            self.row_factory = record
+
+    def connect(database, *args, **kwargs):
+        if kwargs.get("uri") and str(database).startswith("file:"):
+            parts = urlsplit(str(database))
+            file_path = url2pathname(("//" + parts.netloc if parts.netloc else "") + parts.path)
+            if (parse_qs(parts.query).get("mode") == ["ro"] and os.path.exists(file_path)
+                    and os.path.samefile(file_path, database_path)):
+                assert "factory" not in kwargs
+                kwargs["factory"] = ObservedConnection
+                connection = real_connect(database, *args, **kwargs)
+                opened.append(connection)
+                return connection
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    return opened
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path,before,after,has_snapshot", [
     ("current", 2, 0, True), ("exact", 0, 3, True),
@@ -93,11 +130,6 @@ async def _prepared(world, ref):
 ])
 async def test_cost_path_reads_only_selected_event_range(file_world, monkeypatch,
                                                         path, before, after, has_snapshot):
-    import os
-    import sqlite3
-    from urllib.parse import parse_qs, urlsplit
-    from urllib.request import url2pathname
-
     world = file_world
     if has_snapshot:
         await _snapshot(world)
@@ -109,41 +141,18 @@ async def test_cost_path_reads_only_selected_event_range(file_world, monkeypatch
         "SELECT id, body_json FROM history_events"))
     known_bodies = set(event_bodies.values())
     observed = []
-    opened = []
-    real_connect = sqlite3.connect
 
-    class EventRowsConnection(sqlite3.Connection):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            original_factory = self.row_factory
+    def record(cursor, row):
+        names = [column[0] for column in cursor.description]
+        body_columns = [index for index, name in enumerate(names)
+                        if name == "body_json" or row[index] in known_bodies]
+        if body_columns:
+            assert len(body_columns) == 1 and names[body_columns[0]] == "body_json"
+            id_columns = [index for index, name in enumerate(names) if name == "id"]
+            assert len(id_columns) == 1
+            observed.append((row[id_columns[0]], row[body_columns[0]]))
 
-            def record(cursor, row):
-                names = [column[0] for column in cursor.description]
-                body_columns = [index for index, name in enumerate(names)
-                                if name == "body_json" or row[index] in known_bodies]
-                if body_columns:
-                    assert len(body_columns) == 1 and names[body_columns[0]] == "body_json"
-                    id_columns = [index for index, name in enumerate(names) if name == "id"]
-                    assert len(id_columns) == 1
-                    observed.append((row[id_columns[0]], row[body_columns[0]]))
-                return row if original_factory is None else original_factory(cursor, row)
-
-            self.row_factory = record
-
-    def connect(database, *args, **kwargs):
-        if kwargs.get("uri") and str(database).startswith("file:"):
-            parts = urlsplit(str(database))
-            file_path = url2pathname(("//" + parts.netloc if parts.netloc else "") + parts.path)
-            if (parse_qs(parts.query).get("mode") == ["ro"] and os.path.exists(file_path)
-                    and os.path.samefile(file_path, world.history.path)):
-                assert "factory" not in kwargs
-                kwargs["factory"] = EventRowsConnection
-                connection = real_connect(database, *args, **kwargs)
-                opened.append(connection)
-                return connection
-        return real_connect(database, *args, **kwargs)
-
-    monkeypatch.setattr(sqlite3, "connect", connect)
+    opened = _observe_readonly_rows(monkeypatch, world.history.path, record)
     actual = world.history.restore_entity("device_file", 1, boundary, event_batch_size=1)
     if path in ("current", "exact"):
         wanted = []
@@ -879,20 +888,34 @@ async def test_snapshot_rejects_duplicate_mutable_unique_key(two_item_world, dup
 @pytest.mark.asyncio
 async def test_snapshot_allows_repeated_null_unique_keys(two_item_world, monkeypatch):
     world = two_item_world
-    assert all(row_facts(world.owned.connection, "obtain_items", identity)["delivery_id"] is None
-               for identity in world.item_ids)
+    originals = {identity: row_facts(world.owned.connection, "obtain_items", identity)
+                 for identity in world.item_ids}
+    assert all(row["delivery_id"] is None for row in originals.values())
     snapshot_id, boundary = await _save_ref_snapshot(world, SnapshotRef(1, 2))
+    snapshot = world.owned.connection.execute(
+        "SELECT entity_type, entity_id, boundary_event_id, change_count, format_version, content"
+        " FROM entity_snapshots WHERE id = ?", (snapshot_id,)).fetchone()
+    assert snapshot is not None and snapshot[:3] == (1, 2, boundary.last_event_id)
     _grant_item(world, world.item_ids[0])
+    assert row_facts(world.owned.connection, "actions", 2)["last_event_id"] > boundary.last_event_id
+    assert world.history.current_boundary().last_event_id > boundary.last_event_id
     selected = []
-    original = world.history._snapshot_rows
+    columns = ("entity_type", "entity_id", "boundary_event_id", "change_count", "format_version", "content")
 
-    def read_selected(seed):
-        selected.append(seed.snapshot.snapshot_id)
-        return original(seed)
+    def record(cursor, row):
+        names = [column[0] for column in cursor.description]
+        content_columns = [index for index, name in enumerate(names)
+                           if name == "content" or row[index] == snapshot[-1]]
+        if content_columns:
+            assert len(content_columns) == 1 and names[content_columns[0]] == "content"
+            assert all(names.count(name) == 1 for name in columns)
+            selected.append(tuple(row[names.index(name)] for name in columns))
 
-    monkeypatch.setattr(world.history, "_snapshot_rows", read_selected)
+    opened = _observe_readonly_rows(monkeypatch, world.history.path, record)
     restored = world.history.restore_entity("action", 2, boundary)
-    assert selected == [snapshot_id]
+    # (entity_type, entity_id, boundary_event_id) 在快照表中唯一。
+    assert opened and selected == [snapshot]
+    assert {identity: restored[("obtain_items", identity)] for identity in world.item_ids} == originals
     assert all(restored[("obtain_items", identity)]["delivery_id"] is None
                for identity in world.item_ids)
 
