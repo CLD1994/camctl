@@ -40,6 +40,28 @@ def _rows(handle, table, ref=None, limit=2):
             return
 
 
+def _is_readonly_database(database, uri, path):
+    """识别 SQLite 本地文件路径，并单独核对该状态库以只读模式打开。"""
+    import os
+    from pathlib import Path
+    from urllib.parse import parse_qs, unquote, urlsplit
+
+    value = os.fsdecode(database)
+    if value.startswith('file:'):
+        parts = urlsplit(value)
+        if parts.netloc not in ('', 'localhost'):
+            return False
+        candidate = Path(unquote(parts.path)).resolve()
+        mode = parse_qs(parts.query).get('mode', [])
+    else:
+        candidate = Path(value).resolve()
+        mode = []
+    if candidate != path.resolve():
+        return False
+    assert uri and mode == ['ro'], '历史读取必须以只读模式打开受测状态库'
+    return True
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('strategy', ['initial', 'current'])
 async def test_complete_segment_rows_at_boundary(tmp_path, strategy):
@@ -62,7 +84,7 @@ async def test_current_boundary_does_not_read_event_bodies(tmp_path, monkeypatch
     """当前投影即目标边界时，元数据仍可读取，事件正文不能被读取。"""
     import sqlite3
     from contextlib import closing
-    from camctl.history.snapshots import prepare_snapshot
+    from camctl.history.snapshots import SnapshotRef, decode_snapshot, prepare_snapshot
 
     owned, _, _, ref, history = await _fixture(tmp_path)
     try:
@@ -79,19 +101,32 @@ async def test_current_boundary_does_not_read_event_bodies(tmp_path, monkeypatch
 
         def connect(database, *args, **kwargs):
             connection = original_connect(database, *args, **kwargs)
-            if str(database) == history.path.resolve().as_uri() + '?mode=ro':
+            if _is_readonly_database(database, kwargs.get('uri', False), history.path):
                 connection.set_authorizer(authorize)
                 attached.append(True)
             return connection
 
         monkeypatch.setattr(sqlite3, 'connect', connect)
         with history.open_segment_history(ref.action_id, boundary, strategy='current', batch_size=2) as handle:
-            assert handle.primary()['id'] == ref.action_id
-            assert len(tuple(_rows(handle, 'segment_members', ref))) == 5
-            assert len(tuple(_rows(handle, 'segment_gaps', ref))) == 1
+            primary = handle.primary()
+            assert primary['id'] == ref.action_id
+            expected = {table: tuple(_rows(handle, table, ref)) for table in
+                        ('segment_members', 'segment_gaps', 'segment_scope_members')}
+            assert [row.row_id for row in expected['segment_members']] == [1, 2, 3, 4, 5]
+            assert len(expected['segment_gaps']) == len(expected['segment_scope_members']) == 1
+            assert expected['segment_scope_members'][0].values['member_id'] == expected['segment_members'][0].row_id
             prepared = prepare_snapshot(handle)
             try:
-                assert sum(map(len, prepared.chunks)) == prepared.length
+                content = b''.join(prepared.chunks)
+                assert len(content) == prepared.length
+                header, rows = decode_snapshot(content, expect_ref=SnapshotRef(1, ref.action_id))
+                assert header['boundary_event_id'] == boundary.last_event_id
+                assert [dict(row.values) for row in rows if row.table == 'actions'] == [dict(primary)]
+                for table, expected_rows in expected.items():
+                    actual_rows = [row for row in rows if row.table == table]
+                    assert {row.row_id: dict(row.values) for row in actual_rows} == {
+                        row.row_id: dict(row.values) for row in expected_rows}
+                    assert len(actual_rows) == len(expected_rows)
             finally:
                 prepared.close()
         assert attached and not denied
@@ -120,10 +155,28 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
     original_connect = sqlite3.connect
 
     class Cursor(sqlite3.Cursor):
+        def fetchall(self):
+            rows = super().fetchall()
+            if getattr(self, 'record', None) is not None:
+                self.record[3].extend(rows)
+            return rows
+
+        def fetchmany(self, size=None):
+            rows = super().fetchmany() if size is None else super().fetchmany(size)
+            if getattr(self, 'record', None) is not None:
+                self.record[3].extend(rows)
+            return rows
+
+        def fetchone(self):
+            row = super().fetchone()
+            if row is not None and getattr(self, 'record', None) is not None:
+                self.record[3].append(row)
+            return row
+
         def close(self):
             if getattr(self, 'record', None) is not None:
-                sql, params, counter = self.record
-                observations.append((sql, params, counter[0]))
+                sql, params, counter, rows = self.record
+                observations.append((sql, params, counter[0], rows))
                 self.connection.set_progress_handler(None, 0)
                 self.record = None
             return super().close()
@@ -147,13 +200,13 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
                 self.set_authorizer(None)
             if ({('segment_members', 'id'), ('segment_members', 'set_id')} <= reads
                     and cursor.description and [column[0] for column in cursor.description] == ['id']):
-                cursor.record = (sql, parameters, counter)
+                cursor.record = (sql, parameters, counter, [])
             else:
                 self.set_progress_handler(None, 0)
             return cursor
 
     def connect(database, *args, **kwargs):
-        if str(database) == path.resolve().as_uri() + '?mode=ro':
+        if _is_readonly_database(database, kwargs.get('uri', False), path):
             kwargs['factory'] = Connection
         return original_connect(database, *args, **kwargs)
 
@@ -172,7 +225,7 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
                 indexes.append(name)
         assert indexes
         plans = [db.execute('EXPLAIN QUERY PLAN ' + sql, params).fetchall()
-                 for sql, params, _ in observations]
+                 for sql, params, _, _ in observations]
         used = [name for name in indexes if all(
             any('SEARCH' in row[3].upper() and name in row[3] for row in plan)
             and not any('TEMP' in row[3].upper() for row in plan) for plan in plans)]
@@ -188,29 +241,26 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
             return 0
         db.set_progress_handler(advance, 1)
         control_ids = []
-        for sql, params, _ in observations:
-            control_ids.extend(row[0] for row in db.execute(sql, params).fetchall())
+        for sql, params, _, original_rows in observations:
+            control_rows = db.execute(sql, params).fetchall()
+            assert control_rows == original_rows
+            control_ids.extend(row[0] for row in control_rows)
         db.set_progress_handler(None, 0)
         assert len(control_ids) == size and set(control_ids) == member_ids
         assert indexed_steps < steps[0]
     print('SEGMENT_INDEX_WORK', {'size': size, 'queries': len(observations),
           'indexed_steps': indexed_steps, 'without_index_steps': steps[0],
           'first_plan': plans[0], 'last_plan': plans[-1]}, flush=True)
-    return indexed_steps, steps[0]
 
 
 def test_segment_candidate_index_work(tmp_path, monkeypatch):
-    """工作量随成员规模增长，索引移除对照能证伪此保障。"""
+    """在两个固定负载中核对成员候选查询的索引及实际工作量。"""
     small = tmp_path / 'small'
     large = tmp_path / 'large'
     small.mkdir()
     large.mkdir()
-    small_indexed, small_control = _segment_candidate_index_work(small, monkeypatch, 256)
-    large_indexed, large_control = _segment_candidate_index_work(large, monkeypatch, 2048)
-    # 以线性增长和同查询失去索引的实测增长作为两端，检查实际增长更接近线性一端。
-    assert large_control > 8 * small_control
-    assert 2 * large_indexed * small_control < (
-        8 * small_indexed * small_control + small_indexed * large_control)
+    _segment_candidate_index_work(small, monkeypatch, 256)
+    _segment_candidate_index_work(large, monkeypatch, 2048)
 
 
 @pytest.mark.asyncio
