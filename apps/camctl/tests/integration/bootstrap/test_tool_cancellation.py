@@ -27,6 +27,7 @@ from .test_adb_camera_dispatch import EVIDENCE, RETURNED, ASSUMED
 from ..capture.test_baseline_start import _prepared
 from ..capture.test_capture_contract import DriverDouble, ResultsDouble
 from ..support.capture import capture_runtime
+from ..support.managed_process import ObservedManagedProcess
 from ..capture.test_baseline_prepare import Directory
 from ..scheduling.test_start_action import owned, _SCHEDULED
 
@@ -41,11 +42,11 @@ class LocalTransport:
     async def run(self, spec, stop):
         self.calls.append(spec)
         held = self.held_call(spec)
-        script = "import sys; print('ACTUAL', flush=True)"
+        script = "import sys; sys.stdout.buffer.write(b'ACTUAL\\n'); sys.stdout.flush()"
         if held:
             script += "; from pathlib import Path; import time; Path(" + repr(str(self.marker)) + ").write_text('started'); time.sleep(30)"
         async def spawn(local):
-            handle = await spawn_subprocess(local)
+            handle = ObservedManagedProcess(await spawn_subprocess(local))
             self.handles.append(handle)
             return handle
         return await execute_tool(replace(spec, argv=(sys.executable, "-c", script)), stop=stop, spawner=spawn)
@@ -58,8 +59,9 @@ async def _entered(marker):
 
 
 def _assert_settled(transport):
-    assert all(handle._process.returncode is not None for handle in transport.handles)
-    assert all(handle._reader.done() and handle._stderr_reader.done() for handle in transport.handles)
+    assert len(transport.handles) == len(transport.calls) > 0
+    assert all(handle.exit is not None and handle.output_finished for handle in transport.handles)
+    assert all(handle.output == b"ACTUAL\n" and handle.stderr == b"" for handle in transport.handles)
 
 
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])

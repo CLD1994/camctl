@@ -20,6 +20,7 @@ from camctl.operations.process import (
     execute_tool,
     spawn_subprocess,
 )
+from ..support.managed_process import ObservedManagedProcess
 
 pytestmark = pytest.mark.asyncio
 
@@ -129,7 +130,7 @@ async def test_canceled_waiter_reaps_real_process_and_finishes_both_output_reade
     marker = tmp_path / "started"
     handles = []
     async def spawn(spec):
-        handle = await spawn_subprocess(spec)
+        handle = ObservedManagedProcess(await spawn_subprocess(spec))
         handles.append(handle)
         return handle
     script = ("import sys,time; from pathlib import Path; "
@@ -147,8 +148,9 @@ async def test_canceled_waiter_reaps_real_process_and_finishes_both_output_reade
         assert raw.exit is not None and raw.error == "cancelled"
         assert b"original stdout" in raw.output and b"original stderr" in raw.stderr
         assert len(handles) == 1
-        assert handles[0]._process.returncode is not None
-        assert handles[0]._reader.done() and handles[0]._stderr_reader.done()
+        assert handles[0].exit == raw.exit
+        assert handles[0].output_finished
+        assert handles[0].output == raw.output and handles[0].stderr == raw.stderr
     finally:
         if not task.done():
             task.cancel()
