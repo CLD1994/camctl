@@ -18,6 +18,7 @@ from ..support.outputs import output_operation
 from ..support.output_planning import capture_operation, validate_static_event
 from ..support.read_batch_cases import acquire_read_batch
 from ..support.database import business_database, database_path
+from ..host_files.file_boundary_helpers import fail_fd_operation
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
@@ -245,8 +246,6 @@ def test_finished_owner_without_cancel_also_skips(segment_env):
 
 def test_sync_failure_keeps_progress_and_reports_stage(segment_env, monkeypatch):
     """段尾同步失败：保留阶段与诊断，可靠进度不变，文件尾部未确认。"""
-    from camctl.host_files import io as host_io
-
     owned, roots, first = segment_env
     asyncio.run(output_operation(
         owned, prepare_copy, first.copy_id, CopyContext,
@@ -255,15 +254,15 @@ def test_sync_failure_keeps_progress_and_reports_stage(segment_env, monkeypatch)
         occurred_at=_NOW + 1,
     ))
 
-    def _refuse(fd: int) -> None:
-        raise OSError("sync refused")
-
-    monkeypatch.setattr(host_io, "_fsync", _refuse)
-    with pytest.raises(CopySegmentError) as caught:
-        asyncio.run(_drive(
-            owned, roots, first.copy_id, segment_size=4, max_segments=1, prepare=False))
+    failure = OSError("sync refused")
+    path = _target_path(roots, owned, first.target_file_id)
+    with monkeypatch.context() as patch:
+        fail_fd_operation(patch, "fsync", path, failure)
+        with pytest.raises(CopySegmentError) as caught:
+            asyncio.run(_drive(
+                owned, roots, first.copy_id, segment_size=4, max_segments=1, prepare=False))
     assert caught.value.stage == "segment_sync_failed"
-    monkeypatch.undo()
+    assert caught.value.__cause__ is failure
     assert _committed(owned, first.copy_id) == 0
     assert _segment_events(owned) == 0
 

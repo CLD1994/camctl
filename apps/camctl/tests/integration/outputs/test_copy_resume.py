@@ -11,6 +11,7 @@ from ..support.outputs import output_operation
 from ..support.output_planning import EventSequence, proposal_state
 from ..support.output_storage_cases import capture_scoped_operation, observed_operation
 from ..support.read_batch_cases import acquire_read_batch
+from ..host_files.file_boundary_helpers import fail_fd_operation
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
@@ -216,21 +217,18 @@ def test_prepare_continues_in_place_without_rewriting(copy_env):
 
 def test_sync_failure_blocks_resume_without_progress_change(copy_env, monkeypatch):
     """截断后同步失败：保留阶段与诊断，不确认尾部、不改可靠进度。"""
-    from camctl.host_files import io as host_io
-
     owned, roots, first = copy_env
     path = _target_path(roots, owned, first.target_file_id)
     path.write_bytes(b"abcde")
     _seed_progress(owned, first.copy_id, 3)
 
-    def _refuse(fd: int) -> None:
-        raise OSError("sync refused")
-
-    monkeypatch.setattr(host_io, "_fsync", _refuse)
-    with pytest.raises(CopyPreparationError) as caught:
-        asyncio.run(_prepare(owned, first.copy_id, roots))
+    failure = OSError("sync refused")
+    with monkeypatch.context() as patch:
+        fail_fd_operation(patch, "fsync", path, failure)
+        with pytest.raises(CopyPreparationError) as caught:
+            asyncio.run(_prepare(owned, first.copy_id, roots))
     assert caught.value.stage == "target_sync_failed"
-    monkeypatch.undo()
+    assert str(failure) in caught.value.detail
     committed = owned.connection.execute(
         "SELECT committed_bytes FROM file_copies WHERE id=?", (first.copy_id,)).fetchone()[0]
     assert committed == 3
