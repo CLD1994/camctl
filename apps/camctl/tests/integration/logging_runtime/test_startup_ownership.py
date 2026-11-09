@@ -50,14 +50,15 @@ def test_unconfirmed_old_owner_files_wait_for_settled_sweep(
     assert not current_owner.owns_name(old_copy.name)
     assert not current_owner.owns_name(old_temp.name)
 
-    real_unlink = copies._unlink
+    real_unlink = os.unlink
     unlink_attempts: list[Path] = []
 
-    def record_unlink(path: Path) -> None:
-        unlink_attempts.append(Path(path))
-        real_unlink(path)
+    def record_unlink(path, *args, **kwargs):
+        if Path(os.fsdecode(path)) in (old_copy, old_temp):
+            unlink_attempts.append(Path(os.fsdecode(path)))
+        return real_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(copies, "_unlink", record_unlink)
+    monkeypatch.setattr(os, "unlink", record_unlink)
 
     unconfirmed = startup_sweep(
         logs, ownership=current_owner, owner_settled=False)
@@ -121,16 +122,16 @@ def test_sweep_preserves_formal_marker_and_other_log_scopes(
 
     unreadable_reads: list[Path] = []
     if marker_case == "unreadable":
-        real_read = copies._read_bytes
+        real_read = Path.read_bytes
 
         def deny_marker_read(path: Path) -> bytes:
-            target = Path(path)
+            target = Path(os.fsdecode(path))
             if target == marker_path:
                 unreadable_reads.append(target)
                 raise PermissionError("controlled formal marker read denial")
             return real_read(path)
 
-        monkeypatch.setattr(copies, "_read_bytes", deny_marker_read)
+        monkeypatch.setattr(Path, "read_bytes", deny_marker_read)
         unreadable = marker_store.check()
         assert unreadable.presence is MarkerPresence.EXISTS
         assert "controlled formal marker read denial" in (unreadable.error or "")
@@ -140,7 +141,9 @@ def test_sweep_preserves_formal_marker_and_other_log_scopes(
         logs, ownership=RunFileOwnership(), owner_settled=True)
 
     assert result.error is None and result.failures == ()
-    assert marker_path.is_file() and marker_path.read_bytes() == marker_bytes
+    assert marker_path.is_file()
+    assert (real_read(marker_path) if marker_case == "unreadable"
+            else marker_path.read_bytes()) == marker_bytes
     assert unknown.read_bytes() == b"unknown purpose"
     assert ready_copy.read_bytes() == b"ready-owned copy"
     assert processing_copy.read_bytes() == b"processing-owned copy"
@@ -194,29 +197,29 @@ def test_sweep_reports_candidate_errors_and_retries_only_next_invocation(
     clean_copy.write_bytes(b"clean old copy")
     clean_temp.write_bytes(b"clean old temp")
 
-    real_lstat = copies._lstat
-    real_unlink = copies._unlink
+    real_lstat = Path.lstat
+    real_unlink = os.unlink
     lstat_attempts: list[Path] = []
     unlink_attempts: list[Path] = []
 
-    def fail_one_lstat(path: Path):
-        target = Path(path)
+    def fail_one_lstat(path: Path, *args, **kwargs):
+        target = Path(os.fsdecode(path))
         if target == stale_lstat:
             lstat_attempts.append(target)
             if len(lstat_attempts) == 1:
                 raise PermissionError("controlled candidate lstat denial")
-        return real_lstat(path)
+        return real_lstat(path, *args, **kwargs)
 
-    def fail_one_unlink(path: Path) -> None:
-        target = Path(path)
+    def fail_one_unlink(path, *args, **kwargs):
+        target = Path(os.fsdecode(path))
         if target == stale_unlink:
             unlink_attempts.append(target)
             if len(unlink_attempts) == 1:
                 raise PermissionError("controlled candidate unlink denial")
-        real_unlink(path)
+        return real_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(copies, "_lstat", fail_one_lstat)
-    monkeypatch.setattr(copies, "_unlink", fail_one_unlink)
+    monkeypatch.setattr(Path, "lstat", fail_one_lstat)
+    monkeypatch.setattr(os, "unlink", fail_one_unlink)
 
     first = startup_sweep(
         logs, ownership=RunFileOwnership(), owner_settled=True)
@@ -263,15 +266,44 @@ async def test_real_copy_and_closed_failed_marker_temp_share_run_ownership(
         channel.close()
         raise
 
-    real_write_synced = copies._write_synced
+    real_open, real_fsync, real_close = os.open, os.fsync, os.close
+    real_replace = os.replace
+    temp_fds: dict[int, Path] = {}
+    synced: set[Path] = set()
+    closed: set[Path] = set()
     synced_temp_paths: list[Path] = []
 
-    def record_synced_temp(path: Path, data: bytes) -> None:
-        real_write_synced(path, data)
-        # _write_synced 返回意味着真实 write、fsync 和 close 都已返回。
-        synced_temp_paths.append(Path(path))
+    def open_temp(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        candidate = Path(os.fsdecode(path))
+        if candidate.parent == logs and copies.is_marker_temp_name(candidate.name):
+            temp_fds[fd] = candidate
+        return fd
 
-    monkeypatch.setattr(copies, "_write_synced", record_synced_temp)
+    def sync_temp(fd):
+        result = real_fsync(fd)
+        if fd in temp_fds:
+            synced.add(temp_fds[fd])
+        return result
+
+    def close_temp(fd):
+        path = temp_fds.pop(fd, None)
+        result = real_close(fd)
+        if path is not None:
+            closed.add(path)
+        return result
+
+    def record_marker_placement(source, target, *args, **kwargs):
+        if Path(os.fsdecode(target)) == logs / MARKER_NAME:
+            path = Path(os.fsdecode(source))
+            assert path in synced and path in closed
+            synced_temp_paths.append(path)
+        return real_replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_temp)
+    monkeypatch.setattr(os, "fsync", sync_temp)
+    monkeypatch.setattr(os, "close", close_temp)
+    monkeypatch.setattr(os, "replace", record_marker_placement)
 
     async def fail_before_handoff(_source, _directories, _target):
         raise OSError("controlled handoff failure")
@@ -283,8 +315,7 @@ async def test_real_copy_and_closed_failed_marker_temp_share_run_ownership(
         channel=channel,
         marker=marker,
     )
-    real_replace = copies._replace
-    real_unlink = copies._unlink
+    real_unlink = os.unlink
     failed_temp_paths: list[Path] = []
     failed_temp_cleanup: list[Path] = []
 
@@ -308,22 +339,24 @@ async def test_real_copy_and_closed_failed_marker_temp_share_run_ownership(
         assert synced_temp_paths
         assert all(ownership.owns_name(path.name) for path in synced_temp_paths)
 
-        def fail_marker_placement(source: Path, target: Path) -> None:
-            path = Path(source)
-            assert Path(target) == logs / MARKER_NAME
-            assert path in synced_temp_paths
-            failed_temp_paths.append(path)
-            raise OSError("controlled marker placement failure")
+        def fail_marker_placement(source, target, *args, **kwargs):
+            path = Path(os.fsdecode(source))
+            if Path(os.fsdecode(target)) == logs / MARKER_NAME:
+                assert path in synced and path in closed
+                synced_temp_paths.append(path)
+                failed_temp_paths.append(path)
+                raise OSError("controlled marker placement failure")
+            return real_replace(source, target, *args, **kwargs)
 
-        def fail_failed_temp_cleanup(path: Path) -> None:
-            target = Path(path)
+        def fail_failed_temp_cleanup(path, *args, **kwargs):
+            target = Path(os.fsdecode(path))
             if failed_temp_paths and target == failed_temp_paths[0]:
                 failed_temp_cleanup.append(target)
                 raise OSError("controlled closed marker temp cleanup failure")
-            real_unlink(path)
+            return real_unlink(path, *args, **kwargs)
 
-        monkeypatch.setattr(copies, "_replace", fail_marker_placement)
-        monkeypatch.setattr(copies, "_unlink", fail_failed_temp_cleanup)
+        monkeypatch.setattr(os, "replace", fail_marker_placement)
+        monkeypatch.setattr(os, "unlink", fail_failed_temp_cleanup)
         failed_save = marker.update_stage(
             MarkerStage.PUBLISHED,
             expected_round_id=receipt.round_id,

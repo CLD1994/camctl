@@ -13,6 +13,17 @@ from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogRecord
 
 
+def _same_file(fd, path):
+    opened, named = os.fstat(fd), path.stat()
+    return (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino)
+
+
+def _lock_path(log_path):
+    import concurrent_log_handler as clh
+    directory, name = clh.ConcurrentRotatingFileHandler.baseLockFilename(str(log_path))
+    return Path(directory) / name
+
+
 def record(message="trigger", level=LogLevel.ERROR):
     return LogRecord(level, message)
 
@@ -454,24 +465,24 @@ def test_unsupported_directory_sync_cannot_confirm_durable(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("via_copy", [False, True])
 def test_unlock_control_preserves_durable_record_result(tmp_path, monkeypatch, via_copy):
-    import fcntl
-    import portalocker.portalocker as portalocker_api
+    import concurrent_log_handler as clh
 
     path = tmp_path / "camctl.log"
+    lock_path = _lock_path(path)
     channel = FileChannel(path, max_bytes=4096, file_count=3)
-    original_flock = fcntl.flock
+    real_unlock = clh.unlock
     original = asyncio.CancelledError("unlock control")
     interrupted = False
 
-    def flock(fd, operation):
+    def unlock(stream):
         nonlocal interrupted
-        value = original_flock(fd, operation)
-        if operation == fcntl.LOCK_UN and not interrupted:
+        result = real_unlock(stream)
+        if not interrupted and _same_file(stream.fileno(), lock_path):
             interrupted = True
             raise original
-        return value
+        return result
 
-    monkeypatch.setattr(portalocker_api, "LOCKER", flock)
+    monkeypatch.setattr(clh, "unlock", unlock)
     try:
         with pytest.raises(asyncio.CancelledError) as raised:
             if via_copy:
@@ -494,7 +505,8 @@ def test_disable_close_control_retains_first_control_and_append(tmp_path, monkey
     path = tmp_path / "camctl.log"
     path.touch()
     channel = FileChannel(path, max_bytes=4096, file_count=3)
-    original_open = concurrent_log_handler._open
+    original_open = concurrent_log_handler.ConcurrentRotatingFileHandler.do_open
+    real_fsync = os.fsync
     first = asyncio.CancelledError("sync control") if sync_control else OSError("sync failed")
     close_control = asyncio.CancelledError("handler close control")
     close_attempts = 0
@@ -515,12 +527,17 @@ def test_disable_close_control_retains_first_control_and_append(tmp_path, monkey
                 if close_attempts == 1:
                     raise close_control
 
-    def open_file(name, *args, **kwargs):
-        value = original_open(name, *args, **kwargs)
-        return Stream(value) if str(name) == str(path) else value
+    def open_file(handler, *args, **kwargs):
+        value = original_open(handler, *args, **kwargs)
+        return Stream(value) if Path(handler.baseFilename) == path else value
 
-    monkeypatch.setattr(concurrent_log_handler, "_open", open_file)
-    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(first))
+    def fail_sync(fd):
+        if _same_file(fd, path):
+            raise first
+        return real_fsync(fd)
+
+    monkeypatch.setattr(concurrent_log_handler.ConcurrentRotatingFileHandler, "do_open", open_file)
+    monkeypatch.setattr(os, "fsync", fail_sync)
     try:
         with pytest.raises(asyncio.CancelledError) as raised:
             if via_copy:
@@ -594,15 +611,17 @@ def test_rotation_always_retains_formal_names_for_kept_content(tmp_path, monkeyp
 @pytest.mark.parametrize("via_copy", [False, True])
 @pytest.mark.parametrize("acquire_control", [False, True])
 def test_lock_failure_then_close_control_keeps_original_failure_and_facts(tmp_path, monkeypatch, via_copy, acquire_control):
-    import concurrent_log_handler
-    import portalocker.portalocker as portalocker_api
+    import concurrent_log_handler as clh
 
     path = tmp_path / "camctl.log"
+    lock_path = _lock_path(path)
     channel = FileChannel(path, max_bytes=4096, file_count=3)
-    original_open = concurrent_log_handler._open
+    real_atomic_open = clh.ConcurrentRotatingFileHandler.atomic_open
+    real_lock = clh.lock
     cleanup_control = asyncio.CancelledError("lock cleanup control")
     failure = asyncio.CancelledError("lock acquire control") if acquire_control else OSError("lock denied")
     original = failure if acquire_control else cleanup_control
+    attempts = []
 
     class Stream:
         def __init__(self, wrapped):
@@ -615,10 +634,18 @@ def test_lock_failure_then_close_control_keeps_original_failure_and_facts(tmp_pa
             self.wrapped.close()
             raise cleanup_control
 
-    monkeypatch.setattr(concurrent_log_handler, "_open",
-                        lambda *args, **kwargs: Stream(original_open(*args, **kwargs)))
-    monkeypatch.setattr(portalocker_api, "LOCKER",
-                        lambda fd, operation: (_ for _ in ()).throw(failure))
+    def open_lock(handler, file_path):
+        stream = real_atomic_open(handler, file_path)
+        return Stream(stream) if Path(file_path) == lock_path else stream
+
+    def fail_lock(stream, flags):
+        if _same_file(stream.fileno(), lock_path):
+            attempts.append(failure)
+            raise failure
+        return real_lock(stream, flags)
+
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "atomic_open", open_lock)
+    monkeypatch.setattr(clh, "lock", fail_lock)
     try:
         with pytest.raises(asyncio.CancelledError) as raised:
             if via_copy:
@@ -631,7 +658,11 @@ def test_lock_failure_then_close_control_keeps_original_failure_and_facts(tmp_pa
         assert result.failure_stage is WriteFailureStage.LOCK_ACQUIRE
         assert result.coordination_error and result.close_error
         if not acquire_control:
-            assert original.__context__ is not None
+            assert len(attempts) > 1
+            assert isinstance(original.__context__, RuntimeError)
+            assert "Cannot acquire lock" in str(original.__context__)
+        else:
+            assert attempts == [failure]
         assert channel.disabled and not path.exists()
         if via_copy:
             later, copy_error = channel.copy_with_write(record("later"), tmp_path / "later.log")
@@ -850,8 +881,7 @@ def test_actual_path_resolution_failure_preserves_append_and_reports_directory_s
 @pytest.mark.parametrize("scenario", ["copy_error", "close_errors", "copy_control", "close_control", "close_group", "file_control"])
 def test_copy_selection_and_independent_operation_control_use_separate_responsibility(tmp_path, monkeypatch, scenario):
     import builtins
-    import fcntl
-    import portalocker.portalocker as portalocker_api
+    import concurrent_log_handler as clh
     import shutil
 
     path, destination = tmp_path / "camctl.log", tmp_path / "copy.log"
@@ -863,7 +893,8 @@ def test_copy_selection_and_independent_operation_control_use_separate_responsib
     copy_error = RuntimeError("copy operation failed")
     target_error = RuntimeError("target close failed") if scenario == "close_errors" else OSError("target close failed")
     source_error = RuntimeError("source close failed") if scenario == "close_group" else asyncio.CancelledError("source close control")
-    original_open, original_copy, original_flock, original_sync = builtins.open, shutil.copyfileobj, fcntl.flock, os.fsync
+    original_open, original_copy, original_unlock, original_sync = builtins.open, shutil.copyfileobj, clh.unlock, os.fsync
+    lock_path = _lock_path(path)
     copy_started, unlock_interrupted = [], False
 
     class Stream:
@@ -894,22 +925,22 @@ def test_copy_selection_and_independent_operation_control_use_separate_responsib
             raise copy_control
         return original_copy(source, target)
 
-    def flock(fd, flags):
+    def unlock(stream):
         nonlocal unlock_interrupted
-        value = original_flock(fd, flags)
-        if flags == fcntl.LOCK_UN and not unlock_interrupted:
+        value = original_unlock(stream)
+        if not unlock_interrupted and _same_file(stream.fileno(), lock_path):
             unlock_interrupted = True
             raise operation_control
         return value
 
     def fsync(fd):
-        if scenario == "file_control" and stat.S_ISREG(os.fstat(fd).st_mode):
+        if scenario == "file_control" and _same_file(fd, path):
             raise file_control
         return original_sync(fd)
 
     monkeypatch.setattr(builtins, "open", open_file)
     monkeypatch.setattr(shutil, "copyfileobj", copy)
-    monkeypatch.setattr(portalocker_api, "LOCKER", flock)
+    monkeypatch.setattr(clh, "unlock", unlock)
     monkeypatch.setattr(os, "fsync", fsync)
     try:
         with pytest.raises(BaseException) as raised:
