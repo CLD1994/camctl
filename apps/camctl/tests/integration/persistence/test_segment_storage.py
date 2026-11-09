@@ -112,29 +112,50 @@ async def test_frozen_members_roundtrip_and_child_only_history_count(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_fixed_member_batch_reads_saved_facts_without_replaying_source(tmp_path, monkeypatch):
-    from camctl.persistence.repositories import segments
+async def test_fixed_member_batch_reads_saved_facts_without_replaying_source(tmp_path):
+    from contextlib import closing
 
     owned, runtime, repo, ref, members = await _world(tmp_path, indexes=(1, 2, 3, 4, 5, 6))
+    original_factory = owned.connection.row_factory
     try:
         _ok(repo.append_members(ref, members, runtime.wall_us(), new_operation_key(), owned))
         _ok(repo.fix_members(ref, runtime.wall_us(), new_operation_key(), owned))
-        def forbidden_page(*args, **kwargs):
-            raise AssertionError('固定成员消费不重新展开来源页')
-        monkeypatch.setattr(segments, '_at', forbidden_page)
+        source_events = {member.page_event_id for member in members}
+        source_bodies = set()
+        for event_id in source_events:
+            row = owned.connection.execute(
+                'SELECT body_json FROM history_events WHERE id=?', (event_id,)).fetchone()
+            assert row is not None and isinstance(row[0], str)
+            source_bodies.add(row[0])
+        assert source_bodies
+
+        def observe_row(cursor, row):
+            if any(isinstance(value, str) and value in source_bodies for value in row):
+                raise AssertionError('固定成员消费不读取来源页正文')
+            return row if original_factory is None else original_factory(cursor, row)
+
+        owned.connection.row_factory = observe_row
+        with closing(owned.connection.execute(
+                'SELECT body_json FROM history_events WHERE id=?', (ref.final_page_event_id,))) as probe:
+            with pytest.raises(AssertionError, match='来源页正文'):
+                probe.fetchone()
         first = repo.read_members(ref, None, 3, owned)
         last = repo.read_members(ref, first.next_cursor, 3, owned)
         assert len(first.items) == 3 and first.next_cursor is not None
         assert len(last.items) == 3 and last.next_cursor is None
+        assert tuple(item.file_id for item in first.items + last.items) == tuple(member.file_id for member in members)
         owned.connection.execute(
             "UPDATE result_page_files SET family_stem='changed' WHERE page_event_id=?",
             (ref.final_page_event_id,),
         )
-        assert repo.read_members(ref, None, 3, owned).items == first.items
+        reread_first = repo.read_members(ref, None, 3, owned)
+        reread_last = repo.read_members(ref, reread_first.next_cursor, 3, owned)
+        assert reread_first == first and reread_last == last
         owned.connection.execute('DELETE FROM segment_members WHERE id=?', (first.items[0].member_id,))
         with pytest.raises(ConsistencyError):
             repo.read_members(ref, None, 3, owned)
     finally:
+        owned.connection.row_factory = original_factory
         owned.connection.close()
 
 
