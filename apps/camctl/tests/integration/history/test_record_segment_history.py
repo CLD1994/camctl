@@ -58,6 +58,162 @@ async def test_complete_segment_rows_at_boundary(tmp_path, strategy):
 
 
 @pytest.mark.asyncio
+async def test_current_boundary_does_not_read_event_bodies(tmp_path, monkeypatch):
+    """当前投影即目标边界时，元数据仍可读取，事件正文不能被读取。"""
+    import sqlite3
+    from contextlib import closing
+    from camctl.history.snapshots import prepare_snapshot
+
+    owned, _, _, ref, history = await _fixture(tmp_path)
+    try:
+        boundary = history.current_boundary()
+        original_connect = sqlite3.connect
+        denied = []
+        attached = []
+
+        def authorize(operation, table, column, _database, _source):
+            if operation == sqlite3.SQLITE_READ and (table, column) == ('history_events', 'body_json'):
+                denied.append((table, column))
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        def connect(database, *args, **kwargs):
+            connection = original_connect(database, *args, **kwargs)
+            if str(database) == history.path.resolve().as_uri() + '?mode=ro':
+                connection.set_authorizer(authorize)
+                attached.append(True)
+            return connection
+
+        monkeypatch.setattr(sqlite3, 'connect', connect)
+        with history.open_segment_history(ref.action_id, boundary, strategy='current', batch_size=2) as handle:
+            assert handle.primary()['id'] == ref.action_id
+            assert len(tuple(_rows(handle, 'segment_members', ref))) == 5
+            assert len(tuple(_rows(handle, 'segment_gaps', ref))) == 1
+            prepared = prepare_snapshot(handle)
+            try:
+                assert sum(map(len, prepared.chunks)) == prepared.length
+            finally:
+                prepared.close()
+        assert attached and not denied
+        # 独立确认拦截器确实拒绝正文列，而非未附着到真实状态库连接。
+        with closing(connect(history.path.resolve().as_uri() + '?mode=ro', uri=True)) as probe:
+            with pytest.raises(sqlite3.DatabaseError):
+                probe.execute('SELECT body_json FROM history_events LIMIT 1').fetchone()
+        assert denied == [('history_events', 'body_json')]
+    finally:
+        owned.connection.close()
+
+
+def _segment_candidate_index_work(tmp_path, monkeypatch, size):
+    import sqlite3
+    from contextlib import closing
+    from camctl.capture.segment_models import SegmentSetRef
+    from camctl.contracts.history_values import HistoryBoundary
+    from ..support.segment_history_corpus import prepare_copy
+
+    directory = tmp_path / 'sample'
+    manifest = prepare_copy(directory, size)
+    path = directory / 'state.db'
+    ref = SegmentSetRef(*(manifest[name] for name in ('action_id', 'scan_id', 'final_page_event_id', 'version')))
+    boundary = HistoryBoundary(**manifest['boundary'])
+    observations = []
+    original_connect = sqlite3.connect
+
+    class Cursor(sqlite3.Cursor):
+        def close(self):
+            if getattr(self, 'record', None) is not None:
+                sql, params, counter = self.record
+                observations.append((sql, params, counter[0]))
+                self.connection.set_progress_handler(None, 0)
+                self.record = None
+            return super().close()
+
+    class Connection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            reads = set()
+            counter = [0]
+            def authorize(operation, table, column, _database, _source):
+                if operation == sqlite3.SQLITE_READ:
+                    reads.add((table, column))
+                return sqlite3.SQLITE_OK
+            def advance():
+                counter[0] += 1
+                return 0
+            self.set_authorizer(authorize)
+            self.set_progress_handler(advance, 1)
+            try:
+                cursor = self.cursor(factory=Cursor).execute(sql, parameters)
+            finally:
+                self.set_authorizer(None)
+            if ({('segment_members', 'id'), ('segment_members', 'set_id')} <= reads
+                    and cursor.description and [column[0] for column in cursor.description] == ['id']):
+                cursor.record = (sql, parameters, counter)
+            else:
+                self.set_progress_handler(None, 0)
+            return cursor
+
+    def connect(database, *args, **kwargs):
+        if str(database) == path.resolve().as_uri() + '?mode=ro':
+            kwargs['factory'] = Connection
+        return original_connect(database, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, 'connect', connect)
+        with HistoryRepository(path).open_segment_history(ref.action_id, boundary, strategy='current', batch_size=7) as handle:
+            member_ids = {row.row_id for row in _rows(handle, 'segment_members', ref, limit=7)}
+            assert len(member_ids) == size
+    assert len(observations) > 1
+    with closing(original_connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as db:
+        indexes = []
+        for index in db.execute('PRAGMA index_list(segment_members)').fetchall():
+            name = index[1]
+            columns = [row[2] for row in db.execute('SELECT * FROM pragma_index_info(?)', (name,))]
+            if columns[:2] == ['set_id', 'id'] and index[3] == 'c':
+                indexes.append(name)
+        assert indexes
+        plans = [db.execute('EXPLAIN QUERY PLAN ' + sql, params).fetchall()
+                 for sql, params, _ in observations]
+        used = [name for name in indexes if all(
+            any('SEARCH' in row[3].upper() and name in row[3] for row in plan)
+            and not any('TEMP' in row[3].upper() for row in plan) for plan in plans)]
+        assert used
+    indexed_steps = sum(item[2] for item in observations)
+    # 在独立副本移除实际使用的索引，重放正式入口执行的同一组查询与参数。
+    with closing(original_connect(path)) as db:
+        for name in used:
+            db.execute('DROP INDEX "' + name.replace('"', '""') + '"')
+        steps = [0]
+        def advance():
+            steps[0] += 1
+            return 0
+        db.set_progress_handler(advance, 1)
+        control_ids = []
+        for sql, params, _ in observations:
+            control_ids.extend(row[0] for row in db.execute(sql, params).fetchall())
+        db.set_progress_handler(None, 0)
+        assert len(control_ids) == size and set(control_ids) == member_ids
+        assert indexed_steps < steps[0]
+    print('SEGMENT_INDEX_WORK', {'size': size, 'queries': len(observations),
+          'indexed_steps': indexed_steps, 'without_index_steps': steps[0],
+          'first_plan': plans[0], 'last_plan': plans[-1]}, flush=True)
+    return indexed_steps, steps[0]
+
+
+def test_segment_candidate_index_work(tmp_path, monkeypatch):
+    """工作量随成员规模增长，索引移除对照能证伪此保障。"""
+    small = tmp_path / 'small'
+    large = tmp_path / 'large'
+    small.mkdir()
+    large.mkdir()
+    small_indexed, small_control = _segment_candidate_index_work(small, monkeypatch, 256)
+    large_indexed, large_control = _segment_candidate_index_work(large, monkeypatch, 2048)
+    # 以线性增长和同查询失去索引的实测增长作为两端，检查实际增长更接近线性一端。
+    assert large_control > 8 * small_control
+    assert 2 * large_indexed * small_control < (
+        8 * small_indexed * small_control + small_indexed * large_control)
+
+
+@pytest.mark.asyncio
 async def test_cursor_is_bound_to_handle_boundary_ref_and_table(tmp_path):
     owned, runtime, repo, ref, history = await _fixture(tmp_path)
     try:
