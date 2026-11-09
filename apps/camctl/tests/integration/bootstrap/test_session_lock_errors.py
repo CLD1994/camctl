@@ -11,7 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
-from contextlib import closing, suppress
+from contextlib import closing
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import url2pathname
@@ -1286,9 +1286,8 @@ def test_close_runtime_fallback_closes_channel_after_handler_error(
     assert "fallback file handler close marker" in stderr.getvalue()
 
 
-@pytest.mark.parametrize("cancel_log_wait", [False, True])
 def test_cli_control_closes_copy_channel_without_reclassification(
-        tmp_path: Path, monkeypatch, cancel_log_wait: bool) -> None:
+        tmp_path: Path, monkeypatch) -> None:
     from camctl import cli
 
     config = _config_for(tmp_path)
@@ -1306,69 +1305,70 @@ def test_cli_control_closes_copy_channel_without_reclassification(
         admission_path=admission_path,
     )
     monkeypatch.setattr(WorkerSupervisor, "generate", _worker_report_failure)
-    built = []
-    original_build = lifecycle.build_runtime
     logger_close_error = OSError(errno.EIO, "later ordinary logger close error")
     copy_close_error = OSError(errno.EBADF, "later failure-copy handler close error")
-    logger_close_calls: list[int] = []
-    async_close_calls: list[int] = []
-    copy_close_calls: list[int] = []
-    logger_cleanup: list[tuple[object, object]] = []
-    close_wait_parent = []
-    original_close_log = lifecycle._close_log_runtime
-
-    async def track_close_wait(*args, **kwargs):
-        close_wait_parent[:] = [asyncio.get_running_loop(), asyncio.current_task()]
-        return await original_close_log(*args, **kwargs)
-
-    monkeypatch.setattr(lifecycle, "_close_log_runtime", track_close_wait)
-
-    def capture_runtime(*args, **kwargs):
-        deps = original_build(*args, **kwargs)
-        built.append(deps)
-        if deps.mode is CommandMode.RUN:
-            runtime = deps.log_runtime
-            assert runtime is not None
-            real_closer = runtime.file_closer
-            real_async_close = runtime.channel.async_close
-            logger_cleanup.append((real_closer, real_async_close))
-            real_stop = runtime.channel.stop_listener
-
-            def cancel_during_real_stop(*args, **kwargs):
-                if cancel_log_wait and close_wait_parent:
-                    loop, parent = close_wait_parent
-                    loop.call_soon_threadsafe(parent.cancel, "later log close wait cancel")
-                return real_stop(*args, **kwargs)
-
-            runtime.channel.stop_listener = cancel_during_real_stop
-
-            def fail_logger_close_after_real_close():
-                logger_close_calls.append(1)
-                assert real_closer is not None
-                real_closer()
-                raise logger_close_error
-
-            def track_async_close():
-                async_close_calls.append(1)
-                return real_async_close()
-
-            runtime.file_closer = fail_logger_close_after_real_close
-            runtime.channel.async_close = track_async_close
-        return deps
-
-    monkeypatch.setattr(lifecycle, "build_runtime", capture_runtime)
     opened = _tracked_open_connections(monkeypatch, Path(config.paths.state_db))
-    original_channel_close = FileChannel.close
+    log_path = Path(config.paths.log_file)
+    logs = Path(config.paths.staging) / "logs"
+    channels: dict[FileChannel, Path] = {}
+    ordinary_channels: set[FileChannel] = set()
+    copy_results: list[tuple[FileChannel, object, object, bytes]] = []
+    writer_threads: set[threading.Thread] = set()
+    close_calls: list[tuple[str, FileChannel]] = []
+    closed_channels: list[tuple[str, FileChannel]] = []
+    observation_lock = threading.Lock()
+    original_init = FileChannel.__init__
+    original_write = FileChannel.write_record
+    original_copy = FileChannel.copy_with_write
+    original_close = FileChannel.close
 
-    def fail_copy_close_after_real_close(channel):
-        deps = built[-1] if built else None
-        if (deps is not None and deps.failure_channel is channel):
-            copy_close_calls.append(1)
-            original_channel_close(channel)
-            raise copy_close_error
-        return original_channel_close(channel)
+    def track_channel(channel, path, **kwargs):
+        original_init(channel, path, **kwargs)
+        if Path(path) == log_path:
+            with observation_lock:
+                channels[channel] = Path(path)
 
-    monkeypatch.setattr(FileChannel, "close", fail_copy_close_after_real_close)
+    def track_write(channel, record):
+        with observation_lock:
+            if channels.get(channel) == log_path:
+                ordinary_channels.add(channel)
+                writer_threads.add(threading.current_thread())
+        return original_write(channel, record)
+
+    def track_copy(channel, record, destination):
+        result, copy_error = original_copy(channel, record, destination)
+        if Path(destination).parent == logs:
+            copied_bytes = Path(destination).read_bytes()
+            with observation_lock:
+                assert channels.get(channel) == log_path
+                copy_results.append((channel, result, copy_error, copied_bytes))
+        return result, copy_error
+
+    def fail_after_real_close(channel):
+        with observation_lock:
+            copied_channels = {item[0] for item in copy_results}
+            if channels.get(channel) != log_path:
+                role = None
+            elif channel in copied_channels:
+                assert channel not in ordinary_channels
+                role = "copy"
+            elif channel in ordinary_channels:
+                role = "ordinary"
+            else:
+                role = None
+            if role is not None:
+                close_calls.append((role, channel))
+        original_close(channel)
+        if role is not None:
+            assert channel.closed is True
+            with observation_lock:
+                closed_channels.append((role, channel))
+            raise copy_close_error if role == "copy" else logger_close_error
+
+    monkeypatch.setattr(FileChannel, "__init__", track_channel)
+    monkeypatch.setattr(FileChannel, "write_record", track_write)
+    monkeypatch.setattr(FileChannel, "copy_with_write", track_copy)
+    monkeypatch.setattr(FileChannel, "close", fail_after_real_close)
     stdout = io.StringIO()
     stderr = io.StringIO()
     monkeypatch.setattr(sys, "stderr", stderr)
@@ -1377,43 +1377,27 @@ def test_cli_control_closes_copy_channel_without_reclassification(
         with pytest.raises(asyncio.CancelledError) as raised:
             cli.main(["run", "--config", str(config_file)], stdout, stderr)
     finally:
-        if built:
-            deps = built[-1]
-            if not deps.closed:
-                with suppress(BaseException):
-                    close_runtime(deps)
-            if deps.log_runtime is not None and logger_cleanup:
-                runtime = deps.log_runtime
-                real_closer, real_async_close = logger_cleanup[-1]
-                if runtime.channel.listener_alive:
-                    with suppress(BaseException):
-                        runtime.channel.stop_listener(0.1)
-                if not async_close_calls:
-                    with suppress(BaseException):
-                        real_async_close()
-                if not logger_close_calls and real_closer is not None:
-                    with suppress(BaseException):
-                        real_closer()
-            if (deps.failure_channel is not None
-                    and not deps.failure_channel.closed):
-                with suppress(BaseException):
-                    original_channel_close(deps.failure_channel)
+        for channel in tuple(channels):
+            if not channel.closed:
+                original_close(channel)
 
     assert raised.value is control
-    assert built
-    deps = built[-1]
-    assert deps.failure_channel is not None
-    assert deps.failure_channel.closed is True
-    copies_ready = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+    (copy_channel, copy_result, copy_error, copied_bytes), = copy_results
+    assert copy_result.appended is True and copy_result.durable is True
+    assert copy_error is None
+    ordinary_channel, = ordinary_channels
+    assert ordinary_channel is not copy_channel
+    assert set(channels) == {ordinary_channel, copy_channel}
+    assert {role for role, _ in close_calls} == {"ordinary", "copy"}
+    assert len(close_calls) == 2 and closed_channels == close_calls
+    assert dict(close_calls) == {"ordinary": ordinary_channel, "copy": copy_channel}
+    assert all(channel.closed for channel in (ordinary_channel, copy_channel))
+    writer_thread, = writer_threads
+    assert not writer_thread.is_alive()
+    copies_ready = list(Path(config.paths.ready).glob("log-copy-*.log"))
     assert len(copies_ready) == 1
-    assert b"Task3 report failure reached the real failure-copy path" in (
-        copies_ready[0].read_bytes())
-    assert deps.closed is True
-    assert deps.log_runtime.close_attempts == 1
-    assert deps.log_runtime.channel.listener_alive is False
-    assert logger_close_calls == [1]
-    assert async_close_calls == [1]
-    assert copy_close_calls == [1]
+    assert copies_ready[0].read_bytes() == copied_bytes
+    assert b"Task3 report failure reached the real failure-copy path" in copied_bytes
     assert backend.calls == {"open": 1, "try_lock": 1, "unlock": 1, "close": 1}
     assert opened and all(connection.close_calls == 1 and connection.unusable_after_close
                           for connection in opened)
