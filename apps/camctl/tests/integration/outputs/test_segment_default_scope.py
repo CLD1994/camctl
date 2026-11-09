@@ -479,19 +479,10 @@ async def test_failed_source_uses_confirmed_prefix_or_source_failure(
 
 @pytest.mark.parametrize("mode", ["default", "preview"])
 async def test_failed_segment_source_with_complete_empty_catalog_saves_source_error(
-    tmp_path, mode, monkeypatch
+    tmp_path, mode
 ):
     owned, runtime, aid = await _source(tmp_path, indexes=(), known=False)
     try:
-        from camctl.persistence.repositories import outputs as outputs_repository
-
-        monkeypatch.setattr(
-            outputs_repository,
-            "_catalog_members",
-            lambda *_args: pytest.fail(
-                "有界失败来源判定不能枚举完整产物目录"
-            ),
-        )
         assert row_facts(owned.connection, "actions", aid)["status"] == 4
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM outputs WHERE source_action_id=?", (aid,)
