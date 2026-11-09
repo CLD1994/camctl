@@ -12,8 +12,9 @@ import subprocess
 import sys
 import threading
 from contextlib import closing, suppress
-from dataclasses import replace
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import url2pathname
 
 import pytest
 
@@ -235,29 +236,50 @@ def _write_cli_config(config, target: Path) -> Path:
     return target
 
 
-def _tracked_open_connections(monkeypatch):
+def _tracked_open_connections(monkeypatch, database: Path):
     opened = []
-    original_open = lifecycle._open_runtime_connection
+    original_connect = sqlite3.connect
+    database_path = os.path.normcase(os.path.realpath(database))
 
-    class TrackedConnection:
-        def __init__(self, connection):
-            self.connection = connection
+    class TrackedConnection(sqlite3.Connection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
             self.close_calls = 0
+            self.unusable_after_close = False
 
         def close(self):
+            result = super().close()
             self.close_calls += 1
-            return self.connection.close()
+            try:
+                super().execute("SELECT 1")
+            except sqlite3.ProgrammingError:
+                self.unusable_after_close = True
+            return result
 
-        def __getattr__(self, name):
-            return getattr(self.connection, name)
+    def connect(path, *args, **kwargs):
+        uri = kwargs.get("uri", args[6] if len(args) > 6 else False)
+        if not uri or not isinstance(path, (str, bytes, os.PathLike)):
+            return original_connect(path, *args, **kwargs)
+        try:
+            parts = urlsplit(os.fsdecode(path))
+            matches = (parts.scheme == "file" and parts.netloc in ("", "localhost")
+                       and parse_qs(parts.query).get("mode") == ["rw"]
+                       and os.path.normcase(os.path.realpath(url2pathname(parts.path))) == database_path)
+        except (OSError, TypeError, ValueError):
+            return original_connect(path, *args, **kwargs)
+        if not matches:
+            return original_connect(path, *args, **kwargs)
+        factory = kwargs.get("factory", args[4] if len(args) > 4 else sqlite3.Connection)
+        if factory is sqlite3.Connection:
+            if len(args) > 4:
+                args = (*args[:4], TrackedConnection, *args[5:])
+            else:
+                kwargs["factory"] = TrackedConnection
+        connection = original_connect(path, *args, **kwargs)
+        opened.append(connection)
+        return connection
 
-    def open_tracked(deps):
-        owned = original_open(deps)
-        tracked = TrackedConnection(owned.connection)
-        opened.append(tracked)
-        return replace(owned, connection=tracked)
-
-    monkeypatch.setattr(lifecycle, "_open_runtime_connection", open_tracked)
+    monkeypatch.setattr(sqlite3, "connect", connect)
     return opened
 
 
@@ -345,15 +367,7 @@ async def test_default_run_lock_failure_has_zero_business_effects(
         admission_path=admission_path,
     )
 
-    session_connections: list[object] = []
-    original_open = lifecycle._open_runtime_connection
-
-    def count_open(current):
-        owned = original_open(current)
-        session_connections.append(owned.connection)
-        return owned
-
-    monkeypatch.setattr(lifecycle, "_open_runtime_connection", count_open)
+    session_connections = _tracked_open_connections(monkeypatch, Path(config.paths.state_db))
     scans: list[Path] = []
     original_listdir = os.listdir
 
@@ -552,15 +566,7 @@ async def test_admission_acquire_failure_keeps_commits_and_skips_ordinary_flows(
     deps = build_runtime(CommandMode.RUN, config)
     session_path = Path(deps.session_lock)
     admission_path = Path(deps.admission_lock)
-    connection_box: list[sqlite3.Connection] = []
-    original_open = lifecycle._open_runtime_connection
-
-    def track_connection(current):
-        owned = original_open(current)
-        connection_box.append(owned.connection)
-        return owned
-
-    monkeypatch.setattr(lifecycle, "_open_runtime_connection", track_connection)
+    connection_box = _tracked_open_connections(monkeypatch, database)
     transaction_observations: list[bool] = []
     failure = OSError(errno.EACCES, "controlled admission acquire failure")
     backend = _FaultingLockBackend(
@@ -652,7 +658,7 @@ async def test_cleanup_lock_error_does_not_skip_other_resources(
         monkeypatch, session_path=session_path, session_backend=backend,
         admission_path=admission_path,
     )
-    opened = _tracked_open_connections(monkeypatch)
+    opened = _tracked_open_connections(monkeypatch, Path(config.paths.state_db))
     try:
         outcome = await execute_command(deps, None)
     finally:
@@ -668,7 +674,8 @@ async def test_cleanup_lock_error_does_not_skip_other_resources(
     assert backend.calls == {"open": 1, "try_lock": 1, "unlock": 1, "close": 1}
     _assert_session_lock_reacquirable(session_path)
     assert locks.probe_admission(admission_path).is_free is True
-    assert opened and all(connection.close_calls == 1 for connection in opened)
+    assert opened and all(connection.close_calls == 1 and connection.unusable_after_close
+                          for connection in opened)
     assert deps.log_runtime.close_attempts == 1
     assert deps.log_runtime.channel.listener_alive is False
     if report_error:
@@ -706,7 +713,7 @@ async def test_original_error_survives_later_lock_error(
         raise StateDbFailure("pre-existing work database failure")
 
     monkeypatch.setattr(application, "query_work_facts", fail_work_query)
-    opened = _tracked_open_connections(monkeypatch)
+    opened = _tracked_open_connections(monkeypatch, Path(config.paths.state_db))
     try:
         outcome = await execute_command(deps, None)
     finally:
@@ -720,7 +727,8 @@ async def test_original_error_survives_later_lock_error(
     assert secondary[0]["reason"] == "lock_error"
     assert secondary[0]["details"]["path"] == str(session_path)
     assert secondary[0]["details"]["errno"] == errno.EIO
-    assert all(connection.close_calls == 1 for connection in opened)
+    assert opened and all(connection.close_calls == 1 and connection.unusable_after_close
+                          for connection in opened)
     _assert_session_lock_reacquirable(session_path)
     assert _scalar(
         Path(config.paths.state_db),
@@ -930,7 +938,7 @@ async def test_lock_control_and_parent_cancel_keep_first_source(
         return original_listdir(path)
 
     monkeypatch.setattr(os, "listdir", blocked_listdir)
-    opened = _tracked_open_connections(monkeypatch)
+    opened = _tracked_open_connections(monkeypatch, Path(config.paths.state_db))
     run_task = asyncio.create_task(execute_command(deps, None))
     try:
         assert await asyncio.to_thread(listdir_started.wait, _GATE_TIMEOUT)
@@ -985,7 +993,8 @@ async def test_lock_control_and_parent_cancel_keep_first_source(
         assert "parent cancelled after synchronous lock control" in notes
         assert "original synchronous lock control note" in notes
     assert "late clock enters required local cleanup" in notes
-    assert opened and all(connection.close_calls == 1 for connection in opened)
+    assert opened and all(connection.close_calls == 1 and connection.unusable_after_close
+                          for connection in opened)
     _assert_session_lock_reacquirable(session_path)
     assert locks.probe_admission(admission_path).is_free is True
     assert _scalar(
@@ -1062,7 +1071,7 @@ async def test_body_success_keeps_first_worker_close_control(
         return real_channel_close()
 
     runtime.channel.async_close = close_real_log_channel
-    opened = _tracked_open_connections(monkeypatch)
+    opened = _tracked_open_connections(monkeypatch, database)
     try:
         with pytest.raises(asyncio.CancelledError) as raised:
             await asyncio.wait_for(execute_command(deps, None), _GATE_TIMEOUT)
@@ -1107,7 +1116,8 @@ async def test_body_success_keeps_first_worker_close_control(
     assert runtime.channel.listener_alive is False
     assert file_close_calls == [1]
     assert channel_close_calls == [1]
-    assert opened and all(connection.close_calls == 1 for connection in opened)
+    assert opened and all(connection.close_calls == 1 and connection.unusable_after_close
+                          for connection in opened)
     _assert_session_lock_reacquirable(session_path)
     assert _scalar(database, "SELECT COUNT(*) FROM plans") == (0,)
 
@@ -1309,7 +1319,7 @@ def test_cli_control_closes_copy_channel_without_reclassification(
         return deps
 
     monkeypatch.setattr(lifecycle, "build_runtime", capture_runtime)
-    opened = _tracked_open_connections(monkeypatch)
+    opened = _tracked_open_connections(monkeypatch, Path(config.paths.state_db))
     original_channel_close = FileChannel.close
 
     def fail_copy_close_after_real_close(channel):
@@ -1367,7 +1377,8 @@ def test_cli_control_closes_copy_channel_without_reclassification(
     assert async_close_calls == [1]
     assert copy_close_calls == [1]
     assert backend.calls == {"open": 1, "try_lock": 1, "unlock": 1, "close": 1}
-    assert opened and all(connection.close_calls == 1 for connection in opened)
+    assert opened and all(connection.close_calls == 1 and connection.unusable_after_close
+                          for connection in opened)
     _assert_session_lock_reacquirable(session_path)
     assert locks.probe_admission(admission_path).is_free is True
     assert stdout.getvalue() == ""
