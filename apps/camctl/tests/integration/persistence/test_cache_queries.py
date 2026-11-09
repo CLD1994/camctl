@@ -10,8 +10,11 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import url2pathname
 
 import pytest
 
@@ -44,41 +47,64 @@ class TestQueryPlanUnderRepresentativeLoad:
             connection.execute("ANALYZE")
 
         repository = HistoryRepository(tmp_path / "state.db")
-        captured: list[str] = []
-        original_connect = repository._connect
+        captured: dict[str, list[str]] = {}
+        matched_connections = []
+        original_connect = sqlite3.connect
+        phase = ""
 
-        def traced_connect() -> sqlite3.Connection:
-            connection = original_connect()
+        def traced_connect(database, *args, **kwargs) -> sqlite3.Connection:
+            connection = original_connect(database, *args, **kwargs)
+            parts = urlsplit(os.fsdecode(database))
+            if (kwargs.get("uri") and parts.scheme == "file"
+                    and parts.netloc in ("", "localhost")
+                    and parse_qs(parts.query).get("mode") == ["ro"]
+                    and os.path.samefile(url2pathname(parts.path), repository.path)):
+                matched_connections.append(database)
 
-            def record(statement: str) -> None:
-                if statement.lstrip().upper().startswith("SELECT"):
-                    captured.append(statement)
+                def record(statement: str) -> None:
+                    if statement.lstrip().upper().startswith("SELECT"):
+                        captured[phase].append(statement)
 
-            connection.set_trace_callback(record)
+                connection.set_trace_callback(record)
             return connection
 
-        monkeypatch.setattr(repository, "_connect", traced_connect)
+        # 只对本次仓储读取附着；打开库时的结构核验也纳入观察。
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, "connect", traced_connect)
+            phase = "current_boundary"
+            captured[phase] = []
+            boundary = repository.current_boundary()
+            phase = "read_events"
+            captured[phase] = []
+            repository.read_events(
+                _ascending_scope(boundary.last_event_id, batch_limit=8), boundary)
+            phase = "select_report_entities"
+            captured[phase] = []
+            repository.select_report_entities(
+                entity_type=4, from_wm=0, to_wm=boundary.last_event_id * 10,
+                after_id=0, limit=5)
+            phase = "restore_entity"
+            captured[phase] = []
+            repository.restore_entity("plan", 1, HistoryBoundary(1, 1))
 
-        boundary = repository.current_boundary()
-        repository.read_events(
-            _ascending_scope(boundary.last_event_id, batch_limit=8), boundary)
-        repository.select_report_entities(
-            entity_type=4, from_wm=0, to_wm=boundary.last_event_id * 10,
-            after_id=0, limit=5)
-        repository.restore_entity("plan", 1, HistoryBoundary(1, 1))
-
-        assert captured, "未捕获任何查询语句，trace 未生效"
+        assert matched_connections, "没有观察到目标状态库的只读连接"
         scans: list[str] = []
         explain_connection = sqlite3.connect(f"file:{tmp_path / 'state.db'}?mode=ro", uri=True)
         try:
-            for statement in captured:
-                plan = explain_connection.execute(
-                    f"EXPLAIN QUERY PLAN {statement}").fetchall()
-                for row in plan:
-                    detail = str(row[3])
-                    for table in _VOLUME_TABLES:
-                        if detail.startswith("SCAN") and table in detail:
-                            scans.append(f"{detail} <- {statement[:120]}")
+            for name, statements in captured.items():
+                assert statements, f"{name} 没有捕获到查询语句"
+                accessed = set()
+                for statement in statements:
+                    plan = explain_connection.execute(
+                        f"EXPLAIN QUERY PLAN {statement}").fetchall()
+                    for row in plan:
+                        detail = str(row[3])
+                        for table in _VOLUME_TABLES:
+                            if table in detail:
+                                accessed.add(table)
+                                if detail.startswith("SCAN"):
+                                    scans.append(f"{detail} <- {statement[:120]}")
+                assert accessed, f"{name} 没有捕获到历史体量表查询"
         finally:
             explain_connection.close()
         assert scans == [], f"体量表出现全表扫描: {scans}"
