@@ -1,5 +1,6 @@
 """绑定失败申请的产物目录构造契约。"""
 
+from copy import deepcopy
 from dataclasses import replace
 
 import pytest
@@ -31,6 +32,17 @@ def test_binding_directory_input_accepts_complete_paired_drafts(binding_request)
         OutputKind.PREVIEW, OutputKind.ORIGINAL, OutputKind.ORIGINAL)
     assert preview.original_batch_file_id == original_a.file.device_file_id == 11
     assert binding_request.catalog_facts == OutputCatalogFacts(binding_request.action_id, True)
+
+
+def test_binding_directory_input_accepts_empty_drafts_without_catalog(binding_request):
+    original = deepcopy(binding_request)
+
+    empty = replace(binding_request, drafts=(), catalog_facts=None)
+
+    assert empty.drafts == () and empty.catalog_facts is None
+    assert binding_request == original
+    preview, _, original_a = binding_request.drafts
+    assert preview.original_batch_file_id == original_a.file.device_file_id == 11
 
 
 @pytest.mark.parametrize("invalid", [

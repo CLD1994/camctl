@@ -257,17 +257,6 @@ async def test_original_key_rejects_changed_complete_binding_request(saved_pair,
     assert tuple(owned.connection.iterdump()) == before
 
 
-async def test_binding_directory_input_accepts_empty_drafts_without_catalog(saved_pair):
-    world, owned = saved_pair
-    before = tuple(owned.connection.iterdump())
-
-    empty = replace(world.request, drafts=(), catalog_facts=None)
-
-    assert empty.drafts == () and empty.catalog_facts is None
-    assert world.request.drafts == _expected_drafts(world)
-    assert tuple(owned.connection.iterdump()) == before
-
-
 async def test_incomplete_original_excludes_its_preview_and_keeps_other_complete_original(
         tmp_path, monkeypatch):
     world, owned, runtime, methods = await _paired_capture_world(tmp_path, monkeypatch, incomplete_a=True)
