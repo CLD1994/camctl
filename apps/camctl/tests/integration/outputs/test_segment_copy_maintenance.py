@@ -9,7 +9,6 @@ import pytest
 
 from camctl.contracts.enums import enum_for
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
-from camctl.outputs import work_files
 from camctl.outputs.work_files import (
     WorkFileContext, WorkFileLimits, WorkFileSingleOutcome, clean_one_work_file,
 )
@@ -109,16 +108,17 @@ async def test_inspection_copy_delete_failure_is_retried_after_database_reopen(
     world, file_id, path = await _published_check_copy(tmp_path, capture_resources, monkeypatch)
     owned, source = world.owned, world.source_id
     executor = FileTaskExecutor(Supervisor())
-    remove = work_files._remove_work_file
+    remove = Path.unlink
     removals = []
 
-    def refuse_once(candidate):
-        removals.append(candidate)
-        if len(removals) == 1:
-            raise OSError("检查副本删除被拒绝")
-        remove(candidate)
+    def refuse_once(candidate, *args, **kwargs):
+        if candidate == path:
+            removals.append(candidate)
+            if len(removals) == 1:
+                raise OSError("检查副本删除被拒绝")
+        return remove(candidate, *args, **kwargs)
 
-    monkeypatch.setattr(work_files, "_remove_work_file", refuse_once)
+    monkeypatch.setattr(Path, "unlink", refuse_once)
     before = owned.connection.execute(
         "SELECT status,error_code,error_details_json FROM actions WHERE id=?", (source,),
     ).fetchone()

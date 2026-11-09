@@ -6,7 +6,6 @@ import pytest
 
 from camctl.bootstrap.obtain_assembly import obtain_flow, session_obtain_assembly
 from camctl.contracts.workflow_errors import item_error_id
-from camctl.outputs import work_files
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -57,15 +56,16 @@ async def test_default_session_cancel_adopts_actual_first_work_file_result(envir
     paths = {row[0] for row in owned.connection.execute(
         "SELECT f.relative_path FROM intermediate_files f JOIN deliveries d ON d.id=f.owner_delivery_id"
         " WHERE d.action_id=?", (target,))}
-    original_remove = work_files._remove_work_file
+    targets = {Path(cfg.paths.staging) / path: path for path in paths}
+    original_remove = Path.unlink
     removed = []
-    def remove(path):
-        if str(path.relative_to(cfg.paths.staging)) in paths:
-            removed.append(str(path.relative_to(cfg.paths.staging)))
+    def remove(path, *args, **kwargs):
+        if path in targets:
+            removed.append(targets[path])
             if result == "failed":
                 raise OSError("first unlink refused")
-        return original_remove(path)
-    monkeypatch.setattr(work_files, "_remove_work_file", remove)
+        return original_remove(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", remove)
     session_cfg = replace(cfg, cleanup=replace(cfg.cleanup, work_file_batch_size=32,
         work_file_limit_per_run=1))
     deps = build_runtime(CommandMode.RUN, session_cfg, catalog=Catalog())
@@ -186,12 +186,15 @@ async def test_default_session_cancel_waits_for_active_read_before_file_cleanup(
             return ReadSession(source, offset, HeldStream(_CONTENT[offset:]), idle_timeout_s)
 
     held_driver = HeldDriver(owned)
-    original_remove = work_files._remove_work_file
+    targets = {Path(cfg.paths.staging) / row[0]: row[0] for row in owned.connection.execute(
+        "SELECT relative_path FROM intermediate_files")}
+    original_remove = Path.unlink
     removed = []
-    def remove(path):
-        removed.append(str(path.relative_to(cfg.paths.staging)))
-        return original_remove(path)
-    monkeypatch.setattr(work_files, "_remove_work_file", remove)
+    def remove(path, *args, **kwargs):
+        if path in targets:
+            removed.append(targets[path])
+        return original_remove(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", remove)
     session_cfg = replace(cfg, cleanup=replace(cfg.cleanup, work_file_batch_size=32,
         work_file_limit_per_run=1))
     deps = build_runtime(CommandMode.RUN, session_cfg, catalog=Catalog())
@@ -261,12 +264,15 @@ async def test_default_session_cancel_stops_when_first_cleanup_commit_is_unknown
     files = {row[0]: row[1] for row in owned.connection.execute(
         "SELECT f.id,f.relative_path FROM intermediate_files f JOIN deliveries d ON d.id=f.owner_delivery_id"
         " WHERE d.action_id=?", (target,))}
-    original_remove = work_files._remove_work_file
+    targets = {Path(cfg.paths.staging) / row[0]: row[0] for row in owned.connection.execute(
+        "SELECT relative_path FROM intermediate_files")}
+    original_remove = Path.unlink
     removed = []
-    def remove(path):
-        removed.append(str(path.relative_to(cfg.paths.staging)))
-        return original_remove(path)
-    monkeypatch.setattr(work_files, "_remove_work_file", remove)
+    def remove(path, *args, **kwargs):
+        if path in targets:
+            removed.append(targets[path])
+        return original_remove(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", remove)
     requests, errors = [], []
 
     class SaveObserver(OutputsRepository):

@@ -335,22 +335,24 @@ async def test_device_terminal_replay_after_cleanup_preserves_report_and_history
 
 
 async def test_failed_host_copy_cleanup_retries_on_next_maintenance(tmp_path,monkeypatch):
-    from camctl.outputs import work_files
     cfg,owned,driver,runtime,_=await _world(tmp_path,storage="device")
     try:
         await capture_handler("camera_take_photo")(1,runtime)
-        remove=work_files._remove_work_file
-        def denied(path):
-            if "capture-originals" in path.parts:
+        relative, = owned.connection.execute(
+            "SELECT relative_path FROM intermediate_files ORDER BY id LIMIT 1").fetchone()
+        target = Path(cfg.paths.staging) / relative
+        remove=Path.unlink
+        def denied(path, *args, **kwargs):
+            if path == target:
                 raise PermissionError("主机副本删除被拒绝")
-            return remove(path)
-        monkeypatch.setattr(work_files,"_remove_work_file",denied)
+            return remove(path, *args, **kwargs)
+        monkeypatch.setattr(Path,"unlink",denied)
         await _maintain(cfg,owned)
         rows=owned.connection.execute("SELECT cleanup_state,last_error_json,relative_path FROM intermediate_files ORDER BY id").fetchall()
         assert rows[0][0]==5 and rows[0][1] is not None
         assert (Path(cfg.paths.staging)/rows[0][2]).is_file()
         assert rows[1][0]==4
-        monkeypatch.setattr(work_files,"_remove_work_file",remove)
+        monkeypatch.setattr(Path,"unlink",remove)
         await _maintain(cfg,owned)
         assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files ORDER BY id").fetchall()==[(4,),(4,)]
         assert not (Path(cfg.paths.staging)/rows[0][2]).exists()

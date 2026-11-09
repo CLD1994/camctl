@@ -11,7 +11,6 @@ from camctl.history.events import branch_of, business_columns, event_type_name
 from camctl.history.replay import EntityImage, RestoreSeed, restore
 from camctl.history.snapshots import SnapshotRef, decode_snapshot, prepare_snapshot
 from camctl.history.validators import ValidatedEvent
-from camctl.outputs import work_files
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -69,11 +68,15 @@ async def test_work_file_results_and_cursor_match_three_history_paths(environmen
             await store.save_snapshots((prepare_snapshot(seed),))
     finally:
         await executor.close()
-    original_remove = work_files._remove_work_file
+    target = Path(cfg.paths.staging) / owned.connection.execute(
+        "SELECT relative_path FROM intermediate_files WHERE id=?", (identities[0],)).fetchone()[0]
+    original_remove = Path.unlink
     if first_failed:
-        def failed(_path):
-            raise OSError("historical unlink refused")
-        monkeypatch.setattr(work_files, "_remove_work_file", failed)
+        def failed(path, *args, **kwargs):
+            if path == target:
+                raise OSError("historical unlink refused")
+            return original_remove(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "unlink", failed)
     from camctl.bootstrap import lifecycle
     monkeypatch.setattr(lifecycle, "SystemClock", lambda: FixedClock(_NOW))
     before_event = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
@@ -90,7 +93,7 @@ async def test_work_file_results_and_cursor_match_three_history_paths(environmen
         owned.connection, "intermediate_files", identity)}) for identity in identities}
     expected_runtime = _business({("runtime_state", 1): row_facts(owned.connection, "runtime_state", 1)})
     action_business = tuple(owned.connection.execute("SELECT id,status,cancel_requested FROM actions ORDER BY id"))
-    monkeypatch.setattr(work_files, "_remove_work_file", original_remove)
+    monkeypatch.setattr(Path, "unlink", original_remove)
     second = await _execute(replace(cfg, cleanup=replace(cfg.cleanup, work_file_limit_per_run=2)))
     assert second.succeeded, second
     assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files ORDER BY id").fetchall() == [(4,), (4,)]

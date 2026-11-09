@@ -6,7 +6,6 @@ import sqlite3
 
 import pytest
 
-from camctl.outputs import work_files
 from camctl.outputs.work_files import (
     WorkFileCleanupError, WorkFileSingleOutcome, clean_one_work_file, clean_work_files,
 )
@@ -16,7 +15,7 @@ from ..bootstrap.test_binding_transactions import _CommitFailure
 from ..support.outputs import SqliteOperationFault
 from ..support.database import business_database
 from .test_work_files import (
-    _cancel_delivery, _context, _file_state, _release_ok,
+    _cancel_delivery, _context, _file_state, _release_ok, _work_path,
     local_read, read_targets, storage_work_env as work_env,  # noqa: F401
 )
 
@@ -34,21 +33,24 @@ async def test_reopen_preserves_actual_cleanup_result_and_original_key(
     database = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     async with business_database(database) as original_database:
         context = _context(original_database, roots)
-        observe, remove = work_files._observe_work_file, work_files._remove_work_file
+        target = _work_path(roots, owned, file_id)
+        observe, remove = Path.stat, Path.unlink
         observations, removals, saves = [], [], []
 
-        def stat(path):
-            observations.append(path)
-            return observe(path)
+        def stat(path, *args, **kwargs):
+            if path == target:
+                observations.append(path)
+            return observe(path, *args, **kwargs)
 
-        def unlink(path):
-            removals.append(path)
-            if delete_failed:
-                raise OSError("original unlink refused")
-            remove(path)
+        def unlink(path, *args, **kwargs):
+            if path == target:
+                removals.append(path)
+                if delete_failed:
+                    raise OSError("original unlink refused")
+            return remove(path, *args, **kwargs)
 
-        monkeypatch.setattr(work_files, "_observe_work_file", stat)
-        monkeypatch.setattr(work_files, "_remove_work_file", unlink)
+        monkeypatch.setattr(Path, "stat", stat)
+        monkeypatch.setattr(Path, "unlink", unlink)
         save = context.repository.save_cleanup_result
 
         def fault_once(request, key, current):
