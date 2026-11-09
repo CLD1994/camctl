@@ -24,6 +24,7 @@ from ..support.output_planning import EventSequence, capture_operation
 from ..support.database import business_database, database_path
 from ..support.public_delivery_cases import prepare_public_delivery
 from ..support.output_storage_cases import observed_operation
+from ..support.bootstrap_read_cases import work_file_case, release_work_consumer, segment_input_case
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
@@ -334,60 +335,68 @@ async def test_observation_failure_is_not_missing(public_file_env, monkeypatch):
         assert json.loads(error_json)["code"] == "work_file_delete_failed"
 
 
+@pytest_asyncio.fixture
+async def public_quota_env(tmp_path, capture_resources):
+    world = await work_file_case(tmp_path, capture_resources, count=2)
+    try:
+        assert all(world.paths[file_id].read_bytes() == b"bind" for file_id, _, _ in world.files)
+        yield world
+    finally:
+        world.owned.connection.close()
+
+
 # ---- 历史扫描预算与游标 ----
 
 
 @pytest.mark.asyncio
-async def test_history_scan_respects_run_limit_and_resumes(storage_work_env):
+async def test_history_scan_respects_run_limit_and_resumes(public_quota_env):
     """额度先尽即止；已检查记录推进游标，下次运行从其后继续。"""
-    owned, roots, qualification = storage_work_env
-    async with business_database(database_path(owned)) as database:
-        file_id = qualification.target_file_id
-        _cancel_delivery(owned, qualification.delivery_id)
-        _release_ok(owned, file_id)
-        _seed_action_candidate(owned, roots, file_id=900)
-        first = (await clean_work_files(
-            _context(database, roots, batch=32, limit=1)))
+    world = public_quota_env
+    owned = world.owned
+    first_id, second_id = (row[0] for row in world.files)
+    assert first_id < second_id
+    release_work_consumer(world, 0)
+    release_work_consumer(world, 1)
+    roots = BoundDirectories(staging=Path(world.cfg.paths.staging))
+    async with business_database(world.path) as database:
+        first = await clean_work_files(_context(database, roots, batch=32, limit=1))
         assert (first.checked, first.cleaned) == (1, 1)
-        assert _row(
-            owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] \
-            == file_id
-        assert _file_state(owned, 900)[:2] == (2, 2)
-        second = (await clean_work_files(
-            _context(database, roots, batch=32, limit=1)))
+        assert _row(owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == first_id
+        assert not world.paths[first_id].exists()
+        assert world.paths[second_id].read_bytes() == b"bind"
+        assert _file_state(owned, second_id)[:2] == (2, 2)
+        second = await clean_work_files(_context(database, roots, batch=32, limit=1))
         assert (second.checked, second.cleaned) == (1, 1)
-        assert _row(
-            owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == 900
-        assert _file_state(owned, 900)[:2] == (2, 4)
-        third = (await clean_work_files(
-            _context(database, roots, batch=32, limit=1)))
+        assert _row(owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == second_id
+        assert _file_state(owned, second_id)[:2] == (2, 4)
+        assert not world.paths[second_id].exists()
+        third = await clean_work_files(_context(database, roots, batch=32, limit=1))
         assert (third.checked, third.cleaned) == (0, 0)
 
 
 @pytest.mark.asyncio
-async def test_history_scan_wraps_to_start_once(storage_work_env):
-    """游标已到记录末尾后绕回候选范围起点，本轮最多检查一轮。"""
-    owned, roots, qualification = storage_work_env
-    async with business_database(database_path(owned)) as database:
-        file_id = qualification.target_file_id
-        _cancel_delivery(owned, qualification.delivery_id)
-        _release_ok(owned, file_id)
-        _seed_action_candidate(owned, roots, file_id=900)
-        # 第一轮只检查交付副本（较小 id），游标落在它之前还有候选 900。
-        first = (await clean_work_files(
-            _context(database, roots, batch=1, limit=1)))
-        assert first.checked == 1
-        assert _row(
-            owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] \
-            == file_id
-        second = (await clean_work_files(
-            _context(database, roots, batch=32, limit=1)))
+async def test_history_scan_wraps_to_start_once(public_quota_env):
+    """游标处于高位时绕回尚待清理的低位候选。"""
+    world = public_quota_env
+    owned = world.owned
+    low, high = (row[0] for row in world.files)
+    assert low < high
+    release_work_consumer(world, 1)
+    roots = BoundDirectories(staging=Path(world.cfg.paths.staging))
+    async with business_database(world.path) as database:
+        first = await clean_work_files(_context(database, roots, batch=1, limit=1))
+        assert (first.checked, first.cleaned) == (1, 1)
+        assert _row(owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == high
+        assert not world.paths[high].exists()
+        assert world.paths[low].read_bytes() == b"bind"
+        release_work_consumer(world, 0)
+        second = await clean_work_files(_context(database, roots, batch=32, limit=2))
         assert (second.checked, second.cleaned) == (1, 1)
-        # 候选全部完成，新一轮无记录可查。
-        third = (await clean_work_files(
-            _context(database, roots, batch=32, limit=2)))
-        assert third.checked == 0
-        assert _file_state(owned, 900)[:2] == (2, 4)
+        assert _row(owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == low
+        assert _file_state(owned, low)[:2] == (2, 4)
+        assert not world.paths[low].exists()
+        third = await clean_work_files(_context(database, roots, batch=32, limit=2))
+        assert (third.checked, third.cleaned) == (0, 0)
 
 
 @pytest.mark.asyncio
@@ -416,36 +425,53 @@ async def test_kept_candidate_consumes_budget_and_advances(storage_work_env):
 
 
 @pytest.mark.asyncio
-async def test_batch_configuration_cannot_exceed_remaining(storage_work_env):
+async def test_batch_configuration_cannot_exceed_remaining(public_quota_env, monkeypatch):
     """批量配置大于剩余额度时按剩余额度读取。"""
-    owned, roots, qualification = storage_work_env
-    async with business_database(database_path(owned)) as database:
-        _cancel_delivery(owned, qualification.delivery_id)
-        _release_ok(owned, qualification.target_file_id)
-        _seed_action_candidate(owned, roots, file_id=900)
-        result = (await clean_work_files(
-            _context(database, roots, batch=32, limit=1)))
-        assert result.checked == 1
+    world = public_quota_env
+    first_id, second_id = (row[0] for row in world.files)
+    assert first_id < second_id
+    release_work_consumer(world, 0)
+    release_work_consumer(world, 1)
+    roots = BoundDirectories(staging=Path(world.cfg.paths.staging))
+    original = OutputsRepository.next_cleanup_candidates
+    batches = []
+
+    def observe(repository, after, ceiling, limit, owned):
+        result = original(repository, after, ceiling, limit, owned)
+        batches.append((after, ceiling, limit, result))
+        return result
+
+    monkeypatch.setattr(OutputsRepository, "next_cleanup_candidates", observe)
+    async with business_database(world.path) as database:
+        result = await clean_work_files(_context(database, roots, batch=32, limit=1))
+    assert (result.checked, result.cleaned) == (1, 1)
+    assert len(batches) == 1 and batches[0][2:] == (1, (first_id,))
+    assert not world.paths[first_id].exists()
+    assert world.paths[second_id].read_bytes() == b"bind"
+    assert _file_state(world.owned, second_id)[:2] == (2, 2)
 
 
 @pytest.mark.asyncio
-async def test_first_cleanup_does_not_consume_history_budget(storage_work_env):
-    """本次运行中新形成的清理责任由首次入口清理，不占历史额度。"""
-    owned, roots, qualification = storage_work_env
-    async with business_database(database_path(owned)) as database:
-        _cancel_delivery(owned, qualification.delivery_id)
-        _seed_action_candidate(owned, roots, file_id=900)
-        single = (await clean_one_work_file(
-            qualification.target_file_id, _context(database, roots)))
+async def test_first_cleanup_does_not_consume_history_budget(public_quota_env):
+    """首次清理不占同一次运行的历史额度。"""
+    world = public_quota_env
+    first_id, second_id = (row[0] for row in world.files)
+    assert first_id < second_id
+    release_work_consumer(world, 0)
+    release_work_consumer(world, 1)
+    roots = BoundDirectories(staging=Path(world.cfg.paths.staging))
+    async with business_database(world.path) as database:
+        context = _context(database, roots, limit=1)
+        single = await clean_one_work_file(first_id, context)
         assert single.outcome is WorkFileSingleOutcome.DELETED
-        # 首次清理不推进历史游标。
-        assert _row(
-            owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] is None
-        scan = (await clean_work_files(
-            _context(database, roots, limit=1)))
-        # 已完成清理的本文件不再是候选，额度用于其余候选。
+        assert not world.paths[first_id].exists()
+        assert _row(world.owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] is None
+        assert world.paths[second_id].read_bytes() == b"bind"
+        scan = await clean_work_files(context)
         assert (scan.checked, scan.cleaned) == (1, 1)
-        assert _file_state(owned, 900)[:2] == (2, 4)
+        assert _file_state(world.owned, second_id)[:2] == (2, 4)
+        assert _row(world.owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == second_id
+        assert not world.paths[second_id].exists()
 
 
 @pytest.mark.asyncio
@@ -505,14 +531,39 @@ async def test_same_run_reuses_first_attempt_for_same_file(public_file_env):
 
 @pytest.mark.asyncio
 async def test_action_owned_delete_failure_keeps_responsibility(
-        storage_work_env, monkeypatch):
-    """动作归属候选删除失败：保存文件身份错误详情，继续其余记录。"""
-    owned, roots, qualification = storage_work_env
-    async with business_database(database_path(owned)) as database:
-        _cancel_delivery(owned, qualification.delivery_id)
-        _release_ok(owned, qualification.target_file_id)
-        _seed_action_candidate(owned, roots, file_id=900)
-        target = roots.staging / "recording-inputs" / "900.bin"
+        tmp_path, capture_resources, monkeypatch):
+    """真实录像输入删除失败后仍清理同库内的独立交付副本。"""
+    world = await segment_input_case(tmp_path, capture_resources, monkeypatch, (60,),
+                                     early_waiters=(120,), segment_size=4)
+    try:
+        await world.publish()
+        assert len(world.inputs) == 1
+        file_id, _, _ = world.inputs[0]
+        target = world.paths[file_id]
+        assert target.read_bytes() == _CONTENT
+        source_status = _row(world.owned, "SELECT status FROM actions WHERE id=?", world.source_id)[0]
+        await world.advance_obtains(1)
+        waiter, _ = world.early[0]
+        delivery = _row(world.owned,
+            "SELECT f.id,f.relative_path,d.id FROM intermediate_files f"
+            " JOIN file_copies c ON c.target_file_id=f.id"
+            " JOIN deliveries d ON d.id=c.delivery_id WHERE d.action_id=?", waiter)
+        assert delivery is not None
+        delivery_file_id, relative_path, delivery_id = delivery
+        delivery_path = Path(world.cfg.paths.staging) / relative_path
+        assert file_id < delivery_file_id and delivery_path.is_file()
+        delivery_bytes = delivery_path.read_bytes()
+        assert delivery_bytes == _CONTENT
+        await world.cancel(waiter)
+        assert not world.executor.unfinished_files()
+        assert target.read_bytes() == _CONTENT and delivery_path.read_bytes() == delivery_bytes
+        repository = OutputsRepository()
+        assert repository.next_cleanup_candidates(0, delivery_file_id, 2, world.owned) == (
+            file_id, delivery_file_id)
+        target_facts = repository.load_work_file_state(file_id, world.owned)
+        delivery_facts = repository.load_work_file_state(delivery_file_id, world.owned)
+        assert target_facts.owner_finished and target_facts.operations_stopped
+        assert delivery_facts.owner_finished and delivery_facts.operations_stopped
         original_unlink = Path.unlink
         calls = []
 
@@ -522,21 +573,25 @@ async def test_action_owned_delete_failure_keeps_responsibility(
                 raise OSError("动作副本删除被拒绝")
             return original_unlink(path, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "unlink", _refused)
-        scan = (await clean_work_files(_context(database, roots)))
-        monkeypatch.undo()
+        with monkeypatch.context() as fault:
+            fault.setattr(Path, "unlink", _refused)
+            context = WorkFileContext(repository=repository, database=world.database,
+                staging=Path(world.cfg.paths.staging), occurred_at=world.wall[0],
+                limits=WorkFileLimits(batch_size=32, limit_per_run=128), executor=world.executor)
+            scan = await clean_work_files(context)
         assert (scan.checked, scan.cleaned, scan.failed) == (2, 1, 1)
-        assert calls == [target]
-        # 动作归属候选保存失败事实与登记的错误详情，责任留给后续运行。
-        retention, cleanup, error = _file_state(owned, 900)
+        assert calls == [target] and target.read_bytes() == _CONTENT
+        retention, cleanup, error = _file_state(world.owned, file_id)
         assert (retention, cleanup) == (2, 5)
         assert json.loads(error)["code"] == "action_work_file_delete_failed"
-        assert json.loads(error)["details"] == {"file_id": "900"}
-        assert (roots.staging / "recording-inputs" / "900.bin").exists()
-        # 交付副本正常清理，游标推进到本次最后检查的记录。
-        assert _file_state(owned, qualification.target_file_id)[:2] == (2, 4)
-        assert _row(
-            owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == 900
+        assert json.loads(error)["details"] == {"file_id": str(file_id)}
+        assert _file_state(world.owned, delivery_file_id)[:2] == (2, 4)
+        assert not delivery_path.exists()
+        assert _row(world.owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == delivery_file_id
+        assert _row(world.owned, "SELECT status FROM actions WHERE id=?", world.source_id)[0] == source_status
+        assert _row(world.owned, "SELECT status FROM deliveries WHERE id=?", delivery_id)[0] == 7
+    finally:
+        await world.close()
 
 # ---- 发布后的生命周期 ----
 
