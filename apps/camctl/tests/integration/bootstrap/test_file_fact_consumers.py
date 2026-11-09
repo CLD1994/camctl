@@ -182,14 +182,12 @@ def _file_complete(owned):
 @pytest.mark.parametrize("stage", tuple(_METHODS))
 async def test_default_file_consumers_confirm_original_stage_before_filters(
         tmp_path, capture_resources, monkeypatch, entrance, commit_after, stage):
-    from ..support.bootstrap_consumers import apply_cancellation, accept_cancellation
+    from ..support.bootstrap_consumers import accept_cancellation
 
     world, driver, actual, inputs, order, receipts = await _hold_original_file_stage(
         tmp_path, capture_resources, monkeypatch, stage, commit_after)
     owned = world.owned
     try:
-        if commit_after:
-            await apply_cancellation(world, terminal=True)
         before_action, before_result = _business_state(owned), _result_state(owned)
         cancel_id = None
         if entrance in ("cancel", "restricted_cancel"):
@@ -211,13 +209,12 @@ async def test_default_file_consumers_confirm_original_stage_before_filters(
         assert order[0] == "file_confirmation" and _file_complete(owned)
         assert _result_state(owned) == before_result and len(driver.requests) == 1
         assert world.reader.requests == [] and world.tools() == [] and world.driver.calls == []
-        if commit_after:
+        if commit_after and cancel_id is None:
             assert _business_state(owned) == before_action
         if cancel_id is not None:
             assert "cancel_apply" in order
             assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (cancel_id,)).fetchone()[0] in (2, 3)
-            if not commit_after:
-                assert owned.connection.execute("SELECT cancel_requested FROM actions WHERE id=1").fetchone() == (1,)
+            assert owned.connection.execute("SELECT cancel_requested FROM actions WHERE id=1").fetchone() == (1,)
         from camctl.capture.handlers import capture_handler
         runtime = await world.factory(world.database, "cam-1")
         await capture_handler("camera_record")(1, runtime)
