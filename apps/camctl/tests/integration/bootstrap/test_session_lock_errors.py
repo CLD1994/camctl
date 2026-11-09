@@ -23,7 +23,6 @@ from camctl.bootstrap import application
 from camctl.bootstrap import lifecycle
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.logging_runtime import copies
 from camctl.logging_runtime.clh_adapter import FileChannel
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.reporting.messages import ErrorKind, ResultFailureMessage
@@ -356,13 +355,14 @@ async def test_default_run_lock_failure_has_zero_business_effects(
 
     monkeypatch.setattr(lifecycle, "_open_runtime_connection", count_open)
     scans: list[Path] = []
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
-    def count_scan(path):
-        scans.append(Path(path))
+    def count_scan(path=None):
+        if isinstance(path, (str, bytes, os.PathLike)) and os.fsdecode(path) == os.fspath(old_copy.parent):
+            scans.append(Path(os.fsdecode(path)))
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", count_scan)
+    monkeypatch.setattr(os, "listdir", count_scan)
     emergency_calls: list[str] = []
     original_emergency = lifecycle._emergency_settlement_of
 
@@ -875,7 +875,7 @@ async def test_lock_control_and_parent_cancel_keep_first_source(
     config = _config_for(tmp_path)
     assert initialize_state(
         config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
-    _seed_startup_log(tmp_path)
+    logs = _seed_startup_log(tmp_path).parent
     deps = build_runtime(
         CommandMode.RUN, config,
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
@@ -920,15 +920,16 @@ async def test_lock_control_and_parent_cancel_keep_first_source(
     monkeypatch.setattr(session_service, "_settle_local_work", gated_settle)
     listdir_started = threading.Event()
     release_listdir = threading.Event()
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
-    def blocked_listdir(path):
-        listdir_started.set()
-        if not release_listdir.wait(timeout=_GATE_TIMEOUT):
-            raise TimeoutError("startup-sweep test gate was not released")
+    def blocked_listdir(path=None):
+        if isinstance(path, (str, bytes, os.PathLike)) and os.fsdecode(path) == os.fspath(logs):
+            listdir_started.set()
+            if not release_listdir.wait(timeout=_GATE_TIMEOUT):
+                raise TimeoutError("startup-sweep test gate was not released")
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
     opened = _tracked_open_connections(monkeypatch)
     run_task = asyncio.create_task(execute_command(deps, None))
     try:

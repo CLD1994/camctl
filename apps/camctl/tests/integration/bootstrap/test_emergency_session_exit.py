@@ -8,6 +8,7 @@
 import asyncio
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 import threading
 
@@ -333,7 +334,6 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
     """父取消不取消已合格的真实 EMG，保存及日志收场仍在会话锁内。"""
     from camctl.bootstrap.background_flow import CombinedLocalWork
     from camctl.acceptance.service import CommandMode
-    from camctl.logging_runtime import copies
     from camctl.logging_runtime.copies import RunFileOwnership
     from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.persistence.repositories.acceptance import AcceptanceRepository
@@ -354,15 +354,16 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
     logs.mkdir()
     scan_started = asyncio.Event()
     release_scan = threading.Event()
-    original_listdir = copies._listdir
+    original_listdir = os.listdir
 
-    def blocked_listdir(path):
-        loop.call_soon_threadsafe(scan_started.set)
-        if not release_scan.wait(timeout=timeout):
-            raise TimeoutError("startup sweep test gate was not released")
+    def blocked_listdir(path=None):
+        if isinstance(path, (str, bytes, os.PathLike)) and os.fsdecode(path) == os.fspath(logs):
+            loop.call_soon_threadsafe(scan_started.set)
+            if not release_scan.wait(timeout=timeout):
+                raise TimeoutError("startup sweep test gate was not released")
         return original_listdir(path)
 
-    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(os, "listdir", blocked_listdir)
     logging_owner = LoggingOwner(
         logs_dir=logs, ownership=RunFileOwnership(), supervisor=Supervisor(),
         owner_settled=True, diagnose=lambda message: asyncio.sleep(0))
@@ -517,7 +518,6 @@ async def test_internal_emergency_control_error_still_settles_logs(
     """EMG 内部 CancelledError 不跳过日志收场，也不替换首父取消。"""
     from camctl.bootstrap.background_flow import CombinedLocalWork
     from camctl.acceptance.service import CommandMode
-    from camctl.logging_runtime import copies
     from camctl.logging_runtime.copies import RunFileOwnership
     from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.persistence.repositories.acceptance import AcceptanceRepository
@@ -539,16 +539,20 @@ async def test_internal_emergency_control_error_still_settles_logs(
     release_diagnostic = asyncio.Event()
     diagnostic_messages: list[str] = []
     scan_thread_ids: list[int] = []
-    def failed_listdir(_path):
-        scan_thread_ids.append(threading.get_ident())
-        raise OSError("controlled startup scan failure")
+    original_listdir = os.listdir
+
+    def failed_listdir(path=None):
+        if isinstance(path, (str, bytes, os.PathLike)) and os.fsdecode(path) == os.fspath(logs):
+            scan_thread_ids.append(threading.get_ident())
+            raise OSError("controlled startup scan failure")
+        return original_listdir(path)
 
     async def gated_diagnose(message: str) -> None:
         diagnostic_messages.append(message)
         diagnostic_started.set()
         await asyncio.wait_for(release_diagnostic.wait(), timeout=timeout)
 
-    monkeypatch.setattr(copies, "_listdir", failed_listdir)
+    monkeypatch.setattr(os, "listdir", failed_listdir)
     logging_owner = LoggingOwner(
         logs_dir=logs, ownership=RunFileOwnership(), supervisor=Supervisor(),
         owner_settled=True, diagnose=gated_diagnose)
@@ -645,7 +649,6 @@ async def test_initial_restricted_internal_control_stays_separate_from_parent(
     """区分受限阶段内部取消与父取消，并保留内部异常附注。"""
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.background_flow import CombinedLocalWork
-    from camctl.logging_runtime import copies
     from camctl.logging_runtime.copies import RunFileOwnership
     from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.persistence.repositories.acceptance import AcceptanceRepository
@@ -664,17 +667,20 @@ async def test_initial_restricted_internal_control_stays_separate_from_parent(
     release_diagnostic = asyncio.Event()
     diagnostic_messages: list[str] = []
     scan_thread_ids: list[int] = []
+    original_listdir = os.listdir
 
-    def failed_listdir(_path):
-        scan_thread_ids.append(threading.get_ident())
-        raise OSError("controlled restricted startup scan failure")
+    def failed_listdir(path=None):
+        if isinstance(path, (str, bytes, os.PathLike)) and os.fsdecode(path) == os.fspath(logs):
+            scan_thread_ids.append(threading.get_ident())
+            raise OSError("controlled restricted startup scan failure")
+        return original_listdir(path)
 
     async def gated_diagnose(message: str) -> None:
         diagnostic_messages.append(message)
         diagnostic_started.set()
         await asyncio.wait_for(release_diagnostic.wait(), timeout=timeout)
 
-    monkeypatch.setattr(copies, "_listdir", failed_listdir)
+    monkeypatch.setattr(os, "listdir", failed_listdir)
     logging_owner = LoggingOwner(
         logs_dir=logs, ownership=RunFileOwnership(), supervisor=Supervisor(),
         owner_settled=True, diagnose=gated_diagnose)
