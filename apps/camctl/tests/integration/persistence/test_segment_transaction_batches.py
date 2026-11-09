@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from camctl.capture.segment_models import DefaultScopeState
 from camctl.contracts.values import new_operation_key
+from camctl.history.events import load_event_registry
+from camctl.persistence.repositories.segments import segment_event
 from .test_segment_storage import _assessed_world
 from .transaction_fixtures import decorate_transaction_command
 
@@ -259,6 +261,7 @@ async def test_independent_cross_batch_guards_reject_tampered_proposal(tmp_path,
     count=21 if mode=='wrong_file' else 6
     owned,runtime,repo,ref,request=await _ready_world(tmp_path,count=count,sizes=(10,)*(count-1)+(0,))
     from camctl.persistence.transaction import row_change,update_change
+    segment_event_type=load_event_registry()['events']['SEGMENT_FACTS']
     def plan(command,scope):
         result=command.plan(scope)
         def events():
@@ -273,22 +276,25 @@ async def test_independent_cross_batch_guards_reject_tampered_proposal(tmp_path,
                         values=dict(event.rows[0].after.values)
                         values['device_file_id']=(scope.connection.execute('SELECT MAX(file_id) FROM segment_members').fetchone()[0] if mode=='wrong_file' else first)
                         event=replace(event,rows=(row_change('outputs',event.rows[0].row_id,values),))
-                if event.event_type==transactions.storage._EVENT['id']:
-                    if mode=='wrong_scope' and event.reason==transactions.storage._EVENT['branches']['PUBLISH']['reason']:
+                if event.event_type==segment_event_type['id']:
+                    if mode=='wrong_scope' and event.reason==segment_event_type['branches']['PUBLISH']['reason']:
                         row=event.rows[0]
                         changed=update_change(row.table,row.row_id,{'output_id':None},{'output_id':999999})
                         event=replace(event,rows=(changed,*event.rows[1:]))
-                    if mode=='fake_marker' and event.reason==transactions.storage._EVENT['branches']['ACTIVATE']['reason']:
-                        event=replace(event,evidence={'segment_request':{'ref':{**transactions.document(ref),'version':ref.version+1},'input':None}})
+                    if mode=='fake_marker' and event.reason==segment_event_type['branches']['ACTIVATE']['reason']:
+                        fake=segment_event(replace(ref,version=ref.version+1),'ACTIVATE',event.rows,
+                            event.event_id,event.transaction_id,event.occurred_at,request_input=None)
+                        event=replace(event,evidence=fake.evidence)
                 yield event
             if mode=='extra':yield replace(last,event_id=last.event_id+1)
         return replace(result,events=events())
     decorate_transaction_command(monkeypatch,transactions,plan)
     try:
-        before=_fingerprint(owned.connection)
+        before=_complete_persisted_state(owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
         assert saved.kind=='rolled_back',saved.error
-        assert _fingerprint(owned.connection)==before
+        assert not owned.connection.in_transaction
+        assert _complete_persisted_state(owned)==before
     finally:owned.connection.close()
 
 @pytest.mark.asyncio
@@ -570,11 +576,12 @@ async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_pat
     from camctl.persistence.repositories.outputs import register_outputs_guards
     register_outputs_guards()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
+    segment_event_type=load_event_registry()['events']['SEGMENT_FACTS']
     def plan(command,scope):
         result=command.plan(scope)
         def events():
             for event in result.events:
-                if event.event_type==transactions.storage._EVENT['id'] and event.reason==transactions.storage._EVENT['branches']['ACTIVATE']['reason']:
+                if event.event_type==segment_event_type['id'] and event.reason==segment_event_type['branches']['ACTIVATE']['reason']:
                     row=scope.connection.execute('SELECT id,original_name FROM outputs ORDER BY id LIMIT 1').fetchone()
                     event=event_envelope(event.event_id,event.transaction_id,20,4,(update_change('outputs',row[0],{'original_name':row[1]},{'original_name':'changed.osv'}),),request.occurred_at)
                 yield event
@@ -592,6 +599,7 @@ async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_pat
         before=_complete_persisted_state(owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
         assert saved.kind=='rolled_back',saved.error
+        assert not owned.connection.in_transaction
         assert _complete_persisted_state(owned)==before
     finally:owned.connection.close()
 
@@ -1075,6 +1083,7 @@ async def test_accepted_completion_matches_original_full_request(tmp_path,monkey
         request=transactions.FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us())
     else:
         owned,runtime,repo,ref,request=await _ready_world(tmp_path,count=5)
+    segment_event_type=load_event_registry()['events']['SEGMENT_FACTS']
     def altered_plan(command,scope):
         result=command.plan(scope)
         def events():
@@ -1085,14 +1094,16 @@ async def test_accepted_completion_matches_original_full_request(tmp_path,monkey
                     if mode=='name':event=replace(event,rows=(row_change('outputs',row.row_id,{**row.after.values,'original_name':'changed.osv'}),*event.rows[1:]))
                     elif mode=='time':event=replace(event,occurred_at=event.occurred_at+1)
                     elif mode=='id':event=replace(event,rows=(replace(row,row_id=row.row_id+100),*event.rows[1:]))
-                if mode=='batch' and event.event_type==transactions.storage._EVENT['id'] and event.reason==transactions.storage._EVENT['branches']['PUBLISH']['reason']:
+                if mode=='batch' and event.event_type==segment_event_type['id'] and event.reason==segment_event_type['branches']['PUBLISH']['reason']:
                     if pending is None:
                         pending=event
                         continue
                     if pending is not False:
                         def repartition(base,rows):
                             bindings=tuple((r.row_id,r.after.values['output_id']) for r in rows)
-                            return replace(base,rows=tuple(rows),evidence={'segment_request':{'ref':transactions.document(ref),'input':transactions.storage._request_document(bindings)}})
+                            proposal=segment_event(ref,'PUBLISH',tuple(rows),base.event_id,
+                                base.transaction_id,base.occurred_at,request_input=bindings)
+                            return replace(base,rows=tuple(rows),evidence=proposal.evidence)
                         yield repartition(pending,(pending.rows[0],))
                         event=repartition(event,(pending.rows[1],*event.rows))
                         pending=False
@@ -1105,6 +1116,7 @@ async def test_accepted_completion_matches_original_full_request(tmp_path,monkey
         else:
             if mode!='valid':decorate_transaction_command(monkeypatch,transactions,altered_plan)
             receipt=transactions.finish_segment_recording(request,key,owned,batch_size=2)
+        assert not owned.connection.in_transaction
         if mode in ('valid','direct'):
             assert receipt.kind=='completed',receipt.error
             result=transactions.verify_segment_finish(request,key,owned,execution_finished=True,batch_size=1)
@@ -1136,7 +1148,7 @@ async def test_every_actual_stage_must_match_frozen_protocol(tmp_path,monkeypatc
         types=transactions.load_event_registry()['events']
         current=('F' if event.event_type==types['ACTION_FINISHED']['id'] else
             ('original' if event.reason==1 else 'preview') if event.event_type==types['OUTPUT_REGISTERED']['id'] else
-            ('publish' if event.reason==7 else 'L') if event.event_type==types['SEGMENT_FACTS']['id'] else
+            ('publish' if event.reason==types['SEGMENT_FACTS']['branches']['PUBLISH']['reason'] else 'L') if event.event_type==types['SEGMENT_FACTS']['id'] else
             'run' if event.event_type==types['OPERATION_CONFIGURED']['id'] else 'plan')
         if changed or current!=stage:return event
         changed=True
@@ -1146,7 +1158,9 @@ async def test_every_actual_stage_must_match_frozen_protocol(tmp_path,monkeypatc
         if field=='order':
             rows=tuple(reversed(event.rows))
             bindings=tuple((row.row_id,row.after.values['output_id']) for row in rows)
-            return replace(event,rows=rows,evidence={'segment_request':{'ref':transactions.document(ref),'input':transactions.storage._request_document(bindings)}})
+            proposal=segment_event(ref,'PUBLISH',rows,event.event_id,event.transaction_id,
+                event.occurred_at,request_input=bindings)
+            return replace(event,rows=rows,evidence=proposal.evidence)
         if field=='origin_id':return replace(event,rows=(event.rows[0],replace(event.rows[1],row_id=event.rows[1].row_id+100)))
         row=event.rows[0]
         if field=='before':return replace(event,rows=(replace(row,before=replace(row.before,values={**row.before.values,'retry_wait_required':1})),))
@@ -1169,6 +1183,7 @@ async def test_every_actual_stage_must_match_frozen_protocol(tmp_path,monkeypatc
             receipt=commit_operation(Altered(),key,owned)
         assert changed,(stage,field,receipt.error)
         assert receipt.kind=='rolled_back',receipt.error
+        assert not owned.connection.in_transaction
         assert _complete_persisted_state(owned)==before
     finally:owned.connection.close()
 
