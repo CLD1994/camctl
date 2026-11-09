@@ -207,9 +207,10 @@ def test_history_replays_saved_choice_without_current_catalog(selection_database
     }[mode]
     assert [identity for identity, _, _ in saved] == (
         [11 + 7 * index for index in range(len(saved))] if sparse else list(range(1, len(saved) + 1)))
-    after = {**before, ("obtain_source_selections", 61): business_row("obtain_source_selections", 61),
-             **{("obtain_items", identity): business_row("obtain_items", identity)
-                for identity, _, _ in saved}}
+    after = {(table, identity): business_row(table, identity) for table, identity in (
+        ("actions", 30), ("action_dependencies", 41), ("obtain_source_selections", 61))}
+    after.update({("obtain_items", identity): business_row("obtain_items", identity)
+                  for identity, _, _ in saved})
     # 当前目录已不可解释时，历史仍只使用保存的事实。
     owned.connection.execute("DELETE FROM output_origins")
     owned.connection.execute("DELETE FROM outputs")
