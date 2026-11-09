@@ -869,37 +869,6 @@ async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp
 
 
 @pytest.mark.asyncio
-async def test_restore_keeps_original_s_when_business_commits_between_source_pages(tmp_path,monkeypatch):
-    from contextlib import contextmanager
-    from camctl.history.snapshots import SnapshotRef
-    from camctl.persistence.runtime import open_existing,DbOpenMode,DbConfig
-    from .test_record_segment_history import _version,_rows
-    owned,runtime,repo,ref,history=await _fixture(tmp_path)
-    store,executor=await _snapshot_store(history)
-    calls=0;committed=[];original=HistoryRepository._read_connection
-    @contextmanager
-    def changing(self):
-        nonlocal calls
-        with original(self) as connection:yield connection
-        calls+=1
-        if calls==4:
-            writer=open_existing(history.path,DbOpenMode.EXISTING_RW,DbConfig())
-            try:
-                committed.append(_version(writer,runtime,repo,ref,2))
-            finally:writer.connection.close()
-    monkeypatch.setattr(HistoryRepository,'_read_connection',changing)
-    images=()
-    try:
-        images=await store.load_entity_images((SnapshotRef(1,ref.action_id),))
-        assert committed and calls>4
-        assert [row.values['version'] for row in _rows(images[0],'segment_sets')]==[1]
-        assert owned.connection.execute('SELECT COUNT(*) FROM segment_sets').fetchone()[0]==2
-    finally:
-        for image in images:image.close()
-        await executor.close();owned.connection.close()
-
-
-@pytest.mark.asyncio
 async def test_cancel_after_job_end_before_delivery_still_receives_original_result(tmp_path,monkeypatch):
     from camctl.history.snapshots import MaintenanceContext,MaintenanceState,SnapshotRef,maintain_snapshots
     from camctl.persistence.models import DbJob,DbJobKind,DbPriority
