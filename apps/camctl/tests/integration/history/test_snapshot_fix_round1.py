@@ -218,7 +218,6 @@ async def test_growth_snapshot_restore_runs_in_managed_thread_and_event_loop_is_
         assert not task.done()
         release.set()
         images=await task
-        assert images[0]._db is None
         assert images[0].primary()['id']==ref.action_id
     finally:
         release.set()

@@ -554,7 +554,6 @@ def save_runtime_evidence(directory, outcome, snapshots):
     document = {'outcome': {
         'succeeded': outcome.succeeded, 'needs_run': outcome.needs_run,
         'reason': outcome.reason, 'details': outcome.details,
-        '_diagnostic_sources': outcome._diagnostic_sources,
     }, 'snapshots': snapshots}
     Path(directory, 'session-evidence.json').write_text(
         json.dumps(encode(document, '#'), ensure_ascii=False, indent=2), encoding='utf-8')
