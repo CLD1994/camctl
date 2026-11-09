@@ -7,6 +7,7 @@ from decimal import Decimal
 from dataclasses import replace
 
 import pytest
+import pytest_asyncio
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
@@ -15,7 +16,7 @@ from camctl.capture.recovery import RecoveryBoundary
 from camctl.capture.media_flow import run_recording_media
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
-from camctl.devices.read_session import ReadChunk, ReadSession
+from camctl.devices.read_session import ReadSession
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.persistence.repositories.acceptance import register_acceptance_guards
 from camctl.persistence.repositories.cancellation import register_cancellation_guards
@@ -25,13 +26,10 @@ from camctl.persistence.repositories.file_batches import register_file_batch_gua
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
-from .test_qualification import (
-    _NOW,
-    _seed_selection_and_item,
-)
+from .test_qualification import _NOW
 from .test_read_associations import read_targets
 from ..support.capture import capture_database
-from ..support.outputs import obtain_factory, output_drivers
+from ..support.digest_read_recovery_cases import Driver, factory, prepare_request
 from .test_cleanup_query_commit_recovery import _CommitFaultConnection
 
 register_acceptance_guards()
@@ -43,6 +41,35 @@ register_file_batch_guards()
 pytestmark = pytest.mark.asyncio
 
 _CONTENT = b"0123456789"
+
+
+@pytest_asyncio.fixture
+async def public_read_case(tmp_path):
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.session.supervision import Supervisor
+
+    owned, action, output = await prepare_request(tmp_path, now=_NOW)
+    driver = Driver(digest_error="source SHA query failed")
+    supervisor = Supervisor()
+    runtime = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
+                      horizon=None, executor=FileTaskExecutor(supervisor))(
+                          await capture_database(owned))
+    try:
+        yield owned, action, output, driver, runtime
+    finally:
+        try:
+            assert not (await supervisor.drain_required()).failed
+        finally:
+            owned.connection.close()
+
+
+def _delivery_read_state(owned, output):
+    return owned.connection.execute(
+        "SELECT r.status,t.status,d.status FROM operation_runs r"
+        " JOIN operation_attempts t ON t.run_id=r.id"
+        " JOIN file_copies c ON c.id=r.copy_id"
+        " JOIN deliveries d ON d.id=c.delivery_id WHERE d.output_id=?", (output,)
+    ).fetchone()
 
 
 class _ReadStream:
@@ -106,150 +133,118 @@ class _Digest:
         return SourceDigest(digest=self.digest, error=self.error)
 
 
-async def _runtime(owned, tmp_path, *, seed=True, sibling=True,
-             recovery_boundary=RecoveryBoundary.UNCONFIRMED,
-             recovery_max_event_id=None):
-    connection = owned.connection
-    if seed:
-        connection.execute("UPDATE actions SET status=3 WHERE id IN (11, 12, 32)")
-        connection.execute(
-            "UPDATE device_files SET size_bytes=10, checksum_support=2, sha256=NULL"
-            " WHERE id IN (501, 502)")
-        if sibling:
-            _seed_selection_and_item(
-                connection, dependency_id=33, selection_id=33, item_id=103,
-                owner_action_id=31, source_action_id=12, output_id=702)
-        connection.commit()
-
-    staging = tmp_path / "staging"
-    for name in ("deliveries", "recording-inputs", "derived"):
-        (staging / name).mkdir(parents=True, exist_ok=True)
-    ready = tmp_path / "ready"
-    processing = tmp_path / "processing"
-    ready.mkdir(exist_ok=True)
-    processing.mkdir(exist_ok=True)
-    device_id, driver_id = connection.execute(
-        "SELECT device_id,driver_id FROM actions WHERE id=11").fetchone()
-    evidence = EvidenceRegistry((
-        EvidenceContract("read_returned", 1, "read", frozenset()),
-        EvidenceContract("file_digest", 1, "digest", frozenset({"file_id", "sha256"}), identity_field="file_id"),
-        EvidenceContract("local_read_recovery", 1, "read", frozenset()),
-    ))
-    failed_digest = _Digest(error="source SHA query failed")
-    good_digest = _Digest(digest=hashlib.sha256(_CONTENT).hexdigest())
-    driver = _ReadDriver()
-    driver.digests = {501: failed_digest, 502: good_digest}
-    factory = obtain_factory(
-        devices={device_id: {"driver": driver_id, "copy": {
-            "retry_interval_s": Decimal(0), "max_read_attempts": 3,
-            "read_idle_timeout_s": Decimal(10),
-        }}},
-        drivers=output_drivers(driver, evidence, driver_id=driver_id,
-                               read=True, digest=True, local_read_recovery=True),
-        staging=staging, ready=ready, processing=processing, segment_size=10,
-        monotonic_ns=lambda: 20_000_000_000, occurred_at=lambda: _NOW + 23_000_000,
-        recovery_boundary=recovery_boundary,
-        recovery_max_event_id=None if recovery_max_event_id is None else lambda: recovery_max_event_id,
-        on_recovery_diagnostic=driver.recovery_diagnostics.append,
-    )
-    runtime = factory(await capture_database(owned))
-    return runtime, failed_digest, good_digest, driver
-
-
 async def test_source_digest_failure_finishes_original_read_and_preserves_sibling_success(
-        read_targets, tmp_path):
-    owned = read_targets
-    runtime, failed_digest, good_digest, _driver = await _runtime(owned, tmp_path)
+        tmp_path, capture_resources):
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.session.supervision import Supervisor
 
-    await advance_obtain(runtime)
+    owned, action, outputs = await prepare_request(tmp_path, now=_NOW, sibling=True)
+    supervisor = Supervisor()
+    try:
+        sources = owned.connection.execute(
+            "SELECT o.id,o.device_file_id,a.device_id FROM outputs o"
+            " JOIN actions a ON a.id=o.source_action_id WHERE o.id IN (?,?) ORDER BY o.id",
+            outputs,
+        ).fetchall()
+        assert len(sources) == 2 and all(row[2] == "cam-1" for row in sources)
+        assert sources[0][1] != sources[1][1]
+        failed_output, failed_file, _ = sources[0]
+        good_output, good_file, _ = sources[1]
+        driver = Driver(digest_errors={str(failed_file): "source SHA query failed"})
+        runtime = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
+                          horizon=None, executor=FileTaskExecutor(supervisor))(
+                              await capture_database(owned))
+        await advance_obtain(runtime)
 
-    states = owned.connection.execute(
-        "SELECT c.source_device_file_id,c.committed_bytes,c.verification_state,"
-        " c.source_sha256,c.target_sha256,c.verification_error_json,"
-        " c.recopies_used,d.status,d.error_json,i.source_dependency,c.slot_device_id,"
-        " r.status,r.error_json,r.attempts_used,r.retry_wait_required,t.status,t.result_json"
-        " FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id"
-        " JOIN obtain_items i ON i.delivery_id=d.id"
-        " JOIN operation_runs r ON r.copy_id=c.id"
-        " JOIN operation_attempts t ON t.run_id=r.id ORDER BY c.source_device_file_id"
-    ).fetchall()
-    assert len(states) == 2
-    failed, good = states
-    verification = enum_for("file_copies.verification_state")
-    delivery = enum_for("deliveries.status")
-    run = enum_for("operation_runs.status")
-    attempt = enum_for("operation_attempts.status")
+        states = owned.connection.execute(
+            "SELECT c.source_device_file_id,c.committed_bytes,c.verification_state,"
+            " c.source_sha256,c.target_sha256,c.verification_error_json,"
+            " c.recopies_used,d.status,d.error_json,i.source_dependency,c.slot_device_id,"
+            " r.status,r.error_json,r.attempts_used,r.retry_wait_required,t.status,t.result_json"
+            " FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id"
+            " JOIN obtain_items i ON i.delivery_id=d.id"
+            " JOIN operation_runs r ON r.copy_id=c.id"
+            " JOIN operation_attempts t ON t.run_id=r.id"
+            " WHERE d.action_id=? ORDER BY c.source_device_file_id", (action,),
+        ).fetchall()
+        assert len(states) == 2
+        failed, good = states
+        verification = enum_for("file_copies.verification_state")
+        delivery = enum_for("deliveries.status")
+        run = enum_for("operation_runs.status")
+        attempt = enum_for("operation_attempts.status")
+        digest = hashlib.sha256(_CONTENT).hexdigest()
 
-    assert failed[:5] == (
-        501, 10, int(verification.FAILED), None,
-        hashlib.sha256(_CONTENT).hexdigest(),
-    )
-    assert parse_exact_json(failed[5]) == {"reason": str({"reason": failed_digest.error})}
-    assert failed[6] == 0
-    assert failed[7] == int(delivery.FAILED)
-    expected_error = {
-        "code": "source_file_unconfirmed", "stage": "source_read",
-        "details": {"output_id": "701"},
-    }
-    assert parse_exact_json(failed[8]) == expected_error
-    assert failed[9:11] == (0, None)
-    assert failed[11] == int(run.FAILED)
-    assert parse_exact_json(failed[12]) == expected_error
-    assert failed[13:15] == (1, 0)
-    assert failed[15] == int(attempt.SUCCEEDED)
-    assert failed[16] is not None
-    assert failed_digest.calls == 1
+        assert failed[:5] == (failed_file, 10, int(verification.FAILED), None, digest)
+        assert parse_exact_json(failed[5]) == {"reason": str({"reason": "source SHA query failed"})}
+        assert failed[6] == 0
+        assert failed[7] == int(delivery.FAILED)
+        expected_error = {
+            "code": "source_file_unconfirmed", "stage": "source_read",
+            "details": {"output_id": str(failed_output)},
+        }
+        assert parse_exact_json(failed[8]) == expected_error
+        assert failed[9:11] == (0, None)
+        assert failed[11] == int(run.FAILED)
+        assert parse_exact_json(failed[12]) == expected_error
+        assert failed[13:15] == (1, 0)
+        assert failed[15] == int(attempt.SUCCEEDED)
+        assert failed[16] is not None
+        assert good[0:3] == (good_file, 10, int(verification.MATCHED))
+        assert good[3:5] == (digest, digest)
+        assert good[7] in (int(delivery.PREPARING), int(delivery.PREPARED))
+        assert good[11] == int(run.SUCCEEDED)
+        assert good[15] == int(attempt.SUCCEEDED)
+        assert sorted(driver.digest_targets) == sorted((str(failed_file), str(good_file)))
+        assert len(driver.calls) == 2 and all(offset == 0 for offset, _ in driver.calls)
+        assert all(end.stopped and end.error is None for end in driver.ends)
 
-    assert good[0:3] == (502, 10, int(verification.MATCHED))
-    assert good[7] in (int(delivery.PREPARING), int(delivery.PREPARED))
-    assert good[11] == int(run.SUCCEEDED)
-    assert good[15] == int(attempt.SUCCEEDED)
-    assert good_digest.calls == 1
-
-    await advance_obtain(runtime)
-    published = owned.connection.execute(
-        "SELECT d.status FROM deliveries d JOIN file_copies c ON c.delivery_id=d.id"
-        " WHERE c.source_device_file_id=502").fetchone()[0]
-    assert published == int(delivery.PUBLISHED)
+        await advance_obtain(runtime)
+        published, filename = owned.connection.execute(
+            "SELECT status,file_name FROM deliveries WHERE action_id=? AND output_id=?",
+            (action, good_output),
+        ).fetchone()
+        assert published == int(delivery.PUBLISHED)
+        assert (tmp_path / "ready" / filename).read_bytes() == _CONTENT
+        assert driver.digest_calls == 2
+    finally:
+        try:
+            assert not (await supervisor.drain_required()).failed
+        finally:
+            owned.connection.close()
 
 
 async def test_unknown_attempt_finish_reuses_original_key_without_requery(
-        read_targets, tmp_path):
-    owned = read_targets
-    runtime, failed_digest, _good_digest, _driver = await _runtime(owned, tmp_path, sibling=False)
-    finish = runtime.operations.finish_attempt
-    calls = []
+        public_read_case, monkeypatch):
+    owned, _action, output, driver, runtime = public_read_case
+    finish = OperationRepository.finish_attempt
+    calls, faults = [], []
 
-    def unknown_after_commit(request, key, connection):
+    def unknown_after_commit(repository, request, key, current):
         if request.run_finish is not None and request.run_finish.error is not None \
                 and request.run_finish.error.code == "source_file_unconfirmed":
-            calls.append(str(key))
+            calls.append((request, key))
             if len(calls) == 1:
-                connection = replace(connection, connection=_CommitFaultConnection(
-                    connection.connection, after_commit=True))
-            return finish(request, key, connection)
-        return finish(request, key, connection)
+                fault = _CommitFaultConnection(current.connection, after_commit=True)
+                faults.append(fault)
+                current = replace(current, connection=fault)
+        return finish(repository, request, key, current)
 
-    runtime.operations.finish_attempt = unknown_after_commit
+    monkeypatch.setattr(OperationRepository, "finish_attempt", unknown_after_commit)
     with pytest.raises(ConsistencyError, match="原读取结果未可靠保存"):
         await advance_obtain(runtime)
-    original_key = calls[0]
+    assert len(calls) == 1 and faults[0].actual_commits == 1
+    assert faults[0].transaction_at_failure is False
     await advance_obtain(runtime)
 
-    assert calls == [original_key, original_key]
-    transactions = owned.connection.execute(
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert owned.connection.execute(
         "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
-        (original_key,),
-    ).fetchone()[0]
-    assert transactions == 1
-    assert failed_digest.calls == 1
-    state = owned.connection.execute(
-        "SELECT r.status,t.status,d.status FROM operation_runs r"
-        " JOIN operation_attempts t ON t.run_id=r.id"
-        " JOIN file_copies c ON c.id=r.copy_id"
-        " JOIN deliveries d ON d.id=c.delivery_id"
-        " WHERE c.source_device_file_id=501").fetchone()
-    assert state == (
+        (str(calls[0][1]),),
+    ).fetchone()[0] == 1
+    assert len(driver.calls) == driver.digest_calls == 1
+    assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].error is None
+    assert _delivery_read_state(owned, output) == (
         int(enum_for("operation_runs.status").FAILED),
         int(enum_for("operation_attempts.status").SUCCEEDED),
         int(enum_for("deliveries.status").FAILED),
@@ -257,46 +252,38 @@ async def test_unknown_attempt_finish_reuses_original_key_without_requery(
 
 
 async def test_unknown_delivery_failure_reuses_original_key_without_duplicate_event(
-        read_targets, tmp_path):
-    owned = read_targets
-    runtime, failed_digest, _good_digest, _driver = await _runtime(owned, tmp_path, sibling=False)
-    fail_delivery = runtime.outputs.fail_read_delivery
-    calls = []
+        public_read_case, monkeypatch):
+    owned, _action, output, driver, runtime = public_read_case
+    fail_delivery = OutputsRepository.fail_read_delivery
+    calls, faults = [], []
 
-    def unknown_after_commit(request, key, connection):
-        calls.append(str(key))
+    def unknown_after_commit(repository, request, key, current):
+        calls.append((request, key))
         if len(calls) == 1:
-            connection = replace(connection, connection=_CommitFaultConnection(
-                connection.connection, after_commit=True))
-        return fail_delivery(request, key, connection)
+            fault = _CommitFaultConnection(current.connection, after_commit=True)
+            faults.append(fault)
+            current = replace(current, connection=fault)
+        return fail_delivery(repository, request, key, current)
 
-    runtime.outputs.fail_read_delivery = unknown_after_commit
+    monkeypatch.setattr(OutputsRepository, "fail_read_delivery", unknown_after_commit)
     with pytest.raises(ConsistencyError, match="原读取业务结果未可靠保存"):
         await advance_obtain(runtime)
-    original_key = calls[0]
+    assert len(calls) == 1 and faults[0].actual_commits == 1
+    assert faults[0].transaction_at_failure is False
     await advance_obtain(runtime)
 
-    assert calls == [original_key, original_key]
+    assert len(calls) == 2 and calls[0] == calls[1]
     assert owned.connection.execute(
         "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
-        (original_key,),
+        (str(calls[0][1]),),
     ).fetchone()[0] == 1
-    assert failed_digest.calls == 1
-
-
-class _ReadFinishGate(OperationRepository):
-    """在原 READ 的真实结果保存入口暂时拒绝，记录完整原申请。"""
-
-    def __init__(self):
-        self.enabled = True
-        self.calls = []
-
-    def finish_attempt(self, request, key, owned):
-        if request.ticket.operation == "read":
-            self.calls.append((request, key))
-            if self.enabled:
-                return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=RuntimeError("READ 保存中断"))
-        return super().finish_attempt(request, key, owned)
+    assert len(driver.calls) == driver.digest_calls == 1
+    assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].error is None
+    assert _delivery_read_state(owned, output) == (
+        int(enum_for("operation_runs.status").FAILED),
+        int(enum_for("operation_attempts.status").SUCCEEDED),
+        int(enum_for("deliveries.status").FAILED),
+    )
 
 
 async def test_saved_read_end_and_digest_failure_resume_without_device_calls(tmp_path, capture_resources):
@@ -471,36 +458,37 @@ async def test_process_exit_before_read_end_requires_boundary_and_confirms_eof(t
 
 
 async def test_held_clean_read_end_retries_saved_verification_failure_without_digest_requery(
-        read_targets, tmp_path, capture_resources):
-    import camctl.outputs.obtain_flow as obtain_flow
+        public_read_case, monkeypatch):
+    owned, _action, output, driver, runtime = public_read_case
+    finish = OperationRepository.finish_attempt
+    calls = []
+    enabled = True
 
-    owned = read_targets
-    runtime, failed_digest, _good_digest, driver = await _runtime(
-        owned, tmp_path, sibling=False)
-    gate = _ReadFinishGate()
-    runtime.operations = gate
+    def deny_first_save(repository, request, key, current):
+        if request.ticket.operation == "read":
+            calls.append((request, key))
+            if enabled:
+                return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=RuntimeError("READ 保存中断"))
+        return finish(repository, request, key, current)
+
+    monkeypatch.setattr(OperationRepository, "finish_attempt", deny_first_save)
     with pytest.raises(ConsistencyError):
         await advance_obtain(runtime)
-    copy_id, = owned.connection.execute(
-        "SELECT id FROM file_copies WHERE source_device_file_id=501").fetchone()
-    assert driver.ends and all(end.stopped and end.error is None for end in driver.ends)
+    assert len(calls) == 1
+    assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].error is None
     assert owned.connection.execute(
-        "SELECT status FROM operation_attempts WHERE run_id="
-        "(SELECT id FROM operation_runs WHERE copy_id=?)", (copy_id,)
+        "SELECT a.status FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+        " JOIN file_copies c ON c.id=r.copy_id JOIN deliveries d ON d.id=c.delivery_id"
+        " WHERE d.output_id=?", (output,),
     ).fetchone()[0] == int(enum_for("operation_attempts.status").RUNNING)
 
-    gate.enabled = False
+    enabled = False
     await advance_obtain(runtime)
 
-    assert driver.offsets == [0]
-    assert failed_digest.calls == 1
-    state = owned.connection.execute(
-        "SELECT r.status,t.status,d.status FROM operation_runs r"
-        " JOIN operation_attempts t ON t.run_id=r.id"
-        " JOIN file_copies c ON c.id=r.copy_id"
-        " JOIN deliveries d ON d.id=c.delivery_id"
-        " WHERE c.id=?", (copy_id,)).fetchone()
-    assert state == (
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert [offset for offset, _ticket in driver.calls] == [0]
+    assert driver.digest_calls == 1
+    assert _delivery_read_state(owned, output) == (
         int(enum_for("operation_runs.status").FAILED),
         int(enum_for("operation_attempts.status").SUCCEEDED),
         int(enum_for("deliveries.status").FAILED),
@@ -508,12 +496,8 @@ async def test_held_clean_read_end_retries_saved_verification_failure_without_di
 
 
 async def test_reliable_cancellation_wins_after_saved_source_digest_failure(
-        read_targets, tmp_path, capture_resources, monkeypatch):
-    import camctl.outputs.obtain_flow as obtain_flow
-
-    owned = read_targets
-    runtime, failed_digest, _good_digest, _driver = await _runtime(
-        owned, tmp_path, sibling=False)
+        public_read_case, monkeypatch):
+    owned, action, output, driver, runtime = public_read_case
     from ..bootstrap.test_output_binding_changes import Catalog
     from ..support.outputs import prepare_cancel_target
     save_verification = OutputsRepository.save_verification
@@ -524,7 +508,8 @@ async def test_reliable_cancellation_wins_after_saved_source_digest_failure(
         receipt = save_verification(repository, request, key, current)
         if receipt.kind is DbOutcomeKind.COMPLETED and not applied:
             applied = True
-            prepare_cancel_target(current, catalog=Catalog(), now=_NOW + 23_000_000, action_id=31)
+            prepare_cancel_target(current, catalog=Catalog(), now=_NOW + 23_000_000,
+                                  action_id=action)
         return receipt
 
     monkeypatch.setattr(OutputsRepository, "save_verification", cancel_after_verification)
@@ -537,7 +522,8 @@ async def test_reliable_cancellation_wins_after_saved_source_digest_failure(
         " JOIN file_copies c ON c.id=r.copy_id"
         " JOIN deliveries d ON d.id=c.delivery_id"
         " JOIN obtain_items i ON i.delivery_id=d.id"
-        " WHERE c.source_device_file_id=501").fetchone()
+        " WHERE d.output_id=?", (output,)).fetchone()
+    assert applied
     assert row[0] == int(enum_for("operation_runs.status").CANCELED)
     assert row[1] is None
     assert row[2] == int(enum_for("operation_attempts.status").SUCCEEDED)
@@ -545,7 +531,8 @@ async def test_reliable_cancellation_wins_after_saved_source_digest_failure(
     assert row[4] is None
     assert row[5] == 1
     assert row[6] is not None
-    assert failed_digest.calls == 1
+    assert len(driver.calls) == driver.digest_calls == 1
+    assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].error is None
 
 
 async def test_internal_read_finishes_successfully_and_fails_processing_on_source_digest_error(

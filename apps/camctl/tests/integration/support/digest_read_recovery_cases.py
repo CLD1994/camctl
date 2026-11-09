@@ -44,11 +44,13 @@ class Stream(BytesIO):
 
 
 class Driver:
-    def __init__(self, *, digest_error=None, on_digest=None):
+    def __init__(self, *, digest_error=None, digest_errors=None, on_digest=None):
         self.calls = []
         self.ends = []
         self.digest_calls = 0
         self.digest_error = digest_error
+        self.digest_errors = {} if digest_errors is None else digest_errors
+        self.digest_targets = []
         self.on_digest = on_digest
         self.diagnostics = []
 
@@ -66,16 +68,19 @@ class Driver:
 
     async def digest(self, request):
         self.digest_calls += 1
+        file_id = str(request.params['file_id'])
+        self.digest_targets.append(file_id)
         if self.on_digest is not None:
             await self.on_digest()
-        if self.digest_error:
-            return DeviceCallResult((), {'reason': self.digest_error})
+        error = self.digest_errors.get(file_id, self.digest_error)
+        if error:
+            return DeviceCallResult((), {'reason': error})
         return DeviceCallResult((DeviceObservation('file_digest', 1, {
             'file_id': request.params['file_id'], 'sha256': hashlib.sha256(CONTENT).hexdigest(),
         }),), None)
 
 
-async def prepare_request(tmp_path, *, now):
+async def prepare_request(tmp_path, *, now, sibling=False):
     """通过受理、实际拍摄处理和选择建立普通交付，尚未开始读取。"""
     register_file_batch_guards()
     cfg = _config(tmp_path)
@@ -83,10 +88,12 @@ async def prepare_request(tmp_path, *, now):
 
     def capture_options(owned, _driver, _defaults):
         action, = owned.connection.execute('SELECT id FROM actions').fetchone()
-        entry = ObservedFile(identity='delivery-source', locator={'path': '/DCIM/source.jpg'},
-            evidence={'listing': 'source'}, complete=True, size_bytes=len(CONTENT),
-            kind=FileKind.PHOTO, original_name='source.jpg', media_type='image/jpeg')
-        return {'staging': staging, 'results': ResultsDouble({action: (entry,)}),
+        entries = tuple(ObservedFile(identity=f'delivery-{name}',
+            locator={'path': f'/DCIM/{name}.jpg'},
+            evidence={'listing': name}, complete=True, size_bytes=len(CONTENT),
+            kind=FileKind.PHOTO, original_name=f'{name}.jpg', media_type='image/jpeg')
+            for name in (('source', 'sibling') if sibling else ('source',)))
+        return {'staging': staging, 'results': ResultsDouble({action: entries}),
                 'evidence': RESULT_EVIDENCE.with_contract(RESULT_PAGE_CONTRACT)}
 
     owned, capture, source, handler = await consumer_world(
@@ -94,12 +101,14 @@ async def prepare_request(tmp_path, *, now):
         runtime_options=capture_options)
     try:
         await capture_handler(handler)(source, capture)
-        output, = owned.connection.execute('SELECT id FROM outputs WHERE source_action_id=?', (source,)).fetchone()
+        outputs = tuple(row[0] for row in owned.connection.execute(
+            'SELECT id FROM outputs WHERE source_action_id=? ORDER BY id', (source,)))
+        assert len(outputs) == (2 if sibling else 1)
         action, _ = prepare_obtain_selection(owned, catalog=Catalog(), now=now, source_id=source,
                                              mode='default', request_id=2)
         for name in ('staging', 'ready', 'processing'):
             (tmp_path / name).mkdir(parents=True, exist_ok=True)
-        return owned, action, output
+        return owned, action, outputs if sibling else outputs[0]
     except BaseException:
         owned.connection.close()
         raise
