@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
+import concurrent_log_handler as clh
 import pytest
 
 pytestmark = pytest.mark.asyncio
@@ -34,6 +37,17 @@ from ..support.bootstrap_log_cases import (
     observe_failure_service,
 )
 from ..support.distribution import prepare_project_metadata
+
+
+def _lock_path(log_path: Path) -> Path:
+    directory, name = clh.ConcurrentRotatingFileHandler.baseLockFilename(str(log_path))
+    return Path(directory) / name
+
+
+def _is_lock_file(stream, path: Path) -> bool:
+    opened = os.fstat(stream.fileno())
+    named = path.stat()
+    return (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino)
 
 
 def _session_failures(text):
@@ -594,26 +608,37 @@ async def test_default_lock_failure_disables_file_logging(
         original_init(channel, *args, **kwargs)
 
     original_copy = FileChannel.copy_with_write
+    original_lock = clh.lock
+    original_close = clh.ConcurrentRotatingFileHandler.close
+    active = threading.local()
+    primary_path = Path(deps.config.paths.log_file).expanduser()
+    lock_path = _lock_path(primary_path)
+
+    def fail_lock(stream, flags):
+        if getattr(active, "copy", False) and _is_lock_file(stream, lock_path):
+            attempts["lock"] += 1
+            raise OSError("controlled lock acquisition failure")
+        return original_lock(stream, flags)
+
+    def close_with_optional_error(handler):
+        if not getattr(active, "copy", False) or Path(handler.baseFilename) != primary_path:
+            return original_close(handler)
+        attempts["close"] += 1
+        result = original_close(handler)
+        if close_fails:
+            raise OSError("controlled helper close failure")
+        return result
 
     def lock_failure_copy(channel, record, destination):
         attempts["copy"] += 1
-        handler = channel._handler
-        original_close = handler.close
+        active.copy = True
+        try:
+            return original_copy(channel, record, destination)
+        finally:
+            active.copy = False
 
-        def fail_lock():
-            attempts["lock"] += 1
-            raise OSError("controlled lock acquisition failure")
-
-        def close_with_optional_error():
-            attempts["close"] += 1
-            original_close()
-            if close_fails:
-                raise OSError("controlled helper close failure")
-
-        monkeypatch.setattr(handler, "_do_lock", fail_lock)
-        monkeypatch.setattr(handler, "close", close_with_optional_error)
-        return original_copy(channel, record, destination)
-
+    monkeypatch.setattr(clh, "lock", fail_lock)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "close", close_with_optional_error)
     monkeypatch.setattr(FileChannel, "__init__", count_helper)
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
     monkeypatch.setattr(FileChannel, "copy_with_write", lock_failure_copy)
@@ -623,7 +648,9 @@ async def test_default_lock_failure_disables_file_logging(
 
         assert outcome.reason == "report_error"
         assert generated == [first_report.report_id, second_report.report_id]
-        assert attempts == {"factory": 1, "copy": 1, "lock": 1, "close": 1}
+        assert attempts["factory"] == attempts["copy"] == attempts["close"] == 1
+        assert attempts["lock"] > 1
+        assert "Cannot acquire lock" in stderr.getvalue()
         assert deps.failure_channel.disabled is True
         assert deps.failure_channel.closed is (not close_fails)
         assert deps.log_path_unsafe is True
@@ -649,8 +676,6 @@ async def test_default_lock_failure_disables_file_logging(
 async def test_default_current_log_io_failure_disables_file_logging(
         tmp_path: Path, monkeypatch, failure_step: str,
         close_fails: bool) -> None:
-    import concurrent_log_handler
-
     deps = await _runtime(tmp_path)
     first_report, second_report = await _seed_two_pending_reports(deps, tmp_path)
     stderr = io.StringIO()
@@ -681,63 +706,75 @@ async def test_default_current_log_io_failure_disables_file_logging(
 
 
     original_copy = FileChannel.copy_with_write
+    original_open = clh.ConcurrentRotatingFileHandler.do_open
+    original_lock, original_unlock = clh.lock, clh.unlock
+    original_close = clh.ConcurrentRotatingFileHandler.close
+    active = threading.local()
+    primary_path = Path(deps.config.paths.log_file).expanduser()
+    lock_path = _lock_path(primary_path)
 
-    def fail_file_operation(channel, record, destination):
-        attempts["copy"] += 1
-        handler = channel._handler
-        original_lock = handler._do_lock
-        original_unlock = handler._do_unlock
-        original_clh_open = concurrent_log_handler._open
-        original_write = handler.do_write
-        original_flush = handler.flush
-        original_close = handler.close
-        flush_calls = 0
+    class FaultingStream:
+        def __init__(self, stream):
+            self.stream = stream
 
-        def tracked_lock():
-            attempts["lock"] += 1
-            return original_lock()
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
 
-        def tracked_unlock():
-            attempts["unlock"] += 1
-            return original_unlock()
-
-        def fail_open(file, *args, **kwargs):
-            is_current_log = str(file) == handler.baseFilename
-            if is_current_log:
-                attempts["open"] += 1
-            if is_current_log and failure_step == "open":
-                raise OSError("controlled current log open failure")
-            return original_clh_open(file, *args, **kwargs)
-
-        def fail_append(message):
+        def write(self, message):
             attempts["append"] += 1
             if failure_step == "append":
                 raise OSError("controlled current log append failure")
-            return original_write(message)
+            return self.stream.write(message)
 
-        def fail_flush():
-            nonlocal flush_calls
-            flush_calls += 1
+        def flush(self):
             attempts["flush"] += 1
-            if failure_step == "flush" and flush_calls == 1:
+            if failure_step == "flush" and attempts["flush"] == 1:
                 raise OSError("controlled current log flush failure")
-            return original_flush()
+            return self.stream.flush()
 
-        def close_with_optional_error():
-            attempts["close"] += 1
-            original_close()
-            if close_fails:
-                raise OSError("controlled current log handler close failure")
+        def close(self):
+            return self.stream.close()
 
-        monkeypatch.setattr(handler, "_do_lock", tracked_lock)
-        monkeypatch.setattr(handler, "_do_unlock", tracked_unlock)
+    def tracked_lock(stream, flags):
+        if getattr(active, "copy", False) and _is_lock_file(stream, lock_path):
+            attempts["lock"] += 1
+        return original_lock(stream, flags)
+
+    def tracked_unlock(stream):
+        result = original_unlock(stream)
+        if getattr(active, "copy", False) and _is_lock_file(stream, lock_path):
+            attempts["unlock"] += 1
+        return result
+
+    def fail_open(handler, *args, **kwargs):
+        if not getattr(active, "copy", False) or Path(handler.baseFilename) != primary_path:
+            return original_open(handler, *args, **kwargs)
+        attempts["open"] += 1
         if failure_step == "open":
-            monkeypatch.setattr(concurrent_log_handler, "_open", fail_open)
-        monkeypatch.setattr(handler, "do_write", fail_append)
-        monkeypatch.setattr(handler, "flush", fail_flush)
-        monkeypatch.setattr(handler, "close", close_with_optional_error)
-        return original_copy(channel, record, destination)
+            raise OSError("controlled current log open failure")
+        return FaultingStream(original_open(handler, *args, **kwargs))
 
+    def close_with_optional_error(handler):
+        if not getattr(active, "copy", False) or Path(handler.baseFilename) != primary_path:
+            return original_close(handler)
+        attempts["close"] += 1
+        result = original_close(handler)
+        if close_fails:
+            raise OSError("controlled current log handler close failure")
+        return result
+
+    def fail_file_operation(channel, record, destination):
+        attempts["copy"] += 1
+        active.copy = True
+        try:
+            return original_copy(channel, record, destination)
+        finally:
+            active.copy = False
+
+    monkeypatch.setattr(clh, "lock", tracked_lock)
+    monkeypatch.setattr(clh, "unlock", tracked_unlock)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "do_open", fail_open)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "close", close_with_optional_error)
     observe_failure_service(monkeypatch, receipts=receipts, factory_started=lambda: attempts.__setitem__("factory", attempts["factory"] + 1))
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
     monkeypatch.setattr(FileChannel, "copy_with_write", fail_file_operation)
@@ -785,22 +822,31 @@ async def test_default_format_failure_keeps_file_logging_available(
     copy_calls = {"count": 0}
     lock_calls = {"count": 0}
     original_copy = FileChannel.copy_with_write
+    original_format, original_lock = logging.Formatter.format, clh.lock
+    active = threading.local()
+    lock_path = _lock_path(Path(deps.config.paths.log_file).expanduser())
 
-    def fail_format(channel, record, destination):
+    def fail_format(formatter, entry):
+        if getattr(active, "copy", False):
+            raise ValueError("permission denied while formatting")
+        return original_format(formatter, entry)
+
+    def count_lock(stream, flags):
+        if getattr(active, "copy", False) and _is_lock_file(stream, lock_path):
+            lock_calls["count"] += 1
+        return original_lock(stream, flags)
+
+    def copy_with_format_failure(channel, record, destination):
         copy_calls["count"] += 1
-        handler = channel._handler
-        monkeypatch.setattr(
-            handler, "format",
-            lambda entry: (_ for _ in ()).throw(
-                ValueError("permission denied while formatting")),
-        )
-        monkeypatch.setattr(
-            handler, "_do_lock",
-            lambda: lock_calls.__setitem__("count", lock_calls["count"] + 1),
-        )
-        return original_copy(channel, record, destination)
+        active.copy = True
+        try:
+            return original_copy(channel, record, destination)
+        finally:
+            active.copy = False
 
-    monkeypatch.setattr(FileChannel, "copy_with_write", fail_format)
+    monkeypatch.setattr(logging.Formatter, "format", fail_format)
+    monkeypatch.setattr(clh, "lock", count_lock)
+    monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_format_failure)
 
     try:
         outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
@@ -885,19 +931,18 @@ async def test_default_format_failure_keeps_listener_for_later_record(
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stderr", stderr)
     monkeypatch.setattr(sys, "stdout", stdout)
-    style = logging._defaultFormatter._style
-    original_format = style.format
+    original_format = logging.Formatter.format
 
-    def fail_one_record(record):
+    def fail_one_record(formatter, record):
         try:
             document = json.loads(record.getMessage())
         except json.JSONDecodeError:
-            return original_format(record)
+            return original_format(formatter, record)
         if isinstance(document, dict) and document.get("message") == "controlled ordinary format failure":
             raise ValueError("permission denied while formatting ordinary log")
-        return original_format(record)
+        return original_format(formatter, record)
 
-    monkeypatch.setattr(style, "format", fail_one_record)
+    monkeypatch.setattr(logging.Formatter, "format", fail_one_record)
     try:
         first = await deps.log_runtime.channel.deliver_important(
             LogRecord(level=LogLevel.ERROR,
@@ -907,7 +952,7 @@ async def test_default_format_failure_keeps_listener_for_later_record(
         assert deps.log_path_unsafe is False
         assert deps.log_runtime.path_unsafe is False
 
-        monkeypatch.setattr(style, "format", original_format)
+        monkeypatch.setattr(logging.Formatter, "format", original_format)
         later = await deps.log_runtime.channel.deliver_important(
             LogRecord(level=LogLevel.ERROR, message="later ordinary record"))
 
@@ -926,8 +971,6 @@ async def test_default_format_failure_keeps_listener_for_later_record(
 
 async def test_default_file_io_failure_stops_listener_and_uses_stderr(
         tmp_path: Path, monkeypatch) -> None:
-    import concurrent_log_handler
-
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import ChannelError, LogRecord
 
@@ -937,16 +980,16 @@ async def test_default_file_io_failure_stops_listener_and_uses_stderr(
     monkeypatch.setattr(sys, "stderr", stderr)
     monkeypatch.setattr(sys, "stdout", stdout)
     target = Path(deps.config.paths.log_file).expanduser()
-    original_open = concurrent_log_handler._open
+    original_open = clh.ConcurrentRotatingFileHandler.do_open
     attempts = {"open": 0}
 
-    def fail_log_open(file, *args, **kwargs):
-        if str(file) == str(target):
+    def fail_log_open(handler, *args, **kwargs):
+        if Path(handler.baseFilename) == target:
             attempts["open"] += 1
             raise OSError("ordinary current log open denied")
-        return original_open(file, *args, **kwargs)
+        return original_open(handler, *args, **kwargs)
 
-    monkeypatch.setattr(concurrent_log_handler, "_open", fail_log_open)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "do_open", fail_log_open)
     try:
         with pytest.raises(ChannelError, match="共享文件日志 I/O 或协调失败"):
             await deps.log_runtime.channel.deliver_important(
@@ -975,8 +1018,6 @@ async def test_default_file_io_failure_stops_listener_and_uses_stderr(
 
 async def test_default_unsafe_log_blocks_later_copy_factory(
         tmp_path: Path, monkeypatch) -> None:
-    import concurrent_log_handler
-
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import ChannelError, LogRecord
 
@@ -992,18 +1033,18 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
         "open": 0, "append": 0, "factory": 0,
         "helper_create": 0, "copy": 0,
     }
-    original_open = concurrent_log_handler._open
+    original_open = clh.ConcurrentRotatingFileHandler.do_open
     before = Path(primary_path).read_bytes()
     original_file_channel_init = FileChannel.__init__
     original_copy = FileChannel.copy_with_write
 
-    def fail_first_primary_open(file, *args, **kwargs):
-        if str(file) == primary_path:
+    def fail_first_primary_open(handler, *args, **kwargs):
+        if handler.baseFilename == primary_path:
             attempts["open"] += 1
             if attempts["open"] == 1:
                 raise OSError("controlled prior ordinary log open failure")
-        stream = original_open(file, *args, **kwargs)
-        if str(file) != primary_path:
+        stream = original_open(handler, *args, **kwargs)
+        if handler.baseFilename != primary_path:
             return stream
         class ObservedStream:
             def __getattr__(self, name):
@@ -1022,7 +1063,7 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
         attempts["copy"] += 1
         return original_copy(channel, record, destination)
 
-    monkeypatch.setattr(concurrent_log_handler, "_open", fail_first_primary_open)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "do_open", fail_first_primary_open)
     monkeypatch.setattr(FileChannel, "__init__", count_helper_create)
     monkeypatch.setattr(FileChannel, "copy_with_write", count_copy)
 
@@ -1081,8 +1122,6 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
 
 async def test_default_rotation_failure_is_reported_once_and_keeps_writes(
         tmp_path: Path, monkeypatch) -> None:
-    import concurrent_log_handler
-
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import LogRecord
 
@@ -1096,8 +1135,7 @@ async def test_default_rotation_failure_is_reported_once_and_keeps_writes(
         raise OSError("controlled rotation failure")
 
     monkeypatch.setattr(
-        concurrent_log_handler.ConcurrentRotatingFileHandler,
-        "shouldRollover", fail_rollover_check)
+        clh.ConcurrentRotatingFileHandler, "shouldRollover", fail_rollover_check)
     try:
         first = await deps.log_runtime.channel.deliver_important(
             LogRecord(level=LogLevel.ERROR, message="first rotation record"))
@@ -1384,32 +1422,45 @@ async def test_default_copy_program_error_keeps_original_channel_failure_facts(
 
 
     original_copy = FileChannel.copy_with_write
+    original_unlock = clh.unlock
+    original_close = clh.ConcurrentRotatingFileHandler.close
+    original_snapshot = shutil.copyfileobj
+    active = threading.local()
+    primary_path = Path(deps.config.paths.log_file).expanduser()
+    lock_path = _lock_path(primary_path)
+
+    def unlock_then_fail(stream):
+        result = original_unlock(stream)
+        if getattr(active, "copy", False) and _is_lock_file(stream, lock_path):
+            raise OSError("controlled copy unlock failure")
+        return result
+
+    def close_then_fail(handler):
+        result = original_close(handler)
+        if getattr(active, "copy", False) and Path(handler.baseFilename) == primary_path:
+            raise OSError("controlled copy handler close failure")
+        return result
+
+    def fail_snapshot_program(source, target, *args, **kwargs):
+        if (getattr(active, "copy", False)
+                and Path(source.name) == primary_path
+                and Path(target.name).parent == Path(deps.config.paths.staging) / "logs"):
+            raise program_error
+        return original_snapshot(source, target, *args, **kwargs)
 
     def fail_copy_program_with_unlock_error(channel, record, destination):
-        handler = channel._handler
-        original_unlock = handler._do_unlock
-        original_close = handler.close
-
-        def unlock_then_fail():
-            original_unlock()
-            raise OSError("controlled copy unlock failure")
-
-        def close_then_fail():
-            original_close()
-            raise OSError("controlled copy handler close failure")
-
-        def fail_snapshot_program(*_args, **_kwargs):
-            raise program_error
-
-        monkeypatch.setattr(handler, "_do_unlock", unlock_then_fail)
-        monkeypatch.setattr(handler, "close", close_then_fail)
-        monkeypatch.setattr(shutil, "copyfileobj", fail_snapshot_program)
+        active.copy = True
         try:
             return original_copy(channel, record, destination)
         except BaseException as failure:
             observed_program_errors.append(failure)
             raise
+        finally:
+            active.copy = False
 
+    monkeypatch.setattr(clh, "unlock", unlock_then_fail)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "close", close_then_fail)
+    monkeypatch.setattr(shutil, "copyfileobj", fail_snapshot_program)
     observe_failure_service(monkeypatch, receipts=receipts, factory_started=lambda: factories.append(True))
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
     monkeypatch.setattr(
@@ -1478,28 +1529,41 @@ async def test_failure_wiring_does_not_reopen_failed_helper_channel(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
     await _seed_two_pending_reports(deps, tmp_path)
-    channels, results, closes = [], [], []
+    channels, results, unclosed_handlers = [], [], []
     original_init, original_copy = FileChannel.__init__, FileChannel.copy_with_write
+    original_unlock = clh.unlock
+    original_close = clh.ConcurrentRotatingFileHandler.close
+    active = threading.local()
+    primary_path = Path(deps.config.paths.log_file).expanduser()
+    lock_path = _lock_path(primary_path)
 
     def create(channel, *args, **kwargs):
         original_init(channel, *args, **kwargs)
         channels.append(channel)
 
-    def copy(channel, record, destination):
-        handler = channel._handler
-        unlock = handler._do_unlock
-        closes.append(handler.close)
-        def fail_unlock():
-            unlock()
+    def unlock_then_fail(stream):
+        result = original_unlock(stream)
+        if getattr(active, "copy", False) and _is_lock_file(stream, lock_path):
             raise OSError("unlock result unavailable")
-        def fail_close():
-            raise OSError("close result unavailable")
-        monkeypatch.setattr(handler, "_do_unlock", fail_unlock)
-        monkeypatch.setattr(handler, "close", fail_close)
-        result = original_copy(channel, record, destination)
-        results.append(result)
         return result
 
+    def fail_close(handler):
+        if getattr(active, "copy", False) and Path(handler.baseFilename) == primary_path:
+            unclosed_handlers.append(handler)
+            raise OSError("close result unavailable")
+        return original_close(handler)
+
+    def copy(channel, record, destination):
+        active.copy = True
+        try:
+            result = original_copy(channel, record, destination)
+            results.append(result)
+            return result
+        finally:
+            active.copy = False
+
+    monkeypatch.setattr(clh, "unlock", unlock_then_fail)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "close", fail_close)
     monkeypatch.setattr(FileChannel, "__init__", create)
     monkeypatch.setattr(FileChannel, "copy_with_write", copy)
     stderr = io.StringIO()
@@ -1519,8 +1583,8 @@ async def test_failure_wiring_does_not_reopen_failed_helper_channel(
         assert len(ready) == 1
         assert b"controlled report generation failure" in ready[0].read_bytes()
     finally:
-        for close in closes:
-            close()
+        for handler in unclosed_handlers:
+            original_close(handler)
         close_runtime(deps)
 
 
@@ -1743,7 +1807,6 @@ async def test_write_result_disables_log_before_followup_wait(
     import threading
 
     from camctl.capture.recovery import RecoveryBoundary
-    import camctl.logging_runtime.clh_adapter as clh_adapter
 
     deps = await _runtime(tmp_path, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED)
     await _seed_two_pending_reports(deps, tmp_path)
@@ -1782,19 +1845,40 @@ async def test_write_result_disables_log_before_followup_wait(
     log_deliveries: list[str] = []
     original_unlink = os.unlink
     original_file_channel_init = FileChannel.__init__
-    original_check_stream = clh_adapter._TrackingHandler._check_stream
+    original_open = clh.ConcurrentRotatingFileHandler.do_open
+    original_copy = FileChannel.copy_with_write
+    original_lock = clh.lock
+    active = threading.local()
     original_deliver = deps.log_runtime.channel.deliver_important
     primary_path = Path(deps.config.paths.log_file).expanduser()
+    lock_path = _lock_path(primary_path)
+    lock_acquired = threading.Event()
+    copy_results = []
 
     def count_file_channel_init(channel, *args, **kwargs):
         original_file_channel_init(channel, *args, **kwargs)
         helper_channels.append(channel)
 
-    def fail_copy_stream_check(handler):
-        if any(handler is channel._handler for channel in helper_channels):
-            assert Path(handler.baseFilename) == primary_path
-            raise OSError("controlled copy channel stream failure")
-        return original_check_stream(handler)
+    def copy_with_open_failure(channel, record, destination):
+        active.copy = True
+        try:
+            result = original_copy(channel, record, destination)
+            copy_results.append(result)
+            return result
+        finally:
+            active.copy = False
+
+    def track_copy_lock(stream, flags):
+        result = original_lock(stream, flags)
+        if getattr(active, "copy", False) and _is_lock_file(stream, lock_path):
+            lock_acquired.set()
+        return result
+
+    def fail_copy_log_open(handler, *args, **kwargs):
+        if getattr(active, "copy", False) and Path(handler.baseFilename) == primary_path:
+            assert lock_acquired.is_set()
+            raise OSError("controlled copy channel open failure")
+        return original_open(handler, *args, **kwargs)
 
     def block_copy_cleanup(path, *args, **kwargs):
         path = Path(path)
@@ -1810,8 +1894,9 @@ async def test_write_result_disables_log_before_followup_wait(
         return await original_deliver(record)
 
     monkeypatch.setattr(FileChannel, "__init__", count_file_channel_init)
-    monkeypatch.setattr(
-        clh_adapter._TrackingHandler, "_check_stream", fail_copy_stream_check)
+    monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_open_failure)
+    monkeypatch.setattr(clh, "lock", track_copy_lock)
+    monkeypatch.setattr(clh.ConcurrentRotatingFileHandler, "do_open", fail_copy_log_open)
     monkeypatch.setattr(os, "unlink", block_copy_cleanup)
     monkeypatch.setattr(
         deps.log_runtime.channel, "deliver_important", count_log_delivery)
@@ -1834,6 +1919,10 @@ async def test_write_result_disables_log_before_followup_wait(
     run_task = asyncio.create_task(execute_command(deps, None))
     try:
         await asyncio.wait_for(cleanup_started.wait(), timeout=10)
+        assert lock_acquired.is_set() and len(copy_results) == 1
+        write_result, copy_error = copy_results[0]
+        assert write_result.failure_stage.value == "file_io"
+        assert write_result.appended is False and copy_error is None
         assert deps.log_path_unsafe is True
         assert deps.log_runtime.path_unsafe is True
         assert deps.log_runtime.channel.disabled is True
