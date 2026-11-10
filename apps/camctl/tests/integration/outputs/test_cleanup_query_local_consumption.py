@@ -111,6 +111,7 @@ class _MemberResults(OutputsRepository):
     """保存成员的真实仓储，同时记录完整输入并选择一次 COMMIT 故障。"""
 
     def __init__(self, item_id, method, after_commit):
+        super().__init__()
         self.item_id = item_id
         self.method = method
         self.after_commit = after_commit
