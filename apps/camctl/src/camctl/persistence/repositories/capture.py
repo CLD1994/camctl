@@ -22,6 +22,12 @@ from camctl.capture.photo_pair_rules import (
     _host_photo_source_pair, _FILE_ROLE, _FILE_ROLE_FOR_KIND, _HOST_PHOTO_PURPOSE_CODES,
     _HOST_PHOTO_SHA256, _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
 )
+from camctl.capture.emergency_rules import (
+    emergency_attempt_count_error, emergency_attempt_error, emergency_attempt_presence_error,
+    emergency_failure_error,
+    emergency_identity_error, emergency_observation_error, emergency_run_status_error,
+    emergency_target_error,
+)
 from camctl.capture.device_file_rules import (
     checksum_decision_error, checksum_value_error, completion_facts_error,
     completion_wait_reference_error, incomplete_facts_error, ownership_claim_error,
@@ -6769,27 +6775,14 @@ def _emergency_guard(event, context) -> None:
             attempts.append(row.after.values)
     if run_values is None:
         raise EventValidationError("应急补记缺少最终流程行")
-    session_key = run_values.get("session_key")
-    if not isinstance(session_key, str) or len(session_key) != 32:
-        raise EventValidationError("应急流程行必须携带本会话身份")
-    expected_key = (
-        f"emergency/{session_key}/{run_values.get('activity_id')}"
-    )
-    if run_values.get("responsibility_key") != expected_key:
-        raise EventValidationError("应急责任键与会话及活动不符")
-    if run_values.get("kind") != 9 or run_values.get("retry_wait_required") != 0:
-        raise EventValidationError("应急流程必须是补记终态")
-    config_columns = ("max_attempts_used", "timeout_s_json", "retry_interval_s_json")
+    error = emergency_identity_error(run_values)
+    if error is not None:
+        raise EventValidationError(error)
     _check_config_numbers(run_values, f"operation_runs#{run_id}")
-    if attempts and any(run_values.get(column) is None for column in config_columns):
-        raise EventValidationError("已有应急尝试必须保存完整的固定配置")
+    error = emergency_run_status_error(run_values, attempts)
+    if error is not None:
+        raise EventValidationError(error)
     status = run_values.get("status")
-    if status not in (3, 4, 6):
-        raise EventValidationError("应急补记不保存进行中状态")
-    if status == 3 and run_values.get("error_json") is not None:
-        raise EventValidationError("应急成功不携带流程错误")
-    if status in (4, 6) and run_values.get("error_json") is None:
-        raise EventValidationError("应急失败或未确认必须携带原因")
     if status in (4, 6):
         error = run_values["error_json"]
         try:
@@ -6798,28 +6791,15 @@ def _emergency_guard(event, context) -> None:
             raise
         except ValueError as cause:
             raise EventValidationError("应急流程错误不符合公共契约") from cause
-        expected = "emergency_not_attempted" if status == 4 else "emergency_stop_unconfirmed"
-        if error["code"] != expected:
-            raise EventValidationError("应急错误与最终结果分区不符")
-        if error["details"]["activity_id"] != str(run_values.get("activity_id")):
-            raise EventValidationError("应急错误必须指向本流程的实际目标活动")
-    if status == 6 and not attempts:
-        raise EventValidationError("停止未确认的补记必须有实际尝试")
-    if status == 4 and attempts:
-        raise EventValidationError("未能尝试的补记不创建尝试行")
-    observation = event.evidence.get("observation")
-    if observation is not None and status != 3:
-        raise EventValidationError("停止依据只伴随停止成功的补记")
-    if observation is not None or (status == 3 and not attempts):
-        _verify_stop_observation(observation, run_values)
-    if status == 3 and attempts and observation is None:
-        if not any(
-            _result_confirms_stop(attempt, run_values.get("activity_id"))
-            for attempt in attempts
-        ):
-            raise EventValidationError(
-                "停止成功的补记必须在尝试结果中保存指向目标活动的停止观察"
-            )
+        failure = emergency_failure_error(run_values)
+        if failure is not None:
+            raise EventValidationError(failure)
+    error = emergency_attempt_presence_error(run_values, attempts)
+    if error is not None:
+        raise EventValidationError(error)
+    error = emergency_observation_error(run_values, attempts, event.evidence.get("observation"))
+    if error is not None:
+        raise EventValidationError(error)
     activity_id = run_values.get("activity_id")
     activity = (
         dict(context.state_rows.get("device_activities", {}).get(activity_id, {}))
@@ -6831,72 +6811,17 @@ def _emergency_guard(event, context) -> None:
                 raise EventValidationError("应急补记不能删除目标活动")
             activity.update(row.before.values)
             activity.update(row.after.values)
-    if "last_error_json" not in activity:
-        raise EventValidationError("应急补记缺少可靠的目标活动错误")
-    if not json_equal(activity["last_error_json"], run_values.get("error_json")):
-        raise EventValidationError("应急流程与目标活动的完整错误不一致")
-    numbers = [a.get("attempt_no") for a in attempts]
-    if numbers != list(range(1, len(attempts) + 1)):
-        raise EventValidationError("应急尝试必须从 1 连续编号")
-    if run_values.get("attempts_used") != len(attempts):
-        raise EventValidationError("累计次数与尝试行数不符")
-    maximum = run_values.get("max_attempts_used")
-    if maximum is not None and len(attempts) > maximum:
-        raise EventValidationError("尝试次数超过本会话固定限额")
+    error = emergency_target_error(run_values, activity)
+    if error is not None:
+        raise EventValidationError(error)
+    error = emergency_attempt_count_error(run_values, attempts)
+    if error is not None:
+        raise EventValidationError(error)
     for attempt in attempts:
         _check_config_numbers(attempt, "应急尝试")
-        if any(not json_equal(attempt.get(column), run_values.get(column))
-               for column in config_columns):
-            raise EventValidationError("每条应急尝试必须采用本会话的相同固定配置")
-        if attempt.get("run_id") != run_id:
-            raise EventValidationError("应急尝试必须归属本次流程")
-        if attempt.get("intent_event_id") is not None:
-            raise EventValidationError("应急尝试不携带普通意图引用")
-        if attempt.get("result_event_id") != event.event_id:
-            raise EventValidationError("应急尝试结果必须指向本事件")
-        if attempt.get("status") == 1:
-            raise EventValidationError("应急补记不保存运行中尝试")
-        if attempt.get("copy_round") is not None:
-            raise EventValidationError("应急尝试没有拷贝轮次")
-
-
-def _structured_observation(observation) -> bool:
-    """观察的结构边界：非空类型、正整数版本与结构化数据。
-
-    证据类型与 data 成员是否符合驱动契约由装配层按证据登记核对；
-    本结构边界只排除不能解释为观察的形状。
-    """
-    return (
-        isinstance(observation, Mapping)
-        and isinstance(observation.get("type"), str)
-        and bool(observation.get("type"))
-        and is_json_integer(observation.get("version"))
-        and observation["version"] > 0
-        and isinstance(observation.get("data"), Mapping)
-    )
-
-
-def _result_confirms_stop(attempt_values, activity_id) -> bool:
-    """尝试结果是否携带指向目标活动的可靠停止观察。"""
-    result = attempt_values.get("result_json")
-    if not isinstance(result, Mapping):
-        return False
-    observations = result.get("observations")
-    if not isinstance(observations, list):
-        return False
-    return any(
-        _structured_observation(item)
-        and item["data"].get("activity_id") == str(activity_id)
-        for item in observations
-    )
-
-
-def _verify_stop_observation(observation, run_values: Mapping[str, Any]) -> None:
-    """核对事件依据成员中的停止依据的结构与目标指向。"""
-    if not _structured_observation(observation):
-        raise EventValidationError("停止的补记必须携带结构化停止依据")
-    if observation["data"].get("activity_id") != str(run_values.get("activity_id")):
-        raise EventValidationError("停止依据必须指向本补记的目标活动")
+        error = emergency_attempt_error(run_values, run_id, event.event_id, attempt)
+        if error is not None:
+            raise EventValidationError(error)
 
 
 def _validate_activity_result(row, context) -> None:
