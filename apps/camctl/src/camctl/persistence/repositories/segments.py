@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from itertools import zip_longest
 
 from camctl.capture.segment_models import *
+from camctl.capture.segment_candidates import (
+    eligible_original, eligible_paired_preview, eligible_photo_original, is_paired_preview,
+)
 from camctl.capture.segment_storage import (
     SegmentSetCreate,
     SegmentMemberInput,
@@ -45,7 +48,6 @@ from .result_file_proofs import read_fixed_file
 
 _EVENT = load_event_registry()['events']['SEGMENT_FACTS']
 _STATE = enum_for('segment_sets.state')
-_FAMILY_ROLE = enum_for('result_page_files.family_role')
 _ORDER = '(COALESCE(directory_number,0),COALESCE(segment_index,0),identity,id)'
 
 
@@ -250,26 +252,16 @@ def _read_member_facts(db, row, *, setrow=None):
         row['file_event_id'], member,row['pairing_fact_id']), file, fact)
 
 
-def _eligible_original(member):
-    return (member.role is SegmentMemberRole.ORIGINAL
-        and member.ownership is OwnershipState.OWNED
-        and member.completion is FileCompletionState.COMPLETE
-        and member.size_bytes is not None and member.size_bytes>0)
-
-
 def _output_candidate(db,setrow,facts, *, paired_members=None):
     """统一两方向资格，只使用冻结成员及其固定file_event事实。"""
     stored, file = facts.stored, facts.file
     member=stored.member
-    if (member.role is SegmentMemberRole.OTHER
-            and profile_for_action(db,setrow['action_id']).classify_file(member.identity).kind is SegmentFileKind.PHOTO
-            and member.ownership is OwnershipState.OWNED
-            and member.completion is FileCompletionState.COMPLETE
-            and member.size_bytes is not None and member.size_bytes > 0):
+    if (member.role is SegmentMemberRole.OTHER and eligible_photo_original(member,
+            profile_for_action(db,setrow['action_id']).classify_file(member.identity).kind)):
         return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
-    if _eligible_original(member):
+    if eligible_original(member):
         return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
-    if member.role is not SegmentMemberRole.PREVIEW or member.pairing_state is not PreviewPairingState.PAIRED:
+    if not is_paired_preview(member):
         return None
     if paired_members is None:
         paired = _read_member(db,_member_by_identity(db,setrow['id'],member.pairing_identity), setrow=setrow)
@@ -285,25 +277,14 @@ def _output_candidate(db,setrow,facts, *, paired_members=None):
             result_file_family(member.identity, result_policy=result_policy),
             result_file_family(paired.member.identity, result_policy=result_policy),
         )
-        same_family = (left[0] is not None and left[:2] == right[:2]
-                       and left[2] == int(_FAMILY_ROLE.PREVIEW)
-                       and right[2] == int(_FAMILY_ROLE.ORIGINAL))
-        fact = facts.pairing
-        same_family = (same_family and fact is not None
-                       and fact['original_file_id'] == paired.file_id)
     else:
         profile=profile_for_action(db,setrow['action_id'])
         left=profile.classify_file(member.identity)
         right=profile.classify_file(paired.member.identity)
-        same_family = left.key is not None and right.key is not None and left.pairing_identity == right.pairing_identity
-    if file['original_device_file_id'] != paired.file_id:
-        raise ConsistencyError('预览固定文件关联与同集合实际原片不同')
-    if paired.member.role is not SegmentMemberRole.ORIGINAL or not same_family:
-        raise ConsistencyError('预览没有同集合、同完整名称主干的真实原片')
-    if (member.ownership is not OwnershipState.OWNED
-            or member.completion is not FileCompletionState.COMPLETE
-            or member.size_bytes is None or member.size_bytes<=0
-            or not _eligible_original(paired.member)):
+    if not eligible_paired_preview(member=member, original=paired.member,
+            preview_file=file, original_file_id=paired.file_id,
+            pairing_fact_id=stored.pairing_fact_id, pairing_fact=facts.pairing,
+            preview_family=left, original_family=right):
         return None
     return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.PREVIEW,paired.member_id,paired.file_id)
 
@@ -831,7 +812,7 @@ def _verify_action6_decision(db, setrow, decision):
         page = read_segment_members(_ref(setrow), cursor, 128, Reader)
         for stored in page.items:
             member = stored.member
-            if not _eligible_original(member):
+            if not eligible_original(member):
                 continue
             eligible_count += 1
             if member.cursor is None:

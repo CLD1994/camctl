@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from camctl.capture.files import OwnershipFromResultPageSave, PairResultFilesSave
-from camctl.capture.segment_models import FileCompletionState, OwnershipState
+from camctl.capture.result_pairing import ScanFamilyAssessment
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal
@@ -145,7 +145,7 @@ def _classify(connection, request, *, current_boundary=None):
         raise ConsistencyError('实际扫描缺少申请预览的族关系')
     original_id = originals[0] if original_count == 1 else None
     endpoints = {}
-    reliable, valid = True, True
+    assessment = ScanFamilyAssessment()
     # SQL 对增长族排序，Python 每次只持有一行及一个 <=128 文件的原页。
     with closing(connection.execute(
             'SELECT file_id,page_event_id,identity,family_role FROM result_page_files'
@@ -169,24 +169,16 @@ def _classify(connection, request, *, current_boundary=None):
             member = read_result_file_input(connection, current_page.ref, file_id,
                 request.source_boundary)
             file = read_file_at_boundary(connection, file_id, request.source_boundary)
-            if (member.ownership is not OwnershipState.OWNED
-                    or member.completion is not FileCompletionState.COMPLETE
-                    or not entry.complete or entry.size_bytes is None):
-                reliable = False
-            elif entry.size_bytes != file['size_bytes'] or not json_equal(file['locator_json'], entry.locator):
-                raise ConsistencyError('当前族原观察与固定文件大小或定位矛盾')
-            elif entry.size_bytes == 0:
-                valid = False
+            assessment.observe(ownership=member.ownership, completion=member.completion,
+                observed_complete=entry.complete, observed_size=entry.size_bytes,
+                observed_locator=entry.locator, saved_file=file)
             if file_id in (request.preview_file_id, original_id):
                 # 同身份重复页保留最早端点；不让后页覆盖未知来源。
                 endpoints.setdefault(file_id, (page_id, member.file_event_id))
-    if not reliable:
+    why = assessment.conclusion(original_count=original_count, preview_count=preview_count,
+        original_id=original_id, preview_file=preview)
+    if why is None:
         return None
-    why = (_WHY.MISSING if original_count == 0 else
-           _WHY.AMBIGUOUS if original_count > 1 or preview_count > 1 else
-           _WHY.INVALID if not valid else _WHY.UNIQUE)
-    if why == _WHY.UNIQUE and preview['original_device_file_id'] not in (None, original_id):
-        why = _WHY.CONFLICT
     original = endpoints.get(original_id)
     preview_endpoint = endpoints.get(request.preview_file_id)
     if preview_endpoint is None or original_id is not None and original is None:

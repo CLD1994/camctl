@@ -36,6 +36,18 @@ class HandoffCleanupAbsence:
             raise TypeError("缺席交接必须持有原票据与事务键")
 
 
+def cleanup_absence_projection_complete(*, availability, cleanup_status, cleanup_error) -> bool:
+    """可靠缺席应使正式产物处于清理完成状态。"""
+    return (availability, cleanup_status, cleanup_error) == (3, 4, None)
+
+
+def cleanup_absence_file_complete(*, device_file, intermediate_file) -> bool:
+    """设备文件优先；只有原承载文件完成才能交接产物缺席。"""
+    if device_file is not None:
+        return device_file.get("presence_state") == 3
+    return intermediate_file is not None and intermediate_file.get("cleanup_state") == 4
+
+
 async def handoff_terminal_absence(runtime, item_id):
     """原保存结果是唯一依据；迟到 raw 返回不参与来源选择。"""
     from camctl.outputs.cleanup_results import saved_cleanup_absence

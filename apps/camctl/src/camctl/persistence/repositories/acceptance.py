@@ -14,7 +14,12 @@ from typing import Any, Mapping
 
 from camctl.acceptance.input import InputDiagnostic, InputStage, ParsedInput
 from camctl.acceptance.links import PlanIdentities, prepare_plan
-from camctl.acceptance.storage_rules import validate_admitted_action, validate_initial_plan_status
+from camctl.acceptance.storage_rules import (
+    AcceptanceStorageRuleError, validate_admitted_action, validate_initial_plan_status,
+    validate_fixed_source, validate_admitted_source_owners, validate_admitted_source_owner_type,
+    validate_admitted_source_member, validate_diagnostic_key, validate_diagnostic_errors,
+    validate_acknowledged_sync_status, validate_acknowledged_sync, validate_acknowledged_watermark,
+)
 from camctl.acceptance.rules import extract_request_identity, validate_new_body
 from camctl.acceptance.service import (
     AcceptanceResult,
@@ -36,7 +41,7 @@ from camctl.persistence.repositories.reporting import (
     read_ack_report, read_ack_state, read_outstanding_syncs,
 )
 from camctl.reporting.ack import (
-    AckFacts, AckInput, AckReport, SyncResponsibility,
+    AckFacts, AckInput, AckReport,
     AckDisposition as ReportAckDisposition, decide_ack, qualifies_sync,
 )
 from camctl.persistence.repositories.transactions import (
@@ -652,6 +657,14 @@ def _plan_aggregate_guard(event, context) -> None:
             raise EventValidationError(str(error)) from error
 
 
+def _acceptance_rule(rule, *args):
+    try:
+        return rule(*args)
+    except AcceptanceStorageRuleError as error:
+        message, cause = str(error), error.__cause__
+    raise EventValidationError(message) from cause
+
+
 def _source_members_guard(event, context) -> None:
     if event.event_type == 3 and event.reason in (1, 2):
         from .source_transactions import verify_source_guard
@@ -659,46 +672,36 @@ def _source_members_guard(event, context) -> None:
         return
     for row in event.rows:
         if row.table == "actions" and not row.before.exists:
-            values = row.after.values
-            if values.get("source_resolution_state") == 2 and values.get("resolved_source_plan_id") is None:
-                raise EventValidationError("FIXED 来源必须保存真实来源计划")
+            _acceptance_rule(validate_fixed_source, row.after.values)
     dependencies = [row for row in event.rows if row.table == "action_dependencies" and not row.before.exists]
-    if not dependencies:
-        if event.event_type == 3 and event.reason == 3:
-            raise EventValidationError("受理零成员无需空事件")
-        return
     reads = context.current_reads
-    if event.event_type != 3 or event.reason != 3 or reads is None:
-        raise EventValidationError("来源成员缺少可靠执行申请或真实受理前序")
-    owner_id = dependencies[0].after.values.get("action_id")
-    if any(row.after.values.get("action_id") != owner_id for row in dependencies):
-        raise EventValidationError("受理成员事件只能保存一个真实 owner 的完整成员")
+    owner_id = _acceptance_rule(validate_admitted_source_owners,
+        tuple(row.after.values.get("action_id") for row in dependencies),
+        event.event_type, event.reason, reads is not None)
+    if not dependencies:
+        return
     owner = reads.admitted_source_owner(owner_id, context.transaction)
-    if owner["type"] not in {_action_type_code("obtain_action_outputs"), _action_type_code("delete_action_outputs")}:
-        raise EventValidationError("来源成员所属动作类型不适用")
+    _acceptance_rule(validate_admitted_source_owner_type, owner["type"], frozenset({
+        _action_type_code("obtain_action_outputs"), _action_type_code("delete_action_outputs")}))
     from itertools import zip_longest
     actual = (row.after.values.get("depends_on_action_id") for row in dependencies)
     for member, expected in zip_longest(actual, reads.admitted_source_members(owner,context.transaction)):
-        if member is None or expected is None or member != expected:
-            raise EventValidationError("受理来源成员没有完整覆盖原 source 的真实前序拍摄动作")
+        _acceptance_rule(validate_admitted_source_member, member, expected)
 
 
 def _diagnostic_guard(event, context) -> None:
-    if "input_key" not in event.evidence:
-        raise EventValidationError("输入诊断必须携带 input_key 依据")
+    _acceptance_rule(validate_diagnostic_key, "input_key" in event.evidence)
     for row in event.rows:
         if row.table != "plan_file_diagnostics" or row.before.exists:
             continue
-        errors = row.after.values.get("errors_json")
-        if not isinstance(errors, list) or not errors:
-            raise EventValidationError("输入诊断必须保存非空错误列表")
+        _acceptance_rule(validate_diagnostic_errors, row.after.values.get("errors_json"))
 
 
 def _ack_guard(event, context) -> None:
     for row in event.rows:
         if row.table == "state_syncs":
-            if row.after.values.get("status") != int(enum_for("state_syncs.status").ACKNOWLEDGED):
-                raise EventValidationError("ACK 同步结束必须保存确认状态")
+            _acceptance_rule(validate_acknowledged_sync_status, row.after.values,
+                int(enum_for("state_syncs.status").ACKNOWLEDGED))
             values = context.state_rows.get("state_syncs", {}).get(row.row_id)
             if values is None:
                 raise EventValidationError("ACK 同步结束缺少原责任依据")
@@ -706,29 +709,14 @@ def _ack_guard(event, context) -> None:
             report = context.state_rows.get("reports", {}).get(report_id)
             if report is None:
                 raise EventValidationError("同步确认必须引用实际报告")
-            try:
-                basis = AckReport(report_id, report["from_wm"], report["to_wm"], report["frozen_event_id"])
-                sync = SyncResponsibility(row.row_id, values["action_id"], values["from_wm"],
-                                          values["started_boundary_event_id"])
-            except (ValueError, KeyError) as error:
-                raise EventValidationError("同步确认依据无法可靠解释") from error
-            if not qualifies_sync(basis, sync):
-                raise EventValidationError("ACK 报告未满足同步起点与开始历史边界")
-            if row.after.values.get("ended_event_id") != event.event_id:
-                raise EventValidationError("同步结束依据必须是本事件")
+            _acceptance_rule(validate_acknowledged_sync, row.row_id, event.event_id,
+                row.after.values, values, report)
             continue
         if row.table != "runtime_state" or not row.before.exists:
             continue
-        after = row.after.values
-        report_id = after.get("acknowledged_report_id")
-        new_wm = after.get("acknowledged_wm")
+        report_id = row.after.values.get("acknowledged_report_id")
         report = context.state_rows.get("reports", {}).get(report_id)
-        if report is None:
-            raise EventValidationError(f"吸收的 ACK 引用不存在的报告: {report_id!r}")
-        if report.get("to_wm") != new_wm:
-            raise EventValidationError("累计水位必须等于所吸收报告的覆盖终点")
-        if not row.before.values.get("acknowledged_wm", 0) < new_wm:
-            raise EventValidationError("累计确认水位只严格提高")
+        _acceptance_rule(validate_acknowledged_watermark, row.before.values, row.after.values, report)
 
 
 def register_acceptance_guards(register) -> None:

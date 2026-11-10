@@ -9,7 +9,8 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-from camctl.devices.start_entry import is_hasselblad_photo
+from camctl.capture.selection import (may_prepare_availability_check, within_prepare_window,
+    earlier_capture_preempts)
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventContext
 from camctl.persistence.repositories.transactions import (BoundedCommandPlan, CommandPlan, commit_operation,
@@ -94,11 +95,9 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
     if action is None:
         raise ConsistencyError("检查触发动作不存在")
     if request.trigger_copy_id is None:
-        if (not is_hasselblad_photo(action) or action["status"] != int(enum_for("actions.status").PENDING)
-                or action["execution_started"] != 0 or action["cancel_requested"] != 0):
+        if not may_prepare_availability_check(action):
             raise AvailabilityTargetBlocked("触发拍摄不再具备准备资格")
-        if not (Decimal(action["scheduled_at"]) - request.prepare_lead_s * 1_000_000
-                <= request.trusted_wall_now <= action["scheduled_at"] + action["max_delay_ms"] * 1000):
+        if not within_prepare_window(action, request.prepare_lead_s, request.trusted_wall_now):
             raise AvailabilityTargetBlocked("触发拍摄不在允许的准备时间")
         if _one(connection, "SELECT 1 FROM device_activities WHERE action_id=?", (action["id"],)):
             raise AvailabilityTargetBlocked("触发拍摄已有活动，沿原责任处理")
@@ -161,10 +160,7 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             request.prepare_lead_s, request.trusted_wall_now)
         selected = selected_pending_capture(connection, selection, boundary,
                                             exclude_attempt_id=exclude_attempt_id)
-        if (selected is not None and selected.action_id != action["id"]
-                and (request.trigger_copy_id is not None or
-                     (selected.scheduled_at, selected.plan_id, selected.input_index)
-                     < (action["scheduled_at"], action["plan_id"], action["input_index"]))):
+        if earlier_capture_preempts(selected, action, for_read=request.trigger_copy_id is not None):
             raise AvailabilityTargetBlocked("存在更早的合格拍摄候选")
     from camctl.capture.software_recovery import recovery_locked
     if recovery_locked(connection, device_id):
