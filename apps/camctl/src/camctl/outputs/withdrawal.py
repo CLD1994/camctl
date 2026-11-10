@@ -14,7 +14,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.host_files.handoff import HandoffIdentity, WithdrawStage, withdraw_file
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
-from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
+from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice, withdrawal_delivery_eligible
 from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -108,9 +108,7 @@ class WithdrawalSession:
         delivery = _DeliveryForWithdrawal(*rows[0])
         if delivery.owner_delivery_id != delivery_id:
             raise ConsistencyError("交付撤回缺少原交付的唯一目标文件归属")
-        if (delivery.status not in (int(_DELIVERY.PUBLISHED), int(_DELIVERY.WITHDRAWN))
-                and not (delivery.status in (int(_DELIVERY.CANCELED), int(_DELIVERY.PUBLISHING))
-                         and delivery.withdrawal_state == int(_WITHDRAWAL.UNKNOWN))):
+        if not withdrawal_delivery_eligible({"status": delivery.status, "withdrawal_state": delivery.withdrawal_state}):
             raise ConsistencyError("交付撤回要求可靠的原发布事实或已保存的位置未知结论")
         HandoffIdentity(self._ready, delivery.file_name)
         return delivery

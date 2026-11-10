@@ -15,7 +15,9 @@ def _segment(**changes):
                  current_round=2, committed_bytes=4, source_size=10,
                  requested_round=2, requested_before=4, end=10)
     facts.update(changes)
-    return facts
+    return dict(copy={"reset_state": facts["reset_state"], "round": facts["current_round"],
+                      "committed_bytes": facts["committed_bytes"], "source_size": facts["source_size"]},
+                requested_round=facts["requested_round"], requested_before=facts["requested_before"], end=facts["end"])
 
 
 def test_segment_checks_progress_and_fixed_source_boundary():
@@ -35,6 +37,12 @@ def test_segment_checks_progress_and_fixed_source_boundary():
 def test_segment_save_rejects_stale_facts_in_original_order(changes, message):
     with pytest.raises(ConsistencyError, match=message):
         validate_segment_save_state(**_segment(**changes))
+
+
+def test_segment_save_checks_reset_before_missing_later_fields():
+    with pytest.raises(ConsistencyError, match="重置意图未完成前"):
+        validate_segment_save_state(copy={"reset_state": 2}, requested_round=2,
+                                    requested_before=4, end=10)
 
 
 def test_read_owner_distinguishes_canceled_from_invalid_state():

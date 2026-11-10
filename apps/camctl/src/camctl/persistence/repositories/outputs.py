@@ -62,6 +62,7 @@ from camctl.outputs.cleanup_flow import (
     RestrictCleanupItem,
     StartCleanupAction,
     decide_cleanup_progress, validate_cleanup_success,
+    cleanup_device_absence_needs_record, cleanup_local_absence_needs_record,
 )
 from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, device_holder, first_eligible_read, positive_limit
@@ -80,7 +81,7 @@ from camctl.outputs.handoff import (
     DeliveryFacts, DeliveryFailure, DeliveryStateFacts, FailureSaveDisposition,
     FailureSaveOutcome, IntentDisposition, IntentSaveOutcome, PublicationDisposition,
     PublicationIntentRequest, PublicationSaveOutcome, PublicationSaveRequest,
-    UnconfirmedFailureSave,
+    UnconfirmedFailureSave, publishable_copy_error, withdrawal_waiter_eligible,
 )
 from camctl.outputs.work_files import (
     CleanupChecked, CleanupCheckedDisposition, CleanupCheckedOutcome,
@@ -3135,11 +3136,8 @@ class _SegmentSaveCommand:
         self._state["file_copies"][copy["id"]] = copy
         _copy_owner_of(connection, copy, self._state, self._owners)
         action = self._owner_action(connection, copy)
-        validate_segment_save_state(
-            reset_state=copy["reset_state"], current_round=copy["round"],
-            committed_bytes=copy["committed_bytes"], source_size=copy["source_size"],
-            requested_round=command.copy_round, requested_before=command.committed_before,
-            end=command.segment_end)
+        validate_segment_save_state(copy=copy, requested_round=command.copy_round,
+            requested_before=command.committed_before, end=command.segment_end)
         if action["cancel_requested"] == 1:
             return self._skip("cancel_requested", copy)
         if not _read_owner_eligible(action):
@@ -7091,7 +7089,6 @@ def _require_publishable_copy(context, delivery_id: int) -> None:
     if len(copies) != 1:
         raise EventValidationError("准备或发布必须对应唯一交付拷贝")
     copy = copies[0]
-    from camctl.outputs.handoff import publishable_copy_error
     error = publishable_copy_error(verification_state=copy.get("verification_state"),
                                    committed_bytes=copy.get("committed_bytes"),
                                    source_size=copy.get("source_size"))
@@ -9682,7 +9679,7 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
         output = self._state["outputs"].get(output_id)
         if output is None:
             raise ConsistencyError(f"清理成功要求确认产物身份: {command.item_id}")
-        from_wait = validate_cleanup_success(item=item, outcome=command.outcome, output=output)
+        validate_cleanup_success(item=item, outcome=command.outcome, output=output)
         device_file_id = output.get("device_file_id")
         intermediate_file_id = output.get("intermediate_file_id")
         templates = []
@@ -9691,17 +9688,13 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
             if file is None:
                 raise ConsistencyError(f"设备文件不存在: {device_file_id}")
             self._state.setdefault("device_files", {})[device_file_id] = dict(file)
-            if file["presence_state"] == int(_FILE_PRESENCE.PRESENT):
-                if from_wait:
-                    raise ConsistencyError(
-                        "无本项删除调用的成功要求文件缺席事实先行")
+            if cleanup_device_absence_needs_record(item_status=item["status"],
+                                                   presence_state=file["presence_state"]):
                 templates.append((17, 5, (_update(
                     "device_files", device_file_id,
                     {"presence_state": int(_FILE_PRESENCE.PRESENT)},
                     {"presence_state": int(_FILE_PRESENCE.ABSENT)}),),
                     ("device_file", device_file_id)))
-            elif file["presence_state"] != int(_FILE_PRESENCE.ABSENT):
-                raise ConsistencyError("文件存在性未知，不能确认清理成功")
         elif intermediate_file_id is not None:
             # 主机派生成品：文件缺席事实由清理完成状态承载；本次成
             # 功先保存清理完成事件，同事务先行供成功依据核对。
@@ -9712,14 +9705,8 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                     f"中间文件不存在: {intermediate_file_id}")
             self._state.setdefault("intermediate_files", {})[
                 intermediate_file_id] = dict(file)
-            if file["cleanup_state"] == int(_FILE_CLEANUP.COMPLETED):
-                pass
-            elif file["cleanup_state"] in (
-                    int(_FILE_CLEANUP.NOT_NEEDED),
-                    int(_FILE_CLEANUP.PENDING)):
-                if from_wait:
-                    raise ConsistencyError(
-                        "无本项删除调用的成功要求文件缺席事实先行")
+            if cleanup_local_absence_needs_record(item_status=item["status"],
+                                                  cleanup_state=file["cleanup_state"]):
                 templates.append((
                     _INTERMEDIATE_FILE_EVENT, _CLEANUP_RESULT_REASON,
                     (_update(
@@ -9727,8 +9714,6 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                         {"cleanup_state": file["cleanup_state"]},
                         {"cleanup_state": int(_FILE_CLEANUP.COMPLETED)}),),
                     ("intermediate_file", intermediate_file_id)))
-            else:
-                raise ConsistencyError("中间文件清理状态未决，不能确认清理成功")
         from camctl.outputs.cleanup_group import cleanup_group
         reads = _ProductReads(connection, self._state)
         paired_changes = []
@@ -10843,16 +10828,9 @@ class _EnsureWithdrawalWaiterCommand:
         self._command, self._key = command, key
 
     def _eligible(self, delivery, target, parent, origin):
-        return (delivery["id"] == self._command.delivery_id
-                and parent["id"] == self._command.cancel_item_id
-                and delivery["action_id"] == target["id"] == parent["target_action_id"]
-                and target["type"] == _OBTAIN_TYPE and target["cancel_requested"] == 1
-                and (delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHED), int(_DELIVERY_STATUS.WITHDRAWN))
-                     or delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHING), int(_DELIVERY_STATUS.CANCELED))
-                     and delivery["withdrawal_state"] == int(_WITHDRAWAL.UNKNOWN))
-                and origin["id"] == parent["action_id"] and origin["type"] == _CANCEL_ACTION_TYPE
-                and origin["status"] == int(_ACTION_STATUS.RUNNING)
-                and origin["cancel_requested"] == 0 and parent["status"] == 2)
+        return withdrawal_waiter_eligible(delivery=delivery, target=target, parent=parent,
+            origin=origin, delivery_id=self._command.delivery_id,
+            cancel_item_id=self._command.cancel_item_id)
 
     def plan(self, scope):
         connection = scope.connection

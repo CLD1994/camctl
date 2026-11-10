@@ -76,7 +76,14 @@ def load_handoff():
         module = ModuleType(name)
         module.__getattr__ = lambda name: Stub
         modules[name] = module
-    modules['camctl.contracts.enums'].enum_for = lambda name: Status
+    enums = {
+        'deliveries.status': Status,
+        'deliveries.withdrawal_state': SimpleNamespace(UNKNOWN=6),
+        'file_copies.verification_state': SimpleNamespace(MATCHED=3, SOURCE_CHECKSUM_UNAVAILABLE=5),
+        'actions.type': SimpleNamespace(OBTAIN_ACTION_OUTPUTS=4, CANCEL_TASK=6),
+        'actions.status': SimpleNamespace(RUNNING=2),
+    }
+    modules['camctl.contracts.enums'].enum_for = lambda name: enums.get(name, Status)
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
     modules['camctl.contracts.values'].ObjectId = lambda value: value
     modules['camctl.contracts.values'].UtcMicros = lambda value: value
@@ -178,6 +185,9 @@ def load_repository():
     modules['camctl.history.events'].reason_for_branch = lambda *args: 1
     modules['camctl.contracts.workflow_errors'].action_error_id = lambda *args: 1
     modules['camctl.contracts.workflow_errors'].item_error_id = lambda *args: 1
+    handoff = load_handoff()
+    for name in ('publishable_copy_error', 'withdrawal_waiter_eligible'):
+        setattr(modules['camctl.outputs.handoff'], name, getattr(handoff, name))
     modules['camctl.outputs.read_discovery'].DEFAULT_BATCH_SIZE = 32
     modules['camctl.outputs.read_discovery'].positive_limit = lambda value: value
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
@@ -632,6 +642,7 @@ def load_withdrawal():
     modules['camctl.contracts.enums'].enum_for = lambda name: (
         Status if name == 'deliveries.status' else SimpleNamespace(UNKNOWN=6))
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
+    modules['camctl.outputs.handoff'].withdrawal_delivery_eligible = load_handoff().withdrawal_delivery_eligible
     modules['camctl.persistence.runtime'].canonical_directory_binding = str
     name = 'camctl.outputs._isolated_withdrawal'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/withdrawal.py')

@@ -54,3 +54,27 @@ def test_cleanup_success_rejects_wrong_phase_before_reading_restriction():
     with pytest.raises(ConsistencyError, match="清理成功要求成员处于删除中"):
         validate_cleanup_success(item={"status": int(STATUS.UNRESOLVED)},
                                  outcome=CleanupOutcomeChoice.DELETED, output={})
+
+
+def test_device_absence_requires_prior_file_fact_for_waiting_item():
+    from camctl.outputs.cleanup_flow import cleanup_device_absence_needs_record
+    presence = enum_for("device_files.presence_state")
+    assert cleanup_device_absence_needs_record(item_status=int(STATUS.DELETING), presence_state=int(presence.PRESENT))
+    assert not cleanup_device_absence_needs_record(item_status=int(STATUS.PENDING_DELETE), presence_state=int(presence.ABSENT))
+    with pytest.raises(ConsistencyError, match="缺席事实先行"):
+        cleanup_device_absence_needs_record(item_status=int(STATUS.PENDING_DELETE), presence_state=int(presence.PRESENT))
+    with pytest.raises(ConsistencyError, match="文件存在性未知"):
+        cleanup_device_absence_needs_record(item_status=int(STATUS.DELETING), presence_state=int(presence.UNKNOWN))
+
+
+@pytest.mark.parametrize("state_name", ["NOT_NEEDED", "PENDING"])
+def test_local_absence_requires_prior_file_fact_for_waiting_item(state_name):
+    from camctl.outputs.cleanup_flow import cleanup_local_absence_needs_record
+    cleanup = enum_for("intermediate_files.cleanup_state")
+    state = int(cleanup[state_name])
+    assert cleanup_local_absence_needs_record(item_status=int(STATUS.DELETING), cleanup_state=state)
+    with pytest.raises(ConsistencyError, match="缺席事实先行"):
+        cleanup_local_absence_needs_record(item_status=int(STATUS.PENDING_DELETE), cleanup_state=state)
+    assert not cleanup_local_absence_needs_record(item_status=int(STATUS.PENDING_DELETE), cleanup_state=int(cleanup.COMPLETED))
+    with pytest.raises(ConsistencyError, match="清理状态未决"):
+        cleanup_local_absence_needs_record(item_status=int(STATUS.DELETING), cleanup_state=int(cleanup.UNKNOWN))
