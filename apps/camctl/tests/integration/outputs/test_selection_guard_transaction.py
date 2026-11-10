@@ -14,28 +14,19 @@ from camctl.history.events import branch_of, business_columns, event_type_name
 from camctl.persistence.models import DbOutcomeKind
 from camctl.history.reads import ReadCoverage
 from camctl.history.replay import EntityImage, apply_forward, apply_reverse
-from camctl.history import validators
-from camctl.history.validators import register_guard
 from camctl.history.validators import EventValidationError, ValidatedEvent
 from ..support.output_planning import capture_operation
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.transactions import commit_operation, row_facts
+from camctl.persistence.repositories.transactions import row_facts
+
+from ..support.output_source_cases import observed_event_guards
 
 from .test_selection_guard import _proposal, _request, _snapshot, _NOW, selection_database, family_database
 from .test_selection_event_sequence import _Sequence
 from ..support.output_planning import storage_fault as _FaultConnection
 
 
-@pytest.fixture(autouse=True)
-def restore_formal_guards():
-    """观察 H1 当前事实后，由所属模块恢复正式登记，不保留测试 spy。"""
-    try:
-        yield
-    finally:
-        register_capture_guards()
-        outputs.register_outputs_guards()
 
 
 class _SelectionProposal:
@@ -74,7 +65,8 @@ def _sparse_event(event, owners):
 
 @pytest.mark.parametrize("mode", list(SelectionMode))
 @pytest.mark.parametrize("mutation", ["omit", "append", "swap_ids", "reverse_rows", "sparse_ids"])
-def test_transaction_preserves_complete_saved_order(selection_database, mode, mutation):
+def test_transaction_preserves_complete_saved_order(observed_event_guards, selection_database, mode, mutation):
+    storage, callbacks = observed_event_guards
     owned = selection_database
     ids = (705, 703, 999, 704) if mode is SelectionMode.EXPLICIT_IDS else ()
     _request(owned.connection, mode, ids)
@@ -82,8 +74,8 @@ def test_transaction_preserves_complete_saved_order(selection_database, mode, mu
     before = tuple(owned.connection.iterdump())
     key = new_operation_key()
     saved = capture_operation(owned, lambda target:
-        outputs.OutputsRepository().fix_selection(command, key, target))
-    receipt = commit_operation(_SelectionProposal(saved, mutation), key, owned)
+        outputs.OutputsRepository(storage=storage).fix_selection(command, key, target))
+    receipt = storage.commit_operation(_SelectionProposal(saved, mutation), key, owned)
     if mutation not in ("reverse_rows", "sparse_ids"):
         assert receipt.kind == "rolled_back", receipt.error
         assert isinstance(receipt.error, EventValidationError), receipt.error
@@ -109,9 +101,10 @@ def test_transaction_preserves_complete_saved_order(selection_database, mode, mu
 
 @pytest.mark.parametrize("mode", list(SelectionMode))
 @pytest.mark.parametrize("state", ["uncovered", "current_item", "other_selection"])
-def test_formal_transaction_requires_reliable_empty_current_selection(selection_database, monkeypatch, mode, state):
+def test_formal_transaction_requires_reliable_empty_current_selection(observed_event_guards, selection_database, monkeypatch, mode, state):
+    storage, callbacks = observed_event_guards
     owned = selection_database
-    event, context = _proposal(owned, mode)
+    event, context = _proposal(owned, mode, storage=storage)
     if state == "uncovered":
         ranges = dict(context.read_coverage.ranges)
         ranges.pop(("obtain_items", "selection_id"))
@@ -129,15 +122,13 @@ def test_formal_transaction_requires_reliable_empty_current_selection(selection_
         owned.connection.commit()
         context.state_rows["obtain_items"][99] = row_facts(owned.connection, "obtain_items", 99)
     before = tuple(owned.connection.iterdump())
-    original = validators.NAMED_GUARDS["source_selection"]
     seen = []
 
     def inspect(proposal, current):
         seen.append((proposal.event_type, proposal.reason))
-        original(proposal, current)
 
-    register_guard("source_selection", inspect)
-    receipt = commit_operation(_Sequence((event,), context), new_operation_key(), owned)
+    callbacks["source_selection"] = inspect
+    receipt = storage.commit_operation(_Sequence((event,), context), new_operation_key(), owned)
     assert seen == [(4, 1)], receipt.error
     if state == "other_selection":
         assert receipt.kind == "completed", receipt.error
@@ -150,14 +141,15 @@ def test_formal_transaction_requires_reliable_empty_current_selection(selection_
 
 
 @pytest.mark.parametrize("failure", ["INSERT INTO obtain_items", "UPDATE obtain_source_selections SET"])
-def test_selection_write_failure_rolls_back_history_and_projection(selection_database, failure):
+def test_selection_write_failure_rolls_back_history_and_projection(observed_event_guards, selection_database, failure):
+    storage, callbacks = observed_event_guards
     owned = selection_database
     _request(owned.connection, SelectionMode.DEFAULT)
     command = outputs.FixSelection(61, _snapshot(owned.connection), _NOW)
     before = tuple(owned.connection.iterdump())
     target = replace(owned, connection=_FaultConnection(owned.connection, failure))
     key = new_operation_key()
-    receipt = outputs.OutputsRepository().fix_selection(command, key, target)
+    receipt = outputs.OutputsRepository(storage=storage).fix_selection(command, key, target)
     assert receipt.kind is DbOutcomeKind.ROLLED_BACK, receipt.error
     assert type(receipt.error) is sqlite3.DatabaseError, receipt.error
     assert tuple(owned.connection.iterdump()) == before
@@ -165,7 +157,8 @@ def test_selection_write_failure_rolls_back_history_and_projection(selection_dat
 
 @pytest.mark.parametrize("mode", list(SelectionMode))
 @pytest.mark.parametrize("sparse", [False, True])
-def test_history_replays_saved_choice_without_current_catalog(selection_database, mode, monkeypatch, sparse):
+def test_history_replays_saved_choice_without_current_catalog(observed_event_guards, selection_database, mode, monkeypatch, sparse):
+    storage, callbacks = observed_event_guards
     owned = selection_database
     ids = (705, 703, 999, 704) if mode is SelectionMode.EXPLICIT_IDS else ()
     _request(owned.connection, mode, ids)
@@ -185,11 +178,11 @@ def test_history_replays_saved_choice_without_current_catalog(selection_database
     key = new_operation_key()
     if sparse:
         saved_proposal = capture_operation(owned, lambda target:
-            outputs.OutputsRepository().fix_selection(command, key, target))
-        receipt = commit_operation(_SelectionProposal(saved_proposal, "sparse_ids"), key, owned)
+            outputs.OutputsRepository(storage=storage).fix_selection(command, key, target))
+        receipt = storage.commit_operation(_SelectionProposal(saved_proposal, "sparse_ids"), key, owned)
         assert receipt.kind == "completed", receipt.error
     else:
-        receipt = outputs.OutputsRepository().fix_selection(command, key, owned)
+        receipt = outputs.OutputsRepository(storage=storage).fix_selection(command, key, owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     with closing(owned.connection.execute(
         "SELECT id, transaction_id, event_type, event_version, occurred_at, clock_status, change_seq, body_json"

@@ -7,15 +7,14 @@ import sqlite3
 import pytest
 
 from camctl.contracts.values import new_operation_key
-from camctl.history import validators
-from camctl.history.validators import register_guard
 from camctl.history.events import business_columns
 from camctl.history.reads import ReadCoverage, PlanReadScope
 from camctl.history.validators import EventValidationError
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.transactions import commit_operation, event_envelope, row_change, row_facts, update_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change, row_facts, update_change
+
+from ..support.output_source_cases import observed_event_guards
 
 from .test_selection_guard import _proposal, _NOW, selection_database, family_database
 from .test_selection_event_sequence import _Sequence
@@ -35,14 +34,6 @@ _CASES = {
 }
 
 
-@pytest.fixture(autouse=True)
-def restore_formal_guards():
-    """观察 H1 当前事实后，由所属模块恢复正式登记，不保留测试 spy。"""
-    try:
-        yield
-    finally:
-        register_capture_guards()
-        outputs.register_outputs_guards()
 
 
 def _file(connection, identity, kind, size, *, pending_repair: bool = False):
@@ -83,7 +74,7 @@ def _output(connection, identity, kind, file_id):
         return cursor.fetchone()[0]
 
 
-def _scenario(owned, mode, case):
+def _scenario(owned, mode, case, *, storage):
     connection = owned.connection
     kind, size, previous_kind, previous_size = _CASES[case]
     if previous_kind is not None:
@@ -92,7 +83,7 @@ def _scenario(owned, mode, case):
     file_table, file_id = _file(
         connection, 999, kind, size, pending_repair=kind == 2)
     connection.commit()
-    initial, current = _proposal(owned, mode)
+    initial, current = _proposal(owned, mode, storage=storage)
     current.state_rows["plans"] = {1: row_facts(connection, "plans", 1)}
     current = observe_ranges(current, connection,
         ("output_origins", "output_id", 999),
@@ -107,7 +98,7 @@ def _scenario(owned, mode, case):
         facts = row_facts(connection, table, identity)
         rows.append(row_change(table, identity, {column: facts[column] for column in business_columns(table)}))
         current.owners[table, identity] = ("output", 999)
-    changed, future = _proposal(owned, mode)
+    changed, future = _proposal(owned, mode, storage=storage)
     current.owners.update(future.owners)
     connection.execute("DELETE FROM output_origins WHERE id=?", (origin_id,))
     connection.execute("DELETE FROM outputs WHERE id=999")
@@ -139,24 +130,22 @@ def _changes_selection(case, mode):
 @pytest.mark.parametrize("case", _CASES)
 @pytest.mark.parametrize("registration_first", [False, True])
 @pytest.mark.parametrize("select_changed", [False, True])
-def test_derived_registration_and_origin_take_effect_together(
+def test_derived_registration_and_origin_take_effect_together(observed_event_guards,
     selection_database, monkeypatch, mode, case, registration_first, select_changed,
 ):
-    register_capture_guards()
-    initial, changed, registrations, context = _scenario(selection_database, mode, case)
+    storage, callbacks = observed_event_guards
+    initial, changed, registrations, context = _scenario(selection_database, mode, case, storage=storage)
     selection = changed if select_changed else initial
     events = (*registrations, selection) if registration_first else (selection, *registrations)
     before = tuple(selection_database.connection.iterdump())
     seen = []
-    original = validators.NAMED_GUARDS["source_selection"]
 
     def inspect(event, current):
         seen.append((999 in current.state_rows["outputs"], any(
             row["output_id"] == 999 for row in current.state_rows["output_origins"].values())))
-        original(event, current)
 
-    register_guard("source_selection", inspect)
-    receipt = commit_operation(
+    callbacks["source_selection"] = inspect
+    receipt = storage.commit_operation(
         _Sequence(
             events,
             context,
@@ -201,12 +190,12 @@ def test_derived_registration_and_origin_take_effect_together(
 
 @pytest.mark.parametrize("kind", ["preview_only", "repair_only"])
 @pytest.mark.parametrize("failure", ["INSERT INTO output_origins", "INSERT INTO obtain_items"])
-def test_derived_registration_and_selection_rollback_together(selection_database, monkeypatch, kind, failure):
-    register_capture_guards()
-    _, selection, registrations, context = _scenario(selection_database, SelectionMode.EXPLICIT_IDS, kind)
+def test_derived_registration_and_selection_rollback_together(observed_event_guards, selection_database, monkeypatch, kind, failure):
+    storage, callbacks = observed_event_guards
+    _, selection, registrations, context = _scenario(selection_database, SelectionMode.EXPLICIT_IDS, kind, storage=storage)
     before = tuple(selection_database.connection.iterdump())
     target = replace(selection_database, connection=_FaultConnection(selection_database.connection, failure))
-    receipt = commit_operation(
+    receipt = storage.commit_operation(
         _Sequence(
             (*registrations, selection),
             context,

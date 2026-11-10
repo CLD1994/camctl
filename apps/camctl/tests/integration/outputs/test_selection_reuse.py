@@ -18,18 +18,18 @@ from .test_selection_authority import _request, _snapshot, _NOW, selection_datab
 from ..operations.test_result_reuse import _FaultConnection
 
 
-def _save(owned, mode=SelectionMode.DEFAULT, ids=()):
+def _save(owned, mode=SelectionMode.DEFAULT, ids=(), *, storage=None):
     _request(owned.connection, mode, ids)
     command = outputs.FixSelection(61, _snapshot(owned.connection, mode, ids), _NOW)
     key = new_operation_key()
-    result = outputs.OutputsRepository().fix_selection(command, key, owned)
+    result = outputs.OutputsRepository(storage=storage).fix_selection(command, key, owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     return command, key
 
 
-def _reuse(owned, command, key):
+def _reuse(owned, command, key, *, storage=None):
     before = tuple(owned.connection.iterdump())
-    result = outputs.OutputsRepository().fix_selection(command, key, owned)
+    result = outputs.OutputsRepository(storage=storage).fix_selection(command, key, owned)
     assert tuple(owned.connection.iterdump()) == before
     return result
 

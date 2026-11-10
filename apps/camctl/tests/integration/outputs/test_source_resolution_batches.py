@@ -8,19 +8,12 @@ import pytest
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.transactions import BoundedCommandPlan
 from camctl.outputs.sources import SourceSpec
 
 from .test_sources import _NOW, _seed_action, _six_form_environment
-from ..support.output_source_cases import commit_source, observe_source_reads, accept_body, SourceSequence, captured_source, OperationFailure, QueryProbe
+from ..support.output_source_cases import commit_source, source_observation, accept_body, SourceSequence, captured_source, OperationFailure, QueryProbe
 
-register_acceptance_guards()
-register_operation_guards()
-register_capture_guards()
-outputs.register_outputs_guards()
 pytestmark=pytest.mark.asyncio
 
 
@@ -38,11 +31,13 @@ def _request(owned, spec, *, count=0):
     return outputs.ResolveSources(30, spec, _NOW)
 
 
-async def test_source_resolution_streams_bounded_events_and_returns_finite_result(tmp_path, monkeypatch):
+async def test_source_resolution_streams_bounded_events_and_returns_finite_result(source_observation, tmp_path, monkeypatch):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         request = _request(owned, SourceSpec(plan_instance_id=2), count=140)
-        result = outputs.OutputsRepository(4).resolve_sources(request, new_operation_key(), owned)
+        result = outputs.OutputsRepository(4, storage=storage).resolve_sources(request, new_operation_key(), owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert result.value.member_count == 141
         assert result.value.selection_count == 141
@@ -56,7 +51,9 @@ async def test_source_resolution_streams_bounded_events_and_returns_finite_resul
         owned.connection.close()
 
 
-async def test_bounded_source_write_uses_its_business_storage_rules(tmp_path):
+async def test_bounded_source_write_uses_its_business_storage_rules(source_observation, tmp_path):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories.validation import BusinessStorage
 
@@ -82,12 +79,14 @@ async def test_bounded_source_write_uses_its_business_storage_rules(tmp_path):
         owned.connection.close()
 
 
-async def test_source_resolution_rejects_request_different_from_saved_input(tmp_path):
+async def test_source_resolution_rejects_request_different_from_saved_input(source_observation, tmp_path):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         request = _request(owned, SourceSpec(plan_instance_id=2))
         before = tuple(owned.connection.iterdump())
-        result = outputs.OutputsRepository().resolve_sources(
+        result = outputs.OutputsRepository(storage=storage).resolve_sources(
             replace(request, spec=SourceSpec(current_plan=True)), new_operation_key(), owned)
         assert result.kind is DbOutcomeKind.ROLLED_BACK
         assert tuple(owned.connection.iterdump()) == before
@@ -95,7 +94,9 @@ async def test_source_resolution_rejects_request_different_from_saved_input(tmp_
         owned.connection.close()
 
 
-async def test_obtain_initialization_streams_all_fixed_dependencies(tmp_path, monkeypatch):
+async def test_obtain_initialization_streams_all_fixed_dependencies(source_observation, tmp_path, monkeypatch):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         request = _request(owned, SourceSpec(plan_instance_id=2), count=140)
@@ -105,7 +106,7 @@ async def test_obtain_initialization_streams_all_fixed_dependencies(tmp_path, mo
         owned.connection.executemany("INSERT INTO action_dependencies(id,action_id,depends_on_action_id) VALUES(?,30,?)",
             enumerate(members, 1))
         owned.connection.commit()
-        result = outputs.OutputsRepository(4).start_obtain_action(
+        result = outputs.OutputsRepository(4, storage=storage).start_obtain_action(
             outputs.StartObtainAction(30, _NOW), new_operation_key(), owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert owned.connection.execute("SELECT COUNT(*) FROM obtain_source_selections").fetchone() == (141,)
@@ -123,13 +124,15 @@ async def test_obtain_initialization_streams_all_fixed_dependencies(tmp_path, mo
     (SourceSpec(plan_instance_id=2), (21,), 2),
 ])
 @pytest.mark.parametrize("action_type", [4,5])
-async def test_six_original_forms_publish_exact_members_without_delete_selections(tmp_path, form, members, plan, action_type):
+async def test_six_original_forms_publish_exact_members_without_delete_selections(source_observation, tmp_path, form, members, plan, action_type):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         request = _request(owned, form)
         owned.connection.execute("UPDATE actions SET type=? WHERE id=30", (action_type,))
         owned.connection.commit()
-        result = outputs.OutputsRepository(1).resolve_sources(request,new_operation_key(),owned)
+        result = outputs.OutputsRepository(1, storage=storage).resolve_sources(request,new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert result.value.member_count == len(members)
         assert result.value.source_plan_id == plan
@@ -142,12 +145,14 @@ async def test_six_original_forms_publish_exact_members_without_delete_selection
 
 @pytest.mark.parametrize("finite", [False,True])
 @pytest.mark.parametrize("mutation", ["missing_header","wrong_owner","wrong_member","wrong_branch","missing_final","replace_final","changed_time","fake_header_count"])
-async def test_source_kernel_rejects_entire_malformed_group_in_both_entries(tmp_path,monkeypatch,finite,mutation):
+async def test_source_kernel_rejects_entire_malformed_group_in_both_entries(source_observation, tmp_path,monkeypatch,finite,mutation):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         request = _request(owned,SourceSpec(plan_instance_id=2),count=3)
         before = tuple(owned.connection.iterdump())
-        result=commit_source(owned,request,finite=finite,mutation=mutation)
+        result=commit_source(owned,request,finite=finite,mutation=mutation, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.ROLLED_BACK, (mutation,result)
         assert tuple(owned.connection.iterdump()) == before
     finally:
@@ -155,11 +160,13 @@ async def test_source_kernel_rejects_entire_malformed_group_in_both_entries(tmp_
 
 
 @pytest.mark.parametrize("finite", [False,True])
-async def test_both_entries_accept_the_same_complete_canonical_source_group(tmp_path,monkeypatch,finite):
+async def test_both_entries_accept_the_same_complete_canonical_source_group(source_observation, tmp_path,monkeypatch,finite):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         request = _request(owned,SourceSpec(plan_instance_id=2),count=3)
-        result=commit_source(owned,request,finite=finite)
+        result=commit_source(owned,request,finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert result.value.member_count == 4
     finally:
@@ -167,12 +174,14 @@ async def test_both_entries_accept_the_same_complete_canonical_source_group(tmp_
 
 
 @pytest.mark.parametrize("mutation", ["missing_context","fake_reads","fake_context","reset_and_replace_final"])
-async def test_source_kernel_rejects_missing_or_fake_sql_port(tmp_path,monkeypatch,mutation):
+async def test_source_kernel_rejects_missing_or_fake_sql_port(source_observation, tmp_path,monkeypatch,mutation):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         request = _request(owned,SourceSpec(plan_instance_id=2),count=3)
         before = tuple(owned.connection.iterdump())
-        result=commit_source(owned,request,mutation=mutation)
+        result=commit_source(owned,request,mutation=mutation, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.ROLLED_BACK
         assert tuple(owned.connection.iterdump()) == before
     finally:
@@ -180,13 +189,15 @@ async def test_source_kernel_rejects_missing_or_fake_sql_port(tmp_path,monkeypat
 
 
 @pytest.mark.parametrize("source_state", [1,2])
-async def test_start_with_reliable_zero_initialization_preserves_source_state(tmp_path,source_state):
+async def test_start_with_reliable_zero_initialization_preserves_source_state(source_observation, tmp_path,source_state):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _, owned = _six_form_environment(tmp_path)
     try:
         _request(owned,SourceSpec(plan_instance_id=2))
         owned.connection.execute("UPDATE actions SET status=1,execution_started=0,source_resolution_state=?,resolved_source_plan_id=? WHERE id=30", (source_state,2 if source_state==2 else None))
         owned.connection.commit()
-        result = outputs.OutputsRepository(1).start_obtain_action(outputs.StartObtainAction(30,_NOW),new_operation_key(),owned)
+        result = outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(30,_NOW),new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert owned.connection.execute("SELECT status,execution_started,source_resolution_state FROM actions WHERE id=30").fetchone() == (2,1,source_state)
         assert owned.connection.execute("SELECT COUNT(*) FROM obtain_source_selections").fetchone() == (0,)
@@ -194,7 +205,7 @@ async def test_start_with_reliable_zero_initialization_preserves_source_state(tm
         owned.connection.close()
 
 
-async def _real_environment(tmp_path, *, cleanup=False, source=None, captures=3):
+async def _real_environment(tmp_path, *, storage, cleanup=False, source=None, captures=3):
     """实际受理和实际开始建立完整主对象目录，供 H/原键核实。"""
     from camctl.acceptance.input import ParsedInput
     from camctl.acceptance.service import CommandMode, ProcessInput
@@ -218,7 +229,7 @@ async def _real_environment(tmp_path, *, cleanup=False, source=None, captures=3)
         owner["params"]["purpose"]="manual"
     owner_plan = await accept(_plan_body(request_id="502",actions=[owner]))
     owner_id = owned.connection.execute("SELECT id FROM actions WHERE plan_id=?",(owner_plan,)).fetchone()[0]
-    repository = outputs.OutputsRepository(1)
+    repository = outputs.OutputsRepository(1, storage=storage)
     if cleanup:
         from camctl.outputs.cleanup_flow import StartCleanupAction
         result = repository.start_cleanup_action(StartCleanupAction(owner_id,_NOW),new_operation_key(),owned)
@@ -230,9 +241,11 @@ async def _real_environment(tmp_path, *, cleanup=False, source=None, captures=3)
     return target,owned,request
 
 
-async def test_original_source_key_rechecks_original_h_after_later_work_and_new_ids(tmp_path):
-    _, owned, request = await _real_environment(tmp_path)
-    repository = outputs.OutputsRepository(1)
+async def test_original_source_key_rechecks_original_h_after_later_work_and_new_ids(source_observation, tmp_path):
+    observation, callbacks = source_observation
+    storage = observation.storage
+    _, owned, request = await _real_environment(tmp_path, storage=storage)
+    repository = outputs.OutputsRepository(1, storage=storage)
     key = new_operation_key()
     try:
         first = repository.resolve_sources(request,key,owned)
@@ -255,7 +268,9 @@ async def test_original_source_key_rechecks_original_h_after_later_work_and_new_
 @pytest.mark.parametrize("start",[False,True])
 @pytest.mark.parametrize("finite",[False,True])
 @pytest.mark.parametrize("mutation",["missing_header","missing_final","replace_final","changed_time"])
-async def test_initialization_and_failure_streams_reject_partial_groups(tmp_path,monkeypatch,start,finite,mutation):
+async def test_initialization_and_failure_streams_reject_partial_groups(source_observation, tmp_path,monkeypatch,start,finite,mutation):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _,owned=_six_form_environment(tmp_path)
     try:
         request=_request(owned,SourceSpec(action_instance_id=999))
@@ -267,7 +282,7 @@ async def test_initialization_and_failure_streams_reject_partial_groups(tmp_path
         owned.connection.commit()
         before=tuple(owned.connection.iterdump())
         outcome=commit_source(owned,outputs.StartObtainAction(30,_NOW) if start else request,
-            start=start,finite=finite,mutation=mutation)
+            start=start,finite=finite,mutation=mutation, storage=storage, observation=observation)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK, outcome
         assert tuple(owned.connection.iterdump()) == before
     finally:
@@ -275,13 +290,15 @@ async def test_initialization_and_failure_streams_reject_partial_groups(tmp_path
 
 
 @pytest.mark.parametrize("finite",[False,True])
-async def test_canonical_failure_binds_original_error_and_parent_completion(tmp_path,monkeypatch,finite):
+async def test_canonical_failure_binds_original_error_and_parent_completion(source_observation, tmp_path,monkeypatch,finite):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _,owned=_six_form_environment(tmp_path)
     try:
         request=_request(owned,SourceSpec(action_instance_id=999))
         owned.connection.execute("UPDATE actions SET status=3 WHERE id IN (11,12,13,14)")
         owned.connection.commit()
-        outcome=commit_source(owned,request,finite=finite)
+        outcome=commit_source(owned,request,finite=finite, storage=storage, observation=observation)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         assert not outcome.value.fixed
         assert outcome.value.error_details["reason"] == "action_not_found"
@@ -294,7 +311,9 @@ async def test_canonical_failure_binds_original_error_and_parent_completion(tmp_
 
 @pytest.mark.parametrize("source_state",[1,2])
 @pytest.mark.parametrize("violation",["existing_selection","pending_with_dependency","cancel"])
-async def test_start_rejects_nonempty_pending_already_initialized_or_canceled(tmp_path,source_state,violation):
+async def test_start_rejects_nonempty_pending_already_initialized_or_canceled(source_observation, tmp_path,source_state,violation):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _,owned=_six_form_environment(tmp_path)
     try:
         _request(owned,SourceSpec(plan_instance_id=2))
@@ -307,7 +326,7 @@ async def test_start_rejects_nonempty_pending_already_initialized_or_canceled(tm
             owned.connection.execute("UPDATE actions SET status=2,execution_started=1,cancel_requested=1 WHERE id=30")
         owned.connection.commit()
         before=tuple(owned.connection.iterdump())
-        result=outputs.OutputsRepository(1).start_obtain_action(outputs.StartObtainAction(30,_NOW),new_operation_key(),owned)
+        result=outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(30,_NOW),new_operation_key(),owned)
         if source_state==2 and violation=="pending_with_dependency":
             assert result.kind is DbOutcomeKind.COMPLETED, result.error
         else:
@@ -321,7 +340,9 @@ async def test_start_rejects_nonempty_pending_already_initialized_or_canceled(tm
         owned.connection.close()
 
 
-async def test_bound_port_from_another_connection_is_rejected(tmp_path,monkeypatch):
+async def test_bound_port_from_another_connection_is_rejected(source_observation, tmp_path,monkeypatch):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
     from camctl.persistence.event_reads import SqlEventReads
     path,owned=_six_form_environment(tmp_path)
@@ -330,10 +351,10 @@ async def test_bound_port_from_another_connection_is_rejected(tmp_path,monkeypat
         request=_request(owned,SourceSpec(plan_instance_id=2))
         before=tuple(owned.connection.iterdump())
         from camctl.persistence.repositories.transactions import commit_operation
-        proposal,key,result=captured_source(owned,request)
+        proposal,key,result=captured_source(owned,request, storage=storage)
         def foreign(context,*_):
             return replace(context,current_reads=SqlEventReads(other.connection,context.current_reads.scope))
-        result=commit_operation(SourceSequence(proposal,request,result,change_context=foreign),key,owned)
+        result=storage.commit_operation(SourceSequence(proposal,request,result,change_context=foreign),key,owned)
         assert result.kind=="rolled_back"
         assert tuple(owned.connection.iterdump())==before
     finally:
@@ -343,10 +364,12 @@ async def test_bound_port_from_another_connection_is_rejected(tmp_path,monkeypat
 
 @pytest.mark.parametrize("cleanup",[False,True])
 @pytest.mark.parametrize("committed",[False,True])
-async def test_unknown_commit_recovers_same_source_request_and_ids_after_reopen(tmp_path,cleanup,committed):
+async def test_unknown_commit_recovers_same_source_request_and_ids_after_reopen(source_observation, tmp_path,cleanup,committed):
+    observation, callbacks = source_observation
+    storage = observation.storage
     import sqlite3
     from camctl.persistence.runtime import DbConfig,DbOpenMode,OwnedConnection,open_existing
-    path,owned,request=await _real_environment(tmp_path,cleanup=cleanup)
+    path,owned,request=await _real_environment(tmp_path,cleanup=cleanup, storage=storage)
     key=new_operation_key()
     db=owned.connection
     class LoseCommit:
@@ -362,13 +385,13 @@ async def test_unknown_commit_recovers_same_source_request_and_ids_after_reopen(
                     db.execute(sql,args)
                 raise sqlite3.OperationalError("commit response lost")
             return db.execute(sql,args)
-    result=outputs.OutputsRepository(1).resolve_sources(request,key,OwnedConnection(LoseCommit(),None))
+    result=outputs.OutputsRepository(1, storage=storage).resolve_sources(request,key,OwnedConnection(LoseCommit(),None))
     assert result.kind is DbOutcomeKind.UNKNOWN
     db.close()
     owned=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
     try:
         before=tuple(owned.connection.execute("SELECT id,action_id,depends_on_action_id FROM action_dependencies"))
-        recovered=outputs.OutputsRepository(1).resolve_sources(request,key,owned)
+        recovered=outputs.OutputsRepository(1, storage=storage).resolve_sources(request,key,owned)
         assert recovered.kind is DbOutcomeKind.COMPLETED,recovered.error
         assert recovered.value.member_count==3
         after=tuple(owned.connection.execute("SELECT id,action_id,depends_on_action_id FROM action_dependencies"))
@@ -380,7 +403,9 @@ async def test_unknown_commit_recovers_same_source_request_and_ids_after_reopen(
         owned.connection.close()
 
 
-async def test_non_obtain_start_cannot_smuggle_obtain_rows(tmp_path,monkeypatch):
+async def test_non_obtain_start_cannot_smuggle_obtain_rows(source_observation, tmp_path,monkeypatch):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.outputs.cleanup_flow import StartCleanupAction
     from camctl.persistence.repositories.transactions import row_change
     _,owned=_six_form_environment(tmp_path)
@@ -393,26 +418,28 @@ async def test_non_obtain_start_cannot_smuggle_obtain_rows(tmp_path,monkeypatch)
         from ..support.output_planning import capture_operation,EventSequence
         from camctl.persistence.repositories.transactions import commit_operation
         key=new_operation_key()
-        proposal=capture_operation(owned,lambda copy:outputs.OutputsRepository().start_cleanup_action(
+        proposal=capture_operation(owned,lambda copy:outputs.OutputsRepository(storage=storage).start_cleanup_action(
             StartCleanupAction(30,_NOW),key,copy))
         event=proposal.events[0]
         extra=row_change('obtain_source_selections',1,dict(dependency_id=1,status=1,error_code=None,error_details_json=None))
         events=(replace(event,rows=(*event.rows,extra)),*proposal.events[1:])
-        result=commit_operation(EventSequence(events,proposal),key,owned)
+        result=storage.commit_operation(EventSequence(events,proposal),key,owned)
         assert result.kind=="rolled_back"
         assert tuple(owned.connection.iterdump())==before
     finally:
         owned.connection.close()
 
 
-async def test_source_original_key_uses_original_ids_when_other_owners_add_rows(tmp_path):
+async def test_source_original_key_uses_original_ids_when_other_owners_add_rows(source_observation, tmp_path):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.acceptance.input import ParsedInput
     from camctl.acceptance.service import CommandMode,ProcessInput
     from camctl.persistence.repositories.acceptance import AcceptanceRepository
     from ..acceptance.test_acceptance import Catalog,_plan_body
-    _,owned,request=await _real_environment(tmp_path)
+    _,owned,request=await _real_environment(tmp_path, storage=storage)
     try:
-        repo=outputs.OutputsRepository(1)
+        repo=outputs.OutputsRepository(1, storage=storage)
         key=new_operation_key()
         first=repo.resolve_sources(request,key,owned)
         assert first.kind is DbOutcomeKind.COMPLETED,first.error
@@ -438,10 +465,12 @@ async def test_source_original_key_uses_original_ids_when_other_owners_add_rows(
     "UPDATE obtain_source_selections SET id=999 WHERE id=1",
     "UPDATE action_dependencies SET action_id=2 WHERE id=1",
 ])
-async def test_original_source_key_requires_current_immutable_rows_to_remain(tmp_path,sql):
-    _,owned,request=await _real_environment(tmp_path)
+async def test_original_source_key_requires_current_immutable_rows_to_remain(source_observation, tmp_path,sql):
+    observation, callbacks = source_observation
+    storage = observation.storage
+    _,owned,request=await _real_environment(tmp_path, storage=storage)
     try:
-        repository=outputs.OutputsRepository(1)
+        repository=outputs.OutputsRepository(1, storage=storage)
         key=new_operation_key()
         first=repository.resolve_sources(request,key,owned)
         assert first.kind is DbOutcomeKind.COMPLETED,first.error
@@ -455,15 +484,17 @@ async def test_original_source_key_requires_current_immutable_rows_to_remain(tmp
         owned.connection.close()
 
 
-async def test_original_start_key_survives_source_fixed_after_start(tmp_path):
+async def test_original_start_key_survives_source_fixed_after_start(source_observation, tmp_path):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import OperationKey
-    _,owned,request=await _real_environment(tmp_path)
+    _,owned,request=await _real_environment(tmp_path, storage=storage)
     try:
         raw=owned.connection.execute("SELECT t.operation_key,e.occurred_at FROM history_events e JOIN history_transactions t ON t.id=e.transaction_id WHERE e.event_type=5 AND json_extract(e.body_json,'$.evidence.obtain_initialization_request.action_id')=? ORDER BY e.id LIMIT 1",(request.action_id,)).fetchone()
-        result=outputs.OutputsRepository(1).resolve_sources(request,new_operation_key(),owned)
+        result=outputs.OutputsRepository(1, storage=storage).resolve_sources(request,new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         before=tuple(owned.connection.iterdump())
-        replay=outputs.OutputsRepository(1).start_obtain_action(outputs.StartObtainAction(request.action_id,raw[1]),OperationKey(raw[0]),owned)
+        replay=outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(request.action_id,raw[1]),OperationKey(raw[0]),owned)
         assert replay.kind is DbOutcomeKind.COMPLETED,replay.error
         assert tuple(owned.connection.iterdump())==before
     finally:
@@ -471,7 +502,9 @@ async def test_original_start_key_survives_source_fixed_after_start(tmp_path):
 
 
 @pytest.mark.parametrize("committed",[False,True])
-async def test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids(tmp_path,committed):
+async def test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids(source_observation, tmp_path,committed):
+    observation, callbacks = source_observation
+    storage = observation.storage
     import sqlite3
     from camctl.persistence.runtime import DbConfig,DbOpenMode,OwnedConnection,open_existing
     from ..acceptance.test_source_member_proof import _body
@@ -496,16 +529,16 @@ async def test_fixed_initialization_unknown_commit_reuses_exact_original_selecti
                     db.execute(sql,args)
                 raise sqlite3.OperationalError("start commit response lost")
             return db.execute(sql,args)
-    first=outputs.OutputsRepository(1).start_obtain_action(command,key,OwnedConnection(LoseCommit(),None))
+    first=outputs.OutputsRepository(1, storage=storage).start_obtain_action(command,key,OwnedConnection(LoseCommit(),None))
     assert first.kind is DbOutcomeKind.UNKNOWN
     db.close()
     owned=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
     try:
-        replay=outputs.OutputsRepository(1).start_obtain_action(command,key,owned)
+        replay=outputs.OutputsRepository(1, storage=storage).start_obtain_action(command,key,owned)
         assert replay.kind is DbOutcomeKind.COMPLETED,replay.error
         assert tuple(owned.connection.execute("SELECT id,dependency_id,status FROM obtain_source_selections ORDER BY id"))==((1,1,1),(2,2,1))
         before=tuple(owned.connection.iterdump())
-        same=outputs.OutputsRepository(1).start_obtain_action(command,key,owned)
+        same=outputs.OutputsRepository(1, storage=storage).start_obtain_action(command,key,owned)
         assert same.kind is DbOutcomeKind.COMPLETED,same.error
         assert tuple(owned.connection.iterdump())==before
     finally:
@@ -514,7 +547,9 @@ async def test_fixed_initialization_unknown_commit_reuses_exact_original_selecti
 
 @pytest.mark.parametrize("scope_name",["SourceResolutionReadScope","ObtainInitializationReadScope"])
 @pytest.mark.parametrize("table",["outputs","device_files","obtain_items","output_origins"])
-async def test_source_scope_excludes_catalog_and_file_fact_ports(tmp_path,scope_name,table):
+async def test_source_scope_excludes_catalog_and_file_fact_ports(source_observation, tmp_path,scope_name,table):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
     from camctl.history import reads as scopes
     from camctl.persistence.event_reads import SqlEventReads
@@ -530,14 +565,16 @@ async def test_source_scope_excludes_catalog_and_file_fact_ports(tmp_path,scope_
 
 
 @pytest.mark.parametrize("finite",[False,True])
-async def test_both_entries_accept_complete_fixed_source_initialization(tmp_path,monkeypatch,finite):
+async def test_both_entries_accept_complete_fixed_source_initialization(source_observation, tmp_path,monkeypatch,finite):
+    observation, callbacks = source_observation
+    storage = observation.storage
     _,owned=_six_form_environment(tmp_path)
     try:
         _request(owned,SourceSpec(plan_instance_id=2))
         owned.connection.execute("UPDATE actions SET status=1,execution_started=0,source_resolution_state=2,resolved_source_plan_id=2 WHERE id=30")
         owned.connection.execute("INSERT INTO action_dependencies VALUES(17,30,21)")
         owned.connection.commit()
-        result=commit_source(owned,outputs.StartObtainAction(30,_NOW),start=True,finite=finite)
+        result=commit_source(owned,outputs.StartObtainAction(30,_NOW),start=True,finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert tuple(owned.connection.execute("SELECT id,dependency_id,status FROM obtain_source_selections"))==((1,17,1),)
     finally:
@@ -550,7 +587,9 @@ async def test_both_entries_accept_complete_fixed_source_initialization(tmp_path
     ("INSERT INTO report_entity_changes",0),("INSERT INTO entity_snapshot_progress",1),
     ("UPDATE actions",1),
 ])
-async def test_sql_failure_rolls_back_rows_history_directories_and_snapshot_progress(tmp_path,prefix,skip):
+async def test_sql_failure_rolls_back_rows_history_directories_and_snapshot_progress(source_observation, tmp_path,prefix,skip):
+    observation, callbacks = source_observation
+    storage = observation.storage
     import sqlite3
     from camctl.persistence.runtime import OwnedConnection
     _,owned=_six_form_environment(tmp_path)
@@ -561,7 +600,7 @@ async def test_sql_failure_rolls_back_rows_history_directories_and_snapshot_prog
         parts=prefix.split()
         fault=OperationFailure(db,sqlite3.SQLITE_INSERT if parts[0]=='INSERT' else sqlite3.SQLITE_UPDATE,
             parts[-1],after=skip)
-        result=outputs.OutputsRepository(1).resolve_sources(request,new_operation_key(),replace(owned,connection=fault))
+        result=outputs.OutputsRepository(1, storage=storage).resolve_sources(request,new_operation_key(),replace(owned,connection=fault))
         assert result.kind is DbOutcomeKind.ROLLED_BACK,result
         assert result.error is fault.error
         assert fault.matches>=skip+1
@@ -570,14 +609,16 @@ async def test_sql_failure_rolls_back_rows_history_directories_and_snapshot_prog
         owned.connection.close()
 
 
-async def test_source_write_and_original_key_keep_bounded_pages(tmp_path):
+async def test_source_write_and_original_key_keep_bounded_pages(source_observation, tmp_path):
     """不同规模下的真实写入及原键核实保持分页边界；进程组预算另行验证。"""
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.persistence.runtime import OwnedConnection
     records=[]
     for count in (20,200,600):
         directory=tmp_path/str(count)
         directory.mkdir()
-        _,owned,request=await _real_environment(directory,captures=count)
+        _,owned,request=await _real_environment(directory,captures=count, storage=storage)
         db=owned.connection
         stats={"max_fetch":0,"fetched":0,"sql_calls":0,"group_checks":0,"body_rows":0,"first_body_limit":None}
         txn=db.execute("SELECT MAX(id)+1 FROM history_transactions").fetchone()[0]
@@ -622,7 +663,7 @@ async def test_source_write_and_original_key_keep_bounded_pages(tmp_path):
                 return Cursor(cursor,body)
         try:
             measured=OwnedConnection(Measured(),None)
-            repository=outputs.OutputsRepository(4)
+            repository=outputs.OutputsRepository(4, storage=storage)
             key=new_operation_key()
             written=repository.resolve_sources(request,key,measured)
             assert written.kind is DbOutcomeKind.COMPLETED,written.error
@@ -642,13 +683,15 @@ async def test_source_write_and_original_key_keep_bounded_pages(tmp_path):
     print("P5_SOURCE_BATCHES "+json.dumps(records))
 
 
-async def test_bounded_context_cannot_carry_the_whole_source_plan(tmp_path,monkeypatch):
+async def test_bounded_context_cannot_carry_the_whole_source_plan(source_observation, tmp_path,monkeypatch):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.persistence.repositories.transactions import row_facts
     _,owned=_six_form_environment(tmp_path)
     try:
         request=_request(owned,SourceSpec(plan_instance_id=2),count=20)
         before=tuple(owned.connection.iterdump())
-        result=commit_source(owned,request,mutation='whole_source_plan')
+        result=commit_source(owned,request,mutation='whole_source_plan', storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.ROLLED_BACK,result
         assert tuple(owned.connection.iterdump())==before
     finally:
@@ -657,7 +700,9 @@ async def test_bounded_context_cannot_carry_the_whole_source_plan(tmp_path,monke
 
 @pytest.mark.parametrize("scope_name", ["SourceResolutionReadScope", "ObtainInitializationReadScope"])
 @pytest.mark.parametrize("table,identity", [("actions", 21), ("plans", 1), ("action_dependencies", 1), ("obtain_source_selections", 1)])
-async def test_unbound_source_scope_cannot_grant_point_fact_roles(tmp_path, scope_name, table, identity):
+async def test_unbound_source_scope_cannot_grant_point_fact_roles(source_observation, tmp_path, scope_name, table, identity):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
     from camctl.history import reads as scopes
     from camctl.persistence.event_reads import SqlEventReads
@@ -673,10 +718,12 @@ async def test_unbound_source_scope_cannot_grant_point_fact_roles(tmp_path, scop
 
 
 @pytest.mark.parametrize("start", [False, True])
-async def test_bound_source_scope_only_exposes_actual_canonical_page_roles(tmp_path, monkeypatch, start):
+async def test_bound_source_scope_only_exposes_actual_canonical_page_roles(source_observation, tmp_path, monkeypatch, start):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories import source_transactions as streams
-    _, owned, request = await _real_environment(tmp_path)
+    _, owned, request = await _real_environment(tmp_path, storage=storage)
     try:
         # 另一 owner 的真实已提交依赖/selection 不能借同表点读取进入当前角色。
         from camctl.acceptance.input import ParsedInput
@@ -686,7 +733,7 @@ async def test_bound_source_scope_only_exposes_actual_canonical_page_roles(tmp_p
         raw={"name":"other","type":"obtain_action_outputs","scheduled_at":"2026-01-15 09:00:00","params":{"source":{"plan_instance_id":"1"},"purpose":"manual"}}
         accepted=await accept_body(owned,_plan_body(request_id="503",actions=[raw]),occurred_at=_NOW)
         other=owned.connection.execute("SELECT id FROM actions WHERE plan_id=?",(accepted.plan_id,)).fetchone()[0]
-        repo=outputs.OutputsRepository(1)
+        repo=outputs.OutputsRepository(1, storage=storage)
         assert repo.start_obtain_action(outputs.StartObtainAction(other,_NOW),new_operation_key(),owned).kind is DbOutcomeKind.COMPLETED
         assert repo.resolve_sources(outputs.ResolveSources(other,SourceSpec(plan_instance_id=1),_NOW),new_operation_key(),owned).kind is DbOutcomeKind.COMPLETED
         if start:
@@ -713,8 +760,9 @@ async def test_bound_source_scope_only_exposes_actual_canonical_page_roles(tmp_p
                 assert reads.required("action_dependencies",17)["depends_on_action_id"] == 1
             else:
                 assert reads.optional("action_dependencies",q["dependency_first"]) is None
-        observe_source_reads(monkeypatch,inspect)
-        repository = outputs.OutputsRepository(1)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        repository = outputs.OutputsRepository(1, storage=storage)
         result = repository.start_obtain_action(outputs.StartObtainAction(request.action_id,_NOW),new_operation_key(),owned) if start else repository.resolve_sources(request,new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert checked
@@ -724,10 +772,10 @@ async def test_bound_source_scope_only_exposes_actual_canonical_page_roles(tmp_p
 
 
 
-async def _aggregate_role_world(tmp_path, start):
+async def _aggregate_role_world(tmp_path, start, *, storage):
     """真实三计划：目标 owner=8/main plan=3，源页与数值碰撞 action 分开。"""
     from ..acceptance.test_source_member_proof import _body
-    _, owned, _ = await _real_environment(tmp_path)
+    _, owned, _ = await _real_environment(tmp_path, storage=storage)
     body = _body()
     if not start:
         body["actions"][-1]["params"]["source"] = {"plan_instance_id":"1"}
@@ -738,24 +786,26 @@ async def _aggregate_role_world(tmp_path, start):
     assert accepted.plan_id == 3
     request = outputs.StartObtainAction(8,_NOW) if start else outputs.ResolveSources(8,SourceSpec(plan_instance_id=1),_NOW)
     if not start:
-        local_started = outputs.OutputsRepository(1).start_obtain_action(outputs.StartObtainAction(9,_NOW),new_operation_key(),owned)
+        local_started = outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(9,_NOW),new_operation_key(),owned)
         assert local_started.kind is DbOutcomeKind.COMPLETED, local_started.error
-        started = outputs.OutputsRepository(1).start_obtain_action(outputs.StartObtainAction(8,_NOW),new_operation_key(),owned)
+        started = outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(8,_NOW),new_operation_key(),owned)
         assert started.kind is DbOutcomeKind.COMPLETED, started.error
     return owned, request
 
 
-def _run_aggregate_role_command(owned, request, monkeypatch, *, start, finite, batch_size=1):
-    return commit_source(owned,request,start=start,finite=finite,batch_size=batch_size)
+def _run_aggregate_role_command(owned, request, monkeypatch, *, storage, observation, start, finite, batch_size=1):
+    return commit_source(owned,request,start=start,finite=finite,batch_size=batch_size, storage=storage, observation=observation)
 
 
 @pytest.mark.parametrize("start", [False,True])
 @pytest.mark.parametrize("finite", [False,True])
 @pytest.mark.parametrize("table", ["plans","action_dependencies","obtain_source_selections"])
-async def test_point_iteration_cannot_relabel_its_numeric_ids_as_actions(tmp_path,monkeypatch,start,finite,table):
+async def test_point_iteration_cannot_relabel_its_numeric_ids_as_actions(source_observation, tmp_path,monkeypatch,start,finite,table):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories import source_transactions as streams
-    owned,request = await _aggregate_role_world(tmp_path,start)
+    owned,request = await _aggregate_role_world(tmp_path,start, storage=storage)
     checked = []
     try:
         def inspect(db,event,context,reads,q):
@@ -774,8 +824,9 @@ async def test_point_iteration_cannot_relabel_its_numeric_ids_as_actions(tmp_pat
                 reads.optional("actions",identity)
             assert reads.required("actions",8)["plan_id"] == 3
             assert reads.required("plans",3)["id"] == 3
-        observe_source_reads(monkeypatch,inspect)
-        result = _run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result = _run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert checked
     finally:
@@ -785,11 +836,13 @@ async def test_point_iteration_cannot_relabel_its_numeric_ids_as_actions(tmp_pat
 @pytest.mark.parametrize("start", [False,True])
 @pytest.mark.parametrize("finite", [False,True])
 @pytest.mark.parametrize("failure", ["optional","sql"])
-async def test_aggregate_role_is_revoked_when_page_assembly_fails(tmp_path,monkeypatch,start,finite,failure):
+async def test_aggregate_role_is_revoked_when_page_assembly_fails(source_observation, tmp_path,monkeypatch,start,finite,failure):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
     from ..support.output_source_cases import QueryProbe
     import sqlite3
-    owned,request=await _aggregate_role_world(tmp_path,start)
+    owned,request=await _aggregate_role_world(tmp_path,start, storage=storage)
     target=6 if start else 5
     fault=sqlite3.DatabaseError('page SQL failed') if failure=='sql' else RuntimeError('page assembly failed')
     active={'value':False}
@@ -812,8 +865,9 @@ async def test_aggregate_role_is_revoked_when_page_assembly_fails(tmp_path,monke
             with pytest.raises(ConsistencyError):reads.optional('actions',target)
             iterator.close()
             assert reads.required('actions',8)['plan_id']==3
-        observe_source_reads(monkeypatch,inspect)
-        result=_run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result=_run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert checked
         for cursor in probe.cursors:cursor.close.assert_called_once_with()
@@ -823,11 +877,13 @@ async def test_aggregate_role_is_revoked_when_page_assembly_fails(tmp_path,monke
 @pytest.mark.parametrize("start", [False,True])
 @pytest.mark.parametrize("finite", [False,True])
 @pytest.mark.parametrize("exit_kind", ["exhaust","close","throw","consumer_error"])
-async def test_real_plan_aggregate_page_role_ends_with_its_iterator(tmp_path,monkeypatch,start,finite,exit_kind):
+async def test_real_plan_aggregate_page_role_ends_with_its_iterator(source_observation, tmp_path,monkeypatch,start,finite,exit_kind):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from contextlib import closing
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories import source_transactions as streams
-    owned,request = await _aggregate_role_world(tmp_path,start)
+    owned,request = await _aggregate_role_world(tmp_path,start, storage=storage)
     checked = []
     try:
         def inspect(db,event,context,reads,q):
@@ -864,8 +920,9 @@ async def test_real_plan_aggregate_page_role_ends_with_its_iterator(tmp_path,mon
             with pytest.raises(ConsistencyError):
                 reads.optional("actions",target)
             assert reads.required("actions",8)["plan_id"] == 3
-        observe_source_reads(monkeypatch,inspect)
-        result = _run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result = _run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert checked
     finally:
@@ -873,9 +930,11 @@ async def test_real_plan_aggregate_page_role_ends_with_its_iterator(tmp_path,mon
 
 
 @pytest.mark.parametrize("finite", [False,True])
-async def test_plan_aggregate_keeps_real_accepted_prefix_fields(tmp_path,monkeypatch,finite):
+async def test_plan_aggregate_keeps_real_accepted_prefix_fields(source_observation, tmp_path,monkeypatch,finite):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.persistence.repositories import source_transactions as streams
-    owned,request = await _aggregate_role_world(tmp_path,True)
+    owned,request = await _aggregate_role_world(tmp_path,True, storage=storage)
     checked = []
     try:
         def inspect(db,event,context,reads,q):
@@ -887,8 +946,9 @@ async def test_plan_aggregate_keeps_real_accepted_prefix_fields(tmp_path,monkeyp
             owner = next(row for row in rows if row["id"] == 8)
             assert (owner["status"],owner["execution_started"]) == (2,1)
             checked.append(event.event_id)
-        observe_source_reads(monkeypatch,inspect)
-        result = _run_aggregate_role_command(owned,request,monkeypatch,start=True,finite=finite)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result = _run_aggregate_role_command(owned,request,monkeypatch,start=True,finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert checked
     finally:
@@ -899,10 +959,12 @@ async def test_plan_aggregate_keeps_real_accepted_prefix_fields(tmp_path,monkeyp
 @pytest.mark.parametrize("finite", [False, True])
 @pytest.mark.parametrize("variant", ["same", "columns", "limit", "later_page"])
 @pytest.mark.parametrize("end_first", ["a", "b"])
-async def test_source_aggregate_overlap_rejects_before_sql_without_clearing_owner(tmp_path, monkeypatch, start, finite, variant, end_first):
+async def test_source_aggregate_overlap_rejects_before_sql_without_clearing_owner(source_observation, tmp_path, monkeypatch, start, finite, variant, end_first):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories import source_transactions as streams
-    owned, request = await _aggregate_role_world(tmp_path, start)
+    owned, request = await _aggregate_role_world(tmp_path, start, storage=storage)
     checked = []
     try:
         def inspect(db, event, context, reads, q):
@@ -961,8 +1023,9 @@ async def test_source_aggregate_overlap_rejects_before_sql_without_clearing_owne
                     reads.optional("actions", 7)
             finally:
                 db.set_trace_callback(None)
-        observe_source_reads(monkeypatch,inspect)
-        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite, batch_size=2)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite, batch_size=2, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert checked
     finally:
@@ -973,9 +1036,11 @@ async def test_source_aggregate_overlap_rejects_before_sql_without_clearing_owne
 @pytest.mark.parametrize("finite", [False, True])
 @pytest.mark.parametrize("new_page", ["none", "active", "ended"])
 @pytest.mark.parametrize("old_exit", ["next", "close", "throw"])
-async def test_source_events_keep_independent_ports_until_transaction_ends(tmp_path, monkeypatch, start, finite, new_page, old_exit):
+async def test_source_events_keep_independent_ports_until_transaction_ends(source_observation, tmp_path, monkeypatch, start, finite, new_page, old_exit):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
-    owned,request=await _aggregate_role_world(tmp_path,start)
+    owned,request=await _aggregate_role_world(tmp_path,start, storage=storage)
     old=[];checked=[];ports=[]
     try:
         def inspect(db,event,context,reads,q):
@@ -1009,8 +1074,9 @@ async def test_source_events_keep_independent_ports_until_transaction_ends(tmp_p
             for port in (prior,reads):
                 with pytest.raises(ConsistencyError):port.optional('actions',3)
             b.close()
-        observe_source_reads(monkeypatch,inspect)
-        result=_run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result=_run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert checked
         for port in ports:
@@ -1022,12 +1088,14 @@ async def test_source_events_keep_independent_ports_until_transaction_ends(tmp_p
 
 @pytest.mark.parametrize("start", [False, True])
 @pytest.mark.parametrize("finite", [False, True])
-async def test_source_aggregate_pages_have_exact_current_ids_and_keep_point_roles(tmp_path, monkeypatch, start, finite):
+async def test_source_aggregate_pages_have_exact_current_ids_and_keep_point_roles(source_observation, tmp_path, monkeypatch, start, finite):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories import source_transactions as streams
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.history.reads import ProductReadScope
-    owned, request = await _aggregate_role_world(tmp_path, start)
+    owned, request = await _aggregate_role_world(tmp_path, start, storage=storage)
     active={'value':False}
     probe=QueryProbe(owned.connection,lambda reads,columns,args: active['value']
         and ('actions','plan_id') in reads and columns==frozenset({'id'}) and len(args)==3)
@@ -1083,8 +1151,9 @@ async def test_source_aggregate_pages_have_exact_current_ids_and_keep_point_role
             c = reads.iter_members("actions", "plan_id", 3)
             assert next(c)
             c.close()
-        observe_source_reads(monkeypatch,inspect)
-        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite, batch_size=2)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite, batch_size=2, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert checked
     finally:
@@ -1093,9 +1162,11 @@ async def test_source_aggregate_pages_have_exact_current_ids_and_keep_point_role
 
 @pytest.mark.parametrize("start", [False, True])
 @pytest.mark.parametrize("old_exit", ["next", "close", "throw"])
-async def test_bounded_source_events_keep_independent_page_owners(tmp_path, monkeypatch, start, old_exit):
+async def test_bounded_source_events_keep_independent_page_owners(source_observation, tmp_path, monkeypatch, start, old_exit):
+    observation, callbacks = source_observation
+    storage = observation.storage
     from camctl.contracts.values import ConsistencyError
-    owned,request=await _aggregate_role_world(tmp_path,start)
+    owned,request=await _aggregate_role_world(tmp_path,start, storage=storage)
     old=[];checked=[];ports=[]
     try:
         def inspect(db,event,context,reads,q):
@@ -1128,8 +1199,9 @@ async def test_bounded_source_events_keep_independent_page_owners(tmp_path, monk
             assert reads.required('actions',7)['plan_id']==3
             b.close()
             with pytest.raises(ConsistencyError):reads.optional('actions',7)
-        observe_source_reads(monkeypatch,inspect)
-        result=_run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=False)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result=_run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=False, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert checked
         for port in ports:
@@ -1143,11 +1215,13 @@ async def test_bounded_source_events_keep_independent_page_owners(tmp_path, monk
 @pytest.mark.parametrize("start", [False, True])
 @pytest.mark.parametrize("finite", [False, True])
 @pytest.mark.parametrize("failure", ["query_sql", "projection"])
-async def test_source_aggregate_first_page_failure_releases_reservation(tmp_path, monkeypatch, start, finite, failure):
+async def test_source_aggregate_first_page_failure_releases_reservation(source_observation, tmp_path, monkeypatch, start, finite, failure):
+    observation, callbacks = source_observation
+    storage = observation.storage
     import sqlite3
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories import source_transactions as streams
-    owned, request = await _aggregate_role_world(tmp_path, start)
+    owned, request = await _aggregate_role_world(tmp_path, start, storage=storage)
     checked = []
     try:
         def inspect(db, event, context, reads, q):
@@ -1178,8 +1252,9 @@ async def test_source_aggregate_first_page_failure_releases_reservation(tmp_path
             b.close()
             with pytest.raises(ConsistencyError):
                 reads.optional("actions", target)
-        observe_source_reads(monkeypatch,inspect)
-        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite)
+        callbacks["inspect"] = inspect
+        observation.active = True
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite, storage=storage, observation=observation)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert checked
     finally:
