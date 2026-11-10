@@ -1,4 +1,4 @@
-"""固定分段文件的正式产物候选资格。"""
+"""分段来源策略与固定文件的正式产物候选资格。"""
 
 from camctl.capture.segment_models import (
     FileCompletionState, OwnershipState, PreviewPairingState, SegmentMember, SegmentMemberRole,
@@ -6,9 +6,16 @@ from camctl.capture.segment_models import (
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.segment_profiles import SegmentFileKind
+from camctl.devices.tasks import CaptureResultPolicy
 
 
 _FAMILY_ROLE = enum_for('result_page_files.family_role')
+
+
+def is_segmented_result_policy(policy):
+    """按冻结策略区分分段取回与普通结果来源。"""
+    return policy in (CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
+                      CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
 
 
 def eligible_original(member: SegmentMember) -> bool:
