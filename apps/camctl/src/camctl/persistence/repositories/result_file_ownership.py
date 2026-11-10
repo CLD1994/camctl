@@ -10,7 +10,7 @@ from camctl.capture.files import (
 from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.result_ownership import (
     validate_result_ownership_policy, result_observation_role, resolved_result_role,
-    is_unassigned_result_file, decide_result_ownership, PAIRING_FIELDS,
+    is_unassigned_result_file, result_ownership_already_saved, PAIRING_FIELDS,
 )
 from camctl.devices.tasks import CaptureResultPolicy
 from camctl.contracts.enums import enum_for
@@ -201,10 +201,9 @@ class _FileOwnershipFromResultPageCommand:
             result = _verify(request, self.key, connection)
             return CommandPlan((), {}, {}, result=result, read_only=True)
         source, role, file = _proof(connection, request)
-        disposition = decide_result_ownership(file, source, role)
-        if disposition is ObservationDisposition.ALREADY:
+        if result_ownership_already_saved(file, source, role):
             return CommandPlan((), {}, {}, read_only=True,
-                result=ObservationOutcome(disposition, request.file_id))
+                result=ObservationOutcome(ObservationDisposition.ALREADY, request.file_id))
         state = {'device_files': {request.file_id: file}}
         from .capture import _load_related_outputs
         _load_related_outputs(connection, state, request.file_id)
