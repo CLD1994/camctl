@@ -15,14 +15,12 @@ from camctl.operations.process import RawToolOutcome, ToolStartError
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.outputs.read_attempts import running_read_ticket
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
 
 from ..support.outputs import read_test_runtime
 from .test_grant_reuse import granted, read_request, read_targets, local_read
 from ..devices.test_hasselblad_download import harness, source, RAW
 
 
-register_file_batch_guards()
 
 
 def _fixed_source(owned, command, prepared):

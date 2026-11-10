@@ -16,7 +16,7 @@ from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.session import SessionRepository
 from camctl.persistence.runtime import DatabaseInvalidError
 from camctl.persistence.repositories.transactions import row_facts
-from camctl.session.clock import ClockCheck, ClockTrustStatus, register_clock_guard
+from camctl.session.clock import ClockCheck, ClockTrustStatus
 
 from ..persistence.test_motor_transactions import NOW, _admit, owned
 
@@ -81,7 +81,6 @@ def test_initialized_runtime_restores_initial_values_before_first_change(owned, 
     boundary = INITIAL_BOUNDARY if target == "initial" else before_runtime
     assert before_runtime != INITIAL_BOUNDARY
     assert _links(owned) == []
-    register_clock_guard()
     outcome = SessionRepository().update_lower_bound(
         ClockCheck(ClockTrustStatus.TRUSTED, NOW, None, NOW),
         new_operation_key(), owned)
@@ -106,7 +105,6 @@ def test_initialized_runtime_restores_initial_values_before_first_change(owned, 
 
 def test_pure_restore_preserves_initialized_runtime_across_first_real_change(owned, tmp_path):
     """真实 CLOCK 正向应用后再逆向回到初始化，保留单例及零计数。"""
-    register_clock_guard()
     outcome = SessionRepository().update_lower_bound(
         ClockCheck(ClockTrustStatus.TRUSTED, NOW, None, NOW),
         new_operation_key(), owned)
@@ -143,7 +141,6 @@ def test_pure_restore_preserves_initialized_runtime_across_first_real_change(own
 
 
 def test_runtime_with_own_history_keeps_actual_current_values(owned, tmp_path):
-    register_clock_guard()
     saved = SessionRepository().update_lower_bound(
         ClockCheck(ClockTrustStatus.TRUSTED, NOW, None, NOW),
         new_operation_key(), owned)

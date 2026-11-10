@@ -381,10 +381,8 @@ def accept_business_cancel(owned):
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
-    from camctl.persistence.repositories.cancellation import register_cancellation_guards
     from .media_retry_fixtures import _Catalog
     from .test_input_copy import _NOW
-    register_cancellation_guards()
     instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     result = AcceptanceRepository().process_input(ProcessInput(ParsedInput('cancel.json', {
         'request_id': '9', 'created_at': instant, 'name': '取消录像',

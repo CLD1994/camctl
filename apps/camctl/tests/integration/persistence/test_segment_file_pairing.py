@@ -21,17 +21,11 @@ from camctl.persistence.repositories.transactions import BoundedCommandPlan, com
 from camctl.persistence.repositories import capture as capture_storage
 from .transaction_fixtures import capture_operation_command
 from camctl.persistence.repositories import result_pages
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
 
 from .test_segment_storage import SegmentedCatalog
 from ..support.history_rows import observe_readonly_rows
 from ..capture.result_consumer_fixtures import consumer_world
 from ..capture.test_result_page_history import _actual, _request
-
-register_operation_guards()
-register_capture_guards()
-
 
 def _ok(receipt):
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error

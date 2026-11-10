@@ -26,22 +26,13 @@ from camctl.operations.models import (
     Settlement, SettlementBasis,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository, register_capture_guards,
-)
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .result_consumer_fixtures import result_driver
 from ..support.result_cases import result_case, result_case_for
 
 pytestmark = pytest.mark.asyncio
-register_capture_guards()
-register_operation_guards()
-register_outputs_guards()
-register_timelapse_guards()
 
 _ENTRIES = ("confirm_result_set", "finish_result_check", "close_result_check_unconfirmed")
 

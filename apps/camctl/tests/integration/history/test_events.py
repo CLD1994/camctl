@@ -16,9 +16,8 @@ from camctl.contracts.values import new_operation_key
 from camctl.contracts.values import ConsistencyError
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import EventEnvelope, RowChange, RowImage
-from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import CommandPlan
 
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import PlanCreateCommand, plan_guards
@@ -122,7 +121,7 @@ class TestProductionValidationRejects:
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            receipt = commit_operation(command_type(), new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(command_type(), new_operation_key(), owned)
             assert receipt.kind == "rolled_back"
             assert message in str(receipt.error)
             for table in ("history_transactions", "history_events", "plans", "entity_event_links"):
@@ -135,9 +134,9 @@ class TestProductionValidationRejects:
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            rejected = commit_operation(WrongOwnershipCommand(), new_operation_key(), owned)
+            rejected = plan_guards.commit_operation(WrongOwnershipCommand(), new_operation_key(), owned)
             assert rejected.kind == "rolled_back"
-            accepted = commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned)
+            accepted = plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned)
             assert accepted.kind == "completed"
             # 回滚编号可被后续实际提交使用：事务与事件都从 1 开始。
             assert _count(connection, "history_transactions") == 1

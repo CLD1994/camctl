@@ -8,7 +8,6 @@ from camctl.contracts.values import new_operation_key
 from camctl.history import validators
 from camctl.history.validators import EventValidationError
 from camctl.outputs.sources import SelectionMode
-from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.transactions import commit_operation
 
@@ -24,7 +23,6 @@ from .test_selection_event_sequence import _Sequence
 def test_foreign_file_cannot_be_registered_as_derivative(
     selection_database, monkeypatch, case, table, column, file_id,
 ):
-    register_capture_guards()
     _, _, registrations, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
     connection = selection_database.connection
     connection.execute(f"UPDATE {table} SET {column}=12 WHERE id=?", (file_id,))
@@ -42,7 +40,6 @@ def test_foreign_file_cannot_be_registered_as_derivative(
 @pytest.mark.parametrize("kind,case", [(2, "repair_only"), (3, "preview_only")])
 @pytest.mark.parametrize("cleaned", [False, True])
 def test_existing_derivative_keeps_its_role_after_cleanup(selection_database, monkeypatch, kind, case, cleaned):
-    register_capture_guards()
     _, _, registrations, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
     connection = selection_database.connection
     _, file_id = _file(connection, 998, kind, 100)

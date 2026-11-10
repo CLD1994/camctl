@@ -269,9 +269,7 @@ class TestRealEntrypoints:
     def test_identity_ack_and_body_are_independent(self, tmp_path, mode, scenario):
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-        from camctl.reporting.policy import (
-            ReportingRepository, register_report_guards,
-        )
+        from camctl.reporting.policy import ReportingRepository
         home = tmp_path / "home"
         home.mkdir()
         config = _config(home)
@@ -279,7 +277,6 @@ class TestRealEntrypoints:
         original_file = _plan_file(home, "42")
         original = json.loads(original_file.read_text(encoding="utf-8"))["actions"][0]
         assert _run_cli(home, "submit", str(original_file), "--config", str(config)).returncode == 0
-        register_report_guards()
         owned = open_existing(home / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         try:
             outcome = ReportingRepository().freeze_report(

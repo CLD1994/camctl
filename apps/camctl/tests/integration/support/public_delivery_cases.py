@@ -16,7 +16,6 @@ from camctl.devices.read_session import ReadSession
 from camctl.host_files.models import BoundDirectories
 from camctl.outputs.handoff import DeliveryDirectories
 from camctl.outputs.obtain_flow import advance_obtain
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.runtime import verify_directory_binding
 
 from ..bootstrap.test_media_assembly import _config
@@ -56,7 +55,6 @@ class _ReadDriver:
 
 async def prepare_public_delivery(tmp_path, *, content, now, missing_output_id=None):
     """执行真实读取；可同时通过精确请求准备一个不存在的产物。"""
-    register_file_batch_guards()
     cfg = _config(tmp_path)
     staging = Path(cfg.paths.staging)
     ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)

@@ -21,17 +21,13 @@ from camctl.acceptance.service import (
 )
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.contracts.values import new_operation_key
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.acceptance import accept_document, accept_source
 from ..support.database import database_path
 
-register_acceptance_guards()
 
 pytestmark = pytest.mark.asyncio
 
@@ -139,12 +135,9 @@ async def _seed_report(environment, tmp_path: Path, report_id: int) -> None:
 
 
 def _freeze_reports(environment, report_id: int) -> None:
-    from camctl.reporting.policy import (
-        ReportingRepository, register_report_guards,
-    )
+    from camctl.reporting.policy import ReportingRepository
     from .test_atomicity import _process
 
-    register_report_guards()
     connection, _ = environment
     previous = connection.execute("SELECT MAX(id) FROM reports").fetchone()[0] or 0
     for expected_id in range(previous + 1, report_id + 1):

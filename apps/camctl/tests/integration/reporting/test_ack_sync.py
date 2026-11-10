@@ -20,18 +20,16 @@ from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary, ReadOrder, ReadScope, TransactionRange
 from camctl.history.events import business_columns
 from camctl.history.replay import EntityImage, apply_forward, apply_reverse
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.persistence.repositories.acceptance import ProcessInputCommand
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.transactions import commit_operation
 
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.contracts.values import new_operation_key
-from camctl.reporting.policy import (
-    ReportingRepository, register_report_guards,
-)
+from camctl.reporting.policy import ReportingRepository
 
 from ..acceptance.test_acceptance import Catalog, _NOW, _plan_body
 from ..acceptance.test_atomicity import _process
@@ -41,8 +39,6 @@ from ..persistence.test_transactions import FailingConnection
 
 @pytest.fixture
 def sync_environment(tmp_path):
-    register_acceptance_guards()
-    register_report_guards()
     path = tmp_path / "state.db"
     _create_valid_database(path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -327,7 +323,7 @@ def test_sync_and_ack_history_replay_preserves_independent_facts(sync_environmen
     originals = deepcopy(images)
     validated = []
     for event in page.items:
-        value = validate_event(event, EventContext(TransactionRange(txn, first, last), owners, states))
+        value = BusinessStorage().validate_event(event, EventContext(TransactionRange(txn, first, last), owners, states))
         validated.append(value)
         images = {table: apply_forward(image, value) for table, image in images.items()}
         for row in event.rows:

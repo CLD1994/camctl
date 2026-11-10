@@ -23,16 +23,10 @@ from camctl.contracts.values import new_operation_key
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.publication import parse_report_file_name
-from camctl.reporting.policy import (
-    ReportingRepository,
-    register_report_guards,
-    register_sync_guard,
-)
+from camctl.reporting.policy import ReportingRepository
 
 from ..acceptance.test_acceptance import Catalog
 
-register_report_guards()
-register_sync_guard()
 pytestmark = pytest.mark.asyncio
 
 
@@ -78,12 +72,8 @@ async def _parsed(tmp_path: Path, body: dict):
 
 async def _accept(owned, tmp_path: Path, request_id: str) -> None:
     from camctl.acceptance.service import AcceptanceContext, accept_input
-    from camctl.persistence.repositories.acceptance import (
-        AcceptanceRepository,
-        register_acceptance_guards,
-    )
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
 
-    register_acceptance_guards()
     from ..support.database import business_database, database_path
 
     async with business_database(database_path(owned)) as database:

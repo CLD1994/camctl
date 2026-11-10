@@ -15,7 +15,7 @@ from camctl.persistence.models import DbOutcomeKind
 from ..capture.test_host_photo_flow import _world,_input_time
 from .hasselblad_support import (close, accept_origin, HeldPhotoTransport as HeldTransport,
     action, grant_unknown, cancel, fixed_members, fixed_key)
-from camctl.history.validators import validate_event
+from camctl.persistence.repositories.validation import BusinessStorage
 from .test_hasselblad_fixed_request_scope import fixed,context_for
 
 pytestmark=pytest.mark.asyncio
@@ -85,8 +85,8 @@ async def test_each_mixed_camera_keeps_its_original_preview_permission(tmp_path,
         before=tuple(owned.connection.iterdump())
         event,context=context_for(owned,runtime,origin,entries)
         if add_denied_hb_preview:
-            with pytest.raises(EventValidationError): validate_event(event,context)
-        else: validate_event(event,context)
+            with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
+        else: BusinessStorage().validate_event(event,context)
         result=repository.fix_cancel_targets(fixed(origin,runtime,entries),new_operation_key(),owned)
         assert (result.kind is DbOutcomeKind.COMPLETED) is (not add_denied_hb_preview),result.error
         if add_denied_hb_preview: assert tuple(owned.connection.iterdump())==before
@@ -153,10 +153,10 @@ async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,p
             # 显式提供实际外部主键范围，避免缺上下文代替职责反例。
             context=replace(context,read_coverage=ReadCoverage({**context.read_coverage.ranges,
                 ('device_activities','id'):frozenset((900,))}))
-            validate_event(event,context)
+            BusinessStorage().validate_event(event,context)
             broken,broken_context=context_for(owned,runtime,origin,bad)
             broken_context=replace(broken_context,read_coverage=context.read_coverage)
-            with pytest.raises(EventValidationError): validate_event(broken,broken_context)
+            with pytest.raises(EventValidationError): BusinessStorage().validate_event(broken,broken_context)
             before=tuple(owned.connection.iterdump())
             rejected=repository.fix_cancel_targets(fixed(origin,runtime,bad),new_operation_key(),owned)
             assert rejected.kind is not DbOutcomeKind.COMPLETED

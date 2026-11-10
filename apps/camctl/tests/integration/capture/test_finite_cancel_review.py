@@ -20,7 +20,7 @@ pytestmark = pytest.mark.asyncio
 @pytest.mark.parametrize('entry', ['qualification','save','guard'])
 async def test_current_page_length_cannot_borrow_prior_complete_size(tmp_path, capture_resources, monkeypatch, current_size, allowed, entry):
     from ..support.capture_cancellation_cases import stored_result_case, store_result_end, finite_end_proposal
-    from camctl.history.validators import validate_event
+    from camctl.persistence.repositories.validation import BusinessStorage
     world = await stored_result_case(tmp_path, capture_resources, monkeypatch,
         entries=[_osv(current_size)], prior_entries=[_osv(50)],
         check_attempts=2, check_timeout_s=Decimal('1'), check_retry_s=Decimal('0'))
@@ -39,10 +39,10 @@ async def test_current_page_length_cannot_borrow_prior_complete_size(tmp_path, c
             world.owned.connection.execute('BEGIN')
             try:
                 if allowed:
-                    validate_event(event, context)
+                    BusinessStorage().validate_event(event, context)
                 else:
                     with pytest.raises(EventValidationError, match='文件|产物|扫描'):
-                        validate_event(event, context)
+                        BusinessStorage().validate_event(event, context)
             finally:
                 world.owned.connection.execute('ROLLBACK')
             assert tuple(world.owned.connection.iterdump()) == before
@@ -136,7 +136,7 @@ async def test_optional_preview_observations_do_not_replace_or_block_required_os
 @pytest.mark.parametrize('required_by', ['min','exact'])
 async def test_required_preview_gaps_remain_blocked_in_all_completion_entries(tmp_path, capture_resources, monkeypatch, state, required_by):
     from ..support.capture_cancellation_cases import stored_result_case, store_result_end, finite_end_proposal
-    from camctl.history.validators import validate_event
+    from camctl.persistence.repositories.validation import BusinessStorage
     rule = {'kind': 'video', 'format_id': 'lrf', 'min_count': 1 if required_by == 'min' else 0,
         'exact_count': 1 if required_by == 'exact' else None, 'require_pairing': True, 'min_size_bytes': 1}
     world = await stored_result_case(tmp_path, capture_resources, monkeypatch, entries=[_osv()],
@@ -172,7 +172,7 @@ async def test_required_preview_gaps_remain_blocked_in_all_completion_entries(tm
                     world.owned.connection.execute('BEGIN')
                     try:
                         with pytest.raises(EventValidationError, match='文件|产物|扫描'):
-                            validate_event(event, context)
+                            BusinessStorage().validate_event(event, context)
                     finally:
                         world.owned.connection.execute('ROLLBACK')
                 else:
@@ -192,7 +192,7 @@ async def test_required_preview_gaps_remain_blocked_in_all_completion_entries(tm
 async def test_set_finalized_entries_share_optional_ownership_classification(tmp_path, capture_resources, monkeypatch, case, entry):
     from ..support.capture_cancellation_cases import stored_result_case, store_result_end, output_set_proposal
     from camctl.capture.result_pages import OutputSetFinalizationSave
-    from camctl.history.validators import validate_event
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.repositories.capture import CaptureRepository
     extra = ()
     if case.startswith('required_'):
@@ -223,10 +223,10 @@ async def test_set_finalized_entries_share_optional_ownership_classification(tmp
             world.owned.connection.execute('BEGIN')
             try:
                 if allowed:
-                    validate_event(event, context)
+                    BusinessStorage().validate_event(event, context)
                 else:
                     with pytest.raises(EventValidationError):
-                        validate_event(event, context)
+                        BusinessStorage().validate_event(event, context)
             finally:
                 world.owned.connection.execute('ROLLBACK')
             assert tuple(world.owned.connection.iterdump()) == before

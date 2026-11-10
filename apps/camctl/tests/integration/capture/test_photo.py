@@ -34,10 +34,7 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import (
     GrantRequest,
     SchedulingRepository,
@@ -48,7 +45,6 @@ from camctl.scheduling.rules import LaunchWindow
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity, _seed_plan
 
-register_operation_guards()
 
 _NOW = 1_750_000_000_000_000
 _WINDOW = LaunchWindow(scheduled_at=_NOW - 1_000_000, window_end=_NOW + 1_000_000)

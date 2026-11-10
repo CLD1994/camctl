@@ -19,7 +19,6 @@ from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnosti
 from support.logging import recording_log_channel
 from camctl.outputs import obtain_flow
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -29,7 +28,6 @@ from .test_grant_reuse import local_read, read_targets
 from .test_read_associations import _command
 from .test_source_digest_failure_settlement import _ReadDriver, _CONTENT
 
-register_file_batch_guards()
 
 
 @pytest.fixture

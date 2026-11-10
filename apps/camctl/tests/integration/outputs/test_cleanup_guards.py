@@ -18,8 +18,6 @@ import pytest
 from camctl.capture.files import file_identity_key
 from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventValidationError
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories import outputs
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import commit_operation
@@ -30,8 +28,6 @@ from ..support.output_storage_cases import capture_scoped_operation, observed_op
 from ..support.plan_completion import assert_action_plan, plan_before
 from .test_qualification import _seed_action
 
-register_outputs_guards()
-register_capture_guards()
 
 _NOW = 1_750_000_000_000_000
 
@@ -206,7 +202,6 @@ class TestTargetSetGuard:
             " VALUES (31,1,2,'cancel',6,?,?,'{}',2,1,0,1,1,1,1)",
             (_NOW, json.dumps({"params": {"target": {"action_instance_id": "999"}}})))
         connection.commit()
-        cancellation.register_cancellation_guards()
         request = FailCancelTargets(
             31, missing_target_error(CancelTarget(action_instance_id=999)), _NOW)
         proposal = capture_scoped_operation(
@@ -294,15 +289,12 @@ class TestCleanupMemberGuard:
         from camctl.outputs.cleanup_flow import (
             CleanupOutcomeChoice, FinishCleanupItem, RestrictCleanupItem)
         from camctl.persistence.models import DbOutcomeKind
-        from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
-        from camctl.persistence.repositories.operations import register_operation_guards
+        from camctl.persistence.repositories.file_batches import FileBatchRepository
 
         owned = _environment(tmp_path)
         connection = owned.connection
         connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
         connection.commit()
-        register_operation_guards()
-        register_file_batch_guards()
         repository = outputs.OutputsRepository()
         restricted = repository.restrict_cleanup_item(
             RestrictCleanupItem(90, _NOW), new_operation_key(), owned)
@@ -453,8 +445,6 @@ class TestFixCleanupTargetsCommand:
     def _repository(self):
         from camctl.persistence.repositories.outputs import OutputsRepository
 
-        register_capture_guards()
-        register_outputs_guards()
         return OutputsRepository()
 
     def test_explicit_fix_creates_members_for_resolvable_targets(self, tmp_path):
@@ -750,8 +740,6 @@ class TestFinishCleanupAction:
     def _repository(self):
         from camctl.persistence.repositories.outputs import OutputsRepository
 
-        register_capture_guards()
-        register_outputs_guards()
         return OutputsRepository()
 
     def _finish(self, repository, owned, occurred_at=_NOW, key=None):

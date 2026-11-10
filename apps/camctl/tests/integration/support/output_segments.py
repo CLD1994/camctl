@@ -141,9 +141,7 @@ class SegmentWorld:
 
 @asynccontextmanager
 async def segment_world(tmp_path, *, indexes=(1,), unavailable=False):
-    from camctl.persistence.repositories.file_batches import register_file_batch_guards
 
-    register_file_batch_guards()
     world = {}
     clock = {'wall': _NOW, 'mono': 5_000_000_000}
     class CaptureDriver(ReadDriver):
@@ -211,10 +209,8 @@ async def checked_segment_world(tmp_path, capture_resources, monkeypatch, *,
                                 early_waiters, unavailable=False):
     """异常录像经正式检查发布后，为已等待的取回保留其检查副本。"""
     from types import SimpleNamespace
-    from camctl.persistence.repositories.file_batches import register_file_batch_guards
     from .bootstrap_read_cases import segment_input_case
 
-    register_file_batch_guards()
     driver = ReadDriver(unavailable=unavailable)
     source = await segment_input_case(
         tmp_path, capture_resources, monkeypatch, (Decimal("1.5"),),

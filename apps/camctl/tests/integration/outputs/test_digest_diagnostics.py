@@ -18,7 +18,6 @@ from camctl.operations.process import LocalExit, RawToolOutcome, SignalFailure, 
 from camctl.outputs import copy
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.enums import enum_for
@@ -32,7 +31,6 @@ from unit.devices.test_adb_camera_driver import EVIDENCE, Transport, _driver
 from support.logging import recording_log_channel
 
 
-register_file_batch_guards()
 
 
 def _digest_driver(raw):
