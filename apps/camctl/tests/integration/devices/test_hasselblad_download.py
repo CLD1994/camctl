@@ -161,6 +161,8 @@ async def test_download_error_and_cleanup_error_are_both_retained(tmp_path, monk
     errors = failure.value.__cause__
     assert isinstance(errors, ExceptionGroup)
     download_error, cleanup_error = errors.exceptions
+    assert failure.value.causes == (download_error, cleanup_error)
+    assert "unlink unavailable" in str(failure.value)
     assert download_error.steps[-1]["local_exit_code"] == 17
     assert download_error.steps[-1]["transport_error"] == "output_failed"
     assert isinstance(cleanup_error, OSError)

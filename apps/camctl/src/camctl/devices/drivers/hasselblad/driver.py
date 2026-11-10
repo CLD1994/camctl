@@ -590,6 +590,7 @@ class HasselbladDriver:
                     if isinstance(error, Exception) and isinstance(cleanup_error, Exception):
                         failures = ExceptionGroup("相机读取准备与临时下载回收均失败", [error, cleanup_error])
                         raise read_error("preparation_and_cleanup_failed",
+                                         causes=(error, cleanup_error),
                                          include_tool_calls=not isinstance(error, CameraReadError)) from failures
                     raise BaseExceptionGroup("相机读取准备与临时下载回收均失败", [error, cleanup_error]) from None
             if isinstance(error, Exception) and not isinstance(error, CameraReadError):
