@@ -628,7 +628,7 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
     if held.evidence is None:
         raise ConsistencyError("原实际读取结束缺少原驱动结果契约")
     status = await read_one(runtime.database,
-        "SELECT r.status,a.cancel_requested,c.inspection_id FROM operation_runs r"
+        "SELECT r.status,a.cancel_requested,c.inspection_id,c.delivery_id,c.processing_id FROM operation_runs r"
         " JOIN actions a ON a.id=r.action_id JOIN file_copies c ON c.id=r.copy_id"
         " WHERE r.id=? AND r.copy_id=?", (held.ticket.run_id, copy_id))
     pending = determined()
@@ -643,9 +643,13 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
     binding_status = getattr(binding_result, "status", None)
     photo_mismatch = False
     if binding_status is BindingStatus.DRIVER_MISMATCH:
-        from camctl.outputs.obtain_flow import _is_photo_cache_source, _read_facts
-        photo_mismatch = await runtime.database.read(lambda owned:
-            _is_photo_cache_source(owned.connection, _read_facts(owned.connection, copy_id, include_terminal=True)))
+        inspection_id, delivery_id, processing_id = status[2:5]
+        if sum(identity is not None for identity in (delivery_id, processing_id, inspection_id)) != 1:
+            raise ConsistencyError("原读取拷贝的发起责任不唯一")
+        if delivery_id is not None:
+            from camctl.outputs.obtain_flow import _is_photo_cache_source, _read_facts
+            photo_mismatch = await runtime.database.read(lambda owned:
+                _is_photo_cache_source(owned.connection, _read_facts(owned.connection, copy_id, include_terminal=True)))
     mismatch = ((binding_status is BindingStatus.DEVICE_MISSING or photo_mismatch)
         and facts.verification_state == int(enum_for("file_copies.verification_state").MISMATCHED)
         and facts.source_sha256 is not None and facts.target_sha256 is not None
