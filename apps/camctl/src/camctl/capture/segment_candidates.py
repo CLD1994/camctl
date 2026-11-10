@@ -10,12 +10,33 @@ from camctl.devices.tasks import CaptureResultPolicy
 
 
 _FAMILY_ROLE = enum_for('result_page_files.family_role')
+_SOURCE = enum_for('segment_sets.source_kind')
+_PUBLICATION = enum_for('segment_sets.publication_kind')
 
 
 def is_segmented_result_policy(policy):
     """按冻结策略区分分段取回与普通结果来源。"""
     return policy in (CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
                       CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
+
+
+def ordinary_segment_source(setrow):
+    """普通完整扫描不需要额外读取动作策略。"""
+    return (setrow['source_kind'] == int(_SOURCE.COMPLETE_SCAN)
+            and setrow['publication_kind'] == int(_PUBLICATION.RESULT))
+
+
+def require_segment_write_kind(*, setrow, kind, action):
+    """核对来源、发布方式和冻结 Action6 策略允许的写入。"""
+    action6 = (action is not None and action['execution_spec_json'].get('result_policy')
+               == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
+    allowed = (action6 and (kind in ('MEMBERS', 'FIX_MEMBERS', 'ASSESS', 'SCOPE', 'ACTIVATE')
+               or kind == 'PUBLISH' and setrow['publication_kind'] == int(_PUBLICATION.CANCELED))
+               and setrow['source_kind'] in (int(_SOURCE.COMPLETE_SCAN), int(_SOURCE.RETAINED_SOURCES),
+                                            int(_SOURCE.NO_RESULTS))
+               and setrow['publication_kind'] in (int(_PUBLICATION.RESULT), int(_PUBLICATION.CANCELED)))
+    if not allowed:
+        raise ConsistencyError('普通完整扫描写入不适用于该结果来源或发布处置')
 
 
 def eligible_original(member: SegmentMember) -> bool:

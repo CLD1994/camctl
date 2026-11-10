@@ -10,6 +10,7 @@ from camctl.capture.files import (
 from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.result_ownership import (
     validate_result_ownership_policy, result_observation_role, resolved_result_role,
+    is_unassigned_result_file, decide_result_ownership, PAIRING_FIELDS,
 )
 from camctl.devices.tasks import CaptureResultPolicy
 from camctl.contracts.enums import enum_for
@@ -37,7 +38,7 @@ _REASON = _EVENT['branches']['OWNERSHIP_FROM_RESULT_PAGE']['reason']
 _ROLE = enum_for('device_files.role')
 _METHOD = enum_for('device_files.ownership_evidence_json.method').RESULT_PAGE_DIFFERENCE
 _COLUMNS = frozenset({'source_action_id', 'ownership_evidence_json', 'role'})
-_PAIRS = frozenset({'original_device_file_id', 'pairing_evidence_json'})
+_PAIRS = PAIRING_FIELDS
 
 
 def request_document(request):
@@ -126,12 +127,6 @@ def _after(request, source, role):
         'method': int(_METHOD), 'result_page_event_id': request.page.event_id}, 'role': role}
 
 
-def _unknown(file):
-    return (file['source_action_id'] is None and file['ownership_evidence_json'] is None
-        and file['role'] == int(_ROLE.UNDETERMINED)
-        and all(file[name] is None for name in _PAIRS))
-
-
 def ownership_guard_boundary(connection, event, transaction):
     """区分有限入口完整 C 与 Bounded 尚未写入的单事件 header。"""
     if (event.transaction_id != transaction.txn_id
@@ -162,7 +157,7 @@ def _check_row(event, request, before, source, role):
             or event.rows[0].row_id != request.file_id):
         raise ConsistencyError('原页归属事件只能更新申请中的一个设备文件')
     row = event.rows[0]
-    if (not row.before.exists or not row.after.exists or not _unknown(before)
+    if (not row.before.exists or not row.after.exists or not is_unassigned_result_file(before)
             or dict(row.before.values) != {name: before[name] for name in _COLUMNS}
             or not json_equal(dict(row.after.values), _after(request, source, role))):
         raise ConsistencyError('原页归属前后值必须精确固定来源、证据及用途，配对保持空')
@@ -206,12 +201,10 @@ class _FileOwnershipFromResultPageCommand:
             result = _verify(request, self.key, connection)
             return CommandPlan((), {}, {}, result=result, read_only=True)
         source, role, file = _proof(connection, request)
-        if not _unknown(file):
-            if (file['source_action_id'] == source and file['role'] == role
-                    and file['ownership_evidence_json'] is not None):
-                return CommandPlan((), {}, {}, read_only=True,
-                    result=ObservationOutcome(ObservationDisposition.ALREADY, request.file_id))
-            raise ConsistencyError('文件来源或用途已经固定，不能改指')
+        disposition = decide_result_ownership(file, source, role)
+        if disposition is ObservationDisposition.ALREADY:
+            return CommandPlan((), {}, {}, read_only=True,
+                result=ObservationOutcome(disposition, request.file_id))
         state = {'device_files': {request.file_id: file}}
         from .capture import _load_related_outputs
         _load_related_outputs(connection, state, request.file_id)

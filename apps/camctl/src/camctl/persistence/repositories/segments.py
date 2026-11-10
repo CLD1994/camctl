@@ -6,6 +6,7 @@ from itertools import zip_longest
 from camctl.capture.segment_models import *
 from camctl.capture.segment_candidates import (
     eligible_original, eligible_paired_preview, eligible_photo_original, is_paired_preview,
+    ordinary_segment_source, require_segment_write_kind,
 )
 from camctl.capture.segment_storage import (
     SegmentSetCreate,
@@ -127,24 +128,9 @@ def read_segment_identity(connection, ref, *, fixed=True):
 
 
 def _check_write_kind(db,setrow,kind):
-    from camctl.capture.segment_storage import SegmentSourceKind,PublicationKind
-    if (setrow['source_kind']!=encode_enum(SegmentSourceKind.COMPLETE_SCAN)
-            or setrow['publication_kind']!=encode_enum(PublicationKind.RESULT)):
-        action=row_facts(db,'actions',setrow['action_id'])
-        from camctl.devices.tasks import CaptureResultPolicy
-        action6=(action is not None and action['execution_spec_json'].get('result_policy')
-            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
-        allowed=(action6 and (
-            kind in ('MEMBERS','FIX_MEMBERS','ASSESS','SCOPE','ACTIVATE')
-            or kind=='PUBLISH'
-                and setrow['publication_kind']==encode_enum(PublicationKind.CANCELED))
-            and setrow['source_kind'] in tuple(encode_enum(value) for value in (
-                SegmentSourceKind.COMPLETE_SCAN, SegmentSourceKind.RETAINED_SOURCES,
-                SegmentSourceKind.NO_RESULTS))
-            and setrow['publication_kind'] in tuple(encode_enum(value) for value in (
-                PublicationKind.RESULT, PublicationKind.CANCELED)))
-        if not allowed:
-            raise ConsistencyError('普通完整扫描写入不适用于该结果来源或发布处置')
+    if not ordinary_segment_source(setrow):
+        action = row_facts(db, 'actions', setrow['action_id'])
+        require_segment_write_kind(setrow=setrow, kind=kind, action=action)
     if kind in ('MEMBERS','FIX_MEMBERS'):
         reason=_one(db,"SELECT json_extract(body_json,'$.reason') FROM history_events WHERE id=?",
             (setrow['created_event_id'],))[0]

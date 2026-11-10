@@ -1,12 +1,31 @@
 """扫描族配对只消费已固定的成员事实。"""
 
 import pytest
+from types import SimpleNamespace
 
-from camctl.capture.result_pairing import ScanFamilyAssessment, result_file_family
+from camctl.capture.result_pairing import ScanFamilyAssessment, result_file_family, scan_allows_result_pairing
 from camctl.capture.segment_models import FileCompletionState, OwnershipState
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.tasks import CaptureResultPolicy
+
+
+@pytest.mark.parametrize(('complete', 'finalized', 'error', 'cursor', 'expected'), [
+    (True, True, None, None, True),
+    (False, True, None, None, False),
+    (True, False, None, None, False),
+    (True, True, 'error', None, False),
+    (True, True, None, 'next', False),
+])
+def test_pairing_requires_a_complete_finalized_successful_scan_without_next_page(
+        complete, finalized, error, cursor, expected):
+    page = SimpleNamespace(scan_complete=complete, set_finalized=finalized,
+                           outcome=SimpleNamespace(error=error))
+    assert scan_allows_result_pairing(page, SimpleNamespace(next_cursor=cursor)) is expected
+
+
+def test_incomplete_scan_short_circuits_other_facts():
+    assert not scan_allows_result_pairing(SimpleNamespace(scan_complete=False), object())
 
 
 def observe(assessment, **changes):

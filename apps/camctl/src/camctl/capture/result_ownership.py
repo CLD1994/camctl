@@ -1,6 +1,7 @@
 """对原完整扫描中新增文件的归属责任作逐项判断。"""
 
 from camctl.capture.results import is_optional_preview
+from camctl.capture.files import ObservationDisposition
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
@@ -8,6 +9,24 @@ from camctl.devices.tasks import CaptureResultPolicy
 
 
 _ROLE = enum_for('device_files.role')
+PAIRING_FIELDS = frozenset({'original_device_file_id', 'pairing_evidence_json'})
+
+
+def is_unassigned_result_file(file):
+    """文件来源、用途和配对均未固定时才允许首次归属。"""
+    return (file['source_action_id'] is None and file['ownership_evidence_json'] is None
+            and file['role'] == int(_ROLE.UNDETERMINED)
+            and all(file[name] is None for name in PAIRING_FIELDS))
+
+
+def decide_result_ownership(file, source, role):
+    """首次归属、同一来源复用与已经固定的冲突分别处理。"""
+    if is_unassigned_result_file(file):
+        return ObservationDisposition.SAVED
+    if (file['source_action_id'] == source and file['role'] == role
+            and file['ownership_evidence_json'] is not None):
+        return ObservationDisposition.ALREADY
+    raise ConsistencyError('文件来源或用途已经固定，不能改指')
 
 
 def validate_result_ownership_policy(*, scope_only, policy):
