@@ -167,8 +167,6 @@ def production(monkeypatch):
     validators.EventContext = type("EventContext", (), {})
     validators.EventValidationError = EventValidationError
     validators.ValidatedEvent = type("ValidatedEvent", (), {})
-    validators.register_guard = lambda *_: None
-    validators.validate_event = lambda *_: None
     validators.validate_event_structure = lambda *_: None
 
     class UnusedPaths(ModuleType):
