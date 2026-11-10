@@ -61,6 +61,7 @@ from camctl.outputs.cleanup_flow import (
     ProgressCleanupItem,
     RestrictCleanupItem,
     StartCleanupAction,
+    decide_cleanup_progress, validate_cleanup_success,
 )
 from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, device_holder, first_eligible_read, positive_limit
@@ -70,6 +71,8 @@ from camctl.outputs.copy import (
     RecopyResult, ReliableSegment, SegmentSaveDisposition, SegmentSaveOutcome,
     SourceChecksumSupport, TargetResetDecision, TargetResetOutcome, TargetResetRequest,
     VerificationDisposition, VerificationResult, VerificationSave,
+    read_owner_eligible as _read_owner_eligible, segment_advances, segment_exceeds_source,
+    validate_segment_save_state, verification_result_error, decide_recopy, RecopyPlan,
 )
 from camctl.outputs.handoff import (
     AdvanceWithdrawal,
@@ -949,21 +952,6 @@ def _read_is_due(action, occurred_at: int) -> bool:
     if action is None or not is_json_integer(action.get("scheduled_at")):
         raise ConsistencyError("读取发起动作的计划时间缺失或无法解释")
     return action["scheduled_at"] <= occurred_at
-
-
-def _read_owner_eligible(action) -> bool:
-    """首次建档的发起动作必须仍在执行且未取消；缺事实不能当作可执行。"""
-    if action is None:
-        raise ConsistencyError("读取发起动作缺失")
-    status, canceled = action.get("status"), action.get("cancel_requested")
-    if (not is_json_integer(status) or not is_json_integer(canceled)
-            or canceled not in (0, 1)):
-        raise ConsistencyError("读取发起动作的状态或取消标志无效")
-    try:
-        status = _ACTION_STATUS(int(status))
-    except ValueError as error:
-        raise ConsistencyError("读取发起动作的状态未登记") from error
-    return status == _ACTION_STATUS.RUNNING and canceled == 0
 
 
 def _guard_read_owner(event, context, action_id) -> None:
@@ -3147,19 +3135,11 @@ class _SegmentSaveCommand:
         self._state["file_copies"][copy["id"]] = copy
         _copy_owner_of(connection, copy, self._state, self._owners)
         action = self._owner_action(connection, copy)
-        if copy["reset_state"] != int(_RESET_STATE.READY):
-            raise ConsistencyError("重置意图未完成前不能保存拷贝进度")
-        if copy["round"] != command.copy_round:
-            raise ConsistencyError(
-                f"段所属轮次 {command.copy_round} 与当前拷贝轮次 {copy['round']} 不一致"
-            )
-        if copy["committed_bytes"] != command.committed_before:
-            raise ConsistencyError(
-                f"当前进度 {copy['committed_bytes']} 与段申请的旧进度"
-                f" {command.committed_before} 不一致"
-            )
-        if command.segment_end > copy["source_size"]:
-            raise ConsistencyError("段范围越过固定源长度")
+        validate_segment_save_state(
+            reset_state=copy["reset_state"], current_round=copy["round"],
+            committed_bytes=copy["committed_bytes"], source_size=copy["source_size"],
+            requested_round=command.copy_round, requested_before=command.committed_before,
+            end=command.segment_end)
         if action["cancel_requested"] == 1:
             return self._skip("cancel_requested", copy)
         if not _read_owner_eligible(action):
@@ -3497,7 +3477,8 @@ class _RecopyCommand(_CopyCompletionTablesMixin):
             return self._decision(
                 RecopyResult(RecopyDisposition.SKIPPED, reason="owner_not_running"),
                 read_only=True)
-        if copy["recopies_used"] >= command.max_recopies:
+        if decide_recopy(owner_running=True, recopies_used=copy["recopies_used"],
+                         max_recopies=command.max_recopies) is RecopyPlan.EXHAUSTED:
             return self._exhausted(scope, copy)
         specs = []
         if state == int(_VERIFICATION.NOT_PERFORMED):
@@ -7525,9 +7506,9 @@ def _copy_guard(event, context) -> None:
             if not isinstance(after, int) or isinstance(after, bool) \
                     or not isinstance(before, int) or isinstance(before, bool):
                 raise EventValidationError("进度段必须携带整数进度范围")
-            if after <= before:
+            if not segment_advances(before, after):
                 raise EventValidationError("进度段必须推进可靠进度")
-            if after > copy.get("source_size"):
+            if segment_exceeds_source(after, copy.get("source_size")):
                 raise EventValidationError("进度段不能越过固定源长度")
         return
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _VERIFY_REASON:
@@ -7550,20 +7531,10 @@ def _copy_guard(event, context) -> None:
                         or after["slot_device_id"] is not None
                         or load_read_end(row.row_id, SimpleNamespace(connection=reads.connection)) is None):
                     raise EventValidationError("源摘要与释放机会必须关联原完整读取结束")
-            if state == int(_VERIFICATION.MATCHED):
-                if source is None or target is None or source != target:
-                    raise EventValidationError("校验通过要求源摘要与主机摘要一致")
-            elif state == int(_VERIFICATION.MISMATCHED):
-                if source is None or target is None or source == target:
-                    raise EventValidationError("摘要不一致要求两个摘要都存在且不等")
-            elif state == int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE):
-                if source is not None:
-                    raise EventValidationError("明确不支持源端摘要不能携带源摘要")
-            elif state == int(_VERIFICATION.FAILED):
-                if after.get("verification_error_json") is None:
-                    raise EventValidationError("校验失败必须携带失败诊断")
-            else:
-                raise EventValidationError("校验事务只能保存终局校验状态")
+            error = verification_result_error(state=state, source=source, target=target,
+                                              error=after.get("verification_error_json"))
+            if error is not None:
+                raise EventValidationError(error)
         return
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RECOPY_REASON:
         for row in event.rows:
@@ -9272,18 +9243,14 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
             item = self._load_item(connection, command.item_id)
             return self._verify_and_reuse(scope, saved, item)
         item = self._load_item(connection, command.item_id)
+        disposition = decide_cleanup_progress(item=item, irreversible=command.irreversible)
+        if disposition is CleanupItemDisposition.ALREADY:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CleanupItemSaved(CleanupItemDisposition.ALREADY, command.item_id))
         if command.irreversible:
             # 删除中成员取得可靠派发事实：限制从可撤销升级为不可撤销。
-            if item["status"] != int(_CLEANUP_ITEM_STATUS.DELETING):
-                raise ConsistencyError("不可撤销事实要求成员处于删除中")
-            if item["restriction_state"] == int(_CLEANUP_RESTRICTION.IRREVERSIBLE):
-                return CommandPlan(
-                    events=(), owners=self._owners, state_rows=self._state,
-                    read_only=True,
-                    result=CleanupItemSaved(
-                        CleanupItemDisposition.ALREADY, command.item_id))
-            if item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE):
-                raise ConsistencyError("不可撤销事实要求本项限制仍可撤销")
             upgrade = _update(
                 "cleanup_items", command.item_id,
                 {"restriction_state": int(_CLEANUP_RESTRICTION.ACTIVE)},
@@ -9299,15 +9266,6 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
                 owners=self._owners, state_rows=self._state,
                 result=CleanupItemSaved(
                     CleanupItemDisposition.SAVED, command.item_id))
-        if item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING):
-            return CommandPlan(
-                events=(), owners=self._owners, state_rows=self._state,
-                read_only=True,
-                result=CleanupItemSaved(
-                    CleanupItemDisposition.ALREADY, command.item_id))
-        if (item["status"] != int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)
-                or item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE)):
-            raise ConsistencyError("删除推进要求成员处于限制中")
         output_id = item["output_id"]
         output = self._state["outputs"].get(output_id)
         if output is None or output["cleanup_status"] != int(
@@ -9724,23 +9682,7 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
         output = self._state["outputs"].get(output_id)
         if output is None:
             raise ConsistencyError(f"清理成功要求确认产物身份: {command.item_id}")
-        from_wait = item["status"] == int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)
-        if from_wait:
-            # 待删除成员没有本项删除调用：只复用可靠完成或缺席事实。
-            if item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE):
-                raise ConsistencyError("待删除成员的成功要求可撤销限制")
-            if command.outcome is CleanupOutcomeChoice.DELETED:
-                raise ConsistencyError("没有本项删除调用不能保存实际删除依据")
-            if (command.outcome is CleanupOutcomeChoice.ALREADY_CLEANED
-                    and output["availability"] != int(_AVAILABILITY.CLEANED)):
-                raise ConsistencyError("已有完成依据要求产物已可靠清理")
-        elif (item["status"] != int(_CLEANUP_ITEM_STATUS.DELETING)
-                or item["restriction_state"] not in (
-                    int(_CLEANUP_RESTRICTION.ACTIVE),
-                    int(_CLEANUP_RESTRICTION.IRREVERSIBLE))):
-            # 删除中成员在派发事实保存前仍为可撤销限制；成功终态本身
-            # 保存不可撤销完成事实（查询确认或缺席依据同样适用）。
-            raise ConsistencyError("清理成功要求成员处于删除中")
+        from_wait = validate_cleanup_success(item=item, outcome=command.outcome, output=output)
         device_file_id = output.get("device_file_id")
         intermediate_file_id = output.get("intermediate_file_id")
         templates = []

@@ -19,6 +19,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from camctl.contracts.enums import enum_for
+from camctl.contracts.json_values import is_json_integer
 from camctl.contracts.values import (
     ConsistencyError, MAX_OBJECT_ID, ObjectId, OperationKey, UtcMicros,
     new_operation_key,
@@ -72,6 +73,46 @@ def read_end_completed(*, stopped, bytes_read, error, source_size) -> bool:
     """可靠收场必须实际停止且读取字节数属于当前源长度。"""
     return (stopped is True and error is None and type(bytes_read) is int
             and 0 <= bytes_read <= source_size)
+
+
+def read_owner_eligible(action) -> bool:
+    """读取责任仍在执行且未取消；无法解释的状态按一致性错误处理。"""
+    if action is None:
+        raise ConsistencyError("读取发起动作缺失")
+    status, canceled = action.get("status"), action.get("cancel_requested")
+    if (not is_json_integer(status) or not is_json_integer(canceled)
+            or canceled not in (0, 1)):
+        raise ConsistencyError("读取发起动作的状态或取消标志无效")
+    try:
+        status = enum_for("actions.status")(int(status))
+    except ValueError as error:
+        raise ConsistencyError("读取发起动作的状态未登记") from error
+    return status == enum_for("actions.status").RUNNING and canceled == 0
+
+
+def segment_advances(before, after) -> bool:
+    """一个可靠段必须从原进度向前推进。"""
+    return after > before
+
+
+def segment_exceeds_source(end, source_size) -> bool:
+    """可靠段的结束位置不得超过固定源长度。"""
+    return end > source_size
+
+
+def validate_segment_save_state(*, reset_state, current_round, committed_bytes,
+                                source_size, requested_round, requested_before, end) -> None:
+    """核对段申请与当前轮次、可靠位置及固定源长度。"""
+    if reset_state != int(enum_for("file_copies.reset_state").READY):
+        raise ConsistencyError("重置意图未完成前不能保存拷贝进度")
+    if current_round != requested_round:
+        raise ConsistencyError(
+            f"段所属轮次 {requested_round} 与当前拷贝轮次 {current_round} 不一致")
+    if committed_bytes != requested_before:
+        raise ConsistencyError(
+            f"当前进度 {committed_bytes} 与段申请的旧进度 {requested_before} 不一致")
+    if segment_exceeds_source(end, source_size):
+        raise ConsistencyError("段范围越过固定源长度")
 
 
 class SourceChecksumSupport(Enum):
@@ -168,7 +209,7 @@ def decide_resume(facts: CopyFacts) -> CopyDecision:
     if not isinstance(facts, CopyFacts):
         raise TypeError(f"续传判定必须使用 CopyFacts: {facts!r}")
     size, committed = facts.source_size, facts.committed_bytes
-    if committed > size:
+    if segment_exceeds_source(committed, size):
         raise ConsistencyError(f"可靠进度 {committed} 超过固定源长度 {size}")
     if facts.reset_pending:
         if committed != 0:
@@ -428,7 +469,7 @@ class ReliableSegment:
                             ("segment_end", self.segment_end)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} 必须是非负整数: {value!r}")
-        if self.segment_end <= self.committed_before:
+        if not segment_advances(self.committed_before, self.segment_end):
             raise ValueError("段保存申请必须推进可靠进度")
         if not isinstance(self.synced, bool) or not self.synced:
             raise ValueError("段尾同步未确认的字节不能保存为可靠进度")
@@ -708,6 +749,39 @@ class RecopyPlan(Enum):
     OWNER_NOT_ELIGIBLE = "owner_not_eligible"
 
 
+def digests_match(source, target) -> bool:
+    """只有两端摘要都存在且相同时才是可靠匹配。"""
+    return source is not None and target is not None and source == target
+
+
+def verification_result_error(*, state, source, target, error) -> str | None:
+    """核对待保存的校验结论与原摘要或失败事实。"""
+    if state == int(_VERIFICATION.MATCHED):
+        if not digests_match(source, target):
+            return "校验通过要求源摘要与主机摘要一致"
+    elif state == int(_VERIFICATION.MISMATCHED):
+        if source is None or target is None or digests_match(source, target):
+            return "摘要不一致要求两个摘要都存在且不等"
+    elif state == int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE):
+        if source is not None:
+            return "明确不支持源端摘要不能携带源摘要"
+    elif state == int(_VERIFICATION.FAILED):
+        if error is None:
+            return "校验失败必须携带失败诊断"
+    else:
+        return "校验事务只能保存终局校验状态"
+    return None
+
+
+def decide_recopy(*, owner_running: bool, recopies_used: int, max_recopies: int) -> RecopyPlan:
+    """以发起责任和实际重拷次数决定是否允许进入新一轮。"""
+    if not owner_running:
+        return RecopyPlan.OWNER_NOT_ELIGIBLE
+    if recopies_used >= max_recopies:
+        return RecopyPlan.EXHAUSTED
+    return RecopyPlan.REGISTER
+
+
 @dataclass(frozen=True)
 class IntegrityFacts:
     """完整性判定所需的固定事实。
@@ -782,14 +856,10 @@ def decide_integrity(facts: IntegrityFacts) -> IntegrityDecision:
             raise ConsistencyError("支持源端校验时必须给出获取结果或获取失败")
         return IntegrityDecision(
             outcome=IntegrityOutcome.VERIFICATION_FAILED, error=facts.source_error)
-    if facts.source_sha256 == facts.target_sha256:
+    if digests_match(facts.source_sha256, facts.target_sha256):
         return IntegrityDecision(outcome=IntegrityOutcome.MATCHED)
-    if not facts.owner_running:
-        plan = RecopyPlan.OWNER_NOT_ELIGIBLE
-    elif facts.recopies_used >= facts.max_recopies:
-        plan = RecopyPlan.EXHAUSTED
-    else:
-        plan = RecopyPlan.REGISTER
+    plan = decide_recopy(owner_running=facts.owner_running,
+                         recopies_used=facts.recopies_used, max_recopies=facts.max_recopies)
     return IntegrityDecision(outcome=IntegrityOutcome.MISMATCHED, recopy=plan)
 
 
