@@ -22,6 +22,10 @@ from camctl.capture.photo_pair_rules import (
     _host_photo_source_pair, _FILE_ROLE, _FILE_ROLE_FOR_KIND, _HOST_PHOTO_PURPOSE_CODES,
     _HOST_PHOTO_SHA256, _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
 )
+from camctl.capture.terminal_rules import (
+    activity_capture_action_error, activity_capture_transition_error,
+    preparation_failure_action_error, requires_segment_finish, successful_action_error,
+)
 from camctl.capture.result_set_rules import (
     DEVICE_EVIDENCE_METHOD as _DEVICE_EVIDENCE_METHOD,
     TIME_AND_OUTPUTS_METHOD as _TIME_AND_OUTPUTS_METHOD,
@@ -534,11 +538,9 @@ def _action_finish_guard(event, context) -> None:
                 continue
             action = _guard_facts(context, "actions", row.row_id)
             details = row.after.values.get("error_details_json")
-            if (action.get("status") != 1 or action.get("execution_started") != 0
-                    or action.get("type") not in CAPTURE_ACTION_TYPES or action.get("cancel_requested") != 0
-                    or action.get("execution_spec_json") is None
-                    or row.after.values.get("error_code") != action_error_id("capture_failed")):
-                raise EventValidationError("准备失败要求尚未开始的合法拍摄动作")
+            error = preparation_failure_action_error(action, row.after.values)
+            if error is not None:
+                raise EventValidationError(error)
             try:
                 from camctl.history.validators import parse_preparation_failure_request
                 request = parse_preparation_failure_request(event.evidence.get("preparation_failure_request"))
@@ -553,15 +555,7 @@ def _action_finish_guard(event, context) -> None:
             after = row.after.values
             if after.get("status") in (3, 4, 6):
                 facts=_guard_facts(context,'actions',row.row_id)
-                from camctl.devices.tasks import CaptureResultPolicy
-
-                segmented = (
-                    facts.get("execution_started") == 1
-                    and facts.get("type")
-                    in (_ACTION_TYPE.CAMERA_RECORD, _ACTION_TYPE.CAMERA_TIMELAPSE)
-                    and facts.get("execution_spec_json", {}).get("result_policy")
-                    in {policy.value for policy in CaptureResultPolicy}
-                )
+                segmented = requires_segment_finish(facts)
                 if segmented or 'segment_finish_request' in event.evidence:
                     if context.current_reads is None:
                         raise EventValidationError('分段终态缺少原保存事实读取端口')
@@ -569,8 +563,9 @@ def _action_finish_guard(event, context) -> None:
             if after.get("status") == _ACTION_SUCCEEDED:
                 facts = _guard_facts(context, "actions", row.row_id)
                 facts.update(row.before.values)
-                if facts.get("cancel_requested") != 0:
-                    raise EventValidationError("取消请求生效的动作不能保存成功终态")
+                error = successful_action_error(facts)
+                if error is not None:
+                    raise EventValidationError(error)
                 if facts.get("type") == _ACTION_TYPE.CAMERA_RECORD:
                     if context.current_reads is None:
                         raise EventValidationError("录像成功缺少独立的原输入读取端口")
@@ -6894,7 +6889,6 @@ def _activity_guard(event, context) -> None:
             if not stopped and not completed:
                 raise EventValidationError("活动结束缺少可靠停止或设备完成事实")
         basis_before = row.before.values.get("completion_basis")
-        basis_after = row.after.values.get("completion_basis")
         capture_columns = (
             "capture_json", "completion_basis", "completion_evidence_json")
         if any(row.after.values.get(column) is not None
@@ -6903,18 +6897,13 @@ def _activity_guard(event, context) -> None:
                 "action_id", context.state_rows.get(
                     "device_activities", {}).get(row.row_id, {}).get("action_id"))
             action = context.state_rows.get("actions", {}).get(action_id)
-            if action is None:
-                raise EventValidationError(
-                    f"采集判定列要求动作事实: actions#{action_id}")
-            if action.get("type") == 2:
-                raise EventValidationError("录像活动不得携带采集结果或判定依据")
-            if not is_json_integer(action.get("type")) or action["type"] not in (1, 3):
-                raise EventValidationError("采集判定列要求可靠的照片或延时摄影动作类型")
-        if basis_after != basis_before and basis_after in (2, 3, 4):
-            if basis_before not in (None, 1):
-                raise EventValidationError("采集判定已确定，不能再改判")
-            if not row.after.values.get("completion_evidence_json"):
-                raise EventValidationError("确定的采集判定缺少可靠依据")
+            error = activity_capture_action_error(action_id, action)
+            if error is not None:
+                raise EventValidationError(error)
+        error = activity_capture_transition_error(basis_before, row.after.values)
+        if error is not None:
+            raise EventValidationError(error)
+
 
 
 def _release_guard(event, context) -> None:
