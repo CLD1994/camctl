@@ -232,7 +232,6 @@ class _TaskState:
         self.stop_signal = asyncio.Event()
         self.lease = FileLease()
         self.completion: Future[FileTaskResult] = Future()
-        self.received: Future[None] = Future()
 
     def request_stop(self) -> None:
         self.stop_event.set()
@@ -407,15 +406,17 @@ class FileTaskExecutor:
             return tuple(sorted(self._files))
 
     async def wait_for_files(self, file_ids: tuple[int, ...]) -> None:
-        """等待这些文件已有任务的实际结果交给原等待者或接手方。
+        """等待这些文件已有任务实际结束，不接管原任务的结果。
 
-        等待不接管结果；本协程持有的任务不能等待自身。返回后调用方
-        必须重新检查自己的业务责任，再申请文件资格。
+        同一完整文件操作可继续使用自己已持有的文件；不能等待尚未
+        持有的部分范围。返回后调用方须重新检查业务责任和文件资格。
         """
         wanted = set(file_ids)
         scope = _owned_scope.get()
         if (scope is not None and scope[0] is self and scope[3] is asyncio.current_task()
                 and wanted.intersection(scope[1])):
+            if wanted <= set(scope[1]):
+                return
             raise FileTaskError("文件任务不能等待自身持有的文件")
         executing = _executing_async.get()
         if (executing is not None and executing[0] is self
@@ -424,12 +425,12 @@ class FileTaskExecutor:
             raise FileTaskError("文件任务不能等待自身持有的文件")
         while True:
             with self._lock:
-                pending = tuple(state.received for state in self._tasks.values()
-                                if wanted.intersection(state.task.file_ids))
+                identities = {self._files[file_id] for file_id in wanted if file_id in self._files}
+                pending = tuple(self._tasks[identity].completion for identity in identities)
             if not pending:
                 return
-            for received in pending:
-                await asyncio.shield(asyncio.wrap_future(received))
+            for completion in pending:
+                await asyncio.shield(asyncio.wrap_future(completion))
 
     def _admit(self, task: FileTask | AsyncFileTask) -> _TaskState:
         with self._lock:
@@ -540,7 +541,6 @@ class FileTaskExecutor:
         # 旧句柄的重复观察不能移除已复用身份的新任务。
         if self._tasks.get(state.task.task_id) is state:
             del self._tasks[state.task.task_id]
-            state.received.set_result(None)
 
     def _hand_over(
         self, state: _TaskState, owner: ResponsibilityOwner, *,

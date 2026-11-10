@@ -49,7 +49,7 @@ def _task(task_id: str, file_id: int, body) -> FileTask:
     )
 
 
-async def test_wait_for_files_keeps_original_owner_responsible_after_actual_end():
+async def test_wait_for_files_does_not_consume_original_result():
     supervisor = Supervisor()
     executor = FileTaskExecutor(supervisor)
     owner_entered, owner_release, waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -76,16 +76,16 @@ async def test_wait_for_files_keeps_original_owner_responsible_after_actual_end(
     drain = None
     try:
         await asyncio.wait_for(waiting.wait(), 5)
-        assert not waiter.done()
+        await asyncio.wait_for(waiter, 5)
+        assert results == []  # 实际已结束，等待没有取走原结果。
         await asyncio.wait_for(executor.wait_for_files((10,)), 5)
         other = await executor.run_file_task(_task('other', 10, lambda _: 'ok'), StopAndAwaitOwner())
         assert other.value == 'ok'
         drain = asyncio.create_task(supervisor.drain_required())
         await asyncio.wait_for(owner_entered.wait(), 5)
-        assert not waiter.done() and results == []
+        assert results == []
         owner_release.set()
         await asyncio.wait_for(drain, 5)
-        await asyncio.wait_for(waiter, 5)
         assert len(results) == 1 and results[0].task_id == FileTaskId('original')
         assert results[0].error is not None
     finally:
@@ -95,18 +95,56 @@ async def test_wait_for_files_keeps_original_owner_responsible_after_actual_end(
         await asyncio.wait_for(asyncio.gather(waiter, drain, return_exceptions=True), 5)
 
 
-async def test_wait_for_files_rejects_the_current_owned_task():
+async def test_wait_for_files_reuses_only_the_current_owned_scope():
     executor = FileTaskExecutor(Supervisor())
 
     async def body(_control):
+        await executor.wait_for_files((1,))
         with pytest.raises(FileTaskError, match='自身'):
-            await executor.wait_for_files((1,))
+            await executor.wait_for_files((1, 2))
         await executor.wait_for_files((2,))
+        async def nested(_control):
+            return 'nested'
+        assert await executor.run_owned_async_file_task(
+            AsyncFileTask(FileTaskId('nested'), (1,), 'test', '原文件', nested)) == 'nested'
         return 'finished'
 
     result = await asyncio.wait_for(executor.run_owned_async_file_task(
         AsyncFileTask(FileTaskId('own'), (1,), 'test', '当前文件', body)), 5)
     assert result == 'finished'
+
+
+async def test_cancel_file_wait_does_not_cancel_actual_operation_or_its_result():
+    executor = FileTaskExecutor(Supervisor())
+    started, release, waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def body(_control):
+        started.set()
+        await release.wait()
+        return 'actual'
+
+    async def wait_file():
+        waiting.set()
+        await executor.wait_for_files((9,))
+
+    original = asyncio.create_task(executor.run_owned_async_file_task(
+        AsyncFileTask(FileTaskId('running'), (9,), 'test', '原文件', body)))
+    waiter = None
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        waiter = asyncio.create_task(wait_file())
+        await asyncio.wait_for(waiting.wait(), 5)
+        assert not waiter.done() and executor.unfinished_files() == (9,)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not original.done() and executor.unfinished_files() == (9,)
+        release.set()
+        assert await asyncio.wait_for(original, 5) == 'actual'
+        await asyncio.wait_for(executor.wait_for_files((9,)), 5)
+    finally:
+        release.set()
+        await asyncio.wait_for(asyncio.gather(original, return_exceptions=True), 5)
 
 
 async def test_background_stop_delivers_actual_save_error_after_source_and_connection_close(tmp_path):
