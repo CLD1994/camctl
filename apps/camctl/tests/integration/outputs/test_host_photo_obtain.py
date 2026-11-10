@@ -5,6 +5,9 @@ from dataclasses import replace
 import pytest
 
 from camctl.contracts.values import new_operation_key
+from camctl.contracts.enums import enum_for
+from camctl.contracts.workflow_errors import item_error_id
+from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -22,7 +25,7 @@ def test_two_obtains_make_independent_copies_of_promoted_photo_source(
 ):
     owned = read_targets
     connection = owned.connection
-    connection.execute("UPDATE actions SET type=1 WHERE id=11")
+    connection.execute("UPDATE actions SET type=1, status=3 WHERE id=11")
     connection.execute(
         "INSERT INTO intermediate_files (id, owner_action_id, owner_delivery_id, purpose,"
         " relative_path, retention_state, cleanup_state, size_bytes, sha256, last_error_json,"
@@ -65,9 +68,16 @@ def test_two_obtains_make_independent_copies_of_promoted_photo_source(
     first = repository.grant_file(command, new_operation_key(), owned)
     second = repository.grant_file(replace(command, action_id=32, item_id=102), new_operation_key(), owned)
     if cleaned:
-        assert first.kind is DbOutcomeKind.ROLLED_BACK
-        assert second.kind is DbOutcomeKind.ROLLED_BACK
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        assert second.kind is DbOutcomeKind.COMPLETED, second.error
+        assert first.value.outcome is second.value.outcome is QualificationOutcome.REJECTED_FINAL
+        assert connection.execute("SELECT status,error_code,delivery_id,source_dependency FROM obtain_items ORDER BY id").fetchall() == [
+            (int(enum_for("obtain_items.status").FAILED), item_error_id("obtain_items", "output_unavailable"), None, 0),
+            (int(enum_for("obtain_items.status").FAILED), item_error_id("obtain_items", "output_unavailable"), None, 0),
+        ]
+        assert connection.execute("SELECT COUNT(*) FROM deliveries").fetchone() == (0,)
         assert connection.execute("SELECT COUNT(*) FROM file_copies").fetchone() == (0,)
+        assert connection.execute("SELECT cleanup_state FROM intermediate_files WHERE id=801").fetchone() == (4,)
         return
     assert first.kind is DbOutcomeKind.COMPLETED, first.error
     assert second.kind is DbOutcomeKind.COMPLETED, second.error
