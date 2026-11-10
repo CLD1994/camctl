@@ -24,14 +24,15 @@ from camctl.capture.photo_pair_rules import (
     _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
 )
 from camctl.capture.output_file_rules import (
-    CAPTURE_TYPES as _CAPTURE_TYPES, capture_binding_error, device_output_error,
+    MISSING_CAPTURE_BINDING, NOT_CAPTURE_ACTION, capture_binding_error, capture_binding_issue,
+    device_output_error, initial_output_error,
     device_source_ownership_error, intermediate_output_ownership_error,
     output_carrier_error, repair_output_error, derivative_origin_error, existing_derivative_error,
     origin_links_error, preview_source_pair_error, duplicate_derivative_error,
 )
 from camctl.capture.terminal_rules import (
-    activity_capture_action_error, activity_capture_transition_error,
-    preparation_failure_action_error, requires_segment_finish, successful_action_error,
+    ACTION_TERMINAL as _ACTION_TERMINAL, activity_capture_action_error, activity_capture_transition_error,
+    preparation_failure_action_error, recording_success_error, requires_segment_finish, successful_action_error,
 )
 from camctl.capture.result_set_rules import (
     DEVICE_EVIDENCE_METHOD as _DEVICE_EVIDENCE_METHOD,
@@ -150,7 +151,7 @@ from camctl.operations.attempts import (
     StaleRunFinish,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.capture.release_rules import release_basis_holds, output_scope_resolved
+from camctl.capture.release_rules import release_basis_holds, output_scope_resolved, unstarted_release_allowed
 from camctl.persistence.repositories.capture_facts import (
     include_start_facts, load_start_facts,
     unstarted_events, verify_unstarted_final,
@@ -267,9 +268,6 @@ _ACTION_SUCCEEDED = 3
 _ACTION_CANCELED = 6
 _ACTION_FAILED = 4
 _PLAN_COMPLETE = 3
-
-#: 动作终态集合。
-_ACTION_TERMINAL = (3, 4, 5, 6)
 
 def _unchecked_media() -> dict[str, Any]:
     """登记时产物文件尚无媒体检查：公共 media 结构表达未检查与未知时长。"""
@@ -570,8 +568,9 @@ def _action_finish_guard(event, context) -> None:
                 if facts.get("type") == _ACTION_TYPE.CAMERA_RECORD:
                     if context.current_reads is None:
                         raise EventValidationError("录像成功缺少独立的原输入读取端口")
-                    if context.current_reads.recording_input_issues(row.row_id):
-                        raise EventValidationError("原输入存在已知媒体失败，不能保存录像成功")
+                    error = recording_success_error(context.current_reads.recording_input_issues(row.row_id))
+                    if error is not None:
+                        raise EventValidationError(error)
                 if facts.get("type") == _ACTION_TYPE.CAMERA_TAKE_PHOTO:
                     try:
                         host_spec = _host_photo_execution_spec(facts)
@@ -810,13 +809,9 @@ def _cleanup_aggregate_guard(event, context) -> None:
         if row.table != "outputs" or row.before.exists:
             continue
         values = row.after.values
-        if values.get("cleanup_status") != 1:
-            raise EventValidationError("正式登记的初始清理状态必须是未请求")
-        availability = values.get("availability")
-        if availability not in (1, 5):
-            raise EventValidationError(f"登记初始可用性非法: {availability!r}")
-        if availability == 5 and values.get("error_json") is None:
-            raise EventValidationError("未知可用性必须携带错误依据")
+        error = initial_output_error(values)
+        if error is not None:
+            raise EventValidationError(error)
 
 
 def _plan_aggregate_guard(event, context) -> None:
@@ -5571,12 +5566,14 @@ class _ResultRunCloseCommand:
 
 def _observer_binding(action) -> tuple[str, str]:
     """观察者动作必须属于拍摄类型并携带固定设备与驱动绑定。"""
-    if action is None or action.get("type") not in _CAPTURE_TYPES:
+    if action is None:
         raise ConsistencyError("设备文件观察者必须是拍摄动作")
-    device, driver = action.get("device_id"), action.get("driver_id")
-    if not isinstance(device, str) or not device or not isinstance(driver, str) or not driver:
+    issue = capture_binding_issue(action)
+    if issue == NOT_CAPTURE_ACTION:
+        raise ConsistencyError("设备文件观察者必须是拍摄动作")
+    if issue == MISSING_CAPTURE_BINDING:
         raise ConsistencyError("设备文件观察者缺少已保存的设备或驱动绑定")
-    return device, driver
+    return action.get("device_id"), action.get("driver_id")
 
 
 def file_discovery_row(command: FileObservationSave, file_id: int, identity_key: str):
@@ -6900,10 +6897,7 @@ def _release_guard(event, context) -> None:
             raise EventValidationError("准备收场依据必须是实际可靠的 true")
         if "preparation_error" in event.evidence and event.evidence.get("preparation_resolved") is not True:
             raise EventValidationError("实际准备错误必须与准备收场共同保存")
-        unstarted = ((event.evidence.get("preparation_resolved") is True or facts.get("baseline_state") == 3)
-                     and action.get("status") in _ACTION_TERMINAL
-                     and facts.get("dispatch_state") in (1, 4)
-                     and facts.get("activity_state") == 1 and facts.get("started_at") is None)
+        unstarted = unstarted_release_allowed(facts, action, event.evidence.get("preparation_resolved"))
         from camctl.capture.software_recovery import recovery_state
         recovery = next((recovery_state(item) for item in context.state_rows.get("software_recoveries", {}).values()
                          if item["activity_id"] == row.row_id), None)

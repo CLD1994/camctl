@@ -9,12 +9,36 @@ _PURPOSE = enum_for("intermediate_files.purpose")
 _RETENTION = enum_for("intermediate_files.retention_state")
 
 
-def capture_binding_error(action):
+NOT_CAPTURE_ACTION = 1
+MISSING_CAPTURE_BINDING = 2
+
+
+def capture_binding_issue(action):
     if action.get("type") not in CAPTURE_TYPES:
-        return "产物来源和设备文件观察者必须是拍摄动作"
+        return NOT_CAPTURE_ACTION
     device, driver = action.get("device_id"), action.get("driver_id")
     if not isinstance(device, str) or not device or not isinstance(driver, str) or not driver:
+        return MISSING_CAPTURE_BINDING
+    return None
+
+
+def capture_binding_error(action):
+    issue = capture_binding_issue(action)
+    if issue == NOT_CAPTURE_ACTION:
+        return "产物来源和设备文件观察者必须是拍摄动作"
+    if issue == MISSING_CAPTURE_BINDING:
         return "拍摄动作缺少已保存的设备或驱动绑定"
+    return None
+
+
+def initial_output_error(values):
+    if values.get("cleanup_status") != 1:
+        return "正式登记的初始清理状态必须是未请求"
+    availability = values.get("availability")
+    if availability not in (1, 5):
+        return f"登记初始可用性非法: {availability!r}"
+    if availability == 5 and values.get("error_json") is None:
+        return "未知可用性必须携带错误依据"
     return None
 
 
