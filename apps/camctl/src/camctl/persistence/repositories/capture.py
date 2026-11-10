@@ -1122,20 +1122,22 @@ def _cleanup_aggregate_guard(event, context) -> None:
 
 def _plan_aggregate_guard(event, context) -> None:
     """受理创建时，计划初始状态与全部动作的受理结果一致。"""
+    from camctl.acceptance.storage_rules import validate_initial_plan_status
+
     for row in event.rows:
         if row.table != "plans":
             continue
         if not row.before.exists:
             plan_id = row.row_id
-            actions = [
-                values
+            statuses = tuple(
+                values.get("status")
                 for values in context.state_rows.get("actions", {}).values()
                 if values.get("plan_id") == plan_id
-            ]
-            statuses = {values.get("status") for values in actions}
-            expected = 3 if (actions and statuses == {4}) else 1
-            if row.after.values.get("status") != expected:
-                raise EventValidationError(f"计划状态与动作聚合不符: 期望 {expected}")
+            )
+            try:
+                validate_initial_plan_status(row.after.values.get("status"), statuses)
+            except ValueError as error:
+                raise EventValidationError(str(error)) from error
             continue
 
 

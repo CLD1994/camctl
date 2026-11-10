@@ -118,6 +118,8 @@ def register_window_guard() -> None:
 
 def _window_guard(event, context) -> None:
     """首次窗口内观察与动作保存的启动窗口共同校验。"""
+    from camctl.scheduling.rules import WindowObservationError, validate_window_observation
+
     for row in event.rows:
         if row.table != "actions":
             continue
@@ -125,22 +127,13 @@ def _window_guard(event, context) -> None:
         if facts is None:
             raise EventValidationError(
                 f"窗口观察缺少动作事实: actions#{row.row_id}")
-        if row.before.values.get("first_window_observed_at") is not None:
-            raise EventValidationError("首次观察不能覆盖已有观察时间")
-        observed = row.after.values.get("first_window_observed_at")
-        if not isinstance(observed, int) or isinstance(observed, bool):
-            raise EventValidationError(f"观察时间必须是整数微秒: {observed!r}")
-        scheduled = facts.get("scheduled_at")
-        max_delay = facts.get("max_delay_ms")
-        if (not isinstance(scheduled, int) or isinstance(scheduled, bool)
-                or not isinstance(max_delay, int) or isinstance(max_delay, bool)):
-            raise EventValidationError(
-                f"窗口观察要求动作保存启动窗口: actions#{row.row_id}")
-        window = LaunchWindow(
-            scheduled_at=scheduled, window_end=scheduled + max_delay * 1000)
-        if window_phase(window, observed) is not WindowPhase.IN_WINDOW:
-            raise EventValidationError(
-                f"观察时间不在启动窗口内: actions#{row.row_id}")
+        try:
+            validate_window_observation(action_id=row.row_id,
+                previous=row.before.values.get("first_window_observed_at"),
+                observed=row.after.values.get("first_window_observed_at"),
+                scheduled_at=facts.get("scheduled_at"), max_delay_ms=facts.get("max_delay_ms"))
+        except WindowObservationError as error:
+            raise EventValidationError(str(error)) from error
 
 
 class StartOutcome(Enum):
