@@ -11,15 +11,13 @@ from camctl.history.events import branch_of, load_event_registry
 from camctl.history.host_photo_request import HostPhotoRequestError
 from camctl.outputs.catalog import FileReference, OutputDraft, OutputKind
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
-from camctl.persistence.repositories.outputs import load_output_family, register_outputs_guards
+from camctl.persistence.repositories.outputs import load_output_family
 
 from .test_recording_finish import _environment, _finish, _NOW
 
-register_capture_guards()
-register_outputs_guards()
 
 
 def _photo_environment(tmp_path, *, legacy_v1=False, host_spec=True, capture_format="raw"):
@@ -325,11 +323,7 @@ async def test_original_requests_remain_verifiable_after_explicit_source_cleanup
     from ..support.capture import capture_database
     from camctl.persistence.repositories.host_capture import HostCaptureRepository, HostPhotoComplete, PrepareHostPhoto
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-    from camctl.persistence.repositories.acceptance import register_acceptance_guards
-    from camctl.persistence.repositories.scheduling import register_window_guard
     from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
-    register_acceptance_guards()
-    register_window_guard()
     owned = _photo_environment(tmp_path)
     verification = None
     supervisor = Supervisor()

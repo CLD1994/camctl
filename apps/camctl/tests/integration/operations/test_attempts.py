@@ -42,16 +42,12 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import TransactionError
 
 from ..persistence.test_runtime import _create_valid_database
 
-register_operation_guards()
 
 _NOW = 1_750_000_000_000_000
 

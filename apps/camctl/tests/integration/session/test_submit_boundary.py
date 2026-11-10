@@ -26,9 +26,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, op
 from camctl.contracts.values import new_operation_key
 from camctl.session import service
 from camctl.session.locks import acquire_admission, probe_admission
-from camctl.reporting.policy import (
-    ReportingRepository, register_report_guards,
-)
+from camctl.reporting.policy import ReportingRepository
 
 from ..acceptance.test_acceptance import Catalog, _plan_body
 from ..acceptance.test_atomicity import _process
@@ -417,7 +415,6 @@ async def test_submit_unknown_commit_does_not_return_handoff_success(runtime, mo
 @pytest.mark.asyncio
 @pytest.mark.parametrize("handoff_fails", [False, True])
 async def test_ack_and_input_follow_handoff_transaction(runtime, monkeypatch, handoff_fails):
-    register_report_guards()
     owned = open_existing(runtime.state_db, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         seeded = _process(_plan_body(request_id="41"), owned.connection)
@@ -453,7 +450,6 @@ async def test_ack_and_input_follow_handoff_transaction(runtime, monkeypatch, ha
 
 @pytest.mark.asyncio
 async def test_ack_only_after_terminal_plan_skips_probe(runtime, monkeypatch):
-    register_report_guards()
     owned = open_existing(runtime.state_db, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         body = _plan_body()
@@ -546,7 +542,6 @@ async def test_close_transaction_failure_keeps_released_admission_closed(
     (None, False), ("query", True), ("probe", True),
 ])
 async def test_whole_rejection_ack_and_handoff_share_transaction(runtime, monkeypatch, ack_valid, failed_boundary, handoff_fails):
-    register_report_guards()
     owned = open_existing(runtime.state_db, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert _process(_plan_body(request_id="41"), owned.connection).kind is DbOutcomeKind.COMPLETED

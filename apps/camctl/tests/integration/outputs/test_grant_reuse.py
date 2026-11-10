@@ -13,7 +13,7 @@ from camctl.outputs.qualification import OperationConfig, QualificationOutcome
 from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+from camctl.persistence.repositories.file_batches import FileBatchRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.transactions import TransactionError
@@ -70,7 +70,6 @@ def test_original_key_returns_exact_first_grant(granted):
 def _grant_read_access(owned, command, first):
     if command.source_device_file_id is not None:
         if command.item_id is not None:
-            register_file_batch_guards()
             batch = FileBatchRepository().acquire(
                 BatchRequest(command.action_id, "cam-1", command.occurred_at), new_operation_key(), owned)
             assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch

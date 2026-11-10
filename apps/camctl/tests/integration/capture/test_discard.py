@@ -41,24 +41,13 @@ from camctl.outputs.work_files import (
     clean_one_work_file,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    FinishCapture,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import (
-    OutputsRepository,
-    register_outputs_guards,
-)
+from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture
+from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.database import business_database
 
-register_capture_guards()
-register_operation_guards()
-register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
 

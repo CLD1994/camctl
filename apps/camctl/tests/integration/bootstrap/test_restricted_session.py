@@ -24,27 +24,10 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.contracts.workflow_errors import registered_error
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.operations import (
-    register_operation_guards,
-)
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
-from camctl.reporting.policy import register_report_guards, register_sync_guard
-from camctl.persistence.repositories.outputs import register_outputs_guards
 
 from . import test_run_dispatch
 from .test_run_dispatch import _parsed
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_cancellation_guards()
 
 pytestmark = pytest.mark.asyncio
 

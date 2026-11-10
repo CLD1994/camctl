@@ -30,7 +30,7 @@ from camctl.host_files.tasks import FileTaskExecutor
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.session import SessionRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.session.clock import ClockCheckInput, check_clock, register_clock_guard
+from camctl.session.clock import ClockCheckInput, check_clock
 from camctl.session.service import run_session
 from camctl.session.supervision import Supervisor
 
@@ -218,7 +218,6 @@ class ConsumerWorld:
 
     def prime_clock(self):
         """会话环境预置可信下界；后续快照包括此正式事务。"""
-        register_clock_guard()
         previous = self.owned.connection.execute(
             "SELECT trusted_time_lower_bound FROM runtime_state").fetchone()[0]
         clock = SimpleNamespace(utc_micros=lambda: self.wall[0])

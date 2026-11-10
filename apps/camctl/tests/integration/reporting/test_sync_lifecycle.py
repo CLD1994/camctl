@@ -17,32 +17,11 @@ import pytest
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.repositories.acceptance import (
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.reporting.policy import (
-    cancel_sync,
-    finish_canceled_sync_action,
-    record_local_report,
-    register_report_guards,
-    register_sync_guard,
-    start_sync,
-)
+from camctl.reporting.policy import cancel_sync, finish_canceled_sync_action, record_local_report, start_sync
 from camctl.reporting.models import SyncMode
 
 from ..persistence.test_runtime import _create_valid_database
 
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_capture_guards()
-register_acceptance_guards()
-register_cancellation_guards()
 
 _NOW = 1_750_000_000_000_000
 

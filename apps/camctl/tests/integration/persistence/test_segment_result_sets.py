@@ -5,7 +5,7 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.segments import SegmentRepository,register_segment_guards
+from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories import segments as segment_storage
 from .transaction_fixtures import capture_operation_command
 from camctl.persistence.repositories.transactions import BoundedCommandPlan,commit_operation
@@ -16,7 +16,6 @@ from .test_segment_storage import SegmentedCatalog
 from ..capture.result_consumer_fixtures import consumer_world
 
 pytestmark=pytest.mark.asyncio
-register_segment_guards()
 
 
 def _request(runtime,owned,action_id):

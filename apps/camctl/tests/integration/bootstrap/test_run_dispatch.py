@@ -25,23 +25,9 @@ from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_com
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.capture import (
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import (
-    register_operation_guards,
-)
 from camctl.persistence.repositories.scheduling import SchedulingRepository
-from camctl.persistence.repositories.timelapse import (
-    register_timelapse_guards,
-)
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
-from camctl.reporting.policy import register_report_guards, register_sync_guard
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
 from camctl.session.locks import probe_admission
 
 from ..support.database import business_database
@@ -56,13 +42,6 @@ from ..capture.test_capture_contract import (
 )
 from ..persistence.test_runtime import _create_valid_database  # noqa: F401
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_cancellation_guards()
 
 pytestmark = pytest.mark.asyncio
 

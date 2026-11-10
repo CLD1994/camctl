@@ -23,40 +23,17 @@ from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_inp
 from camctl.bootstrap.application import query_work_facts
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.host_files.handoff import PublishResult, PublishStage
 from camctl.host_files.io import DirectorySyncStage
 from camctl.reporting.models import ReportBytes, SyncMode
-from camctl.reporting.policy import (
-    publish_report,
-    record_local_report,
-    record_report_bytes,
-    record_report_failure,
-    record_report_publish_intent,
-    register_report_guards,
-    register_sync_guard,
-    start_sync,
-)
+from camctl.reporting.policy import publish_report, record_local_report, record_report_bytes, record_report_failure, record_report_publish_intent, start_sync
 
 from ..acceptance.test_acceptance import Catalog
 from ..acceptance.test_atomicity import _process
 from ..persistence.test_runtime import _create_valid_database
 
-register_acceptance_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_capture_guards()
-register_cancellation_guards()
 
 _NOW = 1_750_000_000_000_000
 

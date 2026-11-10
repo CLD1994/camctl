@@ -25,15 +25,10 @@ from camctl.capture.timelapse import (
 from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.timelapse import (
-    ScheduleWait,
-    TimelapseRepository,
-    register_timelapse_guards,
-)
+from camctl.persistence.repositories.timelapse import ScheduleWait, TimelapseRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 
-register_timelapse_guards()
 
 _NOW = 1_750_000_000_000_000
 

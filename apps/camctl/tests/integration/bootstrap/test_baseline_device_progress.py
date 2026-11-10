@@ -15,7 +15,6 @@ from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.scheduling import register_window_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.session.service import StateDbFailure
 
@@ -26,7 +25,6 @@ from ..scheduling.test_start_action import _SCHEDULED
 from ..support.session import accept_plan, session_config
 
 pytestmark = pytest.mark.asyncio
-register_window_guard()
 
 
 class TrackedConnection:

@@ -86,12 +86,9 @@ async def test_partial_write_is_persisted_and_disables_later_actions(owned):
     from types import SimpleNamespace
     from camctl.bootstrap.motor_assembly import motor_flow
     from ..support.database import business_database, database_path
-    from camctl.persistence.repositories.motor import MotorRepository, register_motor_guards
-    from camctl.persistence.repositories.scheduling import register_window_guard
+    from camctl.persistence.repositories.motor import MotorRepository
     from camctl.session.clock import ClockCheckInput
 
-    register_motor_guards()
-    register_window_guard()
     _admit(owned, _body(count=2))
     write = Mock(return_value=5)
     close = Mock()

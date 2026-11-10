@@ -46,8 +46,6 @@ from camctl.outputs.work_files import (
 )
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.transactions import commit_operation
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.session.supervision import Supervisor
 
@@ -57,8 +55,6 @@ from .test_local_read import local_read  # noqa: F401
 from .test_qualification import _NOW
 from .test_read_associations import read_targets  # noqa: F401
 
-register_capture_guards()
-register_file_batch_guards()
 
 _CONTENT_DIGEST = hashlib.sha256(_CONTENT).hexdigest()
 
@@ -264,22 +260,12 @@ async def test_promoted_file_is_not_cleaned(tmp_path, media_cases):
     from camctl.capture.result_inputs import ObservedFile
     from camctl.capture.results import FileKind
     from camctl.host_files.media import MediaProbe, MediaStream
-    from camctl.persistence.repositories.acceptance import register_acceptance_guards
-    from camctl.persistence.repositories.operations import register_operation_guards
-    from camctl.persistence.repositories.outputs import register_outputs_guards
-    from camctl.persistence.repositories.scheduling import register_window_guard
-    from camctl.persistence.repositories.timelapse import register_timelapse_guards
     from ..support.capture import capture_database
     from ..support.capture_media_cases import (
         CONTENT, ScriptTools, media_case, recording_environment,
         recording_media, recording_runtime,
     )
 
-    register_acceptance_guards()
-    register_window_guard()
-    register_operation_guards()
-    register_timelapse_guards()
-    register_outputs_guards()
     owned, staging = await recording_environment(
         tmp_path, check_decision=3,
         check_basis='{"reason": 2, "target_duration_ms": 60000}')

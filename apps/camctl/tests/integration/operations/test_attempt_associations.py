@@ -9,13 +9,12 @@ import pytest
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.transactions import CommandPlan, commit_operation, event_envelope, row_change, row_facts
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind, QueryPurpose
 from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.outputs.slots import SlotOutcome, SlotRequest
-from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+from camctl.persistence.repositories.file_batches import FileBatchRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..outputs.test_qualification import (
@@ -56,8 +55,6 @@ def read_environment(tmp_path):
             (file_id, action_id, delivery_id, purpose, f"copy/{file_id}.part"),
         )
     connection.commit()
-    register_operation_guards()
-    register_outputs_guards()
     try:
         yield owned
     finally:
@@ -192,7 +189,6 @@ def _grant_formal_batch(owned):
     connection.execute("INSERT INTO obtain_items (id,selection_id,output_id,basis,status,source_dependency,delivery_id)"
                        " VALUES (101,31,701,1,3,1,901)")
     connection.commit()
-    register_file_batch_guards()
     result = FileBatchRepository().acquire(BatchRequest(31, "cam-1", _NOW), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED and result.value is BatchOutcome.GRANTED, result
 

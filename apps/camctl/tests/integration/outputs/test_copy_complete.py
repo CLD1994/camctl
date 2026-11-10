@@ -32,7 +32,6 @@ from camctl.outputs.copy import (
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories import outputs
@@ -44,7 +43,6 @@ from .test_local_read import local_read  # noqa: F401
 from .test_qualification import _NOW
 from .test_read_associations import read_targets  # noqa: F401
 
-register_capture_guards()
 
 _CONTENT_DIGEST = hashlib.sha256(_CONTENT).hexdigest()
 _WRONG_DIGEST = "b" * 64

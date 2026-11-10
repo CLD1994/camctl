@@ -32,8 +32,6 @@ async def dispatch_capture(owned, directory, driver, *, evidence, wall_us=None):
 
 async def request_driver_cancel(owned, action_id, occurred_at, catalog):
     """从正式受理和取消流程使当前拍摄失去继续派发资格。"""
-    from camctl.persistence.repositories.cancellation import register_cancellation_guards
-    register_cancellation_guards()
     database = await capture_database(owned)
     instant = datetime.fromtimestamp(occurred_at // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     accepted = await accept_input(ParsedInput('cancel-driver.json', {

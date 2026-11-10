@@ -182,9 +182,8 @@ async def accept_plan(database, directory, catalog, body, clock, *, mode=Command
     """受控时间场景仍经实际文件解析、公开受理与真实业务数据库保存。"""
     from camctl.acceptance.service import AcceptanceContext, accept_input
     from camctl.contracts.values import new_operation_key
-    from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
 
-    register_acceptance_guards()
     result = await accept_input(await parsed_plan(directory, body), AcceptanceContext(
         mode=mode, catalog=catalog, repository=AcceptanceRepository(), clock=clock),
         new_operation_key(), database)
@@ -208,11 +207,10 @@ def session_context(path, *, clock, catalog=None, facts_query=None,
     from camctl.bootstrap.application import query_work_facts
     from camctl.persistence.repositories.acceptance import AcceptanceRepository
     from camctl.persistence.repositories.session import SessionRepository
-    from camctl.session.clock import ClockCheckInput, register_clock_guard
+    from camctl.session.clock import ClockCheckInput
     from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
     from camctl.session.service import SessionContext, SessionPaths
 
-    register_clock_guard()
     path = Path(path)
     session_lock, admission_lock = lock_file_paths(path)
     values = dict(
