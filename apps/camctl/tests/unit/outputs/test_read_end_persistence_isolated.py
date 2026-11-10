@@ -11,6 +11,8 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from camctl.outputs.copy import read_end_completed, validate_read_end_facts
+
 
 SOURCE = Path(__file__).parents[3] / "src/camctl/persistence/repositories/read_end.py"
 ATTEMPTS_SOURCE = SOURCE.parents[2] / "outputs/read_attempts.py"
@@ -81,6 +83,8 @@ def isolated():
     stub("camctl.contracts.enums", enum_for=lambda name: enums[name])
     stub("camctl.contracts.json_values", json_equal=lambda a, b: a == b, parse_exact_json=lambda value: value)
     stub("camctl.contracts.values", ConsistencyError=ValueError, ObjectId=int, OperationKey=str, UtcMicros=int)
+    stub("camctl.outputs.copy", read_end_completed=read_end_completed,
+         validate_read_end_facts=validate_read_end_facts)
     stub("camctl.devices.read_session", ReadEnd=End)
     stub("camctl.operations.models", AttemptTicket=Ticket)
     stub("camctl.history.events", reason_for_branch=lambda *args: 9)

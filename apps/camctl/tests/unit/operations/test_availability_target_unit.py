@@ -317,7 +317,6 @@ def creation_module(target_rules, monkeypatch):
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     validators = ModuleType("camctl.history.validators")
     validators.EventContext = object
-    validators.register_guard = lambda *args: None
     monkeypatch.setitem(sys.modules, validators.__name__, validators)
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_target", target_rules)
     source = find_spec("camctl.persistence.repositories.availability_create")
@@ -784,7 +783,6 @@ def isolated_result_guard(target_rules, monkeypatch):
     monkeypatch.setitem(sys.modules, recovery.__name__, recovery)
     validators = ModuleType("camctl.history.validators")
     validators.EventValidationError = type("EventValidationError", (ValueError,), {})
-    validators.register_guard = lambda *args: None
     monkeypatch.setitem(sys.modules, validators.__name__, validators)
     attempts = ModuleType("camctl.operations.attempts")
     class Kind(Enum):
@@ -798,6 +796,11 @@ def isolated_result_guard(target_rules, monkeypatch):
         STOP_CONFIRMATION = "stop"
         RESIDUAL_STOP_CONFIRMATION = "residual"
     attempts.OperationKind, attempts.QueryPurpose = Kind, Purpose
+    def unused_rule(*args, **kwargs):
+        raise AssertionError("该结果分支不应调用其他业务规则")
+    attempts.retry_wait_violation = unused_rule
+    attempts.may_resolve_output_scope = unused_rule
+    attempts.may_prepare_capture_attempt = unused_rule
     for name in ("AttemptFinish", "ReadResumeDecision", "ReadResumeDisposition", "ReadResumeRequest",
                  "AttemptIntent", "AttemptTarget", "BeginAttemptResult", "BeginDisposition", "FinishAttemptResult",
                  "FinishDisposition", "RunFinish", "RunOutcome", "RunStatus", "StaleRunFinish", "StaleRunFinishResult", "responsibility_key",

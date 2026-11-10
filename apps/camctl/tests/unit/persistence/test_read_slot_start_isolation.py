@@ -10,6 +10,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl import resources
+from camctl.capture.recovery_types import RecoveryPhase
 from camctl.contracts import enums
 from camctl.persistence.repositories.file_batch_reads import FileBatchReads
 
@@ -168,6 +169,9 @@ def production(monkeypatch):
     validators.EventValidationError = EventValidationError
     validators.ValidatedEvent = type("ValidatedEvent", (), {})
     validators.validate_event_structure = lambda *_: None
+    recovery_types = ModuleType("camctl.capture.recovery_types")
+    recovery_types.RecoveryPhase = RecoveryPhase
+    monkeypatch.setitem(sys.modules, recovery_types.__name__, recovery_types)
 
     class UnusedPaths(ModuleType):
         PathRuleError = type("PathRuleError", (ValueError,), {})

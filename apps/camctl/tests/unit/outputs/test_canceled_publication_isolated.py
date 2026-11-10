@@ -407,14 +407,17 @@ class CancelSettlementTests(unittest.TestCase):
                                   'verification_state': 3, 'committed_bytes': 4, 'source_size': 4}},
             'intermediate_files': {23: {'id': 23, 'owner_delivery_id': 19}},
         })
-        with self.assertRaises(event_error):
+        handoff = load_handoff()
+        handoff.enum_for = lambda name: repo._VERIFICATION
+        with patch.dict(sys.modules, {'camctl.outputs.handoff': handoff}):
+            with self.assertRaises(event_error):
+                repo._delivery_guard(event, context)
+            event.evidence = {'canceled_publication': {'delivery_id': 19, 'copy_id': 21,
+                                                        'file_id': 24, 'location': 'staging'}}
+            with self.assertRaises(event_error):
+                repo._delivery_guard(event, context)
+            event.evidence['canceled_publication']['file_id'] = 23
             repo._delivery_guard(event, context)
-        event.evidence = {'canceled_publication': {'delivery_id': 19, 'copy_id': 21,
-                                                    'file_id': 24, 'location': 'staging'}}
-        with self.assertRaises(event_error):
-            repo._delivery_guard(event, context)
-        event.evidence['canceled_publication']['file_id'] = 23
-        repo._delivery_guard(event, context)
 
     def test_replay_rejects_a_different_staging_observation_identity(self):
         repo = load_repository()

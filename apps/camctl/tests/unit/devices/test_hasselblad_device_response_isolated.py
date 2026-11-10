@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from camctl.capture.recovery_types import RecoveryPhase
+
 
 @pytest.fixture
 def responses(monkeypatch):
@@ -823,6 +825,9 @@ def photo_page_guard_api(photo_driver_api, page_api, monkeypatch):
     start_entry.EntryPhase = object
     enums = sys.modules["camctl.contracts.enums"]
     enums.enum_for = lambda name: SimpleNamespace()
+    recovery_types = ModuleType("camctl.capture.recovery_types")
+    recovery_types.RecoveryPhase = RecoveryPhase
+    monkeypatch.setitem(sys.modules, recovery_types.__name__, recovery_types)
     actions = {"id": 1, "device_id": "camera", "driver_id": "hasselblad_cfv100c",
         "execution_spec_json": {"output_storage": "device"}, "effective_params_json": {"capture_format": "raw"}}
     attempts = {"id": 5, "intent_event_id": 20}

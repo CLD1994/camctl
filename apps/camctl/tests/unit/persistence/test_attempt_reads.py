@@ -15,7 +15,8 @@ from camctl.history import events
 from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind, QueryPurpose,
 )
-from camctl.persistence import row_history, transaction
+from camctl.persistence import row_history
+from camctl.persistence.repositories import transactions as transaction
 from camctl.persistence.repositories.transactions import TransactionError, TransactionScope
 
 

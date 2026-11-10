@@ -13,7 +13,8 @@ from camctl.contracts.values import ConsistencyError
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.contracts.history_values import TransactionRange
-from camctl.persistence import row_history, transaction
+from camctl.persistence import row_history
+from camctl.persistence.repositories import transactions as transaction
 
 
 # 每项只给出该行为的协议值，不在夹具中维护完整枚举登记。
