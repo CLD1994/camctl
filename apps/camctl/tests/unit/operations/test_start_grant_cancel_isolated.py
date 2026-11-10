@@ -149,7 +149,6 @@ async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entri
         return SimpleNamespace(terminal=False)
     rules.current_eligibility_facts = current_facts
     rules.decide_cancel_eligibility = lambda facts: True
-    rules.load_eligibility_inputs = lambda connection, identity, motor_permit=None: loaded
     rules.may_link_auto_preview = lambda action, result: result
     models = ModuleType("camctl.cancellation.models")
     models.CancelTargetsDisposition = SimpleNamespace(SAVED="saved")
@@ -183,7 +182,8 @@ async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entri
         return callback(SimpleNamespace(connection=object()))
     database = SimpleNamespace(read=read, metadata=SimpleNamespace(instance_id="db"))
 
-    result = await namespace["_resolve_and_fix"](database, object(), 8, "target", lambda: 100, {}, coordinator)
+    repository = SimpleNamespace(read_eligibility_inputs=lambda owned, identity, motor_permit=None: loaded)
+    result = await namespace["_resolve_and_fix"](database, repository, 8, "target", lambda: 100, {}, coordinator)
 
     assert result is None
     assert phases == [module.EntryPhase.READY]

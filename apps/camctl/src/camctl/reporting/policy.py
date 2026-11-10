@@ -34,6 +34,10 @@ from camctl.reporting.models import (
 )
 from camctl.contracts.workflow_errors import registered_error, validate_error_details
 from camctl.reporting.ack import AckReport
+from camctl.reporting.storage_rules import (
+    ReportStorageRuleError, validate_report_creation, validate_report_change,
+    validate_sync_end_reference, validate_sync_action_started,
+)
 from camctl.persistence.repositories.reporting import (
     read_report_opportunity, read_covering_report, read_frozen_report,
     read_report_management, read_ack_report, read_report_bytes_at_boundary,
@@ -275,15 +279,8 @@ def _validate_management_change(reason: int, event_id: int, before: Mapping, aft
                 raise ConsistencyError(f"报告 {side}.{name} 不符合完整分支状态")
         if values["last_error_json"] is not None:
             parse_exact_json(encode_json_value(values["last_error_json"]))
-    if old_bytes is not None and new_bytes != old_bytes:
-        raise ConsistencyError("报告首次确定的字节依据不能改变")
-    if reason == _ReportChange.INTENT and not json_equal(after["last_error_json"], before["last_error_json"]):
-        raise ConsistencyError("发布意图不能提前清除文件处理错误")
-    if reason == _ReportChange.PUBLISH:
-        if after["publication_count"] != before["publication_count"] + 1:
-            raise ConsistencyError("每次可靠发布必须恰好增加一次成功计数")
-        if after["last_published_event_id"] != event_id:
-            raise ConsistencyError("本次发布依据必须引用当前事件")
+    validate_report_change(reason, event_id, before, after, old_bytes, new_bytes,
+                           intent_reason=_ReportChange.INTENT, publish_reason=_ReportChange.PUBLISH)
     return new_bytes
 
 
@@ -303,20 +300,14 @@ def _report_guard(event, context) -> None:
             continue
         after = row.after.values
         try:
-            validate_report_management(after)
-            AckReport(row.row_id, after.get("from_wm"), after.get("to_wm"),
-                      after.get("frozen_event_id"))
+            validate_report_creation(row.row_id, after, context.transaction.first_event_id)
+        except ReportStorageRuleError as error:
+            message = str(error)
         except ValueError as error:
             raise EventValidationError(str(error)) from error
-        version = after.get("format_version")
-        if isinstance(version, bool) or not isinstance(version, int) or version != 1:
-            raise EventValidationError("报告格式版本不受支持")
-        if after["frozen_event_id"] >= context.transaction.first_event_id:
-            raise EventValidationError("冻结依据必须早于本次登记事务")
-        if after.get("status") != 1:
-            raise EventValidationError("冻结创建的状态必须是 REGISTERED")
-        if after["last_error_json"] is not None:
-            raise EventValidationError("新登记报告尚无文件处理错误")
+        else:
+            continue
+        raise EventValidationError(message)
 
 
 def register_report_guards(register) -> None:
@@ -1057,14 +1048,21 @@ def _load_sync(connection, state, action_id):
     return sync
 
 
+def _report_rule(rule, *args):
+    try:
+        return rule(*args)
+    except ReportStorageRuleError as error:
+        message = str(error)
+    raise EventValidationError(message)
+
+
 def _sync_guard(event, context) -> None:
     """同步的结束事实引用本事件；ACK 资格由 ACK 守卫负责。"""
     for row in event.rows:
         if row.table != "state_syncs" or row.before.exists is False:
             continue
         if "ended_event_id" in row.after.values:
-            if row.after.values["ended_event_id"] != event.event_id:
-                raise EventValidationError("同步结束依据必须是本事件")
+            _report_rule(validate_sync_end_reference, row.after.values["ended_event_id"], event.event_id)
 
 
 def _action_start_guard(event, context) -> None:
@@ -1081,14 +1079,7 @@ def _action_start_guard(event, context) -> None:
             continue
         action_id = row.after.values.get("action_id")
         facts = context.state_rows.get("actions", {}).get(action_id)
-        if facts is None:
-            raise EventValidationError(
-                f"同步建立缺少动作事实: actions#{action_id!r}")
-        if (facts.get("status") != 2 or facts.get("execution_started") != 1
-                or facts.get("cancel_requested") != 0):
-            raise EventValidationError(
-                "同步责任要求发起动作已进入运行且未取消:"
-                f" actions#{action_id} status={facts.get('status')!r}")
+        _report_rule(validate_sync_action_started, action_id, facts)
 
 
 def register_sync_guard(register) -> None:

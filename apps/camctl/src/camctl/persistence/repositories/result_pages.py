@@ -3,6 +3,7 @@ from contextlib import closing
 from dataclasses import replace
 from types import SimpleNamespace
 
+from camctl.capture.result_pairing import result_file_family
 from camctl.capture.files import FileObservationSave, file_identity_key
 from camctl.capture.result_inputs import decode_result_cursor, observed_file, page_from_outcome, saved_outcome
 from camctl.capture.result_pages import ResultPageSave, ResultPageRef, SavedResultPage, result_page_input
@@ -39,7 +40,6 @@ _OWNERSHIP = enum_for("device_activities.ownership_mode")
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _RUN_KIND = enum_for("operation_runs.kind")
 _ROLE = enum_for("device_files.role")
-_FAMILY_ROLE = enum_for("result_page_files.family_role")
 _BASELINE_EVENT = load_event_registry()["events"]["BASELINE_CHUNK"]
 _BASELINE_TYPE = _BASELINE_EVENT["id"]
 _BASELINE_FIX = _BASELINE_EVENT["branches"]["FIX"]["reason"]
@@ -89,16 +89,16 @@ def iter_result_file_facts(reader, action, ticket, last_page_event_id):
 
 def verify_output_scope_ownership(reader, action, ticket, last_page_event_id):
     """当前新增必要成员必须可靠归属；明确可选预览只留发现也可确定范围。"""
-    from camctl.capture.results import ProductRule, is_optional_preview
+    from camctl.capture.result_ownership import require_result_file_ownership
+    from camctl.capture.results import ProductRule
     rules = tuple(ProductRule.from_json(value) for value in action['execution_spec_json'].get('product_rules', ()))
     for entry, facts in iter_result_file_facts(reader, action, ticket, last_page_event_id):
-        if (facts['source_action_id'] == action['id'] and facts['ownership_evidence_json'] is not None):
-            continue
-        if (ticket.responsibility_key != f"scope/{ticket.target_id}"
-                and facts['source_action_id'] is None and is_optional_preview(
-                entry.kind, entry.format_id, entry.paired_identity, rules)):
-            continue
-        raise ConsistencyError('原完整扫描仍有未确认归属的新增必要文件')
+        require_result_file_ownership(action_id=action['id'],
+            source_action_id=facts['source_action_id'],
+            ownership_evidence=(facts['ownership_evidence_json']
+                                if facts['source_action_id'] == action['id'] else None),
+            responsibility_key=ticket.responsibility_key, target_id=ticket.target_id,
+            observed_file=entry, product_rules=rules)
 
 
 class _BaselineCursor:
@@ -273,41 +273,6 @@ def _decode(event, *, run=None):
         return SavedResultPage(ref, page, event.occurred_at, tuple((identity, file_id) for identity, file_id in file_ids)), raw
     except (KeyError, TypeError, ValueError) as error:
         raise ConsistencyError("结果页原历史不可解释") from error
-
-
-def result_file_family(identity, *, result_policy=None):
-    """按冻结结果策略保留原路径主干，并标记配对原片和预览。"""
-    directory, separator, name = identity.rpartition("/")
-    if separator and not directory:
-        directory = "/"
-    stem, dot, suffix = name.rpartition(".")
-    if not separator or not directory or not dot or not stem:
-        return None, None, None
-    suffix = suffix.lower()
-    from camctl.devices.tasks import CaptureResultPolicy
-
-    if result_policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
-        from camctl.devices.drivers.adb_cameras.action6_results import ACTION6_RESULT_PROFILE
-
-        profile = ACTION6_RESULT_PROFILE
-        original_suffixes = frozenset(
-            item.suffix.lstrip(".").casefold()
-            for item in profile.formats
-            if item.format_id == profile.paired_original_format_id
-        )
-        if suffix in original_suffixes:
-            role = int(_FAMILY_ROLE.ORIGINAL)
-        elif suffix == profile.preview_format.suffix.lstrip(".").casefold():
-            role = int(_FAMILY_ROLE.PREVIEW)
-        else:
-            return None, None, None
-    elif suffix == "osv":
-        role = int(_FAMILY_ROLE.ORIGINAL)
-    elif suffix == "lrf":
-        role = int(_FAMILY_ROLE.PREVIEW)
-    else:
-        return None, None, None
-    return directory, stem, role
 
 
 def _relation_values(*, created_event_id, action_id, run_id, attempt_id,

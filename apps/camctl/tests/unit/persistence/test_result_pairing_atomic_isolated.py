@@ -9,6 +9,10 @@ from unittest.mock import patch
 
 import pytest
 
+from camctl.capture.result_pairing import ScanFamilyAssessment
+from camctl.capture.segment_models import FileCompletionState, OwnershipState
+from camctl.contracts.enums import enum_for
+
 SOURCE = Path(__file__).parents[3] / 'src' / 'camctl' / 'persistence' / 'repositories' / 'result_file_pairing.py'
 
 
@@ -45,6 +49,7 @@ def load_pairing():
     class EnumValues:
         def __getattr__(self, name): return 1
     module('camctl.capture.files', OwnershipFromResultPageSave=object, PairResultFilesSave=Request)
+    module('camctl.capture.result_pairing', ScanFamilyAssessment=ScanFamilyAssessment)
     module('camctl.capture.segment_models', FileCompletionState=object, OwnershipState=object)
     module('camctl.contracts.enums', enum_for=lambda name: EnumValues())
     module('camctl.contracts.history_values', HistoryBoundary=Boundary)
@@ -196,9 +201,7 @@ def test_cross_page_family_classification_uses_complete_scan(preview_first, case
     pairing, pages, _ = load_pairing()
     pairing._ROLE = SimpleNamespace(ORIGINAL=1, PREVIEW=2)
     pairing._STATE = SimpleNamespace(PAIRED=1, UNPAIRED=2)
-    pairing._WHY = SimpleNamespace(MISSING=1, AMBIGUOUS=2, INVALID=3, UNIQUE=4, CONFLICT=5)
-    pairing.OwnershipState = SimpleNamespace(OWNED='owned')
-    pairing.FileCompletionState = SimpleNamespace(COMPLETE='complete')
+    pairing._WHY = enum_for('device_file_pairing_facts.reason')
     preview = ('A.LRF', 11, 2)
     original = ('A.OSV', 12, 1)
     other = ('A.MP4', 13, 1)
@@ -228,15 +231,16 @@ def test_cross_page_family_classification_uses_complete_scan(preview_first, case
     pages.read_saved_page = lambda db, page_id: (saved[page_id], None)
     pages.result_file_family = lambda identity, result_policy: ('dir', 'A', 2 if identity.endswith('LRF') else 1)
     pairing.read_result_file_input = lambda db, page, file_id, boundary: SimpleNamespace(
-        ownership='unknown' if case == 'unreliable' and file_id == 11 else 'owned',
-        completion='complete', file_event_id=page.event_id + 10)
+        ownership=(OwnershipState.UNKNOWN if case == 'unreliable' and file_id == 11
+                   else OwnershipState.OWNED),
+        completion=FileCompletionState.COMPLETE, file_event_id=page.event_id + 10)
     result = pairing._classify(connection, request)
     if case == 'unreliable':
         assert result is None
     else:
         values = result[2]
         assert values['state'] == (1 if case == 'unique' else 2)
-        assert values['reason'] == {'unique': 4, 'missing': 1, 'ambiguous': 2}[case]
+        assert values['reason'] == int(pairing._WHY[case.upper()])
         assert values['preview_page_event_id'] == next(row[1] for row in rows if row[0] == 11)
         assert values['source_txn_id'] == 8 and values['source_event_id'] == 40
 

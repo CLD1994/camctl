@@ -90,3 +90,39 @@ def test_initial_plan_rule_rejects_an_unmaterialized_iterator():
 
     with pytest.raises(TypeError, match="已物化的元组"):
         storage_rules.validate_initial_plan_status(3, statuses())
+
+
+def test_source_rule_checks_owner_and_members_without_reading():
+    rules = storage_rules
+    assert rules.validate_admitted_source_owners((3, 3), 3, 3, True) == 3
+    rules.validate_admitted_source_owner_type(4, frozenset({4, 5}))
+    rules.validate_admitted_source_member(11, 11)
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="只能保存一个"):
+        rules.validate_admitted_source_owners((3, 4), 3, 3, True)
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="没有完整覆盖"):
+        rules.validate_admitted_source_member(11, 12)
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="受理零成员无需空事件"):
+        rules.validate_admitted_source_owners((), 3, 3, True)
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="来源计划"):
+        rules.validate_fixed_source({"source_resolution_state": 2, "resolved_source_plan_id": None})
+
+
+def test_diagnostic_and_ack_rules_use_actual_saved_facts():
+    rules = storage_rules
+    rules.validate_diagnostic_key(True)
+    rules.validate_diagnostic_errors([{"error": "bad"}])
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="非空错误列表"):
+        rules.validate_diagnostic_errors([])
+    before = {"acknowledged_wm": 10}
+    after = {"acknowledged_wm": 20, "acknowledged_report_id": 5}
+    rules.validate_acknowledged_watermark(before, after, {"to_wm": 20})
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="严格提高"):
+        rules.validate_acknowledged_watermark({"acknowledged_wm": 20}, after, {"to_wm": 20})
+    sync = {"action_id": 2, "from_wm": 10, "started_boundary_event_id": 8}
+    report = {"from_wm": 10, "to_wm": 20, "frozen_event_id": 8}
+    result = {"ack_report_id": 5, "ended_event_id": 15}
+    rules.validate_acknowledged_sync(3, 15, result, sync, report)
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="未满足同步起点"):
+        rules.validate_acknowledged_sync(3, 15, result, sync, {**report, "frozen_event_id": 7})
+    with pytest.raises(rules.AcceptanceStorageRuleError, match="必须是本事件"):
+        rules.validate_acknowledged_sync(3, 16, result, sync, report)

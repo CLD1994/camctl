@@ -78,3 +78,15 @@ class TestDecideCancelEligibility:
                    CancelEligibility.ALLOW_WITH_STOP}
         for member in CancelEligibility:
             assert may_apply_cancel(member) == (member in allowed)
+
+
+def test_cancel_status_after_apply_keeps_running_capture_until_real_settlement():
+    from camctl.cancellation.models import CancelApplyMode
+    from camctl.cancellation.rules import cancel_status_after_apply
+    assert cancel_status_after_apply({'status': 1, 'type': 1}, CancelApplyMode.PRE_START) == 6
+    assert cancel_status_after_apply({'status': 2, 'type': 1}, CancelApplyMode.PRE_START) is None
+    assert cancel_status_after_apply({'status': 2, 'type': 2}, CancelApplyMode.WITH_STOP) is None
+    with pytest.raises(ValueError):
+        cancel_status_after_apply({'status': 2, 'type': 4}, CancelApplyMode.PRE_START)
+    with pytest.raises(ValueError):
+        cancel_status_after_apply({'status': 1, 'type': 2}, CancelApplyMode.WITH_STOP)
