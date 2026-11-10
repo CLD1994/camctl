@@ -13,9 +13,9 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.history.events import EventEnvelope, RowChange, RowImage
-from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import CommandPlan
+from camctl.persistence.repositories.validation import BusinessStorage
 
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import PlanCreateCommand, PlanStartCommand, plan_guards
@@ -25,15 +25,11 @@ _CREATED_AT = 1_700_000_000_000_000
 
 @pytest.fixture()
 def clock_guard():
-    from camctl.history import validators
-
-    saved = validators.NAMED_GUARDS.get("clock")
-    register_guard("clock", lambda event, context: None)
-    yield
-    if saved is None:
-        validators.NAMED_GUARDS.pop("clock", None)
-    else:
-        validators.NAMED_GUARDS["clock"] = saved
+    return BusinessStorage(overrides={
+        "admission": lambda event, context: None,
+        "plan_aggregate": lambda event, context: None,
+        "clock": lambda event, context: None,
+    })
 
 
 class ClockAcceptCommand:
@@ -91,9 +87,9 @@ class TestCatalogsTogether:
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
-            assert commit_operation(PlanStartCommand(1, before_status=1), new_operation_key(), owned).kind == "completed"
-            assert commit_operation(
+            assert plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+            assert plan_guards.commit_operation(PlanStartCommand(1, before_status=1), new_operation_key(), owned).kind == "completed"
+            assert plan_guards.commit_operation(
                 PlanStartCommand(1, before_status=2, after_status=3), new_operation_key(), owned
             ).kind == "completed"
 
@@ -126,16 +122,16 @@ class TestCatalogsTogether:
             connection.close()
 
     def test_internal_event_has_no_watermark_and_consumes_none(
-        self, tmp_path, plan_guards, clock_guard
+        self, tmp_path, clock_guard
     ) -> None:
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
-            internal = commit_operation(ClockAcceptCommand(), new_operation_key(), owned)
+            assert clock_guard.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+            internal = clock_guard.commit_operation(ClockAcceptCommand(), new_operation_key(), owned)
             assert internal.kind == "completed"
-            assert commit_operation(PlanStartCommand(1, before_status=1), new_operation_key(), owned).kind == "completed"
+            assert clock_guard.commit_operation(PlanStartCommand(1, before_status=1), new_operation_key(), owned).kind == "completed"
 
             # 内部事件：change_seq 为空，不占用业务水位。
             internal_event = _rows(
@@ -189,10 +185,9 @@ class TestReplayMatchesStoredProjection:
         connection = owned.connection
         try:
             from camctl.contracts.values import new_operation_key
-            from camctl.persistence.repositories.transactions import commit_operation
 
-            assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
-            assert commit_operation(
+            assert plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+            assert plan_guards.commit_operation(
                 PlanStartCommand(1, before_status=1), new_operation_key(), owned
             ).kind == "completed"
 
@@ -291,7 +286,7 @@ def test_status_directory_is_atomic_in_both_transaction_paths(tmp_path, plan_gua
 
     try:
         writer = OwnedConnection(FailingConnection(connection, "INSERT INTO plans"), owned.metadata) if rollback else owned
-        outcome = commit_operation(Create(), new_operation_key(), writer)
+        outcome = plan_guards.commit_operation(Create(), new_operation_key(), writer)
         assert outcome.kind == ("rolled_back" if rollback else "completed"), outcome.error
         rows = connection.execute("SELECT before_status,after_status FROM entity_event_links").fetchall()
         assert rows == ([] if rollback else [(None, 1)])
