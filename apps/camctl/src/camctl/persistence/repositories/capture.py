@@ -19,8 +19,13 @@ from typing import Any, Mapping
 from camctl.capture.photo_pair_rules import (
     _HostPhotoPairError, _device_photo_drafts, _device_photo_source_pair,
     _host_photo_drafts, _host_photo_execution_spec, _host_photo_registered_pair,
-    _host_photo_source_pair, _FILE_ROLE, _FILE_ROLE_FOR_KIND, _HOST_PHOTO_PURPOSE_CODES,
-    _HOST_PHOTO_SHA256, _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
+    _host_photo_source_pair, host_photo_metadata_error, host_photo_promotion_failure, _FILE_ROLE, _HOST_PHOTO_PURPOSE_CODES,
+    _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
+)
+from camctl.capture.output_file_rules import (
+    CAPTURE_TYPES as _CAPTURE_TYPES, capture_binding_error, device_output_error,
+    device_source_ownership_error, intermediate_output_ownership_error,
+    output_carrier_error, repair_output_error,
 )
 from camctl.capture.terminal_rules import (
     activity_capture_action_error, activity_capture_transition_error,
@@ -123,11 +128,9 @@ from camctl.history.reads import ReadCoverage, PlanReadScope, SoftwareRecoveryRe
 from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError
 from camctl.capture.photo_format import saved_photo_format
-from camctl.host_files.photo_formats import photo_file_extension, photo_media_type
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
     relative_file_path,
-    validate_relative_file_path,
 )
 from camctl.outputs.catalog import (
     FileReference,
@@ -271,11 +274,7 @@ def _unchecked_media() -> dict[str, Any]:
     return {"check_status": "not_performed", "duration": {"status": "unknown"}}
 
 _ACTION_TYPE = enum_for("actions.type")
-_CAPTURE_TYPES = frozenset({
-    _ACTION_TYPE.CAMERA_TAKE_PHOTO,
-    _ACTION_TYPE.CAMERA_RECORD,
-    _ACTION_TYPE.CAMERA_TIMELAPSE,
-})
+
 
 
 @dataclass(frozen=True)
@@ -680,81 +679,50 @@ def _output_file(values, context) -> None:
     source = _registration_facts(context, "actions", source_id)
     source_binding = _capture_binding(source)
     kind = values.get("kind")
-    if not {"device_file_id", "intermediate_file_id"} <= values.keys():
-        raise EventValidationError("产物承载文件类型尚未完整读取")
+    error = output_carrier_error(values)
+    if error is not None:
+        raise EventValidationError(error)
     device_file_id = values.get("device_file_id")
-    if (device_file_id is None) == (values.get("intermediate_file_id") is None):
-        raise EventValidationError("产物必须恰好由一种文件身份承载")
     if device_file_id is not None:
         facts = _registration_facts(context, "device_files", device_file_id)
-        if facts.get("source_action_id") != source_id or facts.get("ownership_evidence_json") is None:
-            raise EventValidationError("产物承载文件缺少该来源动作的可靠归属")
+        error = device_source_ownership_error(facts, source_id)
+        if error is not None:
+            raise EventValidationError(error)
         observer = _registration_facts(context, "actions", facts.get("observer_action_id"))
         if _capture_binding(observer) != source_binding:
             raise EventValidationError("产物来源与文件观察者的原设备或驱动绑定不一致")
-        expected_role = _FILE_ROLE_FOR_KIND.get(kind)
-        if expected_role is None or facts.get("role") != expected_role:
-            raise EventValidationError(f"产物种类与文件角色不符: kind={kind} role={facts.get('role')}")
-        if facts.get("completion_state") != 3:
-            raise EventValidationError(f"产物承载文件未完成: {device_file_id}")
-        if kind == _OUTPUT_KIND.ORIGINAL and (
-            "original_device_file_id" not in facts or "pairing_evidence_json" not in facts
-            or facts["original_device_file_id"] is not None or facts["pairing_evidence_json"] is not None
-        ):
-            raise EventValidationError("原片文件必须明确没有预览配对")
+        error = device_output_error(facts, kind, device_file_id)
+        if error is not None:
+            raise EventValidationError(error)
     else:
         facts = _registration_facts(context, "intermediate_files", values.get("intermediate_file_id"))
-        if (facts.get("owner_action_id") != source_id
-                or "owner_delivery_id" not in facts
-                or facts["owner_delivery_id"] is not None):
-            raise EventValidationError("产物中间文件不属于来源动作的文件责任")
+        error = intermediate_output_ownership_error(facts, source_id)
+        if error is not None:
+            raise EventValidationError(error)
         if kind == _OUTPUT_KIND.REPAIRED:
             _require_promotable_repair_output(facts)
             _require_repair_success(context, source_id, values.get("intermediate_file_id"))
         else:
             _require_promotable_host_photo(facts, source, kind)
-            if values.get("media_type") != photo_media_type(
-                    FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name], saved_photo_format(source)):
-                raise EventValidationError("主机照片媒体类型与保存格式及用途不一致")
-            if any(not isinstance(values.get(name), str) or not values[name]
-                   for name in ("original_name", "media_type")):
-                raise EventValidationError("主机拍摄源登记缺少可靠可读元信息")
+            error = host_photo_metadata_error(values, source, kind)
+            if error is not None:
+                raise EventValidationError(error)
+
 
 
 def _require_promotable_host_photo(facts, source, kind) -> None:
-    if (source.get("type") != _ACTION_TYPE.CAMERA_TAKE_PHOTO
-            or kind not in (_OUTPUT_KIND.ORIGINAL, _OUTPUT_KIND.PREVIEW)
-            or facts.get("purpose") != int(_HOST_PURPOSE_FOR_KIND[kind])
-            or facts.get("retention_state") != int(_RETENTION.REQUIRED)
-            or facts.get("cleanup_state") != int(_FILE_CLEANUP.NOT_NEEDED)
-            or facts.get("size_bytes") is None or facts.get("sha256") is None):
-        raise EventValidationError("主机拍摄源必须是本次单张拍摄的完整未释放原图或预览")
-    purpose = FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name]
-    size = facts.get("size_bytes")
-    digest = facts.get("sha256")
-    if (type(size) is not int or not 0 < size <= MAX_OBJECT_ID
-            or not isinstance(digest, str) or _HOST_PHOTO_SHA256.fullmatch(digest) is None):
-        raise EventValidationError("主机拍摄源缺少精确正大小或完整小写 SHA-256")
-    try:
-        validate_relative_file_path(purpose, facts["id"], facts["relative_path"])
-        if facts["relative_path"] != relative_file_path(purpose, facts["id"],
-                photo_file_extension(purpose, saved_photo_format(source))):
-            raise ValueError("提升路径与原保存格式不一致")
-    except ValueError as error:
-        raise EventValidationError("主机拍摄源路径与稳定身份不一致") from error
+    error, cause = host_photo_promotion_failure(facts, source, kind)
+    if error is not None:
+        if cause is not None:
+            raise EventValidationError(error) from cause
+        raise EventValidationError(error)
 
 
 def _require_promotable_repair_output(facts) -> None:
     """修复成品的承载文件必须仍是未释放的完整修复输出。"""
-    if facts.get("purpose") != int(_PURPOSE.REPAIR_OUTPUT):
-        raise EventValidationError(
-            f"修复成品承载文件不是修复输出用途: {facts.get('purpose')!r}")
-    if facts.get("retention_state") != int(_RETENTION.REQUIRED):
-        raise EventValidationError(
-            "修复成品承载文件必须尚未释放、提升或交接:"
-            f" {facts.get('retention_state')!r}")
-    if facts.get("size_bytes") is None or facts.get("sha256") is None:
-        raise EventValidationError("修复成品承载文件缺少完整字节事实")
+    error = repair_output_error(facts)
+    if error is not None:
+        raise EventValidationError(error)
 
 
 def _require_repair_success(context, source_id: int, file_id) -> None:
@@ -842,12 +810,10 @@ def _registration_facts(context, table: str, identity: int | None) -> Mapping[st
 
 
 def _capture_binding(action: Mapping[str, Any]) -> tuple[str, str]:
-    if action.get("type") not in _CAPTURE_TYPES:
-        raise EventValidationError("产物来源和设备文件观察者必须是拍摄动作")
-    device, driver = action.get("device_id"), action.get("driver_id")
-    if not isinstance(device, str) or not device or not isinstance(driver, str) or not driver:
-        raise EventValidationError("拍摄动作缺少已保存的设备或驱动绑定")
-    return device, driver
+    error = capture_binding_error(action)
+    if error is not None:
+        raise EventValidationError(error)
+    return action.get("device_id"), action.get("driver_id")
 
 
 def _cleanup_aggregate_guard(event, context) -> None:
