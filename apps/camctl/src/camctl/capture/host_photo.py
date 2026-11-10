@@ -5,7 +5,7 @@ from __future__ import annotations
 from camctl.persistence.models import db_failure
 
 from contextlib import closing
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 from camctl.contracts.enums import enum_for
@@ -22,7 +22,7 @@ from camctl.operations.models import AttemptTicket, EffectState
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.result_format import read_result_document
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind, StateDatabaseError, db_outcome_for
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, StateDatabaseError, db_outcome_for
 from camctl.persistence.repositories.capture import FinishCapture
 from camctl.persistence.repositories.host_capture import (
     HostPhotoComplete,
@@ -44,12 +44,18 @@ _RUN_KIND = enum_for("operation_runs.kind")
 _ACTION_STATUS = enum_for("actions.status")
 
 
+@dataclass
+class _PendingPhotoRecovery:
+    unknown_receipt: DbOutcome | None = None
+
+
 @dataclass(frozen=True)
 class PendingHostPhotoRequest:
     """一项主机拍摄保存请求及其首次分配的键。"""
 
     key: str
     request: Any
+    recovery: _PendingPhotoRecovery = field(default_factory=_PendingPhotoRecovery)
 
 
 @dataclass(frozen=True)
@@ -92,30 +98,41 @@ def _owned_repository(runtime, action_id: int):
 
 
 async def _verify(runtime, repository, request, key):
-    """UNKNOWN由下一worker连接按原键核实，不访问失效连接。"""
-    return await runtime.database.read(lambda owned: repository.verify_operation(request, key, owned))
+    """UNKNOWN 在独立只读连接上按原键及完整申请核实。"""
+    return await runtime.database.verify_original(lambda owned: repository.verify_operation(request, key, owned))
 
 
 async def _request_result(runtime, repository, pending: PendingHostPhotoRequest, save):
     """按原完整请求与键核实 UNKNOWN；回滚重送也沿用原键。"""
     error = None
     for _ in range(2):
-        receipt = await runtime.database.write(lambda owned: save(pending.request, pending.key, owned), key=pending.key)
-        if receipt.kind is DbOutcomeKind.COMPLETED:
-            return receipt.value
-        error = receipt.error
-        if isinstance(error, StateDatabaseError):
-            raise error
-        if receipt.kind is DbOutcomeKind.UNKNOWN:
+        if pending.recovery.unknown_receipt is None:
+            try:
+                receipt = await runtime.database.write(lambda owned: save(pending.request, pending.key, owned), key=pending.key)
+            except BaseException as failure:
+                actual = db_outcome_for(failure)
+                if actual is not None and actual.kind is DbOutcomeKind.UNKNOWN:
+                    pending.recovery.unknown_receipt = actual
+                raise
+            if receipt.kind is DbOutcomeKind.COMPLETED:
+                return receipt.value
+            error = receipt.error
+            if receipt.kind is not DbOutcomeKind.UNKNOWN and isinstance(error, StateDatabaseError):
+                raise error
+            if receipt.kind is DbOutcomeKind.UNKNOWN:
+                pending.recovery.unknown_receipt = receipt
+        if pending.recovery.unknown_receipt is not None:
             verified = await _verify(runtime, repository, pending.request, pending.key)
             if verified.kind is DbOutcomeKind.COMPLETED:
                 return verified.value
             if verified.kind is DbOutcomeKind.UNKNOWN:
                 raise ConsistencyError(
                     f"原主机拍摄文件申请回执仍未知，原request/key继续保留: {verified.error}"
-                )
+                ) from pending.recovery.unknown_receipt.error
             if verified.kind not in (DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED):
                 raise db_failure(ConsistencyError, f"原主机拍摄文件申请核实未完成: {verified.error}", verified)
+            error = pending.recovery.unknown_receipt.error
+            pending.recovery.unknown_receipt = None
     raise ConsistencyError(f"原主机拍摄文件申请未可靠保存，原请求继续保留: {error}")
 
 

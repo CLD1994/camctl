@@ -14,7 +14,7 @@ from camctl.logging_runtime.events import monitor_slow_stage
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.models import (DbExecutorError, DbJob, DbJobKind, DbOutcome,
     DbPriority, DbReadError, ReadReceipt, _attach_db_outcome)
-from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection, open_verification_connection
 
 T = TypeVar('T')
 
@@ -215,6 +215,17 @@ class BusinessDatabase:
         if isinstance(payload, DbOutcome) and payload.error is not None:
             raise payload.error
         raise DbExecutorError('业务读取未完成，不交付默认值')
+
+    async def verify_original(self, callback: Callable[[OwnedConnection], T], *,
+                              description='原操作只读核实') -> T:
+        """在数据库线程独立只读连接上核实原操作，结束后关闭该连接。"""
+        def execute(owned):
+            verifier = open_verification_connection(owned, self._metadata)
+            try:
+                return callback(verifier)
+            finally:
+                verifier.connection.close()
+        return await self.read(execute, description=description)
 
     async def write(self, callback: Callable[[OwnedConnection], DbOutcome[T]], *,
                     key: OperationKey, description='业务写入') -> DbOutcome[T]:

@@ -521,3 +521,23 @@ def open_existing(path, mode: DbOpenMode, config: DbConfig) -> OwnedConnection:
         connection.close()
         raise DatabaseInvalidError(f"状态库校验失败: {error}") from error
     return OwnedConnection(connection=connection, metadata=metadata)
+
+
+def open_verification_connection(owned: OwnedConnection, expected: DatabaseMetadata) -> OwnedConnection:
+    """为原操作核实打开同一状态库；由调用线程关闭返回的连接。"""
+    if owned.metadata != expected:
+        raise DatabaseInvalidError("业务连接的数据库身份或目录绑定已改变")
+    rows = owned.connection.execute("PRAGMA database_list").fetchall()
+    path = next((row[2] for row in rows if row[1] == "main"), None)
+    if not path:
+        raise DatabaseInvalidError("业务连接没有可核实的状态库路径")
+    timeout = owned.connection.execute("PRAGMA busy_timeout").fetchone()[0]
+    verifier = open_existing(Path(path), DbOpenMode.EXISTING_RO, DbConfig(busy_timeout_ms=timeout))
+    try:
+        if verifier.metadata != expected:
+            raise DatabaseInvalidError("核实连接的数据库身份或目录绑定已改变")
+        _set_and_verify(verifier.connection, "query_only", 1)
+    except BaseException:
+        verifier.connection.close()
+        raise
+    return verifier

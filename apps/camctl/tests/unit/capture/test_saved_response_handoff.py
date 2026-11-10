@@ -72,3 +72,23 @@ async def test_result_close_releases_reliable_pending_before_notification_error(
             capture=create_autospec(CaptureRepository, instance=True))
 
     assert raised.value is failure and not pending
+
+
+async def test_host_file_unknown_control_error_resumes_by_verification():
+    database = create_autospec(BusinessDatabase, instance=True)
+    failure = RuntimeError("提交结果未知")
+    _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.UNKNOWN, error=failure))
+    database.write.side_effect = failure
+    database.verify_original.return_value = DbOutcome(DbOutcomeKind.COMPLETED, None)
+    runtime = SimpleNamespace(database=database,
+        host_capture=create_autospec(HostCaptureRepository, instance=True), roots=object(),
+        pending_host_photo_completions={})
+    request = HostPhotoComplete(21, 29, 100, "a" * 64, 30, 20, "b" * 64, 1000)
+
+    with pytest.raises(RuntimeError) as raised:
+        await _save_complete(runtime, 21, request)
+    assert raised.value is failure
+    await _save_complete(runtime, 21, request)
+    assert database.write.await_count == 1
+    assert database.verify_original.await_count == 1
+    assert not runtime.pending_host_photo_completions

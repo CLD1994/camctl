@@ -1109,8 +1109,8 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
                     matches=lambda _name, args, _kwargs: args[0].action_id == 1):
                 await capture_handler("camera_take_photo")(1, runtime)
             assert len(driver.requests) == 1
-            assert uncertain.saved == [uncertain.saved[0]] * 2
-            assert uncertain.verified == [uncertain.saved[0]]
+            assert uncertain.saved == [uncertain.saved[0]]
+            assert uncertain.verified == [uncertain.saved[0]] * 2
             assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
             assert len(_saved_output_rows(owned)) == 2
         finally:
@@ -1222,3 +1222,50 @@ async def test_jpeg_photo_keeps_both_roles_and_distinct_content(tmp_path, storag
         assert owned.connection.execute("SELECT COUNT(*) FROM output_origins").fetchone() == (1,)
     finally:
         owned.connection.close()
+
+
+@pytest.mark.parametrize("database_error", [False, True])
+async def test_unknown_host_photo_waits_for_proven_absence_before_retry(tmp_path, database_error):
+    from camctl.persistence.repositories.host_capture import HostCaptureRepository
+    from camctl.persistence.runtime import StateDatabaseError
+    from ..support.capture import capture_test_session
+
+    original_error = (StateDatabaseError if database_error else RuntimeError)("提交结果未知")
+    async with capture_test_session():
+        _cfg, owned, driver, runtime, _clock = await _world(tmp_path)
+        real = HostCaptureRepository()
+
+        class UncertainSave:
+            def __init__(self):
+                self.saved = []
+                self.verified = []
+                self.delegate = real
+
+            def save_host_photo_complete(self, request, key, current_owned):
+                self.saved.append((request, key))
+                if len(self.saved) == 1:
+                    return DbOutcome(DbOutcomeKind.UNKNOWN, error=original_error)
+                return self.delegate.save_host_photo_complete(request, key, current_owned)
+
+            def verify_operation(self, request, key, verifier):
+                self.verified.append((request, key))
+                if len(self.verified) == 1:
+                    return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("核实暂不可用"))
+                return self.delegate.verify_operation(request, key, verifier)
+
+        uncertain = UncertainSave()
+        try:
+            with repository_port(HostCaptureRepository, uncertain,
+                    ("save_host_photo_complete", "verify_operation"),
+                    matches=lambda _name, args, _kwargs: args[0].action_id == 1):
+                with pytest.raises(ConsistencyError) as caught:
+                    await capture_handler("camera_take_photo")(1, runtime)
+                assert caught.value.__cause__ is original_error
+                assert len(uncertain.saved) == len(uncertain.verified) == 1
+                await capture_handler("camera_take_photo")(1, runtime)
+            assert uncertain.saved == [uncertain.saved[0]] * 2
+            assert uncertain.verified == [uncertain.saved[0]] * 2
+            assert len(driver.requests) == 1
+            assert len(_saved_output_rows(owned)) == 2
+        finally:
+            owned.connection.close()
