@@ -16,7 +16,7 @@ from camctl.capture.handlers import capture_handler
 from ..capture.test_host_photo_flow import _world,_input_time
 from .hasselblad_support import (world, close, accept_origin, save_blocked, preview,
     HeldPhotoTransport as HeldTransport, action as read_action, grant_unknown, cancel)
-from camctl.history.validators import validate_event
+from camctl.persistence.repositories.validation import BusinessStorage
 
 pytestmark=pytest.mark.asyncio
 
@@ -70,7 +70,7 @@ async def test_bare_fixed_event_rejects_ineligible_or_missing_source_facts(tmp_p
                 'error_code':None,'error_details_json':None}),)
         event=replace(event_envelope(100,100,4,3,rows,runtime.wall_us()),change_seq=1)
         context=EventContext(TransactionRange(100,100,100),owners,facts,read_coverage=ReadCoverage(ranges))
-        with pytest.raises(EventValidationError): validate_event(event,context)
+        with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
     finally:
         await close(owned,transport,task)
 
@@ -223,7 +223,7 @@ async def test_independent_guard_accepts_reliable_preceding_original_source(tmp_
     try:
         if state=='blocked': save_blocked(owned,runtime,config=cfg)
         event,context=bare_context(owned,runtime)
-        validate_event(event,context)
+        BusinessStorage().validate_event(event,context)
     finally:
         await close(owned,transport,task)
 
@@ -238,7 +238,7 @@ async def test_independent_guard_requires_every_original_source_range(tmp_path,m
     try:
         event,context=bare_context(owned,runtime)
         context=replace(context,read_coverage=ReadCoverage({k:v for k,v in context.read_coverage.ranges.items() if k!=missing}))
-        with pytest.raises(EventValidationError): validate_event(event,context)
+        with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
     finally:
         await close(owned,transport,task)
 
@@ -269,7 +269,7 @@ async def test_independent_guard_rejects_extra_conflicting_or_future_facts(tmp_p
                     'observations':[]})
             context=replace(context,transaction_rows={'operation_attempts':future})
         context=replace(context,state_rows=state)
-        with pytest.raises(EventValidationError): validate_event(event,context)
+        with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
     finally:
         await close(owned,transport,task)
 
@@ -310,7 +310,7 @@ async def test_no_intent_header_alone_cannot_replace_atomic_source_apply(tmp_pat
         if not actual_transaction:
             event,context=bare_context(owned,runtime)
             event=replace(event,evidence=header)
-            with pytest.raises(EventValidationError): validate_event(event,context)
+            with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
         else:
             from camctl.devices.start_entry import EntryBlock
             from ..support.output_planning import capture_operation, EventSequence
@@ -342,7 +342,7 @@ async def test_independent_guard_does_not_classify_partial_source_as_another_dri
         state=deepcopy(context.state_rows)
         del state['actions'][1][missing]
         with pytest.raises(EventValidationError):
-            validate_event(event,replace(context,state_rows=state))
+            BusinessStorage().validate_event(event,replace(context,state_rows=state))
     finally:
         await close(owned,transport,task)
 
@@ -385,9 +385,9 @@ async def test_no_intent_guard_borrows_exact_same_transaction_source_apply(tmp_p
         try:
             reads=SqlEventReads(owned.connection,PlanReadScope(1,128),planned_events=planned)
             context=replace(context,transaction=transaction,current_reads=reads)
-            if fault is None: validate_event(fixed,context)
+            if fault is None: BusinessStorage().validate_event(fixed,context)
             else:
-                with pytest.raises(EventValidationError): validate_event(fixed,context)
+                with pytest.raises(EventValidationError): BusinessStorage().validate_event(fixed,context)
         finally:
             owned.connection.rollback()
     finally:
