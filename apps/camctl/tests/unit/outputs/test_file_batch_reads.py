@@ -209,3 +209,86 @@ def test_legacy_original_requires_retained_slot_and_no_batch(monkeypatch, holder
         assert connection.execute.call_args.args[1] == (7, 1, "camera")
     else:
         connection.execute.assert_not_called()
+
+
+@pytest.mark.parametrize('action,sequence', [
+    ({'type': 4, 'status': 2, 'cancel_requested': 0, 'scheduled_at': 10,
+      'source_resolution_state': 2},
+     [('source_ready', True), ('obtain_device_ready', True), ('obtain_finished', False)]),
+    ({'type': 5, 'status': 2, 'cancel_requested': 0, 'scheduled_at': 10,
+      'target_selection_state': 2},
+     [('cleanup_device_ready', True), ('cleanup_blocked', False), ('cleanup_finished', False)]),
+    ({'type': 5, 'status': 6, 'cancel_requested': 1, 'scheduled_at': 10},
+     [('cleanup_residual', True), ('cleanup_blocked', False), ('cleanup_finished', False)]),
+])
+@pytest.mark.parametrize('stop_at', [None, 0, 1, 2])
+def test_batch_ready_reads_each_required_fact_in_order_and_stops(monkeypatch, action, sequence, stop_at):
+    reads = FileBatchReads(Mock())
+    monkeypatch.setattr(reads, 'action', lambda _: action)
+    calls = []
+    for index, (name, required) in enumerate(sequence):
+        def read(*args, name=name, index=index, required=required):
+            calls.append((name, args))
+            return not required if index == stop_at else required
+        monkeypatch.setattr(reads, name, read)
+    assert reads.ready(1, 'camera', 20) is (stop_at is None)
+    expected = sequence if stop_at is None else sequence[:stop_at + 1]
+    assert calls == [(name, (1, 'camera')) for name, _ in expected]
+
+
+def test_ineligible_action_does_not_read_batch_conditions(monkeypatch):
+    reads = FileBatchReads(Mock())
+    monkeypatch.setattr(reads, 'action', lambda _: {'scheduled_at': 21})
+    monkeypatch.setattr(reads, 'source_ready', lambda *_: pytest.fail('尚未到期不能读取资格'))
+    assert reads.ready(1, 'camera', 20) is False
+
+
+@pytest.mark.parametrize('local_pending,device_pending,expected,calls', [
+    (True, True, False, 1),
+    (False, False, False, 2),
+    (False, True, True, 2),
+])
+def test_obtain_device_looks_up_local_before_device_and_keeps_limit(local_pending, device_pending, expected, calls):
+    connection = Mock()
+    connection.execute.side_effect = [Cursor([[(1,)] if local_pending else []]),
+                                      Cursor([[(1,)] if device_pending else []])]
+    assert FileBatchReads(connection).obtain_device_ready(7, 'camera') is expected
+    assert connection.execute.call_count == calls
+    statements = connection.execute.call_args_list
+    assert 'source_intermediate_file_id' in statements[0].args[0]
+    if calls == 2:
+        assert 'source_device_file_id' in statements[1].args[0]
+    assert all(call.args[0].endswith(' LIMIT 1') and call.args[1] == (7, 'camera') for call in statements)
+
+
+@pytest.mark.parametrize('stage', [0, 1])
+def test_obtain_device_propagates_original_read_error_at_its_step(stage):
+    connection = Mock()
+    error = RuntimeError('原数据库读取失败')
+    connection.execute.side_effect = [error] if stage == 0 else [Cursor([[]]), error]
+    with pytest.raises(RuntimeError) as caught:
+        FileBatchReads(connection).obtain_device_ready(7, 'camera')
+    assert caught.value is error
+    assert connection.execute.call_count == stage + 1
+
+
+@pytest.mark.parametrize('stage', [0, 1, 2])
+def test_batch_ready_propagates_first_failing_fact_without_later_reads(monkeypatch, stage):
+    reads = FileBatchReads(Mock())
+    monkeypatch.setattr(reads, 'action', lambda _: {
+        'type': 4, 'status': 2, 'cancel_requested': 0,
+        'scheduled_at': 10, 'source_resolution_state': 2})
+    error = RuntimeError('原事实读取失败')
+    sequence = [('source_ready', True), ('obtain_device_ready', True), ('obtain_finished', False)]
+    calls = []
+    for index, (name, result) in enumerate(sequence):
+        def read(*_, index=index, name=name, result=result):
+            calls.append(name)
+            if index == stage:
+                raise error
+            return result
+        monkeypatch.setattr(reads, name, read)
+    with pytest.raises(RuntimeError) as caught:
+        reads.ready(1, 'camera', 20)
+    assert caught.value is error
+    assert calls == [name for name, _ in sequence[:stage + 1]]

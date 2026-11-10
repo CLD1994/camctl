@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 from camctl.capture.finite_cancel import (require_finite_cancel_end, require_failed_stop,
     require_capture_sent, finite_cancel_file, finite_cancel_results_succeeded, finite_cancel_page_complete,
-    finite_cancel_timing_matches)
+    finite_cancel_timing_matches, finite_cancel_source_is_natural)
 from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.results import CaptureFileAssessment, FileKind, ProductRequirements, ProductRule
 from camctl.contracts.enums import enum_for
@@ -106,7 +106,7 @@ def _evidence(state, request):
 def _verify_sources(state, request, evidence, *, event_id):
     from .capture import _history_source_event
     from .result_pages import _decode
-    from .result_sources import ResultSourceKind, result_source_from_state
+    from .result_sources import result_source_from_state
     action, activity, start, stop, results, sent, stopped, result = _facts(state, request.action_id)
     spec = action['execution_spec_json']
     require_finite_cancel_end(action)
@@ -133,7 +133,7 @@ def _verify_sources(state, request, evidence, *, event_id):
     page_event = _history_source_event(state, request.page.event_id)
     page, _ = _decode(page_event)
     original_source = result_source_from_state(action, activity, result, state)
-    if original_source.kind is not ResultSourceKind.NATURAL:
+    if not finite_cancel_source_is_natural(original_source.kind):
         raise ConsistencyError('有限取消结束缺少原结果意图之前的自然来源')
     if max(sent['result_event_id'], stopped['result_event_id'], result['result_event_id'],
             wait_event.event_id, page_event.event_id) >= event_id:
