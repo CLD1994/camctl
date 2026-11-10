@@ -322,6 +322,32 @@ def validate_cleanup_success(*, item: Mapping, outcome: CleanupOutcomeChoice,
     return from_wait
 
 
+def cleanup_device_absence_needs_record(*, item_status: int, presence_state: int) -> bool:
+    """依据设备文件的原在场事实决定是否先保存缺席事件。"""
+    from camctl.contracts.enums import enum_for
+    presence = enum_for("device_files.presence_state")
+    if presence_state == int(presence.PRESENT):
+        if item_status == _ITEM_PENDING_DELETE:
+            raise ConsistencyError("无本项删除调用的成功要求文件缺席事实先行")
+        return True
+    if presence_state != int(presence.ABSENT):
+        raise ConsistencyError("文件存在性未知，不能确认清理成功")
+    return False
+
+
+def cleanup_local_absence_needs_record(*, item_status: int, cleanup_state: int) -> bool:
+    """依据主机文件清理状态决定是否先保存文件完成事件。"""
+    from camctl.contracts.enums import enum_for
+    cleanup = enum_for("intermediate_files.cleanup_state")
+    if cleanup_state == int(cleanup.COMPLETED):
+        return False
+    if cleanup_state in (int(cleanup.NOT_NEEDED), int(cleanup.PENDING)):
+        if item_status == _ITEM_PENDING_DELETE:
+            raise ConsistencyError("无本项删除调用的成功要求文件缺席事实先行")
+        return True
+    raise ConsistencyError("中间文件清理状态未决，不能确认清理成功")
+
+
 class CleanupCancelChoice(Enum):
     """清理项在动作取消下的处理分支（按取消收场规则分类）。"""
 

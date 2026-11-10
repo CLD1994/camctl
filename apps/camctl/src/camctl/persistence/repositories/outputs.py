@@ -62,6 +62,7 @@ from camctl.outputs.cleanup_flow import (
     RestrictCleanupItem,
     StartCleanupAction,
     decide_cleanup_progress, validate_cleanup_success,
+    cleanup_device_absence_needs_record, cleanup_local_absence_needs_record,
 )
 from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, device_holder, first_eligible_read, positive_limit
@@ -9681,7 +9682,7 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
         output = self._state["outputs"].get(output_id)
         if output is None:
             raise ConsistencyError(f"清理成功要求确认产物身份: {command.item_id}")
-        from_wait = validate_cleanup_success(item=item, outcome=command.outcome, output=output)
+        validate_cleanup_success(item=item, outcome=command.outcome, output=output)
         device_file_id = output.get("device_file_id")
         intermediate_file_id = output.get("intermediate_file_id")
         templates = []
@@ -9690,17 +9691,13 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
             if file is None:
                 raise ConsistencyError(f"设备文件不存在: {device_file_id}")
             self._state.setdefault("device_files", {})[device_file_id] = dict(file)
-            if file["presence_state"] == int(_FILE_PRESENCE.PRESENT):
-                if from_wait:
-                    raise ConsistencyError(
-                        "无本项删除调用的成功要求文件缺席事实先行")
+            if cleanup_device_absence_needs_record(item_status=item["status"],
+                                                   presence_state=file["presence_state"]):
                 templates.append((17, 5, (_update(
                     "device_files", device_file_id,
                     {"presence_state": int(_FILE_PRESENCE.PRESENT)},
                     {"presence_state": int(_FILE_PRESENCE.ABSENT)}),),
                     ("device_file", device_file_id)))
-            elif file["presence_state"] != int(_FILE_PRESENCE.ABSENT):
-                raise ConsistencyError("文件存在性未知，不能确认清理成功")
         elif intermediate_file_id is not None:
             # 主机派生成品：文件缺席事实由清理完成状态承载；本次成
             # 功先保存清理完成事件，同事务先行供成功依据核对。
@@ -9711,14 +9708,8 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                     f"中间文件不存在: {intermediate_file_id}")
             self._state.setdefault("intermediate_files", {})[
                 intermediate_file_id] = dict(file)
-            if file["cleanup_state"] == int(_FILE_CLEANUP.COMPLETED):
-                pass
-            elif file["cleanup_state"] in (
-                    int(_FILE_CLEANUP.NOT_NEEDED),
-                    int(_FILE_CLEANUP.PENDING)):
-                if from_wait:
-                    raise ConsistencyError(
-                        "无本项删除调用的成功要求文件缺席事实先行")
+            if cleanup_local_absence_needs_record(item_status=item["status"],
+                                                  cleanup_state=file["cleanup_state"]):
                 templates.append((
                     _INTERMEDIATE_FILE_EVENT, _CLEANUP_RESULT_REASON,
                     (_update(
@@ -9726,8 +9717,6 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                         {"cleanup_state": file["cleanup_state"]},
                         {"cleanup_state": int(_FILE_CLEANUP.COMPLETED)}),),
                     ("intermediate_file", intermediate_file_id)))
-            else:
-                raise ConsistencyError("中间文件清理状态未决，不能确认清理成功")
         from camctl.outputs.cleanup_group import cleanup_group
         reads = _ProductReads(connection, self._state)
         paired_changes = []
