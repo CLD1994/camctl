@@ -323,6 +323,9 @@ class FileBatchReads:
             from camctl.contracts.enums import enum_for
             action_types = enum_for("actions.type")
             if self.action(action_id)["type"] == action_types.OBTAIN_ACTION_OUTPUTS:
-                activity_sql += " AND NOT (a.type=? AND d.started_at IS NOT NULL AND d.activity_state=?)"
-                activity_params += (action_types.CAMERA_RECORD, enum_for("device_activities.activity_state").ACTIVE)
+                activity_sql += (" AND NOT (a.type=? AND d.started_at IS NOT NULL AND d.activity_state=?"
+                    " AND NOT EXISTS(SELECT 1 FROM operation_runs r JOIN operation_attempts t"
+                    " ON t.run_id=r.id WHERE r.activity_id=d.id AND t.status=? LIMIT 1))")
+                activity_params += (action_types.CAMERA_RECORD, enum_for("device_activities.activity_state").ACTIVE,
+                                    enum_for("operation_attempts.status").RUNNING)
         return self.connection.execute(activity_sql + " LIMIT 1", activity_params).fetchone() is not None
