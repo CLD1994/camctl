@@ -104,3 +104,18 @@ def test_cleanup_restriction_rejects_unconfirmed_product_state(name):
     from camctl.outputs.cleanup_flow import validate_cleanup_restriction_output
     with pytest.raises(ConsistencyError, match="产物文件事实不允许建立删除限制"):
         validate_cleanup_restriction_output({"availability": int(AVAILABILITY[name])})
+
+
+def test_cleanup_entry_checks_each_actual_related_member():
+    from camctl.outputs.cleanup_flow import (cleanup_read_dependency_blocks,
+        cleanup_other_delete_blocks, cleanup_own_restriction_blocks)
+    assert cleanup_read_dependency_blocks({"source_dependency": 1})
+    assert not cleanup_read_dependency_blocks({"source_dependency": 0})
+    deleting = {"status": int(STATUS.DELETING)}
+    assert cleanup_other_delete_blocks(current_id=1, member_id=2, member=deleting)
+    assert not cleanup_other_delete_blocks(current_id=1, member_id=1, member=deleting)
+    assert not cleanup_other_delete_blocks(current_id=1, member_id=2, member={"status": int(STATUS.PENDING_DELETE)})
+    unresolved = {"requested_output_id": 7, "status": int(STATUS.UNRESOLVED)}
+    assert cleanup_own_restriction_blocks(output_id=7, member=unresolved)
+    assert not cleanup_own_restriction_blocks(output_id=8, member=unresolved)
+    assert not cleanup_own_restriction_blocks(output_id=7, member=unresolved | {"status": int(STATUS.PENDING_DELETE)})

@@ -62,6 +62,7 @@ from camctl.outputs.cleanup_flow import (
     RestrictCleanupItem,
     StartCleanupAction,
     CleanupRestrictionChoice, decide_cleanup_restriction, validate_cleanup_restriction_output,
+    cleanup_read_dependency_blocks, cleanup_other_delete_blocks, cleanup_own_restriction_blocks,
     decide_cleanup_progress, validate_cleanup_success,
     cleanup_device_absence_needs_record, cleanup_local_absence_needs_record,
 )
@@ -9312,15 +9313,15 @@ def _cleanup_entry_ready(reads, item):
     group = cleanup_group(reads, item["output_id"])
     own = reads.members("cleanup_items", "action_id", item["action_id"])
     for output_id in group:
-        if any(row.get("source_dependency") == 1
+        if any(cleanup_read_dependency_blocks(row)
                for row in reads.members("obtain_items", "output_id", output_id).values()):
             return False
         for identity, row in reads.members("cleanup_items", "output_id", output_id).items():
-            if identity != item["id"] and row.get("status") == int(_CLEANUP_ITEM_STATUS.DELETING):
+            if cleanup_other_delete_blocks(current_id=item["id"], member_id=identity, member=row):
                 return False
         # 旧的已固定集合允许没有配对项；新集合的每一项必须先建立限制。
         for row in own.values():
-            if row.get("requested_output_id") == output_id and row.get("status") == int(_CLEANUP_ITEM_STATUS.UNRESOLVED):
+            if cleanup_own_restriction_blocks(output_id=output_id, member=row):
                 return False
     return True
 

@@ -283,6 +283,21 @@ _ITEM_SUCCEEDED, _ITEM_FAILED, _ITEM_CANCELED = 4, 5, 6
 
 
 
+def cleanup_read_dependency_blocks(item: Mapping) -> bool:
+    """尚未解除原源依赖的取回项阻止共同来源进入删除。"""
+    return item.get("source_dependency") == 1
+
+
+def cleanup_other_delete_blocks(*, current_id: int, member_id: int, member: Mapping) -> bool:
+    """同一共同来源已有其他删除中成员时不能再取得处理责任。"""
+    return member_id != current_id and member.get("status") == _ITEM_DELETING
+
+
+def cleanup_own_restriction_blocks(*, output_id: int, member: Mapping) -> bool:
+    """本请求中指向该产物但尚未建立限制的成员阻止删除。"""
+    return member.get("requested_output_id") == output_id and member.get("status") == _ITEM_UNRESOLVED
+
+
 class CleanupRestrictionChoice(Enum):
     """清理动作与成员对首次建立限制的决定。"""
 
