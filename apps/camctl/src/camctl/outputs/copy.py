@@ -100,18 +100,17 @@ def segment_exceeds_source(end, source_size) -> bool:
     return end > source_size
 
 
-def validate_segment_save_state(*, reset_state, current_round, committed_bytes,
-                                source_size, requested_round, requested_before, end) -> None:
+def validate_segment_save_state(*, copy: Mapping, requested_round, requested_before, end) -> None:
     """核对段申请与当前轮次、可靠位置及固定源长度。"""
-    if reset_state != int(enum_for("file_copies.reset_state").READY):
+    if copy["reset_state"] != int(enum_for("file_copies.reset_state").READY):
         raise ConsistencyError("重置意图未完成前不能保存拷贝进度")
-    if current_round != requested_round:
+    if copy["round"] != requested_round:
         raise ConsistencyError(
-            f"段所属轮次 {requested_round} 与当前拷贝轮次 {current_round} 不一致")
-    if committed_bytes != requested_before:
+            f"段所属轮次 {requested_round} 与当前拷贝轮次 {copy['round']} 不一致")
+    if copy["committed_bytes"] != requested_before:
         raise ConsistencyError(
-            f"当前进度 {committed_bytes} 与段申请的旧进度 {requested_before} 不一致")
-    if segment_exceeds_source(end, source_size):
+            f"当前进度 {copy['committed_bytes']} 与段申请的旧进度 {requested_before} 不一致")
+    if segment_exceeds_source(end, copy["source_size"]):
         raise ConsistencyError("段范围越过固定源长度")
 
 

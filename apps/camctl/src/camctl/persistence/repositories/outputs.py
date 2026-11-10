@@ -3136,11 +3136,8 @@ class _SegmentSaveCommand:
         self._state["file_copies"][copy["id"]] = copy
         _copy_owner_of(connection, copy, self._state, self._owners)
         action = self._owner_action(connection, copy)
-        validate_segment_save_state(
-            reset_state=copy["reset_state"], current_round=copy["round"],
-            committed_bytes=copy["committed_bytes"], source_size=copy["source_size"],
-            requested_round=command.copy_round, requested_before=command.committed_before,
-            end=command.segment_end)
+        validate_segment_save_state(copy=copy, requested_round=command.copy_round,
+            requested_before=command.committed_before, end=command.segment_end)
         if action["cancel_requested"] == 1:
             return self._skip("cancel_requested", copy)
         if not _read_owner_eligible(action):
