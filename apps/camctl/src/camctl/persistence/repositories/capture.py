@@ -19,7 +19,8 @@ from typing import Any, Mapping
 from camctl.capture.photo_pair_rules import (
     _HostPhotoPairError, _device_photo_drafts, _device_photo_source_pair,
     _host_photo_drafts, _host_photo_execution_spec, _host_photo_registered_pair,
-    _host_photo_source_pair, host_photo_metadata_error, host_photo_promotion_failure, _FILE_ROLE, _HOST_PHOTO_PURPOSE_CODES,
+    _host_photo_source_pair, host_photo_metadata_error, host_photo_promotion_failure,
+    host_photo_sources_promoted, _FILE_ROLE,
     _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
 )
 from camctl.capture.output_file_rules import (
@@ -625,15 +626,7 @@ def _output_guard(event, context) -> None:
             continue
         source_rows = context.complete_rows(
             "intermediate_files", "owner_action_id", action_id)
-        host_sources = [
-            values for values in source_rows.values()
-            if values.get("owner_action_id") == action_id
-            and values.get("purpose") in _HOST_PHOTO_PURPOSE_CODES
-        ]
-        terminal = bool(host_sources) and all(
-            values.get("retention_state") == int(_RETENTION.PROMOTED)
-            for values in host_sources
-        )
+        terminal = host_photo_sources_promoted(source_rows, action_id)
         try:
             host_spec = _host_photo_execution_spec(action)
             _guard_host_photo_completion(

@@ -56,3 +56,19 @@ def test_host_photo_rejects_missing_or_unreliable_source(change):
     with pytest.raises(_HostPhotoPairError):
         _host_photo_source_pair(rows, 1, host_spec=True,
                                 action={"effective_params_json": {"capture_format": "raw"}})
+
+
+def test_terminal_photo_source_requires_all_matching_roles_promoted():
+    from camctl.capture.photo_pair_rules import host_photo_sources_promoted
+
+    original = _source(8, FilePurpose.CAPTURE_ORIGINAL)
+    preview = _source(9, FilePurpose.CAPTURE_PREVIEW)
+    promoted = int(enum_for("intermediate_files.retention_state").PROMOTED)
+    assert not host_photo_sources_promoted({}, 1)
+    assert not host_photo_sources_promoted({8: original, 9: preview}, 1)
+    original["retention_state"] = promoted
+    assert not host_photo_sources_promoted({8: original, 9: preview}, 1)
+    preview["retention_state"] = promoted
+    assert host_photo_sources_promoted({8: original, 9: preview}, 1)
+    preview["owner_action_id"] = 2
+    assert host_photo_sources_promoted({8: original, 9: preview}, 1)

@@ -312,3 +312,15 @@ def host_photo_metadata_error(values, source, kind):
     if any(not isinstance(values.get(name), str) or not values[name] for name in ("original_name", "media_type")):
         return "主机拍摄源登记缺少可靠可读元信息"
     return None
+
+
+def host_photo_sources_promoted(source_rows, action_id):
+    """本动作存在照片责任且全部已提升时按终态资格核对。"""
+    found, promoted = False, True
+    for facts in source_rows.values():
+        if (facts.get("owner_action_id") == action_id
+                and facts.get("purpose") in _HOST_PHOTO_PURPOSE_CODES):
+            found = True
+            if promoted:
+                promoted = facts.get("retention_state") == int(_RETENTION.PROMOTED)
+    return found and promoted
