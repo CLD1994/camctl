@@ -1,10 +1,14 @@
 """固定成员逐项复核 Action6 目标与默认范围。"""
 
 from decimal import Decimal
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
-from camctl.capture.action6_scope_rules import Action6ScopeAssessment, require_action6_coverage_header
+from camctl.capture.action6_scope_rules import (
+    Action6CheckedPrefix, Action6ScopeAssessment, require_action6_coverage_header,
+)
 from camctl.capture.segment_models import (
     CoverageMetric, CoverageStatus, DefaultScopeState, FileCompletionState,
     OwnershipState, SegmentDecision, SegmentDecisionScope, SegmentDecisionStatus,
@@ -76,3 +80,64 @@ def test_native_cancel_cannot_hide_qualified_member_without_order_key():
     assessment.observe(member(None))
     with pytest.raises(ConsistencyError, match='缺少可排序游标'):
         assessment.require_decision(action_type='camera_timelapse', source_kind=_SOURCE, publication_kind=_CANCELED)
+
+
+def inspection(metric, *, value, reason=None):
+    completed = int(enum_for('segment_inspections.state').COMPLETED)
+    return SimpleNamespace(state=completed, target_json={'metric': metric, 'value': Decimal('10')},
+                           result_json={'metric': {'metric': metric, 'value': value, 'reason': reason}})
+
+
+def verified_copy():
+    completed = int(enum_for('segment_inspections.state').COMPLETED)
+    matched = int(enum_for('file_copies.verification_state').MATCHED)
+    return SimpleNamespace(inspection_state=completed, verification_state=matched,
+                           committed_bytes=10, source_size=10, target_sha256='hash')
+
+
+def test_checked_prefix_reaches_target_only_after_real_second_member():
+    first, second = member(1), member(2)
+    saved = replace(decision(first, second, 2, checked=True), checked_count=2, confirmed=Decimal('10'))
+    prefix = Action6CheckedPrefix(saved, CoverageTarget(CoverageMetric.DURATION_S, Decimal('10')), first.key)
+    assert prefix.accept_member(first, second)
+    assert prefix.accept_inspection(first, inspection('duration_s', value=Decimal('4')), verified_copy())
+    assert prefix.accept_member(second, None)
+    assert not prefix.accept_inspection(second, inspection('duration_s', value=Decimal('6')), verified_copy())
+    prefix.require_decision(source_kind=_SOURCE, publication_kind=_RESULT)
+
+
+def test_checked_prefix_rejects_untrusted_copy_before_counting_metric():
+    first = member(1)
+    saved = decision(first, first, 1, checked=True)
+    prefix = Action6CheckedPrefix(saved, CoverageTarget(CoverageMetric.DURATION_S, Decimal('10')), first.key)
+    copy = verified_copy()
+    copy.committed_bytes = 9
+    assert prefix.accept_member(first, None)
+    with pytest.raises(ConsistencyError, match='完整校验的检查副本'):
+        prefix.accept_inspection(first, inspection('duration_s', value=Decimal('12')), copy)
+    assert prefix.checked == 0
+
+
+def test_duplicate_original_key_stops_before_reading_either_inspection():
+    first = member(1)
+    scope = SegmentDecisionScope(DefaultScopeState.UNKNOWN, _REF, None, None, None)
+    saved = SegmentDecision(_REF, SegmentDecisionStatus.UNCONFIRMED, CoverageMetric.DURATION_S,
+        Decimal('10'), Decimal('0'), CoverageStatus.UNCONFIRMED, 0, scope,
+        failure_code='capture_failed', reason='order_unknown')
+    prefix = Action6CheckedPrefix(saved, CoverageTarget(CoverageMetric.DURATION_S, Decimal('10')), first.key)
+    assert not prefix.accept_member(first, member(1))
+    prefix.require_decision(source_kind=_SOURCE, publication_kind=_RESULT)
+
+
+def test_checked_prefix_unknown_metric_preserves_confirmed_prefix():
+    first, second = member(1), member(2)
+    scope = SegmentDecisionScope(DefaultScopeState.NONEMPTY, _REF, first.cursor, first.cursor, 1)
+    saved = SegmentDecision(_REF, SegmentDecisionStatus.UNCONFIRMED, CoverageMetric.DURATION_S,
+        Decimal('10'), Decimal('4'), CoverageStatus.UNCONFIRMED, 1, scope,
+        failure_code='capture_failed', reason='metric_unknown')
+    prefix = Action6CheckedPrefix(saved, CoverageTarget(CoverageMetric.DURATION_S, Decimal('10')), first.key)
+    assert prefix.accept_member(first, second)
+    assert prefix.accept_inspection(first, inspection('duration_s', value=Decimal('4')), verified_copy())
+    assert prefix.accept_member(second, None)
+    assert not prefix.accept_inspection(second, inspection('duration_s', value=None, reason='probe_unknown'), None)
+    prefix.require_decision(source_kind=_SOURCE, publication_kind=_RESULT)

@@ -557,40 +557,19 @@ def _verify_assessment(db,setrow,facts,assessment):
 
 
 def _verify_action6_checked_prefix(db, setrow, decision, target):
-    """从已保存的检查事实重算异常前缀指标，不信任调用侧累计量。"""
-    from camctl.capture.segment_models import (
-        CoverageMetric, CoverageStatus, DefaultScopeState, FileCompletionState,
-        OwnershipState, SegmentDecisionStatus, SegmentMemberRole,
-    )
-    from camctl.contracts.video_coverage import (
-        CoverageAccumulator, CoverageTarget, VideoMetric, advance_coverage,
-    )
-    from camctl.contracts.enums import enum_for
-    from camctl.contracts.values import ConsistencyError
+    """逐页取得已保存事实，交由纯规则复核异常检查前缀。"""
+    from camctl.capture.action6_scope_rules import Action6CheckedPrefix, is_checked_prefix_original
+    from camctl.capture.segment_models import CoverageStatus, SegmentDecisionStatus
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
     from .segment_starts import segment_start_from_set
 
-    status = decision.coverage_status
-    if (status is CoverageStatus.NOT_PERFORMED
+    if (decision.coverage_status is CoverageStatus.NOT_PERFORMED
             or decision.status is SegmentDecisionStatus.CANCELED):
         return
-
-    coverage_target = CoverageTarget(CoverageMetric(target.metric.value), target.value)
-    accumulated = CoverageAccumulator(coverage_target)
     start = segment_start_from_set(db, setrow).key
-    expected = start
-    interruption = "start_unknown" if expected is None else None
-    checked = 0
-    first_cursor = last_cursor = None
-    reached = False
-    stopped = False
+    assessment = Action6CheckedPrefix(decision, target, start)
     cursor = None
     Reader = type("Reader", (), {"connection": db})
-    inspections = enum_for("segment_inspections.state")
-    verification = enum_for("file_copies.verification_state")
-    trusted_copy_states = {
-        int(verification.MATCHED), int(verification.SOURCE_CHECKSUM_UNAVAILABLE),
-    }
 
     def candidates():
         nonlocal cursor
@@ -603,154 +582,22 @@ def _verify_action6_checked_prefix(db, setrow, decision, target):
 
     def next_original(iterator):
         for candidate in iterator:
-            candidate_member = candidate.member
-            if (candidate_member.role is SegmentMemberRole.ORIGINAL
-                    and candidate_member.ownership is not OwnershipState.NOT_OWNED):
+            if is_checked_prefix_original(candidate.member):
                 return candidate
         return None
 
     iterator = iter(candidates())
     stored = next_original(iterator)
-    previous_key = None
-    while stored is not None and not stopped:
-        member = stored.member
+    while stored is not None:
         following = next_original(iterator)
-        if expected is None:
-            interruption = interruption or "start_unknown"
-            stopped = True
+        if not assessment.accept_member(stored.member, None if following is None else following.member):
             break
-        if member.key is None:
-            interruption = "order_unknown"
-            stopped = True
+        facts = read_inspection_for_member(setrow['action_id'], stored.member_id, Reader)
+        if not assessment.accept_inspection(stored.member, facts.inspection, facts.copy):
             break
-        if member.key != expected:
-            interruption = (
-                "order_unknown" if member.key == previous_key else "segment_gap"
-            )
-            stopped = True
-            break
-        if (following is not None and following.member.key == member.key):
-            # 同一设备键的原片没有唯一顺序。停止在冲突组之前，不任意
-            # 选择组内第一份；next_original 可跨越底层成员分页。
-            interruption = "order_unknown"
-            stopped = True
-            break
-        if (member.ownership is not OwnershipState.OWNED
-                or member.completion is not FileCompletionState.COMPLETE
-                or member.size_bytes is None):
-            interruption = "file_unconfirmed"
-            stopped = True
-            break
-        if member.size_bytes == 0:
-            interruption = "empty_original"
-            stopped = True
-            break
-
-        facts = read_inspection_for_member(setrow["action_id"], stored.member_id, Reader)
-        if checked < decision.checked_count:
-            inspection = facts.inspection
-            copy = facts.copy
-            if (inspection is None
-                    or inspection.state != int(inspections.COMPLETED)
-                    or inspection.target_json != {
-                        "metric": coverage_target.metric.value,
-                        "value": coverage_target.value,
-                    }
-                    or copy is None
-                    or copy.inspection_state != int(inspections.COMPLETED)
-                    or copy.verification_state not in trusted_copy_states
-                    or copy.committed_bytes != copy.source_size
-                    or copy.target_sha256 is None):
-                raise ConsistencyError(
-                    "Action6 已确认前缀必须引用同目标、完整校验的检查副本"
-                )
-            document = inspection.result_json
-            metric_doc = None if document is None else document.get("metric")
-            if not isinstance(metric_doc, dict):
-                raise ConsistencyError("Action6 已确认检查缺少保存的主视频指标")
-            metric = VideoMetric(
-                CoverageMetric(metric_doc.get("metric")),
-                metric_doc.get("value"),
-                metric_doc.get("reason"),
-            )
-            if metric.metric is not coverage_target.metric or metric.value is None:
-                raise ConsistencyError("Action6 已确认前缀包含可靠值之外的检查记录")
-            if accumulated.reached:
-                raise ConsistencyError("Action6 检查前缀在目标达成后仍包含后续成员")
-            accumulated = advance_coverage(accumulated, metric)
-            checked += 1
-            if first_cursor is None:
-                first_cursor = member.cursor
-            last_cursor = member.cursor
-            previous_key = member.key
-            expected = member.key.successor()
-            if accumulated.reached:
-                if checked != decision.checked_count or status is not CoverageStatus.REACHED:
-                    raise ConsistencyError("Action6 目标达成位置与保存的检查计数不一致")
-                reached = True
-                stopped = True
-                break
-            stored = following
-            continue
-
-        if status is CoverageStatus.UNCONFIRMED:
-            if interruption is not None:
-                stopped = True
-                break
-            inspection = facts.inspection
-            if inspection is None or inspection.state == int(inspections.PENDING):
-                raise ConsistencyError("Action6 未确认前缀缺少已收场的下一成员检查")
-            document = inspection.result_json
-            metric_doc = None if document is None else document.get("metric")
-            if not isinstance(metric_doc, dict):
-                raise ConsistencyError("Action6 未确认检查缺少保存的主视频指标")
-            metric = VideoMetric(
-                CoverageMetric(metric_doc.get("metric")),
-                metric_doc.get("value"),
-                metric_doc.get("reason"),
-            )
-            if metric.metric is not coverage_target.metric or metric.value is not None:
-                raise ConsistencyError("Action6 未确认中断必须落在未知指标处")
-            interruption = metric.reason or "metric_unknown"
-            stopped = True
-            break
-
-        if status is CoverageStatus.CONFIRMED_SHORT:
-            raise ConsistencyError("Action6 确认不足遗漏了连续范围内的实际原片")
-        if status is CoverageStatus.REACHED and accumulated.reached:
-            reached = True
-            stopped = True
-            break
-        raise ConsistencyError("Action6 决策在可靠检查前缀后停止但未说明中断")
-
-    if checked != decision.checked_count or accumulated.confirmed != decision.confirmed:
-        raise ConsistencyError("Action6 保存指标或检查计数与可靠逐段事实不一致")
-    if status is CoverageStatus.REACHED:
-        if not reached or not accumulated.reached:
-            raise ConsistencyError("Action6 达标决策未由已保存前缀实际达成")
-    elif status is CoverageStatus.CONFIRMED_SHORT:
-        complete_scan = (
-            setrow["source_kind"] == int(enum_for("segment_sets.source_kind").COMPLETE_SCAN)
-            and setrow["publication_kind"]
-            == int(enum_for("segment_sets.publication_kind").RESULT)
-        )
-        if accumulated.reached or not complete_scan or interruption is not None:
-            raise ConsistencyError("Action6 确认不足决策缺少完整且连续的全量检查")
-    elif status is CoverageStatus.UNCONFIRMED and accumulated.reached:
-        raise ConsistencyError("Action6 未确认决策的可靠指标已达到目标")
-
-    if decision.checked_count == 0:
-        unknown_scope = interruption in ("start_unknown", "order_unknown")
-        expected_scope = (
-            DefaultScopeState.UNKNOWN if unknown_scope else DefaultScopeState.EMPTY
-        )
-        if decision.default_scope.state is not expected_scope:
-            raise ConsistencyError("Action6 零成员异常范围必须区分顺序未知与已知空范围")
-    elif (decision.default_scope.state is not DefaultScopeState.NONEMPTY
-            or decision.default_scope.member_count != checked
-            or decision.default_scope.first_cursor != first_cursor
-            or decision.default_scope.last_cursor != last_cursor):
-        raise ConsistencyError("Action6 异常默认范围必须等于可靠检查前缀")
+        stored = following
+    assessment.require_decision(source_kind=setrow['source_kind'],
+                                publication_kind=setrow['publication_kind'])
 
 
 def _verify_action6_decision(db, setrow, decision):
