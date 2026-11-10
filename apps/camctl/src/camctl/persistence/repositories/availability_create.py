@@ -11,6 +11,8 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, Ut
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.capture.selection import (may_prepare_availability_check, within_prepare_window,
     earlier_capture_preempts)
+from camctl.operations.availability_rules import (read_check_source_matches, read_check_action_active,
+    read_check_binding_matches, read_holder_blocks_check)
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventContext
 from camctl.persistence.repositories.transactions import (BoundedCommandPlan, CommandPlan, commit_operation,
@@ -112,14 +114,11 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
         delivery = None if copy is None or copy["delivery_id"] is None else row_facts(connection, "deliveries", copy["delivery_id"])
         source = None if copy is None or copy["source_device_file_id"] is None else row_facts(connection, "device_files", copy["source_device_file_id"])
         output = None if delivery is None else row_facts(connection, "outputs", delivery["output_id"])
-        if (copy is None or delivery is None or source is None or output is None
-                or output["device_file_id"] != source["id"] or delivery["action_id"] != action["id"]
-                or action["type"] != int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)):
+        if not read_check_source_matches(action, copy, delivery, source, output):
             raise ConsistencyError("检查触发拷贝缺少原设备来源或取回归属")
-        if action["status"] != int(enum_for("actions.status").RUNNING) or action["cancel_requested"]:
+        if not read_check_action_active(action):
             raise AvailabilityTargetBlocked("取回或原拷贝不再具备检查资格")
         from camctl.devices.drivers.hasselblad.files import camera_file_identity_from_source
-        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         try:
             fixed = camera_file_identity_from_source(source["identity_key"], source["locator_json"])
         except (KeyError, TypeError, ValueError) as error:
@@ -127,9 +126,7 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
         device_id, driver_id = fixed.binding.device_id, fixed.binding.driver_id
         origin = row_facts(connection, "actions", source["source_action_id"])
         observer = row_facts(connection, "actions", source["observer_action_id"])
-        if (origin is None or observer is None or output["source_action_id"] != origin["id"]
-                or driver_id != DRIVER_ID or (origin["device_id"], origin["driver_id"]) != (device_id, driver_id)
-                or (observer["device_id"], observer["driver_id"]) != (device_id, driver_id)):
+        if not read_check_binding_matches(output, origin, observer, fixed):
             raise ConsistencyError("原设备来源绑定与拍摄动作不一致")
         if (fixed.serial, fixed.product_id) != (request.identity.serial, request.identity.product_id):
             raise AvailabilityTargetIdentityMismatch("设备来源的固定机身身份不同")
@@ -171,8 +168,7 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
         raise AvailabilityTargetBlocked("设备读取调用尚未收场")
     from camctl.outputs.read_discovery import device_holder
     holder = device_holder(connection, device_id)
-    if (holder is not None and ((request.trigger_copy_id is not None and holder != request.trigger_copy_id)
-            or (request.trigger_copy_id is None and request.trusted_wall_now < action["scheduled_at"]))):
+    if read_holder_blocks_check(holder, request.trigger_copy_id, action, request.trusted_wall_now):
         raise AvailabilityTargetBlocked("设备读取机会仍由原拷贝保留")
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
     read_in_flight = (device_read_in_flight(connection, device_id) if exclude_read_attempt_id is None else

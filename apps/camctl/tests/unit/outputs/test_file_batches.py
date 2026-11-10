@@ -31,3 +31,12 @@ def test_member_waits_for_verification_retry_and_actual_settlement(
     assert read_member_finished(item_terminal=terminal, has_copy=copy,
         verification_complete=verified, read_ended=ended, retry_wait=retry,
         unsettled=unsettled) is expected
+
+
+def test_batch_action_mode_preserves_canceled_cleanup_responsibility():
+    from camctl.outputs.batches import BatchActionMode, classify_batch_action
+    action = {'type': 5, 'status': 2, 'cancel_requested': 0, 'scheduled_at': 10, 'target_selection_state': 2}
+    assert classify_batch_action(action, 9) is BatchActionMode.NOT_READY
+    assert classify_batch_action(action, 10) is BatchActionMode.CLEANUP
+    assert classify_batch_action({**action, 'cancel_requested': 1}, 10) is BatchActionMode.CLEANUP_RESIDUAL
+    assert classify_batch_action({**action, 'type': 4, 'cancel_requested': 1}, 10) is BatchActionMode.NOT_READY
