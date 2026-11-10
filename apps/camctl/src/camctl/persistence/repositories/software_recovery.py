@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 import uuid
 from typing import Mapping
 
-from camctl.capture.recovery_types import RecoveryPhase
+from camctl.capture.recovery_types import RecoveryPhase, recovery_trigger_active
 from camctl.capture.software_recovery import recovery_blocker, recovery_state
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
@@ -141,7 +141,7 @@ class _Save:
         if (previous is None or request.state["trigger_id"] != previous["trigger_id"]
                 or request.state["reboots"] > previous["reboots"]):
             trigger = row_facts(connection, "actions", request.state["trigger_id"])
-            if trigger["status"] not in (1, 2) or trigger["cancel_requested"]:
+            if not recovery_trigger_active(trigger):
                 raise ConsistencyError("软件重启触发动作已经结束")
             from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
             window = LaunchWindow(trigger["scheduled_at"], trigger["scheduled_at"] + trigger["max_delay_ms"] * 1000)
@@ -195,8 +195,8 @@ def classify_scope_entries(connection, activity, entries, max_chunks):
     identities = tuple(FileIdentity.from_json(entry) for entry in entries)
     action = row_facts(connection, "actions", activity["action_id"])
     _check_entries(identities, activity, action)
-    baseline_members = set()
-    page_keys = {identity.sort_key for identity in identities}
+    from camctl.capture.recovery_rules import RecoveryScopeDifference
+    difference = RecoveryScopeDifference(identities)
     count = total = 0
     previous = None
     first, last = activity["baseline_first_event_id"], activity["baseline_last_event_id"]
@@ -207,7 +207,7 @@ def classify_scope_entries(connection, activity, entries, max_chunks):
             _check_entries(chunk.entries, activity, action)
             if not chunk.entries or (previous is not None and previous >= chunk.entries[0].sort_key):
                 raise ConsistencyError("原目录基准条目顺序不可靠")
-            baseline_members.update(entry.sort_key for entry in chunk.entries if entry.sort_key in page_keys)
+            difference.observe_baseline(chunk.entries)
             count += 1
             total += len(chunk.entries)
             previous = chunk.entries[-1].sort_key
@@ -216,7 +216,7 @@ def classify_scope_entries(connection, activity, entries, max_chunks):
             raise ConsistencyError("原目录基准范围不完整")
     elif first is not None or last is not None:
         raise ConsistencyError("空目录基准仍带非空引用")
-    return [entry for entry, identity in zip(entries, identities) if identity.sort_key not in baseline_members]
+    return [entry for entry, identity in zip(entries, identities) if difference.is_new(identity)]
 
 
 def _verify_directory(connection, activity, previous, state, directory):
@@ -302,15 +302,14 @@ def verify_scope_event(connection, event, context):
     if previous is None or state["trigger_id"] != previous["trigger_id"] or state["reboots"] > previous["reboots"]:
         trigger = row_facts(connection, "actions", state["trigger_id"])
         from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
-        if (trigger is None or trigger["status"] not in (1, 2) or trigger["cancel_requested"]
+        if (trigger is None or not recovery_trigger_active(trigger)
                 or window_phase(LaunchWindow(trigger["scheduled_at"], trigger["scheduled_at"] + trigger["max_delay_ms"] * 1000), event.occurred_at)
                    is not WindowPhase.IN_WINDOW or recovery_blocker(connection, activity, trigger["id"])):
             raise ConsistencyError("软件恢复缺少有效触发资格或仍有冲突调用")
     if previous is not None and state["reboots"] > previous["reboots"]:
         identity = previous.get("last_identity", {}).get("identity")
-        if (not isinstance(identity, list) or len(identity) != 3
-                or identity[:2] != [state["boot_before"], state["fingerprint"]]
-                or state["reported_serial"] != identity[2]):
+        from camctl.capture.recovery_rules import recovery_intent_matches_identity
+        if not recovery_intent_matches_identity(state, identity):
             raise ConsistencyError("重启意图的原启动代次没有可靠身份核实")
     directory = event.evidence["recovery"].get("directory")
     if directory is not None:

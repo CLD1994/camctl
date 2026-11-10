@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 
 from camctl.capture.finite_cancel import (require_finite_cancel_end, require_failed_stop,
-    require_capture_sent, finite_cancel_file)
+    require_capture_sent, finite_cancel_file, finite_cancel_results_succeeded, finite_cancel_page_complete,
+    finite_cancel_timing_matches)
 from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.results import CaptureFileAssessment, FileKind, ProductRequirements, ProductRule
 from camctl.contracts.enums import enum_for
@@ -139,8 +140,7 @@ def _verify_sources(state, request, evidence, *, event_id):
         raise ConsistencyError('有限取消结束不能早于任一原控制、等待或完整结果来源')
     expected = CaptureTiming(spec['target_duration_ms'], spec.get('startup_margin_ms', 0),
         spec['result_wait_margin_ms'], activity['extra_wait_ms_used']).deadline_us(activity['sent_at'])
-    if (sent_event.occurred_at != activity['sent_at'] or activity['expected_check_at'] != expected
-            or activity['result_wait_margin_ms'] != spec['result_wait_margin_ms']
+    if (not finite_cancel_timing_matches(activity, spec, sent_event.occurred_at, expected)
             or wait_event.event_type != _WAIT_EVENT['id']
             or wait_event.reason != _WAIT_EVENT['branches']['COMPLETE']['reason']
             or not any(r.table == 'device_activities' and r.row_id == activity['id']
@@ -149,11 +149,10 @@ def _verify_sources(state, request, evidence, *, event_id):
             or request.occurred_at < page_event.occurred_at
             or not sent_event.event_id < wait_event.event_id < page_event.event_id < event_id):
         raise ConsistencyError('有限取消结束未满足原发送锚点、原规则及可靠等待页顺序')
-    if (results['status'] != int(_RUN.SUCCEEDED) or result['status'] != int(_ATTEMPT.SUCCEEDED)
-            or result['error_json'] is not None or result['result_last_page_event_id'] != page.ref.event_id
+    if (not finite_cancel_results_succeeded(results, result)
+            or result['result_last_page_event_id'] != page.ref.event_id
             or page.ref != request.page or page.ref.ticket.run_id != results['id']
-            or page.ref.ticket.target_id != str(activity['id']) or not page.page.scan_complete
-            or not page.page.set_finalized or page.page.outcome.error is not None
+            or page.ref.ticket.target_id != str(activity['id']) or not finite_cancel_page_complete(page.page)
             or not sent_event.event_id < stopped['result_event_id'] < event_id
             or page.page.outcome != read_result_document(result['status'], result['effect_state'],
                 result['result_json'], result['error_json'])

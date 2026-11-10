@@ -10,3 +10,8 @@ from camctl.contracts.enums import enum_for
 RecoveryPhase = StrEnum("RecoveryPhase", {member.name: member.name.lower()
     for member in enum_for("software_recoveries.phase")},
     module="camctl.capture.software_recovery")
+
+
+def recovery_trigger_active(trigger):
+    """触发动作必须仍在执行范围内且取消未生效。"""
+    return trigger['status'] in (1, 2) and not trigger['cancel_requested']

@@ -6,7 +6,7 @@ from camctl.persistence.models import db_failure
 from dataclasses import dataclass
 from decimal import Decimal
 
-from camctl.capture.recovery_types import RecoveryPhase
+from camctl.capture.recovery_types import RecoveryPhase, recovery_trigger_active
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
@@ -105,7 +105,7 @@ def recovery_blocker(connection, activity, trigger_id):
 
 
 def _eligible(runtime, trigger):
-    return (trigger["status"] in (1, 2) and not trigger["cancel_requested"]
+    return (recovery_trigger_active(trigger)
             and window_phase(runtime.window_of(trigger), runtime.wall_us()) is WindowPhase.IN_WINDOW)
 
 

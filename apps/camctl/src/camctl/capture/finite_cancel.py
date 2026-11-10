@@ -53,3 +53,22 @@ def finite_cancel_file(entry, facts, action_id, rules):
     return CaptureFile(entry.identity, entry.kind, complete, owned,
         format_id=entry.format_id, pairing_confirmed=entry.paired_identity is not None,
         size_bytes=entry.size_bytes)
+
+
+def finite_cancel_results_succeeded(run, attempt):
+    """自然结果流程与实际尝试必须成功且没有调用错误。"""
+    from camctl.contracts.enums import enum_for
+    return (run['status'] == int(enum_for('operation_runs.status').SUCCEEDED)
+            and attempt['status'] == int(enum_for('operation_attempts.status').SUCCEEDED)
+            and attempt['error_json'] is None)
+
+
+def finite_cancel_page_complete(page):
+    """结束只能使用完整扫描且集合固定的无错误结果页。"""
+    return page.scan_complete and page.set_finalized and page.outcome.error is None
+
+
+def finite_cancel_timing_matches(activity, spec, sent_at, expected):
+    """原发送锚点和冻结等待规则必须与当前活动一致。"""
+    return (sent_at == activity['sent_at'] and activity['expected_check_at'] == expected
+            and activity['result_wait_margin_ms'] == spec['result_wait_margin_ms'])
