@@ -27,6 +27,8 @@ from camctl.persistence.transaction import commit_operation
 from ..persistence.test_runtime import _create_valid_database
 from ..support.output_planning import EventSequence, proposal_state
 from ..support.output_storage_cases import capture_scoped_operation, observed_operation
+from ..support.plan_completion import assert_action_plan, plan_before
+from .test_qualification import _seed_action
 
 register_outputs_guards()
 register_capture_guards()
@@ -602,6 +604,34 @@ class TestFixCleanupTargetsCommand:
         return repository.fix_cleanup_targets(
             FixCleanupTargets(30, _NOW), new_operation_key(), owned)
 
+    @pytest.mark.parametrize("unfinished_sibling", [False, True])
+    def test_empty_scope_finishes_action_and_eligible_plan(self, tmp_path, unfinished_sibling):
+        from camctl.outputs.cleanup_flow import CleanupTargetsDisposition, FixCleanupTargets
+        from camctl.persistence.models import DbOutcomeKind
+
+        owned = self._scope_environment(tmp_path)
+        connection = owned.connection
+        try:
+            connection.execute("DELETE FROM outputs WHERE id=701")
+            self._processing_completed(owned)
+            if unfinished_sibling:
+                _seed_action(connection, 12, 1, action_type=7, status=1)
+            connection.commit()
+            before_plan = plan_before(connection, 1)
+            key = new_operation_key()
+            result = self._repository().fix_cleanup_targets(FixCleanupTargets(30, _NOW), key, owned)
+            assert result.kind is DbOutcomeKind.COMPLETED, result.error
+            assert result.value.disposition is CleanupTargetsDisposition.SAVED
+            assert result.value.item_ids == ()
+            assert connection.execute("SELECT status,target_selection_state FROM actions WHERE id=30").fetchone() == (3, 2)
+            assert connection.execute("SELECT COUNT(*) FROM cleanup_items WHERE action_id=30").fetchone() == (0,)
+            assert_action_plan(connection, 30, 1, key, action_status=3,
+                               previous_plan=before_plan, completed=not unfinished_sibling)
+            if unfinished_sibling:
+                assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
+        finally:
+            connection.close()
+
     def test_scope_fix_waits_until_source_terminal(self, tmp_path):
         from camctl.persistence.models import DbOutcomeKind
         from camctl.outputs.cleanup_flow import CleanupTargetsDisposition
@@ -739,8 +769,12 @@ class TestFinishCleanupAction:
             (92, 702, 702, 5, 4, None, 1, 3,
              '{"output_id":"702","max_attempts":1,"attempts_used":1}'),
         ])
-        outcome = self._finish(self._repository(), owned)
+        before_plan = plan_before(owned.connection, 1)
+        key = new_operation_key()
+        outcome = self._finish(self._repository(), owned, key=key)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert_action_plan(owned.connection, 30, 1, key, action_status=4,
+                           previous_plan=before_plan, completed=True)
         assert owned.connection.execute(
             "SELECT status, error_code, error_details_json FROM actions"
             " WHERE id = 30").fetchone() == (4, 22, "{}")
@@ -748,17 +782,59 @@ class TestFinishCleanupAction:
         assert owned.connection.execute(
             "SELECT status FROM plans WHERE id = 1").fetchone() == (3,)
 
-    def test_all_succeeded_completes_action(self, tmp_path):
+    @pytest.mark.parametrize("unfinished_sibling", [False, True])
+    def test_all_succeeded_completes_action(self, tmp_path, unfinished_sibling):
         from camctl.persistence.models import DbOutcomeKind
 
         owned = self._environment(tmp_path, items=[
             (91, 701, 701, 4, 4, 1, 1, None, None),
         ])
-        outcome = self._finish(self._repository(), owned)
-        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-        assert owned.connection.execute(
-            "SELECT status, error_code FROM actions WHERE id = 30"
-        ).fetchone() == (3, None)
+        connection = owned.connection
+        try:
+            if unfinished_sibling:
+                _seed_action(connection, 12, 1, action_type=7, status=1)
+                connection.commit()
+            before_plan = plan_before(connection, 1)
+            key = new_operation_key()
+            outcome = self._finish(self._repository(), owned, key=key)
+            assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+            assert connection.execute(
+                "SELECT status, error_code FROM actions WHERE id = 30"
+            ).fetchone() == (3, None)
+            assert_action_plan(connection, 30, 1, key, action_status=3,
+                               previous_plan=before_plan, completed=not unfinished_sibling)
+            if unfinished_sibling:
+                assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
+        finally:
+            connection.close()
+
+    @pytest.mark.parametrize("unfinished_sibling", [False, True])
+    def test_canceled_cleanup_finishes_action_and_eligible_plan(self, tmp_path, unfinished_sibling):
+        from camctl.outputs.cleanup_flow import FinishCanceledCleanupAction
+        from camctl.persistence.models import DbOutcomeKind
+
+        owned = self._environment(tmp_path, cancel_requested=1, items=[
+            (91, 701, 701, 4, 4, 1, 1, None, None),
+        ])
+        connection = owned.connection
+        try:
+            if unfinished_sibling:
+                _seed_action(connection, 12, 1, action_type=7, status=1)
+                connection.commit()
+            before_plan = plan_before(connection, 1)
+            key = new_operation_key()
+            result = self._repository().finish_canceled_cleanup(
+                FinishCanceledCleanupAction(30, _NOW), key, owned)
+            assert result.kind is DbOutcomeKind.COMPLETED, result.error
+            assert result.value.action_status == 6
+            assert connection.execute("SELECT status,cancel_requested FROM actions WHERE id=30").fetchone() == (6, 1)
+            assert connection.execute("SELECT status FROM cleanup_items WHERE id=91").fetchone() == (4,)
+            assert_action_plan(connection, 30, 1, key, action_status=6,
+                               previous_plan=before_plan, completed=not unfinished_sibling)
+            if unfinished_sibling:
+                assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
+        finally:
+            connection.close()
 
     def test_unfinished_member_rejects_finish(self, tmp_path):
         from camctl.persistence.models import DbOutcomeKind
