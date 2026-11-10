@@ -6,6 +6,10 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from camctl.capture.inspection_rules import (
+    inspection_member_is_eligible, inspection_read_is_complete,
+    inspection_result_requires_read,
+)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
@@ -149,24 +153,14 @@ def inspection_input_read_succeeded(connection, inspection) -> bool:
     if len(rows) != 1:
         return False
     source, size, committed, verification, target_hash, run_id, action_id, status, used, waiting, attempt_status, result, event_id = rows[0]
-    verified = enum_for("file_copies.verification_state")
-    if (source != inspection["source_device_file_id"] or action_id != inspection["action_id"]
-            or size is None or committed != size or target_hash is None
-            or verification not in (int(verified.MATCHED), int(verified.SOURCE_CHECKSUM_UNAVAILABLE))
-            or status != int(enum_for("operation_runs.status").SUCCEEDED)
-            or not used or waiting
-            or attempt_status != int(enum_for("operation_attempts.status").SUCCEEDED)
-            or result is None or event_id is None):
+    copy = {"source_device_file_id": source, "source_size": size, "committed_bytes": committed,
+            "verification_state": verification, "target_sha256": target_hash}
+    run = {"action_id": action_id, "status": status, "attempts_used": used,
+           "retry_wait_required": waiting}
+    attempt = {"status": attempt_status, "result_json": result, "result_event_id": event_id}
+    if not inspection_read_is_complete(inspection, copy, run, attempt):
         return False
     return RetryWaitReads(connection).no_unsettled_attempts(run_id)
-
-
-def _result_requires_read(state, document):
-    tool = document.get("tool")
-    failure = document.get("failure")
-    return (state == int(_STATE.COMPLETED)
-            or isinstance(tool, Mapping) and tool.get("ran") is True
-            or isinstance(failure, Mapping) and failure.get("code") == "probe_failed")
 
 
 def _binding_read_error(document):
@@ -204,17 +198,8 @@ def _validate_member(connection, request: InspectionCreate) -> tuple[dict, dict,
     action = row_facts(connection, "actions", request.action_id)
     if set_row is None or file_row is None or action is None:
         raise ConsistencyError("分段检查成员缺少固定集合、设备文件或来源动作")
-    if (
-        set_row["action_id"] != request.action_id
-        or set_row["state"] not in (int(_SET_STATE.MEMBERS_FIXED), int(_SET_STATE.ASSESSED))
-        or member["role"] != int(_ROLE.ORIGINAL)
-        or member["ownership"] != int(_OWNERSHIP.OWNED)
-        or member["completion"] != int(_MEMBER_COMPLETION.COMPLETE)
-        or file_row["source_action_id"] != request.action_id
-        or file_row["role"] != int(_FILE_ROLE.ORIGINAL)
-        or file_row["completion_state"] != int(_FILE_COMPLETION.COMPLETE)
-        or file_row["presence_state"] != int(_PRESENCE.PRESENT)
-        or file_row["size_bytes"] is None
+    if not inspection_member_is_eligible(
+        request.action_id, member["set_id"], member["file_id"], set_row, member, file_row
     ):
         raise ConsistencyError("分段检查要求同一来源动作内已归属、写完的实际原片成员")
     return action, set_row, member, file_row
@@ -339,7 +324,7 @@ class _SaveInspectionResultCommand:
         if _binding_read_result(connection, inspection, self.request.result_json):
             if action["cancel_requested"] or action["status"] != 2:
                 return self._decision(_inspection_ref(inspection), read_only=True)
-        if (_result_requires_read(self.request.state, self.request.result_json)
+        if (inspection_result_requires_read(self.request.state, self.request.result_json)
                 and not inspection_input_read_succeeded(connection, inspection)):
             raise ConsistencyError("媒体检查结果要求原读取流程可靠成功")
         allocation = scope.allocate(1)
@@ -533,17 +518,8 @@ def _segment_inspection_guard(event, context) -> None:
             member = context.state_rows.get("segment_members", {}).get(member_id)
             file_row = context.state_rows.get("device_files", {}).get(file_id)
             if (set_row is None or member is None or file_row is None
-                    or set_row["action_id"] != action_id
-                    or set_row["state"] not in (int(_SET_STATE.MEMBERS_FIXED), int(_SET_STATE.ASSESSED))
-                    or member["set_id"] != set_id or member["file_id"] != file_id
-                    or member["role"] != int(_ROLE.ORIGINAL)
-                    or member["ownership"] != int(_OWNERSHIP.OWNED)
-                    or member["completion"] != int(_MEMBER_COMPLETION.COMPLETE)
-                    or file_row["source_action_id"] != action_id
-                    or file_row["role"] != int(_FILE_ROLE.ORIGINAL)
-                    or file_row["completion_state"] != int(_FILE_COMPLETION.COMPLETE)
-                    or file_row["presence_state"] != int(_PRESENCE.PRESENT)
-                    or file_row["size_bytes"] is None):
+                    or not inspection_member_is_eligible(
+                        action_id, set_id, file_id, set_row, member, file_row)):
                 raise EventValidationError("检查责任必须引用已固定集合中的同动作完整原片")
         elif event.reason == _RESULT:
             current = context.state_rows.get("segment_inspections", {}).get(row.row_id)
@@ -559,7 +535,7 @@ def _segment_inspection_guard(event, context) -> None:
                 _binding_read_result(reads.connection, current, values["result_json"])
                 if action["cancel_requested"] or action["status"] != 2:
                     raise EventValidationError("已取消或终态动作不能新增检查绑定失败结果")
-            if _result_requires_read(values.get("state"), values["result_json"]):
+            if inspection_result_requires_read(values.get("state"), values["result_json"]):
                 if (type(reads) is not RetryWaitReads
                         or not inspection_input_read_succeeded(reads.connection, current)):
                     raise EventValidationError("媒体检查结果要求原读取流程可靠成功")

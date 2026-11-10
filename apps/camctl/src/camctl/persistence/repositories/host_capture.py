@@ -246,7 +246,7 @@ def validate_host_photo_event(event, context):
 
 def _require_registered_device_pair(connection, action, temporary_rows):
     """原申请核实可跨合法回收；新写资格不消费此例外。"""
-    from camctl.persistence.repositories.capture import (
+    from camctl.capture.photo_pair_rules import (
         _device_photo_source_pair, _host_photo_registered_pair,
     )
 

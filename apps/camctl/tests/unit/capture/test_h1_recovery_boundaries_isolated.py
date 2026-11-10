@@ -126,15 +126,9 @@ class RecoveryBoundaryTests(unittest.TestCase):
 
 
 def release_functions():
-    path = SOURCE / "persistence" / "repositories" / "capture_facts.py"
-    tree = ast.parse(path.read_text())
-    wanted = {"release_basis_holds", "output_scope_resolved", "occupancy_release_allowed"}
-    nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
-    code = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                            *nodes], type_ignores=[])
-    namespace = {"Mapping": dict}
-    exec(compile(ast.fix_missing_locations(code), str(path), "exec"), namespace)
-    return namespace["occupancy_release_allowed"]
+    from camctl.capture.release_rules import occupancy_release_allowed
+
+    return occupancy_release_allowed
 
 
 class ReleaseBoundaryTests(unittest.TestCase):
