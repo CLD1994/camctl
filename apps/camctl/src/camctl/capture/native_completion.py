@@ -11,6 +11,7 @@ from camctl.capture.segment_finish import FinishSegmentRecording
 from camctl.capture.segment_storage import ResultCheckConclusionSave, SegmentSourceKind
 from camctl.capture.segment_models import ResultCheckEndReason, CurrentSegmentResult
 from camctl.capture.native_segments import classify_native_members
+from camctl.capture.result_source_types import ResultSourceKind
 from camctl.persistence.repositories.segment_native import read_saved_native_classification
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.transactions import row_facts
@@ -107,7 +108,7 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
 
             if (
                 (await common._result_source(runtime, listing.ticket)).kind
-                is common.ResultSourceKind.NATURAL
+                is ResultSourceKind.NATURAL
             ):
                 await _save(
                     runtime,

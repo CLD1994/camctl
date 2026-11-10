@@ -142,7 +142,7 @@ from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.devices.tasks import CompletionMode, VideoResultMode
 from camctl.devices.capture_completion import is_stop_context, stop_reports_already_stopped
 from camctl.operations.result_format import read_result_document
-from camctl.persistence.repositories.result_sources import ResultSourceKind
+from camctl.capture.result_source_types import ResultSourceKind
 from camctl.devices.directory import DirectoryReader
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import EvidenceError

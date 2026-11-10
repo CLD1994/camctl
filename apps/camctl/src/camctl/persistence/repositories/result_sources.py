@@ -1,31 +1,12 @@
 """从原结果或范围意图之前的可靠事实重建文件来源，不改变原历史。"""
 from contextlib import closing
-from dataclasses import dataclass
-from enum import StrEnum
-
+from camctl.capture.result_source_types import ResultSource, ResultSourceKind
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.devices.capture_completion import validate_completion_context, validate_control_confirmation
 from camctl.history.events import load_event_registry
 from camctl.persistence.repositories.transactions import row_facts
-
-
-class ResultSourceKind(StrEnum):
-    NATURAL = 'natural'
-    STOP = 'stop'
-    DIRECT = 'direct'
-    UNCONFIRMED = 'unconfirmed'
-    UNANCHORED = 'unanchored'
-
-
-@dataclass(frozen=True)
-class ResultSource:
-    kind: ResultSourceKind
-    intent_event_id: int
-    context: dict | None = None
-    natural_lower_bound: int | None = None
-    requires_file_wait: bool = False
 
 
 def result_source_from_state(action, activity, attempt, state):

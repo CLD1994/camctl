@@ -10,6 +10,7 @@ from camctl.capture.result_inputs import ResultPage, page_from_outcome
 from camctl.capture.results import FileKind
 from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner, SavedResultPage
 from camctl.capture.result_reading import ResultReadingContext
+from camctl.capture.result_source_types import ResultSourceKind
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
 from camctl.devices.capture_completion import is_stop_context, result_page_timeout_s
@@ -252,7 +253,6 @@ def completed_wait_from_page(saved: SavedResultPage, context, *, repository, own
     data = saved.page.outcome.settlement.evidence.data
     if isinstance(data, Mapping) and data.get("file_completion") is None and data.get("file_completion_source_page_event_id") is None:
         return None
-    from camctl.persistence.repositories.result_sources import ResultSourceKind
     original = repository.read_result_source(saved.ref.ticket, owned)
     if (original.kind is not ResultSourceKind.STOP or original.context is None
             or original.context["stop_result_event_id"] != context["stop_result_event_id"]):
