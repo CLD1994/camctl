@@ -9,8 +9,9 @@ from camctl.outputs.batches import (BatchReadinessFact, ObtainDeviceFact, classi
 
 
 class FileBatchReads:
-    def __init__(self, connection):
+    def __init__(self, connection, *, capture_read_parallel_supported=False):
         self.connection = connection
+        self.capture_read_parallel_supported = capture_read_parallel_supported
 
     def supported(self):
         row = self.connection.execute("SELECT format_version FROM database_metadata WHERE id=1").fetchone()
@@ -311,11 +312,17 @@ class FileBatchReads:
         from camctl.persistence.repositories.preparation import PreparationReads
         from camctl.scheduling.resources import current_preparation_holder, device_start_in_flight
         reads = PreparationReads(self.connection)
-        return (current_preparation_holder(self.connection, device_id) is not None
-            or device_start_in_flight(self.connection, device_id)
-            or reads.availability_in_flight(device_id, None)
-            or self.connection.execute(
-                "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
-                " WHERE a.device_id=? AND a.status=2 AND d.occupancy_state=1 LIMIT 1",
-                (device_id,),
-            ).fetchone() is not None)
+        if (current_preparation_holder(self.connection, device_id) is not None
+                or device_start_in_flight(self.connection, device_id)
+                or reads.availability_in_flight(device_id, None)):
+            return True
+        activity_sql = ("SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
+            " WHERE a.device_id=? AND a.status=2 AND d.occupancy_state=1")
+        activity_params = (device_id,)
+        if self.capture_read_parallel_supported:
+            from camctl.contracts.enums import enum_for
+            action_types = enum_for("actions.type")
+            if self.action(action_id)["type"] == action_types.OBTAIN_ACTION_OUTPUTS:
+                activity_sql += " AND NOT (a.type=? AND d.started_at IS NOT NULL AND d.activity_state=?)"
+                activity_params += (action_types.CAMERA_RECORD, enum_for("device_activities.activity_state").ACTIVE)
+        return self.connection.execute(activity_sql + " LIMIT 1", activity_params).fetchone() is not None

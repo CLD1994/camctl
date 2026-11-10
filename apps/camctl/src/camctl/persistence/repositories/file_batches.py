@@ -17,7 +17,7 @@ class _BatchCommand:
 
     def plan(self, scope):
         request, connection = self.request, scope.connection
-        reads = FileBatchReads(connection)
+        reads = FileBatchReads(connection, capture_read_parallel_supported=request.capture_read_parallel_supported)
         if not reads.supported():
             raise ConsistencyError("同机文件批次要求 V9；请先执行 init --upgrade-device-file-batches")
         action = reads.action(request.action_id)
@@ -111,8 +111,23 @@ class FileBatchRepository:
     @staticmethod
     def _write(command, key, owned):
         from camctl.persistence.models import DbOutcome, DbOutcomeKind
-        receipt = commit_operation(command, key, owned)
+        if command.request.capture_read_parallel_supported and not command.release:
+            receipt = commit_operation(command, key, owned, storage=_BatchStorage())
+        else:
+            receipt = commit_operation(command, key, owned)
         if receipt.kind == "completed":
             return DbOutcome(DbOutcomeKind.COMPLETED, receipt.result, boundary=receipt.boundary)
         return DbOutcome(DbOutcomeKind.ROLLED_BACK if receipt.kind == "rolled_back"
             else DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
+class _BatchStorage:
+    """把本次申请的驱动声明交给事务守卫，其他规则仍由正式装配验证。"""
+
+    def validate_event(self, event, context):
+        from dataclasses import replace
+        from .validation import default_business_storage
+        reads = context.file_batch_reads
+        context = replace(context, file_batch_reads=FileBatchReads(
+            reads.connection, capture_read_parallel_supported=True))
+        return default_business_storage().validate_event(event, context)

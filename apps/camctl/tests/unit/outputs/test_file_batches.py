@@ -5,6 +5,13 @@ import pytest
 from camctl.outputs.batches import BatchOutcome, decide_batch_grant, read_member_finished
 
 
+@pytest.mark.parametrize("value", [None, 0, 1, "true"])
+def test_batch_parallel_capability_requires_boolean(value):
+    from camctl.outputs.batches import BatchRequest
+    with pytest.raises(ValueError):
+        BatchRequest(1, "camera", 10, capture_read_parallel_supported=value)
+
+
 @pytest.mark.parametrize("holder,ready,first,expected", [
     (None, False, None, BatchOutcome.WAIT),
     (None, True, 2, BatchOutcome.WAIT),

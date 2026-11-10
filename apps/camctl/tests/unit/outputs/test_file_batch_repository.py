@@ -22,7 +22,7 @@ def world(monkeypatch):
     from camctl.contracts import enums
     monkeypatch.setattr(resources, "resource_bytes", lambda *_: pytest.fail("禁止读取包资源"))
     monkeypatch.setattr(enums, "resource_bytes", lambda *_: pytest.fail("禁止读取包资源"))
-    state = SimpleNamespace(holder=None, ready=True, first=1, busy=False, finished=False,
+    state = SimpleNamespace(holder=None, ready=True, first=1, busy=False, finished=False, parallel_required=False,
         saved=None, prior=None, plans=[], guards={},
         record={"id": 7, "action_id": 1, "device_id": "camera", "acquired_event_id": 50, "released_event_id": None})
     connection = Mock()
@@ -36,7 +36,8 @@ def world(monkeypatch):
         def holder(self, device_id): return state.holder
         def ready(self, action_id, device_id, now): return state.ready
         def first(self, device_id, now): return state.first
-        def busy(self, action_id, device_id, now): return state.busy
+        def busy(self, action_id, device_id, now):
+            return state.busy or (state.parallel_required and not self.capture_read_parallel_supported)
         def finished(self, action_id, device_id): return state.finished
 
     class Kind(Enum):
@@ -64,7 +65,7 @@ def world(monkeypatch):
         row.before = SimpleNamespace(exists=True, values=before)
         return row
 
-    def commit(command, key, owned):
+    def commit(command, key, owned, *, storage=None):
         assert owned == "owned" and key == _KEY
         try:
             value = command.plan(scope)
@@ -228,6 +229,17 @@ def test_guard_rechecks_original_facts_instead_of_accepting_grant_body(world):
     world.ready = False
     with pytest.raises(ValueError):
         world.guards["file_batch"](event, SimpleNamespace(file_batch_reads=world.reads))
+
+
+def test_plan_and_guard_both_require_the_same_parallel_declaration(world):
+    world.parallel_required = True
+    request = BatchRequest(1, "camera", 10, capture_read_parallel_supported=True)
+    assert world.repo.acquire(request, _KEY, "owned").value is BatchOutcome.GRANTED
+    event = world.plans[-1].events[0]
+    with pytest.raises(ValueError):
+        world.guards["file_batch"](event, SimpleNamespace(file_batch_reads=world.reads))
+    reads = type(world.reads)(world.reads.connection, capture_read_parallel_supported=True)
+    world.guards["file_batch"](event, SimpleNamespace(file_batch_reads=reads))
 
 
 def test_guard_rejects_release_when_query_still_needs_settlement(world):

@@ -17,6 +17,7 @@ class BatchRequest:
     action_id: int
     device_id: str
     occurred_at: int
+    capture_read_parallel_supported: bool = False
 
     def __post_init__(self):
         from camctl.contracts.values import ObjectId, UtcMicros
@@ -24,6 +25,8 @@ class BatchRequest:
         UtcMicros(self.occurred_at)
         if not isinstance(self.device_id, str) or not self.device_id:
             raise ValueError("文件批次必须指定原相机")
+        if type(self.capture_read_parallel_supported) is not bool:
+            raise ValueError("拍摄与读取并行声明必须是布尔值")
 
 
 def decide_batch_grant(*, action_id, holder_action_id, ready, first_action_id):
