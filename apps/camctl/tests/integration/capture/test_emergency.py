@@ -21,19 +21,13 @@ from camctl.capture.recovery import (
 )
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    ActivityReleaseSave,
-    CaptureRepository,
-    ReleaseOutcome,
-    register_capture_guards,
-)
+from camctl.persistence.repositories.capture import ActivityReleaseSave, CaptureRepository, ReleaseOutcome
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action
 
-register_capture_guards()
 
 _NOW = 1_750_000_000_000_000
 _SESSION = "a" * 32

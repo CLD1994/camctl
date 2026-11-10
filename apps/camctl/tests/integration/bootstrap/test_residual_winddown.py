@@ -34,20 +34,6 @@ from camctl.devices.evidence import (
 from camctl.devices.tasks import CaptureTask
 from camctl.devices.ports import DeviceCallResult
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.capture import (
-    register_capture_guards,
-)
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.operations import (
-    register_operation_guards,
-)
-from camctl.persistence.repositories.timelapse import (
-    register_timelapse_guards,
-)
-from camctl.reporting.policy import register_report_guards, register_sync_guard
-from camctl.persistence.repositories.outputs import register_outputs_guards
 
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from ..support.capture import capture_assembly
@@ -58,13 +44,6 @@ from camctl.session.service import run_session
 from ..support.session import session_context
 from .session_clock import SessionClock
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_cancellation_guards()
 
 pytestmark = pytest.mark.asyncio
 

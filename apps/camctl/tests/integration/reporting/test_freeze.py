@@ -19,11 +19,9 @@ from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-from camctl.reporting.policy import (
-    ReportDecisionKind, ReportingRepository, register_report_guards,
-)
+from camctl.reporting.policy import ReportDecisionKind, ReportingRepository
 from camctl.persistence.repositories.transactions import commit_operation
 from camctl.history.validators import EventValidationError
 
@@ -35,8 +33,6 @@ from ..support.database import database_path
 from ..support.reporting import deny_storage_access
 from ..support.output_planning import EventSequence, capture_operation
 
-register_acceptance_guards()
-register_report_guards()
 pytestmark = pytest.mark.asyncio
 
 

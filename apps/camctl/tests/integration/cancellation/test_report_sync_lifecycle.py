@@ -34,25 +34,16 @@ from camctl.history.validators import ValidatedEvent
 from camctl.host_files.handoff import HandoffDirectories
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.transactions import commit_operation, row_facts
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.cancellation import (
-    CancellationRepository,
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
+from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-from camctl.persistence.repositories.outputs import OutputsRepository, register_outputs_guards
+from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.models import SyncMode
 from camctl.reporting.policy import (
     ReportingRepository,
-    register_report_guards,
-    register_sync_guard,
     start_sync,
     record_local_report,
     finish_canceled_sync_action,
@@ -70,12 +61,6 @@ _NOW = 1_750_000_000_000_000
 
 @pytest.fixture
 def environment(tmp_path):
-    register_acceptance_guards()
-    register_report_guards()
-    register_sync_guard()
-    register_cancellation_guards()
-    register_capture_guards()
-    register_outputs_guards()
     path = tmp_path / "state.db"
     report_world(tmp_path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())

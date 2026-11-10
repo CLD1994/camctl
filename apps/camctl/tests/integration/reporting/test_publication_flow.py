@@ -30,26 +30,9 @@ from camctl.persistence.runtime import (
     OwnedConnection,
     open_existing,
 )
-from camctl.persistence.repositories.acceptance import (
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.reporting.ack import AckReport
 from camctl.reporting.models import FrozenReport, ReportBytes
-from camctl.reporting.policy import (
-    ReportingRepository,
-    publish_report,
-    record_recovered_publication,
-    record_report_bytes,
-    record_report_failure,
-    record_report_publish_intent,
-    register_report_guards,
-    register_sync_guard,
-)
+from camctl.reporting.policy import ReportingRepository, publish_report, record_recovered_publication, record_report_bytes, record_report_failure, record_report_publish_intent
 from camctl.reporting.publication import (
     DeliveryOutcome,
     DbPublicationSession,
@@ -66,12 +49,6 @@ from ..persistence.test_runtime import _create_valid_database
 from .test_freeze import _submit
 from ..support.database import business_database, database_path
 
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_capture_guards()
-register_acceptance_guards()
-register_cancellation_guards()
 
 _PAYLOAD = b'{"report_id" : "1", "from_wm" : 0, "to_wm" : 0}\n'
 _SHA = hashlib.sha256(_PAYLOAD).hexdigest()

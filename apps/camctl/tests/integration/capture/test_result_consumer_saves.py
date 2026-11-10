@@ -25,14 +25,12 @@ from camctl.operations.models import (
     Settlement, SettlementBasis,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.outputs import register_outputs_guards
 
 from ..support.capture import capture_factory
 from ..support.result_cases import CaseClock, ResultPort
 from .test_capture_contract import ResultsDouble, _NOW
 
 pytestmark = pytest.mark.asyncio
-register_outputs_guards()
 
 from .result_consumer_fixtures import (
     CASES as _CASES, RESULT_EVIDENCE as _EVIDENCE, consumer_world, result_driver, returned,

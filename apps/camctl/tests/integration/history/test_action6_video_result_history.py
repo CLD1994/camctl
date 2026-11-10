@@ -38,7 +38,6 @@ from camctl.persistence.repositories.history import (
     HistoryRepository,
     SqliteSnapshotStore,
 )
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -60,7 +59,6 @@ from ..support.outputs import obtain_factory
 from ..support.capture import capture_database
 
 pytestmark = pytest.mark.asyncio
-register_file_batch_guards()
 
 _BINDING = DeviceBinding(device_id="cam-1", driver_id="camctl-adb")
 

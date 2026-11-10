@@ -8,12 +8,12 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
-from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.transactions import commit_operation, event_envelope, row_facts, update_change
 
 from .test_selection_reuse import _save, selection_database, family_database
@@ -81,7 +81,6 @@ def test_grant_checks_saved_comparison_references_before_other_exits(selection_d
         owned.connection.execute("UPDATE intermediate_files SET size_bytes=200 WHERE id=801")
         owned.connection.commit()
     _save(owned, SelectionMode.PREVIEW)
-    register_operation_guards()
     candidate, key = _candidate(source), new_operation_key()
     repository = outputs.OutputsRepository()
     if entry in ("original_key", "new_reuse"):
@@ -117,7 +116,7 @@ def test_member_rejection_requires_current_comparison_references(selection_datab
     context = EventContext(TransactionRange(3, 3, 3), {("obtain_items", 1): ("action", 30)}, state,
         transaction_rows={**state, "outputs": {**state["outputs"], missing: unavailable}} if future else None)
     with pytest.raises(EventValidationError):
-        validate_event(event, context)
+        BusinessStorage().validate_event(event, context)
 
 
 @pytest.mark.parametrize("state", ["cleaned", "unknown", "new_size"])
@@ -141,7 +140,6 @@ def test_formal_grant_cannot_consume_incomplete_current_references(selection_dat
     from copy import deepcopy
     owned=selection_database
     _save(owned,SelectionMode.PREVIEW)
-    register_operation_guards()
     proposal=capture_operation(owned,lambda copy: outputs.OutputsRepository().grant_file(
         _candidate(),new_operation_key(),copy))
     event,context=event_case(proposal,21)

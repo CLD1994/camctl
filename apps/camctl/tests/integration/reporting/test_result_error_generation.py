@@ -22,20 +22,14 @@ from camctl.contracts.workflow_errors import registered_error
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file
-from camctl.reporting.policy import (
-    ReportDecisionKind, ReportingRepository, register_report_guards, register_sync_guard,
-)
+from camctl.reporting.policy import ReportDecisionKind, ReportingRepository
 
 from ..capture.result_consumer_fixtures import ResultCatalog, consumer_world
 from ..support.acceptance import accept_source
 from ..capture.test_capture_contract import ResultsDouble, _NOW, _entry
 
-register_outputs_guards()
-register_report_guards()
-register_sync_guard()
 pytestmark = pytest.mark.asyncio
 
 

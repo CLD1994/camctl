@@ -24,8 +24,9 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.history.validators import (
-    EventContext, EventValidationError, validate_event, validate_event_structure,
+    EventContext, EventValidationError, validate_event_structure,
 )
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.host_files.models import BoundDirectories
 from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, AttemptTicket, BeginDisposition,
@@ -642,10 +643,10 @@ def test_resume_read_guard_rejects_non_read_flow(segment_env):
     for event in plan.events:
         if event is resume_event:
             break
-        validate_event(event, context)
+        BusinessStorage().validate_event(event, context)
         for row in event.rows:
             context.state_rows[row.table][row.row_id].update(row.after.values)
-    assert validate_event(resume_event, context).branch_name == "RESUME_READ"
+    assert BusinessStorage().validate_event(resume_event, context).branch_name == "RESUME_READ"
     foreign = deepcopy(context.state_rows)
     foreign["operation_runs"][run_id]["kind"] = 1
     # 非 READ 流程的尝试归动作，保持归属合法以验证读取专属守卫。
@@ -654,5 +655,5 @@ def test_resume_read_guard_rejects_non_read_flow(segment_env):
         foreign_owners[(row.table, row.row_id)] = (
             "action", foreign["operation_runs"][run_id]["action_id"])
     with pytest.raises(EventValidationError):
-        validate_event(
+        BusinessStorage().validate_event(
             resume_event, replace(context, state_rows=foreign, owners=foreign_owners))

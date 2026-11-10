@@ -16,6 +16,7 @@ from camctl.logging_runtime.performance import performance_logging
 from camctl.logging_runtime.service import LogChannel
 from camctl.logging_runtime import transaction_timing as timing
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.repositories.validation import BusinessStorage
 
 
 @dataclass
@@ -29,7 +30,7 @@ class _Clock:
 
 
 @pytest.fixture
-def history(mocker):
+def history():
     event = EventEnvelope(1, 1, 1, 1, 0, 2, 1, 1, {}, (
         RowChange("plans", 1, RowImage(False, {}),
             RowImage(True, {"request_id": 42, "name": "p", "created_at": 0, "status": 1})),
@@ -42,10 +43,6 @@ def history(mocker):
     }))
     context = validators.EventContext(TransactionRange(1, 1, 1),
         {("plans", 1): ("plan", 1)}, {"plans": {}})
-    mocker.patch.dict(validators.NAMED_GUARDS, {
-        "admission": lambda event, context: None,
-        "plan_aggregate": lambda event, context: None,
-    })
     return event, row, context
 
 
@@ -88,6 +85,8 @@ def _summaries(channel):
 @pytest.mark.parametrize("entry", ["decode", "structure", "event"])
 def test_without_transaction_history_calls_keep_results_without_clocks_or_logs(mocker, history, entry):
     event, row, context = history
+    storage = BusinessStorage(overrides={"admission": lambda event, context: None,
+        "plan_aggregate": lambda event, context: None})
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
     wall = mocker.patch.object(timing, "monotonic_ns", side_effect=AssertionError("unused clock"))
     cpu = mocker.patch.object(timing, "thread_time_ns", side_effect=AssertionError("unused clock"))
@@ -100,7 +99,7 @@ def test_without_transaction_history_calls_keep_results_without_clocks_or_logs(m
             result = validators.validate_event_structure(event)
             assert result[:2] == ("PLAN_ACCEPTED", "CREATE")
         else:
-            assert validators.validate_event(event, context).envelope is event
+            assert storage.validate_event(event, context).envelope is event
     wall.assert_not_called()
     cpu.assert_not_called()
     channel.slog.assert_not_called()
@@ -123,12 +122,13 @@ def test_repeated_decoding_aggregates_cost_and_keeps_exact_return_object(mocker,
 
 def test_current_event_validation_contains_historical_decode_and_structure_costs(mocker, history, clock):
     event, row, context = history
-    mocker.patch.dict(validators.NAMED_GUARDS, {
+    storage = BusinessStorage(overrides={
         "admission": lambda current, facts: decoding.decode_event_row(row),
+        "plan_aggregate": lambda current, facts: None,
     })
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
     with performance_logging(channel):
-        actual = _transaction(lambda: validators.validate_event(event, context))
+        actual = _transaction(lambda: storage.validate_event(event, context))
     assert actual.value.envelope is event
     payload, = _summaries(channel)
     assert payload["details"] == {
@@ -154,8 +154,8 @@ def test_timed_history_failure_preserves_original_exception(mocker, history, clo
     else:
         def fail(current, facts):
             raise original
-        mocker.patch.dict(validators.NAMED_GUARDS, {"admission": fail})
-        work = lambda: validators.validate_event(event, context)
+        storage = BusinessStorage(overrides={"admission": fail})
+        work = lambda: storage.validate_event(event, context)
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
     with performance_logging(channel):
         with pytest.raises(RuntimeError) as failure:

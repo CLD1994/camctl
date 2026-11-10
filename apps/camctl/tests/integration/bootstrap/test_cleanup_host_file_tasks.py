@@ -30,14 +30,7 @@ from camctl.operations.models import SettlementBasis
 from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
 from camctl.outputs.cleanup_results import saved_cleanup_delete, saved_cleanup_query
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.repositories.scheduling import register_window_guard
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
 from camctl.host_files.tasks import FileTask, FileTaskId, FileTaskExecutor
 from camctl.session.supervision import Supervisor
 
@@ -61,13 +54,6 @@ async def host_environment(tmp_path, monkeypatch):
                     for device in ("cam-a", "cam-b")},
     }, ConfigDefaults())
     assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
-    register_acceptance_guards()
-    register_capture_guards()
-    register_cancellation_guards()
-    register_operation_guards()
-    register_outputs_guards()
-    register_window_guard()
-    register_timelapse_guards()
     owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
     context = SimpleNamespace(
         open_connection=lambda: open_existing(

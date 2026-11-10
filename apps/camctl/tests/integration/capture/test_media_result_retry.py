@@ -20,9 +20,7 @@ from camctl.host_files.media import MediaArtifact, MediaProbe
 from camctl.host_files.models import FileObservation, FileObservationKind
 from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_input_copy import _CONTENT
@@ -72,9 +70,6 @@ class _ActualTools:
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
 async def test_media_actual_result_keeps_original_request_and_key_on_reconstructed_flow(
         pipeline, monkeypatch, branch, phase, capture_resources):
-    register_capture_guards()
-    register_operation_guards()
-    register_outputs_guards()
     owned, roots, source_id = pipeline
     driver, tools = ReadDriverDouble(_CONTENT), _ActualTools(branch)
     flow = (await _flow(pipeline, driver, tools))

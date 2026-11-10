@@ -22,7 +22,7 @@ from camctl.devices.drivers.adb_cameras.registration import register_builtin_cam
 from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
+from camctl.persistence.repositories.operations import OperationRepository
 
 from ..acceptance.test_acceptance import _plan_body
 from ..acceptance.test_adb_camera_definitions import _params
@@ -33,9 +33,6 @@ from ..scheduling.test_start_action import _accept_plan, _start, _SCHEDULED
 from ..support.bootstrap_driver_cases import driver_owned as owned
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("isolated_driver_registries")]
-register_operation_guards()
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
-register_timelapse_guards()
 BINDING = DeviceBinding("cam-1", "dji-osmo360-ii")
 OSV_PATH = "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
 

@@ -164,7 +164,8 @@ async def test_optional_preview_of_original_outside_task_does_not_invalidate_new
     {'observation': {'identity': '/DCIM/wrong.OSV'}}, {'result_page_event_id': 999}])
 async def test_natural_file_event_guard_independently_checks_original_sources(tmp_path, change):
     from camctl.contracts.history_values import TransactionRange
-    from camctl.history.validators import EventContext, EventValidationError, validate_event
+    from camctl.history.validators import EventContext, EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
     owned, runtime, action_id, handler = await _native_world(tmp_path)
     async def read(request, batch):
@@ -201,9 +202,9 @@ async def test_natural_file_event_guard_independently_checks_original_sources(tm
             {('device_files', file_id): ('device_file', file_id)}, state)
         if change:
             with pytest.raises(EventValidationError):
-                validate_event(event, context)
+                BusinessStorage().validate_event(event, context)
         else:
-            assert validate_event(event, context).envelope == event
+            assert BusinessStorage().validate_event(event, context).envelope == event
     finally:
         owned.connection.close()
 
@@ -249,7 +250,8 @@ async def test_new_native_context_and_history_preserve_original_startup_margin(t
 @pytest.mark.parametrize('change', ['none', 'startup', 'early_wait', 'future_page', 'future_time', 'missing_intent', 'early_intent'])
 async def test_new_natural_file_guard_uses_original_startup_and_actual_event_times(tmp_path, change):
     from camctl.contracts.history_values import TransactionRange
-    from camctl.history.validators import EventContext, EventValidationError, validate_event
+    from camctl.history.validators import EventContext, EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
     owned, runtime, action_id, handler = await _native_world(tmp_path, catalog=StartupNativeCatalog(),
         wait_config=lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000))
@@ -305,9 +307,9 @@ async def test_new_natural_file_guard_uses_original_startup_and_actual_event_tim
         context = EventContext(TransactionRange(transaction_id, event_id, event_id),
             {('device_files', file_id): ('device_file', file_id)}, state)
         if change == 'none':
-            assert validate_event(event, context).envelope == event
+            assert BusinessStorage().validate_event(event, context).envelope == event
         else:
             with pytest.raises(EventValidationError):
-                validate_event(event, context)
+                BusinessStorage().validate_event(event, context)
     finally:
         owned.connection.close()

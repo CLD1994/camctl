@@ -41,12 +41,7 @@ from camctl.persistence.repositories.transactions import encode_json_value, row_
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file
-from camctl.reporting.policy import (
-    ReportDecisionKind,
-    ReportingRepository,
-    register_report_guards,
-    register_sync_guard,
-)
+from camctl.reporting.policy import ReportDecisionKind, ReportingRepository
 
 from ..capture.test_capture_contract import ResultsDouble
 from ..history.test_report_scope import (
@@ -60,8 +55,6 @@ from ..support.acceptance import accept_document
 from ..support.database import business_database, database_path
 from ..support.reporting import complete_photo as _finish_action
 
-register_report_guards()
-register_sync_guard()
 
 pytestmark = pytest.mark.asyncio
 

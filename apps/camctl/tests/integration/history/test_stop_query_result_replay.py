@@ -33,20 +33,11 @@ from camctl.history.replay import EntityImage, RestoreSeed, apply_reverse, resto
 from camctl.history.validators import ValidatedEvent
 from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.capture import (
-    CaptureRepository, register_capture_guards,
-)
-from camctl.persistence.repositories.operations import (
-    OperationRepository, register_operation_guards,
-)
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
-from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository, register_timelapse_guards,
-)
+from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.reporting.policy import register_report_guards, register_sync_guard
 from camctl.scheduling.rules import LaunchWindow
 
 from ..bootstrap.test_recording_stop import (
@@ -64,13 +55,6 @@ from ..capture.test_capture_contract import ResultsDouble, _entry
 
 pytestmark = pytest.mark.asyncio
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_cancellation_guards()
 
 _REPLAY_EVIDENCE = EvidenceRegistry((
     EvidenceContract("operation_returned", 1, "control", frozenset()),

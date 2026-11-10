@@ -37,28 +37,11 @@ from camctl.devices.tasks import (
 )
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.capture import (
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import (
-    register_operation_guards,
-)
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.repositories.timelapse import (
-    register_timelapse_guards,
-)
 from camctl.reporting.generation import GenerationSpec, generate_report_file
-from camctl.reporting.policy import (
-    ReportingRepository,
-    register_report_guards,
-    register_sync_guard,
-)
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
+from camctl.reporting.policy import ReportingRepository
 from camctl.session.service import run_session
 
 from ..support.session import capture_factory, session_context
@@ -76,13 +59,6 @@ from .test_recording_stop import (
 from .test_run_dispatch import _ActivityDriver
 from .session_clock import SessionClock
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_cancellation_guards()
 
 pytestmark = pytest.mark.asyncio
 

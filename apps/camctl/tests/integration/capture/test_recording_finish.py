@@ -23,16 +23,7 @@ from camctl.outputs.catalog import (
 )
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.transactions import TransactionError
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    FinishCanceledCapture,
-    FinishCapture,
-    FinishDisposition,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import (
-    register_operation_guards,
-)
+from camctl.persistence.repositories.capture import CaptureRepository, FinishCanceledCapture, FinishCapture, FinishDisposition
 from camctl.persistence.runtime import (
     CURRENT_FORMAT_VERSION,
     DbConfig,
@@ -45,8 +36,6 @@ from ..persistence.test_runtime import (
     _create_valid_database,
 )
 
-register_operation_guards()
-register_capture_guards()
 
 _NOW = 1_750_000_000_000_000
 

@@ -93,7 +93,8 @@ async def test_original_direct_query_cannot_use_a_later_natural_wait(tmp_path):
 @pytest.mark.parametrize('boundary', ['repository', 'event_guard'])
 async def test_natural_result_boundary_rejects_original_intent_before_wait(tmp_path, boundary):
     from camctl.contracts.history_values import TransactionRange
-    from camctl.history.validators import EventContext, EventValidationError, validate_event
+    from camctl.history.validators import EventContext, EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
     owned, runtime, aid, page, wait_id, command, finish = await _original_direct_history(tmp_path)
     try:
@@ -121,7 +122,7 @@ async def test_natural_result_boundary_rejects_original_intent_before_wait(tmp_p
             context = EventContext(TransactionRange(txn_id, event_id, event_id),
                 {('device_activities', aid): ('action', aid)}, state)
             with pytest.raises(EventValidationError, match="自然集合的原结果来源无效"):
-                validate_event(event, context)
+                BusinessStorage().validate_event(event, context)
         assert tuple(owned.connection.iterdump()) == before
     finally:
         owned.connection.close()

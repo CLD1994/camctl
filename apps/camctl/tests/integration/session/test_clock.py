@@ -14,19 +14,11 @@ import pytest
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.repositories.session import SessionRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.session.clock import (
-    ClockCheckInput,
-    ClockTrustStatus,
-    ExecutionMode,
-    check_clock,
-    enter_execution,
-    register_clock_guard,
-)
+from camctl.session.clock import ClockCheckInput, ClockTrustStatus, ExecutionMode, check_clock, enter_execution
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.database import business_database, database_path
 
-register_clock_guard()
 
 _MIN = 1_735_689_600_000_000
 

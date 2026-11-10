@@ -21,14 +21,12 @@ from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
 from camctl.operations.models import AttemptStatus
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.outputs import register_outputs_guards
 
 from .test_call_result_save import ReturnedCall, _outcome
 from .test_capture_contract import _NOW, _entry
 from .test_recording_start_runtime import StartDriver, _ANCHOR, _result
 from .recording_start_fixtures import start_case
 
-register_outputs_guards()
 
 pytestmark = pytest.mark.asyncio
 

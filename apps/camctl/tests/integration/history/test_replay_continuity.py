@@ -9,7 +9,6 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.replay import EntityImage, ReplayError, apply_forward, apply_reverse
 from camctl.history.validators import ValidatedEvent
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.repositories.transactions import commit_operation
 
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import PlanCreateCommand, PlanStartCommand, _open, plan_guards  # noqa: F401
@@ -21,7 +20,7 @@ def saved_history(tmp_path, plan_guards):
     owned = _open(tmp_path)
     try:
         for command in (PlanCreateCommand((1,)), PlanStartCommand(1, before_status=1)):
-            receipt = commit_operation(command, new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(command, new_operation_key(), owned)
             assert receipt.kind == "completed", receipt.error
         page = HistoryRepository(tmp_path / "state.db").read_events(
             ReadScope(ReadOrder.ASCENDING, None, 1, 2, 8, lambda value: value), HistoryBoundary(2, 2),

@@ -8,13 +8,14 @@ from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.history import validators
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.validation import BusinessStorage
 
 
 @pytest.mark.parametrize("action_type,accepted", [
     *((value, True) for value in CAPTURE_ACTION_TYPES),
     (int(enum_for("actions.type").MOTOR_CONTROL), False),
 ])
-def test_preparation_failure_branch_uses_original_capture_type(monkeypatch, action_type, accepted):
+def test_preparation_failure_branch_uses_original_capture_type(action_type, accepted):
     event = EventEnvelope(
         event_id=101, transaction_id=7, event_type=8, event_version=1,
         occurred_at=1, clock_status=2, change_seq=9, reason=5,
@@ -28,15 +29,15 @@ def test_preparation_failure_branch_uses_original_capture_type(monkeypatch, acti
     )
     _, _, branch = validators.validate_event_structure(event)
     # 本单元核对完整context的分支条件，具名业务守卫由其各自单元验证。
-    monkeypatch.setattr(validators, "NAMED_GUARDS", {
+    storage = BusinessStorage(overrides={
         name: lambda event, context: None for name in branch["guards"]
     })
     context = EventContext(TransactionRange(7, 101, 101), {("actions", 8): ("action", 8)},
         {"actions": {8: {"type": action_type, "status": 1,
                          "execution_started": 0, "cancel_requested": 0}}})
     if accepted:
-        validated = validators.validate_event(event, context)
+        validated = storage.validate_event(event, context)
         assert validated.branch_name == "PREPARATION_FAILED"
     else:
         with pytest.raises(EventValidationError):
-            validators.validate_event(event, context)
+            storage.validate_event(event, context)

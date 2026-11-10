@@ -25,24 +25,17 @@ from camctl.outputs.sources import (
     select_outputs,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
-from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import (
     FixSelection,
     OutputsRepository,
     ResolveSources,
     load_selection,
     load_selection_facts,
-    register_outputs_guards,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.plan_completion import assert_action_plan, plan_before
-
-register_acceptance_guards()
-register_capture_guards()  # SOURCE_RESOLVED.FAIL 复用动作终态守卫
-register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
 

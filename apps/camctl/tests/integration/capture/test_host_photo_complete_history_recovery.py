@@ -28,32 +28,15 @@ from camctl.outputs.catalog import FileReference, OutputDraft, OutputKind, Outpu
 from camctl.outputs.cleanup_flow import delete_source_file
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    ProcessInput,
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    FinishCapture,
-    register_capture_guards,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.repositories.host_capture import (
     HostCaptureRepository,
     HostPhotoComplete,
 )
-from camctl.persistence.repositories.outputs import (
-    OutputsRepository,
-    register_outputs_guards,
-)
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.scheduling import (
-    ObserveWindowRequest,
-    SchedulingRepository,
-    StartActionRequest,
-    register_window_guard,
-)
+from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.repositories.scheduling import ObserveWindowRequest, SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.executor import DbExecutor
@@ -68,11 +51,6 @@ _NOW = int(datetime(2026, 1, 15, 9, tzinfo=timezone.utc).timestamp() * 1_000_000
 _ORIGINAL = b"history-recovery-original"
 _PREVIEW = JPEG_IMAGE + b"history-recovery-preview"
 
-register_acceptance_guards()
-register_window_guard()
-register_operation_guards()
-register_capture_guards()
-register_outputs_guards()
 
 
 def _config(home: Path):

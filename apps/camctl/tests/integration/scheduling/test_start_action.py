@@ -21,19 +21,13 @@ from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.contracts.values import new_operation_key, to_utc_micros
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.scheduling import (
     SchedulingRepository,
     StartActionRequest,
     StartOutcome,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-from camctl.reporting.policy import register_report_guards, register_sync_guard
 
 from ..acceptance.test_acceptance import (
     Catalog,
@@ -42,11 +36,6 @@ from ..acceptance.test_acceptance import (
     _plan_body,
 )
 
-register_acceptance_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_capture_guards()
 
 _NOW = 1_750_000_000_000_000
 _SCHEDULED = to_utc_micros("2026-01-15 09:00:00")

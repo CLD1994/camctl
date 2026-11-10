@@ -18,11 +18,11 @@ from .test_output_family import family_database
 from .test_selection_authority import _request, _snapshot, _NOW
 
 
-def _proposal(owned, mode=SelectionMode.DEFAULT):
+def _proposal(owned, mode=SelectionMode.DEFAULT, *, storage=None):
     requested = (705, 703, 999, 704) if mode is SelectionMode.EXPLICIT_IDS else ()
     _request(owned.connection, mode, requested)
     snapshot = _snapshot(owned.connection, mode, requested)
-    plan = capture_operation(owned, lambda target: outputs.OutputsRepository().fix_selection(
+    plan = capture_operation(owned, lambda target: outputs.OutputsRepository(storage=storage).fix_selection(
         outputs.FixSelection(61, snapshot, _NOW), new_operation_key(), target))
     return plan.events[0], plan
 
