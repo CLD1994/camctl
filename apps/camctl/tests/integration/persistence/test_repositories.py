@@ -19,7 +19,6 @@ from camctl.contracts.history_values import HistoryBoundary, ReadOrder, ReadScop
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_transactions import PlanCreateCommand, _open, plan_guards
 from .test_runtime import _create_valid_database
@@ -51,13 +50,13 @@ _READ_TRANSACTION_FUNCTIONS = {
 }
 
 
-def _seed_transactions(tmp_path: Path, count: int) -> None:
+def _seed_transactions(tmp_path: Path, count: int, plan_guards) -> None:
     """用替身命令以每事务一个计划创建事件的方式种若干完整事务。"""
     _create_valid_database(tmp_path / "state.db")
     owned = _open(tmp_path)
     try:
         for plan_id in range(1, count + 1):
-            receipt = commit_operation(
+            receipt = plan_guards.commit_operation(
                 PlanCreateCommand((plan_id,)), new_operation_key(), owned
             )
             assert receipt.kind == "completed"
@@ -76,7 +75,7 @@ def _scope(previous: int | None, limit: int) -> ReadScope[int]:
 class TestDetachedBatch:
     def test_batch_is_detached_and_read_connection_is_released(
             self, tmp_path, plan_guards) -> None:
-        _seed_transactions(tmp_path, 3)
+        _seed_transactions(tmp_path, 3, plan_guards)
         repository = HistoryRepository(tmp_path / "state.db")
         frozen = repository.current_boundary()
         assert frozen == HistoryBoundary(3, 3)
@@ -90,7 +89,7 @@ class TestDetachedBatch:
         # 若 read_events 跨调用持有读事务，快照会遮住第 4 个事务。
         owned = _open(tmp_path)
         try:
-            receipt = commit_operation(
+            receipt = plan_guards.commit_operation(
                 PlanCreateCommand((4,)), new_operation_key(), owned
             )
             assert receipt.kind == "completed"
@@ -118,7 +117,7 @@ class TestDetachedBatch:
 
     def test_read_error_is_propagated_not_an_empty_batch(
             self, tmp_path, plan_guards) -> None:
-        _seed_transactions(tmp_path, 1)
+        _seed_transactions(tmp_path, 1, plan_guards)
         repository = HistoryRepository(tmp_path / "state.db")
         # 伪造的 H 不是事务 1 的完整结束位置：必须按一致性错误传
         # 播，不得静默返回空批或部分批。
