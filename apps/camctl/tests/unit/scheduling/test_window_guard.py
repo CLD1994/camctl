@@ -5,10 +5,7 @@ import pytest
 from camctl.contracts.history_values import TransactionRange
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventContext, EventValidationError
-from camctl.persistence.repositories.scheduling import (
-    _window_guard,
-    register_window_guard,
-)
+from camctl.persistence.repositories.validation import build_business_rules
 from camctl.persistence.repositories.transactions import event_envelope, update_change
 
 _SCHEDULED = 10_000_000
@@ -34,12 +31,8 @@ def _observation(observed, *, first_before=None, scheduled=_SCHEDULED,
 
 
 @pytest.fixture
-def window_guard(monkeypatch):
-    from camctl.history import validators
-
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
-    register_window_guard()
-    return validators.NAMED_GUARDS["window"]
+def window_guard():
+    return build_business_rules()["window"]
 
 
 @pytest.mark.parametrize("observed", [_SCHEDULED, _SCHEDULED + 1, _WINDOW_END])

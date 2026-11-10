@@ -7,11 +7,11 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts.history_values import TransactionRange
-from camctl.history import validators
 from camctl.history.reads import ReadCoverage, CurrentEventReads
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.outputs.catalog import OutputCatalogFacts
-from camctl.persistence.repositories.capture import FinishCapture, register_capture_guards
+from camctl.persistence.repositories.capture import FinishCapture
+from camctl.persistence.repositories.validation import build_business_rules
 from camctl.persistence.repositories.transactions import event_envelope, row_change
 
 
@@ -75,10 +75,8 @@ def _legacy_photo_action():
 
 
 @pytest.fixture
-def output_guard(monkeypatch):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
-    register_capture_guards()
-    return validators.NAMED_GUARDS["output"]
+def output_guard():
+    return build_business_rules()["output"]
 
 
 def _repair_reader():
