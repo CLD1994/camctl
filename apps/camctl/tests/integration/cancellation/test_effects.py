@@ -24,19 +24,11 @@ from camctl.cancellation.ports import SettlementOutcome
 from camctl.cancellation.service import ApplyCancel, apply_cancel
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.cancellation import (
-    CancellationRepository,
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
 
-register_capture_guards()
-register_outputs_guards()
-register_cancellation_guards()
 
 _NOW = 1_750_000_000_000_000
 

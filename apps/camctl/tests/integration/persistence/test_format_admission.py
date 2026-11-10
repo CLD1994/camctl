@@ -15,10 +15,7 @@ from camctl.devices.drivers.hasselblad.definitions import (
     driver_definition,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import (
     DatabaseUnsupportedFormatError,
     DbConfig,
@@ -99,7 +96,6 @@ def test_legacy_v1_refuses_new_host_photo_spec_before_any_history(tmp_path: Path
     target = tmp_path / "state.db"
     _create_valid_database(target, format_version=1)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    register_acceptance_guards()
     try:
         before = _row_counts(owned.connection)
         key = new_operation_key()

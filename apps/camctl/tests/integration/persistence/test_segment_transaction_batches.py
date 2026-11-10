@@ -573,8 +573,6 @@ async def test_fixed_batch_reads_and_output_identity_lookup_keep_their_bounds(tm
 @pytest.mark.parametrize('omit_progress',[False,'missing_reads','unreliable_reads'])
 async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_path,monkeypatch,omit_progress):
     from camctl.persistence.repositories.transactions import update_change,event_envelope
-    from camctl.persistence.repositories.outputs import register_outputs_guards
-    register_outputs_guards()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     segment_event_type=load_event_registry()['events']['SEGMENT_FACTS']
     def plan(command,scope):
@@ -698,8 +696,6 @@ async def test_segmented_prestart_failure_keeps_original_finite_contract(tmp_pat
 @pytest.mark.parametrize('closure',['run','plan'])
 async def test_final_activation_independently_requires_applicable_closure(tmp_path,monkeypatch,closure):
     from camctl.persistence.repositories.transactions import update_change,event_envelope
-    from camctl.persistence.repositories.outputs import register_outputs_guards
-    register_outputs_guards()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     def plan(command,scope):
         result=command.plan(scope)
@@ -742,9 +738,8 @@ async def test_original_receipt_rejects_inconsistent_finite_plan_header(tmp_path
 @pytest.mark.asyncio
 @pytest.mark.parametrize('siblings',['invalid_only','pending_with_invalid'])
 async def test_original_closure_qualification_keeps_birth_terminal_and_later_sibling_facts(tmp_path,siblings):
-    from camctl.reporting.policy import start_sync,register_sync_guard
+    from camctl.reporting.policy import start_sync
     from camctl.reporting.models import SyncMode
-    register_sync_guard()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path,siblings=siblings)
     try:
         invalid=owned.connection.execute('SELECT status,execution_spec_json FROM actions WHERE id=1').fetchone()

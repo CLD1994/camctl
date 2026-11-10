@@ -19,7 +19,7 @@ from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+from camctl.persistence.repositories.file_batches import FileBatchRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.transactions import commit_operation
 
@@ -175,7 +175,6 @@ def test_grant_order_follows_action_time_not_request_time(two_copies):
         "UPDATE actions SET scheduled_at=? WHERE id=32", (_NOW - 10_000_000,))
     owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
-    register_file_batch_guards()
     repository = FileBatchRepository()
     first = repository.acquire(BatchRequest(31, "cam-1", _NOW), new_operation_key(), owned)
     assert first.kind is DbOutcomeKind.COMPLETED and first.value is BatchOutcome.WAIT, first
@@ -402,7 +401,6 @@ def test_slot_order_has_no_purpose_priority(mixed_purposes, order):
         owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=?", (_NOW - 1_000_000, earlier))
         owned.connection.commit()
     assert _slot_of(owned, internal.copy_id) is None and _slot_of(owned, external.copy_id) is None
-    register_file_batch_guards()
     batches = FileBatchRepository()
     requested = batches.acquire(BatchRequest(32, "cam-1", _NOW), new_operation_key(), owned)
     assert requested.kind is DbOutcomeKind.COMPLETED, requested.error

@@ -15,7 +15,7 @@ import pytest
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import GrantOutcome, GrantRequest, SchedulingRepository
 from camctl.persistence.repositories.scheduling import StartOutcome
 from camctl.scheduling.rules import LaunchWindow
@@ -39,7 +39,6 @@ from camctl.persistence.repositories.timelapse import TimelapseRepository
 from .test_capture_contract import ResultsDouble, _PAGE_EVIDENCE
 
 pytestmark = pytest.mark.asyncio
-register_operation_guards()
 
 
 async def _accept_plan(owned, tmp_path, body, catalog):

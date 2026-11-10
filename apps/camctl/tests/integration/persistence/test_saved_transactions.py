@@ -7,7 +7,7 @@ import pytest
 from camctl.contracts.history_values import HistoryBoundary, ReadOrder, ReadScope, TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.repositories.transactions import commit_operation, saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from .test_runtime import _create_valid_database
 from .test_transactions import PlanCreateCommand, _open, plan_guards  # noqa: F401
@@ -24,7 +24,7 @@ def saved_database(tmp_path, plan_guards):
             (PlanCreateCommand((2, 3)), key),
             (PlanCreateCommand((4,)), new_operation_key()),
         ):
-            receipt = commit_operation(command, operation_key, owned)
+            receipt = plan_guards.commit_operation(command, operation_key, owned)
             assert receipt.kind == "completed", receipt.error
         yield owned, key
     finally:
@@ -80,7 +80,7 @@ def test_invalid_original_group_is_rejected_by_both_read_entries(saved_database,
                                HistoryBoundary(2, 3))
 
 
-def test_saved_read_error_rolls_back_new_group_and_projections(saved_database):
+def test_saved_read_error_rolls_back_new_group_and_projections(saved_database, plan_guards):
     owned, key = saved_database
     connection = owned.connection
     connection.execute("UPDATE history_events SET body_json = '{}' WHERE id = 3")
@@ -91,7 +91,7 @@ def test_saved_read_error_rolls_back_new_group_and_projections(saved_database):
             return replace(super().plan(scope), complete_result=lambda connection, result:
                            saved_transaction_events(connection, key))
 
-    receipt = commit_operation(SaveThenVerify((5,)), new_operation_key(), owned)
+    receipt = plan_guards.commit_operation(SaveThenVerify((5,)), new_operation_key(), owned)
     assert receipt.kind == "rolled_back"
     assert isinstance(receipt.error, ConsistencyError)
     assert connection.in_transaction is False

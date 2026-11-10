@@ -33,14 +33,12 @@ from camctl.outputs.handoff import (
     UnconfirmedFailureSave, publish_delivery,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_copy_segments import _CONTENT
 from .test_qualification import _NOW
 
-register_capture_guards()
 
 @pytest_asyncio.fixture
 async def prepared_env(tmp_path):

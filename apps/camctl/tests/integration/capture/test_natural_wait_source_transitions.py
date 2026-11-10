@@ -612,7 +612,8 @@ async def test_independent_finite_end_guard_checks_every_original_page_time(tmp_
     from camctl.history.decoding import decode_event_row
     from camctl.history.events import load_event_registry
     from camctl.history.reads import CaptureResultReadScope
-    from camctl.history.validators import EventContext, EventValidationError, validate_event
+    from camctl.history.validators import EventContext, EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.persistence.repositories.capture import CaptureRepository
     from camctl.persistence.repositories.history import HistoryRepository
@@ -665,9 +666,9 @@ async def test_independent_finite_end_guard_checks_every_original_page_time(tmp_
                 {('device_activities', int(ticket.target_id)): ('action', aid)}, state,
                 current_reads=OriginalPages())
             if page_time != 'good':
-                with pytest.raises(EventValidationError): validate_event(event, context)
+                with pytest.raises(EventValidationError): BusinessStorage().validate_event(event, context)
             else:
-                validate_event(event, context)
+                BusinessStorage().validate_event(event, context)
         finally:
             owned.connection.execute('ROLLBACK')
     finally:

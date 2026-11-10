@@ -513,7 +513,7 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
     from camctl.persistence.initialization import initialize_state, InitOutcome
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
-    from camctl.persistence.repositories.scheduling import SchedulingRepository, ObserveWindowRequest, StartActionRequest, register_window_guard
+    from camctl.persistence.repositories.scheduling import SchedulingRepository, ObserveWindowRequest, StartActionRequest
     from .session import accept_plan, session_config
     from ..bootstrap.test_media_assembly import _SessionDriver, _EVIDENCE, _tool
     from ..capture.test_action6_segmented_normal import Action6RecordCatalog
@@ -596,7 +596,6 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
         "actions": [{"name": "录像", "type": "camera_record", "device_id": "cam-1",
             "scheduled_at": instant, "params": {"type": "video"}, "policy": {"max_delay_ms": 5000}}]},
         SimpleNamespace(utc_micros=lambda: world.wall[0]))
-    register_window_guard()
     scheduling = SchedulingRepository()
     for save, request in ((scheduling.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
             (scheduling.start_action, StartActionRequest(1, _NOW, _NOW))):

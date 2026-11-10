@@ -18,7 +18,6 @@ from camctl.capture.emergency_flow import EmergencySettlement
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.evidence import DeviceObservation, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
-from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..support.capture import capture_database
@@ -26,7 +25,6 @@ from ..support.session import open_session_database
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action
 
-register_capture_guards()
 
 pytestmark = pytest.mark.asyncio
 

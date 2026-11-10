@@ -10,19 +10,11 @@ from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.evidence import DeviceObservation
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
 
 from .result_consumer_fixtures import result_driver
 from ..support.result_cases import result_case
 
 pytestmark = pytest.mark.asyncio
-register_capture_guards()
-register_operation_guards()
-register_outputs_guards()
-register_timelapse_guards()
 
 
 @pytest.mark.parametrize("consumer", ["photo", "timelapse"])

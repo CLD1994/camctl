@@ -3,7 +3,31 @@
 import sqlite3
 from unittest.mock import create_autospec
 
+import pytest
+
 from .outputs import observed_query
+
+
+@pytest.fixture
+def observed_event_guards():
+    """在一份正式规则装配上观察各守卫完成时的事务事实。"""
+    from camctl.persistence.repositories.validation import BusinessStorage, build_business_rules
+
+    callbacks = {}
+    rules = build_business_rules()
+
+    def wrap(name):
+        def guard(event, context):
+            try:
+                rules[name](event, context)
+            finally:
+                if name in callbacks:
+                    callbacks[name](event, context)
+        return guard
+
+    storage = BusinessStorage({name: wrap(name) for name in (
+        'source_selection', 'processing', 'read_permission')})
+    return storage, callbacks
 
 
 class QueryProbe:
@@ -78,26 +102,22 @@ def reads_table(reads, table):
     return any(actual==table for actual,_column in reads)
 
 
-def captured_source(owned, request, *, start=False, batch_size=1):
+def captured_source(owned, request, *, start=False, batch_size=1, storage=None):
     """只从公开来源仓储的真实保存取得事件及有限返回。"""
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.repositories.outputs import OutputsRepository
     from .output_planning import capture_operation
+    from camctl.persistence.repositories.validation import BusinessStorage
+    storage = storage if storage is not None else BusinessStorage()
     result=[]
     key=new_operation_key()
     def save(copy):
-        repository=OutputsRepository(batch_size)
+        repository=OutputsRepository(batch_size, storage=storage)
         outcome=(repository.start_obtain_action(request,key,copy) if start
                  else repository.resolve_sources(request,key,copy))
         result.append(outcome.value)
         return outcome
-    from camctl.history.validators import NAMED_GUARDS, register_guard
-    registered={name:value for name,value in NAMED_GUARDS.items() if hasattr(value,'source_probe_base')}
-    for name,value in registered.items():register_guard(name,value.source_probe_base)
-    try:
-        proposal=capture_operation(owned,save)
-    finally:
-        for name,value in registered.items():register_guard(name,value)
+    proposal=capture_operation(owned,save)
     return proposal,key,result[0]
 
 
@@ -154,13 +174,21 @@ class SourceSequence:
         return BoundedCommandPlan(iter(events),context,self.result,lambda _connection:None)
 
 
-def commit_source(owned,request,*,start=False,batch_size=1,finite=False,mutation=None):
+def commit_source(owned,request,*,start=False,batch_size=1,finite=False,mutation=None, storage=None, observation=None):
     """实际规范事件可独立变造，规划代码始终来自测试拥有的公开事件输入。"""
     from dataclasses import replace
     from camctl.persistence.models import DbOutcome,DbOutcomeKind
-    from camctl.persistence.repositories.transactions import commit_operation
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.event_reads import SqlEventReads
-    proposal,key,result=captured_source(owned,request,start=start,batch_size=batch_size)
+    storage = storage if storage is not None else BusinessStorage()
+    active = observation.active if observation is not None else False
+    if observation is not None:
+        observation.active = False
+    try:
+        proposal,key,result=captured_source(owned,request,start=start,batch_size=batch_size,storage=storage)
+    finally:
+        if observation is not None:
+            observation.active = active
     events=list(proposal.events)
     change=None
     if mutation=='missing_header':events[0]=replace(events[0],evidence={})
@@ -203,33 +231,56 @@ def commit_source(owned,request,*,start=False,batch_size=1,finite=False,mutation
         raise ValueError(mutation)
     command=SourceSequence(proposal,request,result,start=start,batch_size=batch_size,
         finite=finite,events=events,change_context=change)
-    receipt=commit_operation(command,key,owned)
+    receipt=storage.commit_operation(command,key,owned)
     return DbOutcome(DbOutcomeKind(receipt.kind),value=receipt.result,error=receipt.error)
 
 
-def observe_source_reads(monkeypatch,inspect):
-    """正式具名守卫消费实际内核绑定的 EventContext；原守卫先完成独立检查。"""
-    from camctl.history.validators import NAMED_GUARDS,register_guard
-    from camctl.history.events import branch_of
-    seen=set()
-    def wrap(name,original):
-        def observed(event,context):
-            original(event,context)
-            header=next((value for key,value in event.evidence.items()
-                if key in ('source_resolution_request','obtain_initialization_request')),None)
-            if header is None or context.current_reads is None:return
-            guards=branch_of(event.event_type,event.reason)[1]['guards']
-            if name!=guards[-1] or event.event_id in seen:return
-            seen.add(event.event_id)
-            reads=context.current_reads
-            owner=reads.required('actions',header['action_id'])
-            details={'action':owner,'dependency_first':header.get('first_dependency_id')}
-            inspect(reads.connection,event,context,reads,details)
-        observed.source_probe_base=original
-        return observed
-    for name,original in tuple(NAMED_GUARDS.items()):
-        monkeypatch.setitem(NAMED_GUARDS,name,original)
-        register_guard(name,wrap(name,original))
+class SourceReadObservation:
+    """正式守卫执行后观察真实提交事务，不观察独立副本的预运行。"""
+
+    def __init__(self, inspect):
+        from camctl.history.events import branch_of
+        from camctl.persistence.repositories.validation import BusinessStorage, build_business_rules
+        self.active = True
+        seen = set()
+
+        def wrap(name, original):
+            def observed(event, context):
+                original(event, context)
+                if not self.active:
+                    return
+                header = next((value for key, value in event.evidence.items()
+                    if key in ('source_resolution_request', 'obtain_initialization_request')), None)
+                if header is None or context.current_reads is None:
+                    return
+                guards = branch_of(event.event_type, event.reason)[1]['guards']
+                if name != guards[-1] or event.event_id in seen:
+                    return
+                seen.add(event.event_id)
+                reads = context.current_reads
+                owner = reads.required('actions', header['action_id'])
+                details = {'action': owner, 'dependency_first': header.get('first_dependency_id')}
+                inspect(reads.connection, event, context, reads, details)
+            return observed
+
+        self.storage = BusinessStorage({name: wrap(name, original)
+            for name, original in build_business_rules().items()})
+
+
+def observe_source_reads(inspect):
+    """返回独立装配，调用方传给目标仓储及事务。"""
+    return SourceReadObservation(inspect)
+
+
+@pytest.fixture
+def source_observation():
+    """准备阶段与受观察事务共用规则装配，观察从测试显式启用。"""
+    callbacks = {}
+    def inspect(*args):
+        callbacks['inspect'](*args)
+    observation = observe_source_reads(inspect)
+    observation.active = False
+    return observation, callbacks
 
 
 async def accept_body(owned, body, *, occurred_at):

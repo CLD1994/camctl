@@ -8,7 +8,7 @@ from camctl.cancellation.models import (FixCancelTargets,FixedCancelSet,FixedTar
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from .hasselblad_support import world, close, accept_origin, action as read_action, save_blocked, cancel, fixed_members
-from camctl.history.validators import validate_event
+from camctl.persistence.repositories.validation import BusinessStorage
 
 pytestmark=pytest.mark.asyncio
 
@@ -69,7 +69,7 @@ def reject(owned,runtime,repository,origin,entries,surface):
         assert result.kind is DbOutcomeKind.ROLLED_BACK,(case,result)
     else:
         event,context=context_for(owned,runtime,origin,entries)
-        with pytest.raises(EventValidationError): validate_event(event,context)
+        with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
     assert_unchanged(owned,runtime,before,case)
 
 
@@ -151,7 +151,7 @@ async def test_authoritative_complete_scope_keeps_valid_direct_and_linked_member
         elif kind in ('plan','request'): entries=[(1,1,effect),(2,3 if linked else 1,1),(3,1,1)]
         else: entries=[(1,1,effect)]+([(2,2,1)] if linked else [])
         event,context=context_for(owned,runtime,origin,entries)
-        validate_event(event,context)
+        BusinessStorage().validate_event(event,context)
         result=repository.fix_cancel_targets(fixed(origin,runtime,entries),new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert owned.connection.execute('SELECT target_action_id,selection_basis,cancellation_effect FROM cancel_items WHERE action_id=? ORDER BY target_action_id',(origin,)).fetchall()==entries
@@ -179,12 +179,12 @@ async def test_complete_scope_requires_authoritative_address_links_and_start_ran
         origin,repository=await accept_origin(cfg,owned,runtime,address(kind))
         entries=[(1,1,1),(2,1,1),(3,1,1)] if kind in ('plan','request') else [(1,1,1)]
         event,context=context_for(owned,runtime,origin,entries)
-        validate_event(event,context)
+        BusinessStorage().validate_event(event,context)
         for missing in missing_ranges:
             assert not owned.connection.in_transaction,missing
             before=tuple(owned.connection.iterdump())
             incomplete=replace(context,read_coverage=ReadCoverage({key:value for key,value in context.read_coverage.ranges.items() if key!=missing}))
-            with pytest.raises(EventValidationError): validate_event(event,incomplete)
+            with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,incomplete)
             assert_unchanged(owned,runtime,before,missing)
     finally:
         await close(owned,transport,task)

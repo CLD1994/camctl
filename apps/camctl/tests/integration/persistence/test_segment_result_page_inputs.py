@@ -17,7 +17,6 @@ from camctl.history.validators import EventContext
 from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, file_discovery_row
-from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories import capture as capture_repository
 from camctl.persistence.repositories.transactions import (BoundedCommandPlan, CommandPlan,
     commit_operation, event_envelope, next_row_id, row_change, row_facts)
@@ -27,13 +26,10 @@ from camctl.contracts.values import ConsistencyError
 
 from .transaction_fixtures import capture_operation_command
 from ..capture.test_baseline_start import owned, _SCHEDULED
-from ..capture.test_capture_contract import register_capture_guards
 from ..capture.test_result_page_history import _actual, _baseline_world, _REGISTRY
 from camctl.capture.result_pages import ResultPageSave
 from camctl.operations.validation import validate_outcome
 
-register_operation_guards()
-register_capture_guards()
 
 
 def _request(ticket, actual, *, page_no=1, cursor=None):

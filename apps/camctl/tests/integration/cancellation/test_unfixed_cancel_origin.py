@@ -25,13 +25,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import row_facts
 
 from ..acceptance.test_acceptance import Catalog, _plan_body
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
 
-register_capture_guards()
-register_outputs_guards()
-register_cancellation_guards()
 from ..support.acceptance import accept_document
 from ..support.database import business_database, create_test_database
 

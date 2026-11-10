@@ -7,16 +7,15 @@ import sqlite3
 import pytest
 
 from camctl.contracts.values import new_operation_key
-from camctl.history import validators
-from camctl.history.validators import register_guard
 from camctl.history.events import business_columns
 from camctl.history.reads import PlanReadScope, ProductReadScope
 from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories import outputs
-from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.transactions import (
-    commit_operation, event_envelope, row_change, row_facts, update_change,
+    event_envelope, row_change, row_facts, update_change,
 )
+
+from ..support.output_source_cases import observed_event_guards
 
 from .test_product_competition import competition_database
 from ..support.output_planning import capture_operation
@@ -26,19 +25,8 @@ from ..support.output_planning import ScopedEventSequence
 from ..support.output_planning import storage_fault as _FaultConnection
 
 
-@pytest.fixture(autouse=True)
-def restore_formal_guards():
-    """观察 H1 当前事实后，由所属模块恢复正式登记，不保留测试 spy。"""
-    try:
-        yield
-    finally:
-        register_capture_guards()
-        outputs.register_outputs_guards()
 
 
-def _register_sequence_capture_guards(owned, monkeypatch):
-    """组合序列分别提供媒体的原计划范围和授予的原产物范围。"""
-    register_capture_guards()
 
 
 def _repair_file(connection, identity):
@@ -58,14 +46,14 @@ def _repair_file(connection, identity):
     )
 
 
-def _grant_plan(connection, command):
+def _grant_plan(connection, command, *, storage):
     plan = capture_operation(OwnedConnection(connection, None), lambda target:
-        outputs.OutputsRepository().grant_file(command, new_operation_key(), target))
+        outputs.OutputsRepository(storage=storage).grant_file(command, new_operation_key(), target))
     assert len(plan.events) == 5
     return plan
 
 
-def _scenario(owned, case):
+def _scenario(owned, case, *, storage):
     connection = owned.connection
     command = _candidate(_Seedling(31, 101, 701, 501))
     if case == "host_missing":
@@ -77,7 +65,7 @@ def _scenario(owned, case):
         connection.execute("UPDATE obtain_items SET basis=2, original_output_id=703 WHERE id=101")
         command = replace(command, source_device_file_id=None, source_intermediate_file_id=801, config=None)
         connection.commit()
-        plan = _grant_plan(connection, command)
+        plan = _grant_plan(connection, command, storage=storage)
         row = update_change("outputs", 701, {"availability": 1, "error_json": None},
                             {"availability": 4, "error_json": {"reason": "source_missing"}})
         change = event_envelope(2, 2, 20, 4, (row,), _NOW)
@@ -89,7 +77,7 @@ def _scenario(owned, case):
             " input_fields_json=? WHERE id=91",
             (json.dumps({"params": {"source": {"plan_instance_id": "2"}}}),))
         connection.commit()
-        plan = _grant_plan(connection, command)
+        plan = _grant_plan(connection, command, storage=storage)
         # 完成守卫需要状态之外的取消与执行事实，读取实际完整行。
         plan.state_rows["actions"][12] = row_facts(connection, "actions", 12)
         # 前序完成后会继续判断处理责任，当前确实没有处理记录。
@@ -112,7 +100,7 @@ def _scenario(owned, case):
         # 授权命令预跑要求库内一致：已登记的修复成品承载文件已提升。
         connection.execute("UPDATE intermediate_files SET retention_state=3 WHERE id=599")
         connection.commit()
-        plan = _grant_plan(connection, command)
+        plan = _grant_plan(connection, command, storage=storage)
         created = []
         for table, identity in (("outputs", 999), ("output_origins", 899)):
             values = row_facts(connection, table, identity)
@@ -152,11 +140,10 @@ def _sequence(events, plan):
 
 @pytest.mark.parametrize("case", ["host_missing", "new_repair", "source_finished"])
 @pytest.mark.parametrize("change_first", [False, True])
-def test_grant_uses_only_preceding_business_events(competition_database, monkeypatch, case, change_first):
-    _register_sequence_capture_guards(competition_database, monkeypatch)
-    plan, changes = _scenario(competition_database, case)
+def test_grant_uses_only_preceding_business_events(observed_event_guards, competition_database, monkeypatch, case, change_first):
+    storage, callbacks = observed_event_guards
+    plan, changes = _scenario(competition_database, case, storage=storage)
     events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
-    original = validators.NAMED_GUARDS["read_permission"]
     seen = []
 
     def inspect(event, current):
@@ -165,11 +152,10 @@ def test_grant_uses_only_preceding_business_events(competition_database, monkeyp
                 current.state_rows["actions"][12]["status"],
                 999 in current.state_rows["outputs"],
                 any(row["output_id"] == 999 for row in current.state_rows.get("output_origins", {}).values())))
-        original(event, current)
 
-    register_guard("read_permission", inspect)
+    callbacks["read_permission"] = inspect
     before = tuple(competition_database.connection.iterdump())
-    receipt = commit_operation(_sequence(events, plan), new_operation_key(), competition_database)
+    receipt = storage.commit_operation(_sequence(events, plan), new_operation_key(), competition_database)
     assert seen == [(4 if case == "host_missing" and change_first else 1,
                      2 if case == "source_finished" and not change_first else 3,
                      case == "new_repair" and change_first, case == "new_repair" and change_first)], receipt.error
@@ -190,15 +176,15 @@ def test_grant_uses_only_preceding_business_events(competition_database, monkeyp
     ("new_repair", True, "UPDATE obtain_items"),
     ("source_finished", False, "UPDATE actions"),
 ])
-def test_later_write_failure_rolls_back_business_event_and_preparation(
+def test_later_write_failure_rolls_back_business_event_and_preparation(observed_event_guards,
     competition_database, monkeypatch, case, change_first, prefix,
 ):
-    _register_sequence_capture_guards(competition_database, monkeypatch)
-    plan, changes = _scenario(competition_database, case)
+    storage, callbacks = observed_event_guards
+    plan, changes = _scenario(competition_database, case, storage=storage)
     events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
     before = tuple(competition_database.connection.iterdump())
     target = replace(competition_database, connection=_FaultConnection(competition_database.connection, prefix))
-    receipt = commit_operation(_sequence(events, plan), new_operation_key(), target)
+    receipt = storage.commit_operation(_sequence(events, plan), new_operation_key(), target)
     assert receipt.kind == "rolled_back", receipt.error
     assert type(receipt.error) is sqlite3.DatabaseError, receipt.error
     assert tuple(competition_database.connection.iterdump()) == before

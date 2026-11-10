@@ -28,25 +28,13 @@ from camctl.outputs.cleanup_flow import (
     delete_source_file,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
-from camctl.persistence.repositories.outputs import (
-    OutputsRepository,
-    register_outputs_guards,
-)
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..support.database import business_database, create_test_database
 from ..support.outputs import cleanup_runtime
 
-register_operation_guards()
-register_outputs_guards()
-register_capture_guards()
-register_file_batch_guards()
 
 _NOW = 1_750_000_000_000_000
 _BINDING = DeviceBinding(device_id="cam-1", driver_id="camctl-adb")

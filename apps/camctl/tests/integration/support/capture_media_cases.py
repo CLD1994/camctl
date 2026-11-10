@@ -473,7 +473,8 @@ def validate_media_event(owned, event, proposal, *, scope='valid'):
     """H1 静态校验使用实际仓储事件、明确当前事实及真实 PlanReadScope。"""
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.reads import PlanReadScope
-    from camctl.history.validators import EventContext, validate_event
+    from camctl.history.validators import EventContext
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.event_reads import SqlEventReads
     events = proposal.events
     transaction = TransactionRange(event.transaction_id,
@@ -482,7 +483,7 @@ def validate_media_event(owned, event, proposal, *, scope='valid'):
         PlanReadScope(2 if scope == 'wrong_plan' else 1, 128))
     context = EventContext(transaction, proposal.owners, proposal.state_rows,
         proposal.transaction_rows, proposal.read_coverage, current_reads=reads)
-    return validate_event(event, context)
+    return BusinessStorage().validate_event(event, context)
 
 
 async def diagnostic_tool_result(mode):

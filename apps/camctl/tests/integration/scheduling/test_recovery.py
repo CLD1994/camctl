@@ -17,18 +17,7 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    ActivityConcludeSave,
-    ActivityObservationSave,
-    ActivityReleaseSave,
-    CaptureRepository,
-    ConcludeOutcome,
-    ReleaseOutcome,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.scheduling import register_window_guard
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
+from camctl.persistence.repositories.capture import ActivityConcludeSave, ActivityObservationSave, ActivityReleaseSave, CaptureRepository, ConcludeOutcome, ReleaseOutcome
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
@@ -38,10 +27,6 @@ from .test_resources import (
     _seed_record_action,
 )
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_window_guard()
 
 _NOW = 1_750_000_000_000_000
 

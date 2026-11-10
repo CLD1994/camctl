@@ -85,7 +85,6 @@ def world(monkeypatch):
         "id": 140, "branches": {"GRANT": {"reason": 17}, "RELEASE": {"reason": 18}}}}}
     validators = ModuleType("camctl.history.validators")
     validators.EventValidationError = ValueError
-    validators.register_guard = lambda name, guard: state.guards.update({name: guard})
     models = ModuleType("camctl.persistence.models")
     models.DbOutcome, models.DbOutcomeKind = Outcome, Kind
     models.db_failure = lambda error_type, message, outcome: error_type(message)
@@ -100,7 +99,7 @@ def world(monkeypatch):
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.file_batches", api)
     monkeypatch.setattr("camctl.contracts.values.new_operation_key", lambda: _KEY)
     monkeypatch.setattr(api, "FileBatchReads", Facts)
-    api.register_file_batch_guards()
+    api.register_file_batch_guards(lambda name, guard: state.guards.update({name: guard}))
     state.repo, state.scope, state.reads = api.FileBatchRepository(), scope, Facts(connection)
     state.request, state.kinds = BatchRequest(1, "camera", 10), Kind
     return state

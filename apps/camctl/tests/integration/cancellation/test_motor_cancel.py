@@ -23,22 +23,14 @@ from camctl.cancellation.targets import prepare_cancel_set, resolve_cancel_targe
 from camctl.contracts.values import new_operation_key
 from camctl.motor.models import PrepareSendRequest, SendOutcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.cancellation import (
-    CancellationRepository,
-    SqliteCancelLookup,
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.motor import MotorRepository, register_motor_guards
+from camctl.persistence.repositories.cancellation import CancellationRepository, SqliteCancelLookup
+from camctl.persistence.repositories.motor import MotorRepository
 from ..persistence.test_motor_transactions import NOW, _admit, _body, owned
 
 
 @pytest.fixture
 def motor_cancel(owned):
-    from camctl.persistence.repositories.outputs import register_outputs_guards
 
-    register_outputs_guards()
-    register_cancellation_guards()
-    register_motor_guards()
     body = _body()
     body["actions"][0]["group"] = "g"
     _admit(owned, body)

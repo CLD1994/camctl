@@ -10,7 +10,8 @@ from pathlib import Path
 from camctl.capture.files import FileCompletionSave, OwnershipSave
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.history_values import TransactionRange
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.operations.models import ErrorValue
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcomeKind
@@ -285,7 +286,7 @@ async def test_wait_record_event_guard_rejects_time_and_outputs_first_completion
         validation = EventContext(TransactionRange(txn_id, event_id, event_id),
             {("device_files", file_id): ("device_file", file_id)}, state)
         with pytest.raises(EventValidationError):
-            validate_event(event, validation)
+            BusinessStorage().validate_event(event, validation)
     finally:
         owned.connection.close()
 
@@ -308,7 +309,7 @@ async def test_stop_wait_completion_event_guard_rejects_changed_final_locator(tm
         validation = EventContext(TransactionRange(txn_id, event_id, event_id),
             {("device_files", file_id): ("device_file", file_id)}, state)
         with pytest.raises(EventValidationError):
-            validate_event(event, validation)
+            BusinessStorage().validate_event(event, validation)
     finally:
         owned.connection.close()
 
@@ -331,22 +332,22 @@ async def test_completion_event_guard_requires_original_wait_sources_and_exact_e
                 saved.occurred_at, evidence={"completion_request": {
                     "locator": None, "original_name": None, "media_type": None}})
 
-        validate_event(event(evidence), validation)
+        BusinessStorage().validate_event(event(evidence), validation)
         for changed in ({**evidence, "stop_result_event_id": 999},
                         {**evidence, "result_page_event_id": 999},
                         {**evidence, "activity_id": 999},
                         {**evidence, "unexpected": True}):
             with pytest.raises(EventValidationError):
-                validate_event(event(changed), validation)
+                BusinessStorage().validate_event(event(changed), validation)
         absent = deepcopy(state)
         absent["history_events"].pop(saved.ref.event_id)
         with pytest.raises(EventValidationError):
-            validate_event(event(evidence), replace(validation, state_rows=absent))
+            BusinessStorage().validate_event(event(evidence), replace(validation, state_rows=absent))
         for request in ({"locator": None, "original_name": None},
                         {"locator": None, "original_name": "changed.mp4", "media_type": None},
                         {"locator": None, "original_name": None, "media_type": 1}):
             with pytest.raises(EventValidationError):
-                validate_event(replace(event(evidence), evidence={"completion_request": request}), validation)
+                BusinessStorage().validate_event(replace(event(evidence), evidence={"completion_request": request}), validation)
     finally:
         owned.connection.close()
 

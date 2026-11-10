@@ -136,11 +136,10 @@ async def two_photo_read_requests(photo_read_request, tmp_path, capture_resource
 
 def acquire_batch(owned, command):
     from camctl.outputs.batches import BatchOutcome, BatchRequest
-    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+    from camctl.persistence.repositories.file_batches import FileBatchRepository
     device, = owned.connection.execute(
         'SELECT a.device_id FROM device_files f JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?',
         (command.source_device_file_id,)).fetchone()
-    register_file_batch_guards()
     saved = FileBatchRepository().acquire(
         BatchRequest(command.action_id, device, command.occurred_at), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED and saved.value in (BatchOutcome.GRANTED, BatchOutcome.HELD), saved

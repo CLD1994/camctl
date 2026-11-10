@@ -25,30 +25,12 @@ from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import new_operation_key
 from camctl.history.queries import ReportScopeRequest, build_report_scope
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository,
-    register_timelapse_guards,
-)
+from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.reporting.policy import (
-    register_report_guards,
-    register_sync_guard,
-)
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
 from camctl.scheduling.rules import LaunchWindow
 
 from ..capture.test_capture_contract import (
@@ -60,14 +42,6 @@ from ..capture.test_capture_contract import (
 from ..persistence.test_runtime import _create_valid_database
 from ..support.database import business_database, database_path
 
-register_acceptance_guards()
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_cancellation_guards()
 
 _CAMERA_DEFINITION = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",

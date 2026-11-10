@@ -20,15 +20,9 @@ from camctl.capture.handlers import capture_handler
 from camctl.contracts.workflow_errors import registered_error
 from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.host_files.media import MediaProbe
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
 
 from .test_capture_contract import _entry
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
 
 pytestmark = pytest.mark.asyncio
 

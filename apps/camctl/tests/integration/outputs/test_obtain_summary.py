@@ -30,8 +30,6 @@ from camctl.outputs.obtain_summary import (
 )
 from camctl.host_files.models import BoundDirectories
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import (
     FinishObtain,
     ObtainFinishDisposition,
@@ -42,8 +40,6 @@ from camctl.persistence.repositories.transactions import TransactionError
 from .test_copy_segments import _CONTENT
 from .test_qualification import _NOW, _seed_action
 
-register_operation_guards()
-register_capture_guards()
 
 
 def _roots(tmp_path):

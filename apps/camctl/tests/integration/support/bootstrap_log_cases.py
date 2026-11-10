@@ -60,10 +60,9 @@ async def runtime(tmp_path: Path, *, log=None, **options):
 async def seed_two_pending_reports(deps, tmp_path: Path):
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcomeKind
-    from camctl.reporting.policy import ReportingRepository, register_report_guards
+    from camctl.reporting.policy import ReportingRepository
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-    register_report_guards()
     owned = open_existing(deps.state_db, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         first = ReportingRepository().freeze_report(

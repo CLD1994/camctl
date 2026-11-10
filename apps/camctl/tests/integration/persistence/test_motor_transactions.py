@@ -13,10 +13,7 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.values import new_operation_key, to_utc_micros
 from camctl.devices.catalog import DriverDefinitions, build_catalog
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_runtime import _create_valid_database
@@ -46,7 +43,6 @@ def _body(*, count=1, position=100):
 def owned(tmp_path):
     _create_valid_database(tmp_path / "state.db")
     value = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-    register_acceptance_guards()
     yield value
     value.connection.close()
 
@@ -76,12 +72,8 @@ def test_empty_device_configuration_accepts_motor(owned):
 @pytest.fixture
 def prepared(owned):
     from camctl.motor.models import PrepareSendRequest
-    from camctl.persistence.repositories.motor import (
-        MotorRepository,
-        register_motor_guards,
-    )
+    from camctl.persistence.repositories.motor import MotorRepository
 
-    register_motor_guards()
     _admit(owned)
     repository = MotorRepository()
     key = new_operation_key()
@@ -237,12 +229,8 @@ def test_two_motor_results_complete_parent_only_after_last_action(owned):
         MotorFinalKind,
         PrepareSendRequest,
     )
-    from camctl.persistence.repositories.motor import (
-        MotorRepository,
-        register_motor_guards,
-    )
+    from camctl.persistence.repositories.motor import MotorRepository
 
-    register_motor_guards()
     _admit(owned, _body(count=2))
     repository = MotorRepository()
     for action_id, expected_plan in ((1, 2), (2, 3)):
@@ -272,12 +260,8 @@ def test_two_motor_results_complete_parent_only_after_last_action(owned):
 )
 def test_time_rejection_never_creates_intent(owned, when, reason):
     from camctl.motor.models import PrepareSendRequest, PrepareOutcome
-    from camctl.persistence.repositories.motor import (
-        MotorRepository,
-        register_motor_guards,
-    )
+    from camctl.persistence.repositories.motor import MotorRepository
 
-    register_motor_guards()
     _admit(owned)
     outcome = MotorRepository().prepare_send(
         PrepareSendRequest(1, when, NOW), new_operation_key(), owned
@@ -500,17 +484,9 @@ def test_verify_prepare_changed_input_is_unknown(prepared, changed):
 
 
 def test_verify_observe_checks_original_wall_time(owned):
-    from camctl.persistence.repositories.motor import (
-        MotorRepository,
-        register_motor_guards,
-    )
-    from camctl.persistence.repositories.scheduling import (
-        ObserveWindowRequest,
-        register_window_guard,
-    )
+    from camctl.persistence.repositories.motor import MotorRepository
+    from camctl.persistence.repositories.scheduling import ObserveWindowRequest
 
-    register_motor_guards()
-    register_window_guard()
     _admit(owned)
     repository = MotorRepository()
     key = new_operation_key()
