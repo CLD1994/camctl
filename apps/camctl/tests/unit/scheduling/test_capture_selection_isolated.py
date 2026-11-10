@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from camctl.contracts import enums
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
 DRIVER_ID = "hasselblad_cfv100c"
 
 
@@ -24,6 +25,9 @@ class Cursor:
     def fetchone(self):
         return self.rows[0] if self.rows else None
 
+    def fetchall(self):
+        return self.rows
+
     def close(self):
         pass
 
@@ -33,7 +37,12 @@ class Connection:
         self.rows = rows
         self.calls = 0
 
-    def execute(self, sql, parameters):
+    def execute(self, sql, parameters=()):
+        if "database_metadata" in sql.lower() and "format_version" in sql.lower():
+            return Cursor([(CURRENT_FORMAT_VERSION,)])
+        if "device_file_batches" in sql.lower():
+            assert parameters == ("camera",)
+            return Cursor([])
         self.calls += 1
         assert parameters[:3] == ("camera", DRIVER_ID, 1)
         assert "NOT EXISTS" in sql
@@ -188,6 +197,11 @@ def test_read_work_plan_yields_to_selected_photo_without_activity():
     selected.selected_pending_capture = lambda *args: SimpleNamespace(action_id=42, scheduled_at=10)
     class PlanConnection:
         def execute(self, sql, parameters=()):
+            if "database_metadata" in sql.lower() and "format_version" in sql.lower():
+                return Cursor([(CURRENT_FORMAT_VERSION,)])
+            if "device_file_batches" in sql.lower():
+                assert parameters == ("camera",)
+                return Cursor([])
             return Cursor([(9,)] if "history_events" in sql else [])
     candidate = SimpleNamespace(device_id="camera", copy_id=11, held=False)
     selection = selected.CaptureSelectionInput()
