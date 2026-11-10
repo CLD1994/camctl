@@ -88,7 +88,7 @@ from camctl.history.decoding import decode_event_row
 from camctl.persistence.fact_reads import read_event
 from camctl.history.reads import ReadCoverage, PlanReadScope, SoftwareRecoveryReadScope
 from camctl.history.events import business_columns
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.capture.photo_format import saved_photo_format
 from camctl.host_files.photo_formats import photo_file_extension, photo_media_type
 from camctl.host_files.models import FilePurpose
@@ -1141,7 +1141,7 @@ def _plan_aggregate_guard(event, context) -> None:
             continue
 
 
-def register_capture_guards(register=register_guard) -> None:
+def register_capture_guards(register) -> None:
     """注册采集终态事务的正式业务守卫（装配期调用）。"""
     register("action_finish", _action_finish_guard)
     register("output", _output_guard)

@@ -14,7 +14,7 @@ from enum import Enum
 from camctl.contracts.clock import ClockPort
 from camctl.contracts.values import OperationKey
 from camctl.history.events import RowChange, RowImage
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
 from camctl.session.clock_rules import ClockBoundError, validate_trusted_bound
 
@@ -143,7 +143,7 @@ async def check_with_recheck(
     return check
 
 
-def register_clock_guard(register=register_guard) -> None:
+def register_clock_guard(register) -> None:
     """注册可信时间下界事件的正式守卫。"""
     register("clock", _clock_guard)
 

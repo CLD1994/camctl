@@ -33,7 +33,7 @@ from camctl.capture.models import activity_capabilities
 from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptTicket,
@@ -112,7 +112,7 @@ _EXPIRATION_CODES = {
 }
 
 
-def register_window_guard(register=register_guard) -> None:
+def register_window_guard(register) -> None:
     """注册窗口观察事件的正式守卫（装配期调用）。"""
     register("window", _window_guard)
 

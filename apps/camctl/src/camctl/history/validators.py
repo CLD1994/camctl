@@ -1,16 +1,11 @@
-"""事件的生产校验：登记驱动的结构校验与具名守卫分派。
-
-只有结构校验、事务范围、归属和报告影响四类通用守卫随本模块
-提供；业务守卫（admission、ack 等）由所属业务任务注册。
-分支要求的守卫没有实现时明确拒绝写入，不默认接受。
-"""
+"""事件结构、状态事实及历史对象引用的校验。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
 from functools import lru_cache
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import TransactionRange
@@ -36,9 +31,6 @@ from camctl.history.events import (
     write_once_columns,
 )
 from camctl.logging_runtime.transaction_timing import trace_detail
-
-Guard = Callable[[EventEnvelope, "EventContext"], None]
-
 
 class EventValidationError(ValueError):
     """事件违反登记的结构、状态模型、归属、报告影响或具名业务校验。"""
@@ -137,14 +129,6 @@ class ValidatedEvent:
     branch_name: str
     references: tuple[tuple[int, int], ...]
     row_owners: Mapping[tuple[str, int], tuple[int, int]]
-
-
-#: 具名守卫注册表；装配期由所属业务模块注册，重复注册覆盖同名校验。
-NAMED_GUARDS: dict[str, Guard] = {}
-
-
-def register_guard(name: str, guard: Guard) -> None:
-    NAMED_GUARDS[name] = guard
 
 
 @lru_cache(maxsize=1)
@@ -437,12 +421,6 @@ def _report_impact_guard(event: EventEnvelope, context: EventContext) -> None:
 def _row_shape_guard(event: EventEnvelope, context: EventContext) -> None:
     # 行形状校验在守卫分派前由 validate_event 完成；此处保留登记名称分派。
     return None
-
-
-register_guard("row_shape", _row_shape_guard)
-register_guard("transaction", _transaction_guard)
-register_guard("ownership", _ownership_guard)
-register_guard("report_impact", _report_impact_guard)
 
 
 def parse_preparation_request(value: Any) -> dict[str, Any]:
@@ -780,15 +758,3 @@ def resolve_validated_event(event: EventEnvelope, context: EventContext,
         references=tuple(references),
         row_owners=row_owners,
     )
-
-
-@trace_detail("history_event_validation")
-def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEvent:
-    """现有调用方使用的完整事件校验。"""
-    event_name, branch_name, branch = validate_event_facts(event, context)
-    for guard_name in branch["guards"]:
-        guard = NAMED_GUARDS.get(guard_name)
-        if guard is None:
-            _fail(f"{event_name}.{branch_name} 要求的具名校验未接入: {guard_name}")
-        guard(event, context)
-    return resolve_validated_event(event, context, event_name, branch_name)

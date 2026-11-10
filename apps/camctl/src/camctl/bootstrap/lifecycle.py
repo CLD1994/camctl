@@ -40,11 +40,10 @@ from camctl.persistence.runtime import (
 )
 from camctl.persistence.repositories.acceptance import (
     AcceptanceRepository,
-    register_acceptance_guards,
 )
 from camctl.persistence.repositories.session import SessionRepository
 from camctl.reporting.messages import ResultFailureMessage
-from camctl.session.clock import ClockCheckInput, register_clock_guard
+from camctl.session.clock import ClockCheckInput
 from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
 from camctl.session.outcome import SessionOutcome
 from camctl.session.service import (
@@ -262,32 +261,6 @@ def build_runtime(
     recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED,
 ) -> RuntimeDeps:
     """按命令模式创建运行协作者；不隐式创建状态库。"""
-    from camctl.persistence.repositories.capture import register_capture_guards
-    from camctl.persistence.repositories.cancellation import (
-        register_cancellation_guards,
-    )
-    from camctl.persistence.repositories.operations import register_operation_guards
-    from camctl.persistence.repositories.outputs import register_outputs_guards
-    from camctl.persistence.repositories.scheduling import register_window_guard
-    from camctl.persistence.repositories.timelapse import register_timelapse_guards
-    from camctl.reporting.policy import register_report_guards
-
-    # 生产装配统一注册全部正式业务守卫：运行会话内会发出受理、
-    # 动作开始与终态、输出、报告与同步等事务。注册幂等，测试替
-    # 身按需覆盖同名守卫。
-    register_acceptance_guards()
-    register_clock_guard()
-    register_operation_guards()
-    register_capture_guards()
-    register_timelapse_guards()
-    register_outputs_guards()
-    from camctl.persistence.repositories.file_batches import register_file_batch_guards
-    register_file_batch_guards()
-    register_cancellation_guards()
-    register_report_guards()
-    register_window_guard()
-    from camctl.persistence.repositories.motor import register_motor_guards
-    register_motor_guards()
     startup_error = None
     try:
         # 装配边界独立校验目录绑定：配置可能不经 ConfigAdapter 进入

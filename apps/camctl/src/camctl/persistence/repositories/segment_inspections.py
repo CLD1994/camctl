@@ -10,7 +10,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.events import load_event_registry
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.transactions import (
     CommandPlan,
@@ -567,5 +567,5 @@ def _segment_inspection_guard(event, context) -> None:
             raise EventValidationError("分段检查事件分支未登记")
 
 
-def register_segment_inspection_guard(register=register_guard):
+def register_segment_inspection_guard(register):
     register("segment_inspection", _segment_inspection_guard)

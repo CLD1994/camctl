@@ -15,7 +15,7 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
 from camctl.history.events import load_event_registry
 from camctl.history.reads import BaselineReadWriteScope
-from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
+from camctl.history.validators import EventValidationError, validate_event_structure
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.repositories.transactions import (
     CommandPlan, TransactionScope, row_change, event_envelope, read_transaction_range,
@@ -376,7 +376,7 @@ def baseline_read_guard(event, context):
         raise EventValidationError(f'基准调用事实不符合原始输入: {error}') from error
 
 
-def register_baseline_read_guard(register=register_guard):
+def register_baseline_read_guard(register):
     register('baseline_read', baseline_read_guard)
 
 

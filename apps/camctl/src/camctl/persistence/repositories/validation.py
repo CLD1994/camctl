@@ -1,6 +1,7 @@
 """业务存储从正式定义构造一份独立、不可变的事件规则集合。"""
 
 from types import MappingProxyType
+from functools import lru_cache
 
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, resolve_validated_event, validate_event_facts
@@ -72,3 +73,9 @@ class BusinessStorage:
     def commit_operation(self, command, operation_key, owned):
         from .transactions import commit_operation
         return commit_operation(command, operation_key, owned, storage=self)
+
+
+@lru_cache(maxsize=1)
+def default_business_storage():
+    """生产写入共享一次完整装配，事务事实仍由每次调用单独拥有。"""
+    return BusinessStorage()

@@ -16,7 +16,7 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.file_identity import FileIdentity
 from camctl.history.events import load_event_registry
 from camctl.history.reads import BaselineRangeRead
-from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
+from camctl.history.validators import EventValidationError, validate_event_structure
 from camctl.persistence.fact_reads import read_event, read_events
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.repositories.transactions import (CommandPlan, TransactionError, event_envelope,
@@ -410,5 +410,5 @@ def baseline_guard(event, context):
         raise EventValidationError(f"基准历史校验失败: {error}") from error
 
 
-def register_baseline_guard(register=register_guard):
+def register_baseline_guard(register):
     register("baseline", baseline_guard)

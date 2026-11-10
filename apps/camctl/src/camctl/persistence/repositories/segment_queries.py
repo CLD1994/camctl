@@ -8,7 +8,7 @@ from camctl.contracts.workflow_errors import item_error_id, validate_error_detai
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
 from camctl.history.reads import PlanReadScope
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.operations.result_format import read_result_document
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.transactions import (
@@ -256,7 +256,7 @@ def _segment_resolution_guard(event, context):
         raise EventValidationError("QUERY v2 结算必须只更新原取回项")
 
 
-def register_segment_query_guards(register=register_guard):
+def register_segment_query_guards(register):
     register("segment_query_observation", _segment_observation_guard)
     register("segment_query_resolution", _segment_resolution_guard)
 

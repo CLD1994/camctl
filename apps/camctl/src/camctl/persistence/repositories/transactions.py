@@ -54,7 +54,6 @@ from camctl.history.validators import (
     EventContext,
     EventValidationError,
     ValidatedEvent,
-    validate_event,
 )
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.transaction_data import (json_columns, encode_json_value, _read_sql_value,
@@ -690,7 +689,10 @@ def commit_operation(
     派生目录。业务拒绝由命令作为普通结果返回，同样是已提交结果。
     """
     connection: sqlite3.Connection = timed_connection(owned.connection)
-    event_validator = validate_event if storage is None else storage.validate_event
+    if storage is None:
+        from .validation import default_business_storage
+        storage = default_business_storage()
+    event_validator = storage.validate_event
     return _commit_operation(command, operation_key, connection, event_validator)
 
 

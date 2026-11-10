@@ -9,7 +9,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.enums import enum_for
 from camctl.history.events import reason_for_branch
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories.transactions import (CommandPlan, commit_operation, event_envelope,
     next_row_id, row_change, row_facts, saved_transaction_events, update_change)
 
@@ -168,7 +168,7 @@ def _guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_software_recovery_guard(register=register_guard):
+def register_software_recovery_guard(register):
     register("software_recovery", _guard)
 
 

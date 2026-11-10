@@ -24,7 +24,7 @@ from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.history.events import EventEnvelope, RowChange, RowImage, load_event_registry
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.history.reads import PlanReadScope
 from camctl.operations.attempts import (
     AttemptFinish,
@@ -2492,7 +2492,7 @@ def _retry_guard(event, context) -> None:
             _fail("只有未结束流程保存重试等待责任")
 
 
-def register_operation_guards(register=register_guard) -> None:
+def register_operation_guards(register) -> None:
     """注册操作事务的正式业务守卫（装配期调用，替换测试替身）。"""
     from .availability_create import register_availability_guard
     register_availability_guard(register)

@@ -30,7 +30,7 @@ from camctl.contracts.values import (
 from camctl.devices.bindings import BindingResult, binding_failure_details
 from camctl.history.reads import PlanReadScope, ReadCoverage
 from camctl.history.events import business_columns, reason_for_branch
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
     PathRuleError, object_file_name, relative_file_path, validate_relative_file_path,
@@ -11210,7 +11210,7 @@ class _AdvanceWithdrawalCommand:
         return self._already()
 
 
-def register_outputs_guards(register=register_guard) -> None:
+def register_outputs_guards(register) -> None:
     """注册来源、选择与读取资格事件的正式业务守卫（装配期调用）。"""
     register("selection_initialization", _selection_initialization_guard)
     register("source_selection", _source_selection_guard)

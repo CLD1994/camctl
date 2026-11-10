@@ -11,7 +11,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, new_o
 from camctl.devices.tasks import EndControl, StartReturn, CompletionMode
 from camctl.devices.capture_timing import CaptureTiming
 from camctl.history.events import load_event_registry
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.operations.models import AttemptStatus, EffectState
 from camctl.operations.result_format import read_result_document
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -323,5 +323,5 @@ def _guard(event, context):
         raise EventValidationError(f'有限取消结束依据无效: {error}') from error
 
 
-def register_finite_cancel_guard(register=register_guard):
+def register_finite_cancel_guard(register):
     register('finite_cancel_end', _guard)

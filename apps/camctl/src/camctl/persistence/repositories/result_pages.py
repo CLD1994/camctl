@@ -18,7 +18,7 @@ from camctl.devices.directory import DirectoryCursor
 from camctl.devices.evidence import RESULT_LISTED_TYPE, RESULT_LISTED_VERSION
 from camctl.devices.file_identity import FileIdentity
 from camctl.history.events import load_event_registry
-from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
+from camctl.history.validators import EventValidationError, validate_event_structure
 from camctl.operations.models import AttemptTicket
 from camctl.persistence.repositories.transactions import (CommandPlan, TransactionError,
     event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
@@ -1687,6 +1687,6 @@ def _page_index_guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_result_page_guard(register=register_guard):
+def register_result_page_guard(register):
     register("result_page", _page_guard)
     register("result_page_index", _page_index_guard)

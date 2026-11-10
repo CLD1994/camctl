@@ -15,7 +15,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
 from camctl.history.events import load_event_registry
-from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
+from camctl.history.validators import EventValidationError, validate_event_structure
 from camctl.operations.models import AttemptTicket
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.fact_reads import (
@@ -227,7 +227,7 @@ def _ownership_from_result_page_guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_ownership_from_result_page_guard(register=register_guard):
+def register_ownership_from_result_page_guard(register):
     register('ownership_from_result_page', _ownership_from_result_page_guard)
 
 
