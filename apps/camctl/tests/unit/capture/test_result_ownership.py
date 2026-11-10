@@ -4,6 +4,7 @@ import pytest
 
 from camctl.capture.result_inputs import ObservedFile
 from camctl.capture.result_ownership import (
+    result_ownership_already_saved,
     require_result_file_ownership, resolved_result_role, result_observation_role,
     validate_result_ownership_policy,
 )
@@ -11,6 +12,21 @@ from camctl.capture.results import FileKind, ProductRule
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.enums import enum_for
 from camctl.devices.tasks import CaptureResultPolicy
+
+
+def test_ownership_decision_preserves_first_same_and_conflicting_source():
+    role = enum_for('device_files.role')
+    unknown = {'source_action_id': None, 'ownership_evidence_json': None,
+               'role': int(role.UNDETERMINED), 'original_device_file_id': None,
+               'pairing_evidence_json': None}
+    assert result_ownership_already_saved(unknown, 7, int(role.ORIGINAL)) is False
+    saved = unknown | {'source_action_id': 7, 'ownership_evidence_json': {}, 'role': int(role.ORIGINAL)}
+    assert result_ownership_already_saved(saved, 7, int(role.ORIGINAL)) is True
+    for conflicting in (saved | {'source_action_id': 8}, saved | {'role': int(role.PREVIEW)},
+                        unknown | {'original_device_file_id': 4},
+                        unknown | {'pairing_evidence_json': {}}):
+        with pytest.raises(ConsistencyError):
+            result_ownership_already_saved(conflicting, 7, int(role.ORIGINAL))
 
 
 def check(**changes):

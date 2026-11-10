@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from camctl.capture.result_pairing import ScanFamilyAssessment
+from camctl.capture.result_pairing import ScanFamilyAssessment, scan_allows_result_pairing
 from camctl.capture.segment_models import FileCompletionState, OwnershipState
 from camctl.contracts.enums import enum_for
 
@@ -49,7 +49,8 @@ def load_pairing():
     class EnumValues:
         def __getattr__(self, name): return 1
     module('camctl.capture.files', OwnershipFromResultPageSave=object, PairResultFilesSave=Request)
-    module('camctl.capture.result_pairing', ScanFamilyAssessment=ScanFamilyAssessment)
+    module('camctl.capture.result_pairing', ScanFamilyAssessment=ScanFamilyAssessment,
+           scan_allows_result_pairing=scan_allows_result_pairing)
     module('camctl.capture.segment_models', FileCompletionState=object, OwnershipState=object)
     module('camctl.contracts.enums', enum_for=lambda name: EnumValues())
     module('camctl.contracts.history_values', HistoryBoundary=Boundary)
@@ -345,7 +346,7 @@ def test_segment_observations_submits_original_scan_without_reading_boundary():
     module('camctl.persistence.models', 'db_failure DbOutcomeKind db_outcome_for')
     module('camctl.persistence.business', 'SharedSave settle_required')
     module('camctl.persistence.repositories.segments', 'SegmentRepository')
-    module('camctl.persistence.repositories.result_sources', 'ResultSourceKind')
+    module('camctl.capture.result_source_types', 'ResultSourceKind')
     module('camctl.persistence.repositories.transactions', 'row_facts')
     module('camctl.logging_runtime.performance', 'measure_performance')
     module('camctl.logging_runtime.transaction_timing', 'db_operation_context')

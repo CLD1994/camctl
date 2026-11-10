@@ -12,6 +12,12 @@ _REASON = enum_for("device_file_pairing_facts.reason")
 _FAMILY_ROLE = enum_for("result_page_files.family_role")
 
 
+def scan_allows_result_pairing(page, ref):
+    """只有可靠结束的完整扫描才能形成配对结论。"""
+    return bool(page.scan_complete and page.set_finalized
+                and page.outcome.error is None and ref.next_cursor is None)
+
+
 @dataclass
 class ScanFamilyAssessment:
     """逐项消费固定事实，保留族结论所需的有限状态。"""

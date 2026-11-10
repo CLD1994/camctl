@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from camctl.capture.files import OwnershipFromResultPageSave, PairResultFilesSave
-from camctl.capture.result_pairing import ScanFamilyAssessment
+from camctl.capture.result_pairing import ScanFamilyAssessment, scan_allows_result_pairing
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal
@@ -101,8 +101,7 @@ def _scan(connection, request, current_boundary):
     action = None if run is None else row_facts(connection, 'actions', run['action_id'])
     if action is None or attempt is None or raw['run_id'] != run['id']:
         raise ConsistencyError('扫描配对没有同一实际流程及尝试')
-    if (not saved.page.scan_complete or not saved.page.set_finalized
-            or saved.page.outcome.error is not None or saved.ref.next_cursor is not None):
+    if not scan_allows_result_pairing(saved.page, saved.ref):
         return None
     return action, attempt
 

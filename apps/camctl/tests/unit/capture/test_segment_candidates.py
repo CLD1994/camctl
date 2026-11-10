@@ -5,6 +5,7 @@ import pytest
 from camctl.capture.segment_candidates import (
     eligible_original, eligible_paired_preview, eligible_photo_original, is_paired_preview,
     is_segmented_result_policy,
+    ordinary_segment_source, require_segment_write_kind,
 )
 from camctl.capture.segment_models import (
     FileCompletionState, OwnershipState, PreviewPairingState, SegmentMember, SegmentMemberRole,
@@ -14,6 +15,50 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.segment_profiles import SegmentFileFacts, SegmentFileKind
 from camctl.devices.segments import SegmentKey
 from camctl.devices.tasks import CaptureResultPolicy
+
+
+@pytest.mark.parametrize(('source', 'publication', 'kind', 'policy', 'allowed'), [
+    ('COMPLETE_SCAN', 'CANCELED', 'MEMBERS', True, True),
+    ('RETAINED_SOURCES', 'RESULT', 'FIX_MEMBERS', True, True),
+    ('NO_RESULTS', 'RESULT', 'ASSESS', True, True),
+    ('NO_RESULTS', 'CANCELED', 'SCOPE', True, True),
+    ('RETAINED_SOURCES', 'CANCELED', 'ACTIVATE', True, True),
+    ('COMPLETE_SCAN', 'CANCELED', 'PUBLISH', True, True),
+    ('RETAINED_SOURCES', 'RESULT', 'PUBLISH', True, False),
+    ('RETAINED_SOURCES', 'CANCELED', 'OTHER', True, False),
+    ('RETAINED_SOURCES', 'RESULT', 'MEMBERS', False, False),
+])
+def test_nonordinary_segment_write_requires_compatible_action6(source, publication, kind, policy, allowed):
+    row = {'source_kind': int(enum_for('segment_sets.source_kind')[source]),
+           'publication_kind': int(enum_for('segment_sets.publication_kind')[publication])}
+    action = {'execution_spec_json': {'result_policy': CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value}} if policy else None
+    assert not ordinary_segment_source(row)
+    if allowed:
+        require_segment_write_kind(setrow=row, kind=kind, action=action)
+    else:
+        with pytest.raises(ConsistencyError):
+            require_segment_write_kind(setrow=row, kind=kind, action=action)
+
+
+def test_ordinary_complete_scan_result_needs_no_action_fact():
+    row = {'source_kind': int(enum_for('segment_sets.source_kind').COMPLETE_SCAN),
+           'publication_kind': int(enum_for('segment_sets.publication_kind').RESULT)}
+    assert ordinary_segment_source(row)
+
+
+@pytest.mark.parametrize(('source', 'publication', 'policy'), [
+    (999, int(enum_for('segment_sets.publication_kind').RESULT),
+     CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value),
+    (int(enum_for('segment_sets.source_kind').RETAINED_SOURCES), 999,
+     CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value),
+    (int(enum_for('segment_sets.source_kind').RETAINED_SOURCES),
+     int(enum_for('segment_sets.publication_kind').RESULT),
+     CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value),
+])
+def test_segment_write_rejects_other_source_publication_or_policy(source, publication, policy):
+    with pytest.raises(ConsistencyError):
+        require_segment_write_kind(setrow={'source_kind': source, 'publication_kind': publication},
+                                   kind='MEMBERS', action={'execution_spec_json': {'result_policy': policy}})
 
 
 @pytest.mark.parametrize(('role', 'ownership', 'completion', 'size', 'expected'), [

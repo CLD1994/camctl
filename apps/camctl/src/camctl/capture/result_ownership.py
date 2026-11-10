@@ -8,6 +8,24 @@ from camctl.devices.tasks import CaptureResultPolicy
 
 
 _ROLE = enum_for('device_files.role')
+PAIRING_FIELDS = frozenset({'original_device_file_id', 'pairing_evidence_json'})
+
+
+def is_unassigned_result_file(file):
+    """文件来源、用途和配对均未固定时才允许首次归属。"""
+    return (file['source_action_id'] is None and file['ownership_evidence_json'] is None
+            and file['role'] == int(_ROLE.UNDETERMINED)
+            and all(file[name] is None for name in PAIRING_FIELDS))
+
+
+def result_ownership_already_saved(file, source, role):
+    """首次归属返回 False，同一来源已保存返回 True，固定冲突则拒绝。"""
+    if is_unassigned_result_file(file):
+        return False
+    if (file['source_action_id'] == source and file['role'] == role
+            and file['ownership_evidence_json'] is not None):
+        return True
+    raise ConsistencyError('文件来源或用途已经固定，不能改指')
 
 
 def validate_result_ownership_policy(*, scope_only, policy):
