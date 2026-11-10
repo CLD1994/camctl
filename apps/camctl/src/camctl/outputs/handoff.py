@@ -799,6 +799,30 @@ class WithdrawalChoice(Enum):
     UNKNOWN = "unknown"
 
 
+def withdrawal_delivery_eligible(delivery: Mapping) -> bool:
+    """交付已发布，或已有可靠位置未知结论时允许继续撤回。"""
+    withdrawal = enum_for("deliveries.withdrawal_state")
+    return (delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHED), int(_DELIVERY_STATUS.WITHDRAWN))
+            or delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHING), int(_DELIVERY_STATUS.CANCELED))
+            and delivery["withdrawal_state"] == int(withdrawal.UNKNOWN))
+
+
+def withdrawal_waiter_eligible(*, delivery, target, parent, origin,
+                               delivery_id: int, cancel_item_id: int) -> bool:
+    """核对等待撤回的交付、取消目标及其仍在执行的取消责任。"""
+    action_type = enum_for("actions.type")
+    action_status = enum_for("actions.status")
+    return (delivery["id"] == delivery_id
+            and parent["id"] == cancel_item_id
+            and delivery["action_id"] == target["id"] == parent["target_action_id"]
+            and target["type"] == int(action_type.OBTAIN_ACTION_OUTPUTS)
+            and target["cancel_requested"] == 1
+            and withdrawal_delivery_eligible(delivery)
+            and origin["id"] == parent["action_id"] and origin["type"] == int(action_type.CANCEL_TASK)
+            and origin["status"] == int(action_status.RUNNING)
+            and origin["cancel_requested"] == 0 and parent["status"] == 2)
+
+
 def withdrawal_result_state(choice: WithdrawalChoice) -> int:
     """把可靠撤回结果映射到交付自身的撤回状态。"""
     states = enum_for("deliveries.withdrawal_state")

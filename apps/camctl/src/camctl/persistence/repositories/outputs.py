@@ -80,7 +80,7 @@ from camctl.outputs.handoff import (
     DeliveryFacts, DeliveryFailure, DeliveryStateFacts, FailureSaveDisposition,
     FailureSaveOutcome, IntentDisposition, IntentSaveOutcome, PublicationDisposition,
     PublicationIntentRequest, PublicationSaveOutcome, PublicationSaveRequest,
-    UnconfirmedFailureSave,
+    UnconfirmedFailureSave, publishable_copy_error, withdrawal_waiter_eligible,
 )
 from camctl.outputs.work_files import (
     CleanupChecked, CleanupCheckedDisposition, CleanupCheckedOutcome,
@@ -7091,7 +7091,6 @@ def _require_publishable_copy(context, delivery_id: int) -> None:
     if len(copies) != 1:
         raise EventValidationError("准备或发布必须对应唯一交付拷贝")
     copy = copies[0]
-    from camctl.outputs.handoff import publishable_copy_error
     error = publishable_copy_error(verification_state=copy.get("verification_state"),
                                    committed_bytes=copy.get("committed_bytes"),
                                    source_size=copy.get("source_size"))
@@ -10843,16 +10842,9 @@ class _EnsureWithdrawalWaiterCommand:
         self._command, self._key = command, key
 
     def _eligible(self, delivery, target, parent, origin):
-        return (delivery["id"] == self._command.delivery_id
-                and parent["id"] == self._command.cancel_item_id
-                and delivery["action_id"] == target["id"] == parent["target_action_id"]
-                and target["type"] == _OBTAIN_TYPE and target["cancel_requested"] == 1
-                and (delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHED), int(_DELIVERY_STATUS.WITHDRAWN))
-                     or delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHING), int(_DELIVERY_STATUS.CANCELED))
-                     and delivery["withdrawal_state"] == int(_WITHDRAWAL.UNKNOWN))
-                and origin["id"] == parent["action_id"] and origin["type"] == _CANCEL_ACTION_TYPE
-                and origin["status"] == int(_ACTION_STATUS.RUNNING)
-                and origin["cancel_requested"] == 0 and parent["status"] == 2)
+        return withdrawal_waiter_eligible(delivery=delivery, target=target, parent=parent,
+            origin=origin, delivery_id=self._command.delivery_id,
+            cancel_item_id=self._command.cancel_item_id)
 
     def plan(self, scope):
         connection = scope.connection
