@@ -49,6 +49,66 @@ def _task(task_id: str, file_id: int, body) -> FileTask:
     )
 
 
+async def test_wait_for_files_keeps_original_owner_responsible_after_actual_end():
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
+    owner_entered, owner_release, waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    results = []
+
+    class Owner:
+        async def take_over(self, task):
+            owner_entered.set()
+            await owner_release.wait()
+            results.append(await task.pending.wait())
+
+    def interrupted(_stop):
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await executor.run_file_task(_task('original', 9, interrupted), Owner())
+    assert executor.unfinished_files() == ()  # 实际结束，原结果仍未交付。
+
+    async def wait_original():
+        waiting.set()
+        await executor.wait_for_files((9,))
+
+    waiter = asyncio.create_task(wait_original())
+    drain = None
+    try:
+        await asyncio.wait_for(waiting.wait(), 5)
+        assert not waiter.done()
+        await asyncio.wait_for(executor.wait_for_files((10,)), 5)
+        other = await executor.run_file_task(_task('other', 10, lambda _: 'ok'), StopAndAwaitOwner())
+        assert other.value == 'ok'
+        drain = asyncio.create_task(supervisor.drain_required())
+        await asyncio.wait_for(owner_entered.wait(), 5)
+        assert not waiter.done() and results == []
+        owner_release.set()
+        await asyncio.wait_for(drain, 5)
+        await asyncio.wait_for(waiter, 5)
+        assert len(results) == 1 and results[0].task_id == FileTaskId('original')
+        assert results[0].error is not None
+    finally:
+        owner_release.set()
+        if drain is None:
+            drain = asyncio.create_task(supervisor.drain_required())
+        await asyncio.wait_for(asyncio.gather(waiter, drain, return_exceptions=True), 5)
+
+
+async def test_wait_for_files_rejects_the_current_owned_task():
+    executor = FileTaskExecutor(Supervisor())
+
+    async def body(_control):
+        with pytest.raises(FileTaskError, match='自身'):
+            await executor.wait_for_files((1,))
+        await executor.wait_for_files((2,))
+        return 'finished'
+
+    result = await asyncio.wait_for(executor.run_owned_async_file_task(
+        AsyncFileTask(FileTaskId('own'), (1,), 'test', '当前文件', body)), 5)
+    assert result == 'finished'
+
+
 async def test_background_stop_delivers_actual_save_error_after_source_and_connection_close(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"original source")
