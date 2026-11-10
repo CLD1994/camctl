@@ -22,6 +22,21 @@ from camctl.capture.photo_pair_rules import (
     _host_photo_source_pair, _FILE_ROLE, _FILE_ROLE_FOR_KIND, _HOST_PHOTO_PURPOSE_CODES,
     _HOST_PHOTO_SHA256, _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
 )
+from camctl.capture.result_set_rules import (
+    DEVICE_EVIDENCE_METHOD as _DEVICE_EVIDENCE_METHOD,
+    TIME_AND_OUTPUTS_METHOD as _TIME_AND_OUTPUTS_METHOD,
+    RESULT_BEGIN_REASON as _RESULT_BEGIN_REASON,
+    RESULT_COMPLETE_REASON as _RESULT_COMPLETE_REASON,
+    RESULT_PHASE_TARGETS as _RESULT_PHASE_TARGETS,
+    RESULT_SET_NEXT as _RESULT_SET_NEXT,
+    decide_result_basis, decide_result_error, result_begin_error, result_conclusion_error,
+)
+from camctl.capture.emergency_rules import (
+    emergency_attempt_count_error, emergency_attempt_error, emergency_attempt_presence_error,
+    emergency_failure_error,
+    emergency_identity_error, emergency_observation_error, emergency_run_status_error,
+    emergency_target_error,
+)
 from camctl.capture.device_file_rules import (
     checksum_decision_error, checksum_value_error, completion_facts_error,
     completion_wait_reference_error, incomplete_facts_error, ownership_claim_error,
@@ -181,30 +196,7 @@ _ACTIVITY_RELEASE_REASON = 3
 
 #: RESULT_SET_CONFIRMED 的四个分支。
 _RESULT_SET_EVENT = 16
-_RESULT_COMPLETE_REASON = 1
-_RESULT_UNSATISFIED_REASON = 2
-_RESULT_UNCONFIRMED_REASON = 3
-_RESULT_BEGIN_REASON = 4
 _RESULT_OUTPUTS_FINALIZED_REASON = 5
-
-#: 结论分支到（事件分支编号、目标核实状态、结果判定）的映射。
-_RESULT_PHASE_TARGETS = {
-    ResultSetPhase.COMPLETE: (_RESULT_COMPLETE_REASON, 3, 1),
-    ResultSetPhase.UNSATISFIED: (_RESULT_UNSATISFIED_REASON, 3, 2),
-    ResultSetPhase.UNCONFIRMED: (_RESULT_UNCONFIRMED_REASON, 4, 3),
-    ResultSetPhase.BEGIN: (_RESULT_BEGIN_REASON, 2, None),
-}
-
-#: 核实状态的合法转换（登记状态模型；3 与 4 无出边）。
-_RESULT_SET_NEXT = {
-    1: frozenset({2, 3, 4}),
-    2: frozenset({3, 4}),
-}
-
-#: 采集判定依据的方法标识与目标判定（operation-fields.md#设备活动字段）。
-_TIME_AND_OUTPUTS_METHOD = "time_and_outputs"
-_DEVICE_EVIDENCE_METHOD = "device_evidence"
-_KNOWN_FAILURE_METHOD = "known_failure"
 
 _ACTIVITY_DISPATCH = enum_for("device_activities.dispatch_state")
 _ACTIVITY_STATE = enum_for("device_activities.activity_state")
@@ -3602,7 +3594,8 @@ class _ResultSetConfirmCommand:
             if self._ended_activity != activity_id:
                 raise ConsistencyError("同事务设备结束不属于本结果活动")
             basis_facts = {**facts, "activity_state": 3}
-        basis, evidence = self._basis_after(basis_facts)
+        basis, evidence = decide_result_basis(
+            basis_facts, command.phase, command.evidence, command.capture)
         if basis != facts["completion_basis"]:
             before["completion_basis"] = facts["completion_basis"]
             after["completion_basis"] = basis
@@ -3611,7 +3604,7 @@ class _ResultSetConfirmCommand:
         if command.capture is not None:
             before["capture_json"] = facts["capture_json"]
             after["capture_json"] = dict(command.capture)
-        error_after = self._error_after(facts)
+        error_after = decide_result_error(command.phase, command.error)
         if error_after != facts["last_error_json"]:
             before["last_error_json"] = facts["last_error_json"]
             after["last_error_json"] = error_after
@@ -3625,49 +3618,6 @@ class _ResultSetConfirmCommand:
             result=ResultSetOutcome(
                 ResultSetDisposition.SAVED, target, basis),
             capture_result_read_scope=result_scope)
-
-    def _basis_after(self, facts) -> tuple[int | None, dict | None]:
-        """按分支与已保存事实确定采集判定；只从待定初始化一次。"""
-        command = self._command
-        current = facts["completion_basis"]
-        if command.phase is ResultSetPhase.BEGIN:
-            return current, None
-        if command.phase is ResultSetPhase.UNSATISFIED:
-            if current not in (None, 1):
-                raise ConsistencyError("采集判定已确定，不能再保存明确不满足")
-            return 4, dict(command.evidence)
-        if command.phase is ResultSetPhase.UNCONFIRMED:
-            if current not in (None, 1):
-                raise ConsistencyError("采集判定已确定，不能再变为无法确认")
-            if command.capture is None or current == 1:
-                return current, None
-            # 保存未知采集事实要求判定列脱离空值；待定是唯一合法落点。
-            return 1, None
-        method = command.evidence["method"]
-        if method == _TIME_AND_OUTPUTS_METHOD:
-            if facts["completion_mode"] != 2:
-                raise ConsistencyError("固定完成方式不是时间与产物，判定不适用")
-            if (facts["dispatch_state"] != 3 or facts["sent_at"] is None
-                    or facts["expected_check_at"] is None
-                    or facts["wait_completed_event_id"] is None):
-                raise ConsistencyError("时间与产物判定缺少可靠发送与等待完成事实")
-            if (command.evidence.get("wait_completed_event_id")
-                    != facts["wait_completed_event_id"]):
-                raise ConsistencyError("完成依据引用的等待事件与本活动不符")
-            if facts["activity_state"] == 2:
-                raise ConsistencyError("不能以时间与产物判定覆盖进行中的实际观察")
-            return 3, dict(command.evidence)
-        if method == _DEVICE_EVIDENCE_METHOD:
-            if facts["activity_state"] != 3:
-                raise ConsistencyError("设备证据判定要求原活动已经结束")
-            return 2, dict(command.evidence)
-        raise ConsistencyError(f"未登记的采集判定方法: {method!r}")
-
-    def _error_after(self, facts):
-        command = self._command
-        if command.phase is ResultSetPhase.COMPLETE:
-            return None
-        return None if command.error is None else dict(command.error)
 
     def _reuse(self, scope, saved) -> CommandPlan:
         """原键重送：核实原分支与输入后恢复首次结果。"""
@@ -6769,27 +6719,14 @@ def _emergency_guard(event, context) -> None:
             attempts.append(row.after.values)
     if run_values is None:
         raise EventValidationError("应急补记缺少最终流程行")
-    session_key = run_values.get("session_key")
-    if not isinstance(session_key, str) or len(session_key) != 32:
-        raise EventValidationError("应急流程行必须携带本会话身份")
-    expected_key = (
-        f"emergency/{session_key}/{run_values.get('activity_id')}"
-    )
-    if run_values.get("responsibility_key") != expected_key:
-        raise EventValidationError("应急责任键与会话及活动不符")
-    if run_values.get("kind") != 9 or run_values.get("retry_wait_required") != 0:
-        raise EventValidationError("应急流程必须是补记终态")
-    config_columns = ("max_attempts_used", "timeout_s_json", "retry_interval_s_json")
+    error = emergency_identity_error(run_values)
+    if error is not None:
+        raise EventValidationError(error)
     _check_config_numbers(run_values, f"operation_runs#{run_id}")
-    if attempts and any(run_values.get(column) is None for column in config_columns):
-        raise EventValidationError("已有应急尝试必须保存完整的固定配置")
+    error = emergency_run_status_error(run_values, attempts)
+    if error is not None:
+        raise EventValidationError(error)
     status = run_values.get("status")
-    if status not in (3, 4, 6):
-        raise EventValidationError("应急补记不保存进行中状态")
-    if status == 3 and run_values.get("error_json") is not None:
-        raise EventValidationError("应急成功不携带流程错误")
-    if status in (4, 6) and run_values.get("error_json") is None:
-        raise EventValidationError("应急失败或未确认必须携带原因")
     if status in (4, 6):
         error = run_values["error_json"]
         try:
@@ -6798,28 +6735,15 @@ def _emergency_guard(event, context) -> None:
             raise
         except ValueError as cause:
             raise EventValidationError("应急流程错误不符合公共契约") from cause
-        expected = "emergency_not_attempted" if status == 4 else "emergency_stop_unconfirmed"
-        if error["code"] != expected:
-            raise EventValidationError("应急错误与最终结果分区不符")
-        if error["details"]["activity_id"] != str(run_values.get("activity_id")):
-            raise EventValidationError("应急错误必须指向本流程的实际目标活动")
-    if status == 6 and not attempts:
-        raise EventValidationError("停止未确认的补记必须有实际尝试")
-    if status == 4 and attempts:
-        raise EventValidationError("未能尝试的补记不创建尝试行")
-    observation = event.evidence.get("observation")
-    if observation is not None and status != 3:
-        raise EventValidationError("停止依据只伴随停止成功的补记")
-    if observation is not None or (status == 3 and not attempts):
-        _verify_stop_observation(observation, run_values)
-    if status == 3 and attempts and observation is None:
-        if not any(
-            _result_confirms_stop(attempt, run_values.get("activity_id"))
-            for attempt in attempts
-        ):
-            raise EventValidationError(
-                "停止成功的补记必须在尝试结果中保存指向目标活动的停止观察"
-            )
+        failure = emergency_failure_error(run_values)
+        if failure is not None:
+            raise EventValidationError(failure)
+    error = emergency_attempt_presence_error(run_values, attempts)
+    if error is not None:
+        raise EventValidationError(error)
+    error = emergency_observation_error(run_values, attempts, event.evidence.get("observation"))
+    if error is not None:
+        raise EventValidationError(error)
     activity_id = run_values.get("activity_id")
     activity = (
         dict(context.state_rows.get("device_activities", {}).get(activity_id, {}))
@@ -6831,72 +6755,17 @@ def _emergency_guard(event, context) -> None:
                 raise EventValidationError("应急补记不能删除目标活动")
             activity.update(row.before.values)
             activity.update(row.after.values)
-    if "last_error_json" not in activity:
-        raise EventValidationError("应急补记缺少可靠的目标活动错误")
-    if not json_equal(activity["last_error_json"], run_values.get("error_json")):
-        raise EventValidationError("应急流程与目标活动的完整错误不一致")
-    numbers = [a.get("attempt_no") for a in attempts]
-    if numbers != list(range(1, len(attempts) + 1)):
-        raise EventValidationError("应急尝试必须从 1 连续编号")
-    if run_values.get("attempts_used") != len(attempts):
-        raise EventValidationError("累计次数与尝试行数不符")
-    maximum = run_values.get("max_attempts_used")
-    if maximum is not None and len(attempts) > maximum:
-        raise EventValidationError("尝试次数超过本会话固定限额")
+    error = emergency_target_error(run_values, activity)
+    if error is not None:
+        raise EventValidationError(error)
+    error = emergency_attempt_count_error(run_values, attempts)
+    if error is not None:
+        raise EventValidationError(error)
     for attempt in attempts:
         _check_config_numbers(attempt, "应急尝试")
-        if any(not json_equal(attempt.get(column), run_values.get(column))
-               for column in config_columns):
-            raise EventValidationError("每条应急尝试必须采用本会话的相同固定配置")
-        if attempt.get("run_id") != run_id:
-            raise EventValidationError("应急尝试必须归属本次流程")
-        if attempt.get("intent_event_id") is not None:
-            raise EventValidationError("应急尝试不携带普通意图引用")
-        if attempt.get("result_event_id") != event.event_id:
-            raise EventValidationError("应急尝试结果必须指向本事件")
-        if attempt.get("status") == 1:
-            raise EventValidationError("应急补记不保存运行中尝试")
-        if attempt.get("copy_round") is not None:
-            raise EventValidationError("应急尝试没有拷贝轮次")
-
-
-def _structured_observation(observation) -> bool:
-    """观察的结构边界：非空类型、正整数版本与结构化数据。
-
-    证据类型与 data 成员是否符合驱动契约由装配层按证据登记核对；
-    本结构边界只排除不能解释为观察的形状。
-    """
-    return (
-        isinstance(observation, Mapping)
-        and isinstance(observation.get("type"), str)
-        and bool(observation.get("type"))
-        and is_json_integer(observation.get("version"))
-        and observation["version"] > 0
-        and isinstance(observation.get("data"), Mapping)
-    )
-
-
-def _result_confirms_stop(attempt_values, activity_id) -> bool:
-    """尝试结果是否携带指向目标活动的可靠停止观察。"""
-    result = attempt_values.get("result_json")
-    if not isinstance(result, Mapping):
-        return False
-    observations = result.get("observations")
-    if not isinstance(observations, list):
-        return False
-    return any(
-        _structured_observation(item)
-        and item["data"].get("activity_id") == str(activity_id)
-        for item in observations
-    )
-
-
-def _verify_stop_observation(observation, run_values: Mapping[str, Any]) -> None:
-    """核对事件依据成员中的停止依据的结构与目标指向。"""
-    if not _structured_observation(observation):
-        raise EventValidationError("停止的补记必须携带结构化停止依据")
-    if observation["data"].get("activity_id") != str(run_values.get("activity_id")):
-        raise EventValidationError("停止依据必须指向本补记的目标活动")
+        error = emergency_attempt_error(run_values, run_id, event.event_id, attempt)
+        if error is not None:
+            raise EventValidationError(error)
 
 
 def _validate_activity_result(row, context) -> None:
@@ -7165,30 +7034,16 @@ def _result_check_guard(event, context) -> None:
         except (ConsistencyError, ValueError) as error:
             raise EventValidationError(f"集合范围归属核实无效: {error}") from error
         return
-    state_after = row.after.values.get("result_set_state")
     state_before = row.before.values.get("result_set_state")
     if event.reason == _RESULT_BEGIN_REASON:
-        if (state_before, state_after) != (1, 2):
-            raise EventValidationError("开始分支只把未核实集合推进到核实中")
-        extra = set(row.after.values) - {"result_set_state"}
-        if extra:
-            raise EventValidationError(f"开始分支不携带结论事实: {sorted(extra)}")
+        error = result_begin_error(row.before.values, row.after.values)
+        if error is not None:
+            raise EventValidationError(error)
         return
-    outcome_by_reason = {
-        _RESULT_COMPLETE_REASON: (3, 1),
-        _RESULT_UNSATISFIED_REASON: (3, 2),
-        _RESULT_UNCONFIRMED_REASON: (4, 3),
-    }
-    expected = outcome_by_reason.get(event.reason)
-    if expected is None or state_before not in (1, 2) or state_after != expected[0]:
-        raise EventValidationError("结论分支与核实状态转换不符")
+    error = result_conclusion_error(event.reason, state_before, row.after.values)
+    if error is not None:
+        raise EventValidationError(error)
     check = row.after.values.get("result_check_json")
-    if not isinstance(check, Mapping):
-        raise EventValidationError("结论分支必须保存结果集合核实依据")
-    if (not isinstance(check.get("contract"), str) or not check["contract"]
-            or check.get("outcome") != expected[1]
-            or not isinstance(check.get("observation"), Mapping)):
-        raise EventValidationError("结果集合核实依据的结构或判定编码非法")
     capture = row.after.values.get("capture_json")
     if capture is not None:
         phase = next(phase for phase, target in _RESULT_PHASE_TARGETS.items()
