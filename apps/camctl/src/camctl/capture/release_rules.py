@@ -3,6 +3,7 @@
 from typing import Any, Mapping
 
 from camctl.capture.recovery_types import RecoveryPhase
+from camctl.capture.terminal_rules import ACTION_TERMINAL
 
 
 def release_basis_holds(facts: Mapping[str, Any]) -> bool:
@@ -39,3 +40,11 @@ def occupancy_release_allowed(facts: Mapping[str, Any], *, unstarted: bool = Fal
     return (preparation_calls_resolved and facts["occupancy_state"] == 1 and release_basis_holds(facts)
             and (facts["ownership_mode"] != 2 or (unstarted and preparation_resolved)
                  or output_scope_resolved(facts)))
+
+
+def unstarted_release_allowed(facts, action, preparation_resolved):
+    """可靠未启动且动作已终态时，可不等待原输出集合。"""
+    return ((preparation_resolved is True or facts.get("baseline_state") == 3)
+        and action.get("status") in ACTION_TERMINAL
+        and facts.get("dispatch_state") in (1, 4)
+        and facts.get("activity_state") == 1 and facts.get("started_at") is None)

@@ -7,6 +7,7 @@ from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.devices.tasks import CaptureResultPolicy
 
 _ACTION_TYPE = enum_for("actions.type")
+ACTION_TERMINAL = (3, 4, 5, 6)
 
 
 def preparation_failure_action_error(action, after):
@@ -49,4 +50,11 @@ def activity_capture_transition_error(basis_before, after):
             return "采集判定已确定，不能再改判"
         if not after.get("completion_evidence_json"):
             return "确定的采集判定缺少可靠依据"
+    return None
+
+
+def recording_success_error(issues):
+    """已知原输入媒体失败不能作为成功录像保存。"""
+    if issues:
+        return "原输入存在已知媒体失败，不能保存录像成功"
     return None
