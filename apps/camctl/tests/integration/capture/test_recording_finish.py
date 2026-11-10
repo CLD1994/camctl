@@ -328,12 +328,34 @@ async def test_canceled_finish_requires_saved_cancel_mark(tmp_path: Path) -> Non
         await case.close()
 
 
-async def test_canceled_finish_reuse_and_recovery(tmp_path: Path) -> None:
-    case = await finish_case(tmp_path, complete_files=False, canceled=True)
+@pytest.mark.parametrize('pending_sibling', [False, True], ids=['last-action', 'pending-sibling'])
+async def test_canceled_finish_reuse_and_recovery(tmp_path: Path, pending_sibling: bool) -> None:
+    report_at = datetime.fromtimestamp(NOW // 1_000_000 + 3600, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    extra_actions = ({'name': '未来报告', 'type': 'report_status',
+        'scheduled_at': report_at, 'params': {'scope': 'full'}},) if pending_sibling else ()
+    case = await finish_case(tmp_path, complete_files=False, canceled=True, extra_actions=extra_actions)
     try:
         method, command, key = await case.finish_input()
+        assert method == 'finish_canceled_capture'
+        plan_before = case.row('SELECT status,last_event_id FROM plans WHERE id=1')
+        boundary = case.row('SELECT MAX(id) FROM history_events')[0]
         first = await _save_finish(case, method, command, key)
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        plan_after = case.row('SELECT status,last_event_id FROM plans WHERE id=1')
+        expected_plan = plan_before[0] if pending_sibling else 3
+        assert (first.value.action_status, first.value.plan_status) == (6, expected_plan)
+        if pending_sibling:
+            assert plan_after == plan_before
+            assert case.row("SELECT status,execution_started FROM actions WHERE name='未来报告'") == (1, 0)
+        else:
+            events = case.owned.connection.execute(
+                'SELECT event_type,transaction_id FROM history_events WHERE id IN ('
+                'SELECT last_event_id FROM actions WHERE id=1 UNION ALL SELECT last_event_id FROM plans WHERE id=1)'
+            ).fetchall()
+            assert {event[0] for event in events} == {8, 9}
+            assert len({event[1] for event in events}) == 1
+        assert len(case.owned.connection.execute(
+            'SELECT DISTINCT transaction_id FROM history_events WHERE id>?', (boundary,)).fetchall()) == 1
         await case.restart(wall=NOW + 100_000_000)
         before = _image(case)
         for resend_key, request in ((key, command), (new_operation_key(), command),
@@ -341,7 +363,7 @@ async def test_canceled_finish_reuse_and_recovery(tmp_path: Path) -> None:
             again = await _save_finish(case, method, request, resend_key)
             assert again.kind is DbOutcomeKind.COMPLETED, again.error
             assert again.value.disposition is FinishDisposition.ALREADY
-            assert (again.value.action_status, again.value.plan_status, again.value.output_ids) == (6, 3, ())
+            assert (again.value.action_status, again.value.plan_status, again.value.output_ids) == (6, expected_plan, ())
             assert _image(case) == before
     finally:
         await case.close()

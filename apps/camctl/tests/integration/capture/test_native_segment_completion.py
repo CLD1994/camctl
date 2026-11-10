@@ -64,7 +64,9 @@ async def test_native_empty_tail_uses_original_natural_target_and_retains_per_fi
     tmp_path, canceled, zero_position
 ):
     catalog = NativeSegmentCatalog(0)
-    owned, runtime, aid, advance, wall, mono, driver, stop = await native_world(tmp_path, catalog)
+    pending_sibling = zero_position == 'middle'
+    owned, runtime, aid, advance, wall, mono, driver, stop = await native_world(
+        tmp_path, catalog, pending_capture_group='native-group' if pending_sibling else None)
     try:
         if canceled:
             wall[0] = _NOW + 100000
@@ -88,6 +90,15 @@ async def test_native_empty_tail_uses_original_natural_target_and_retains_per_fi
             )
 
         driver.list_results.side_effect = read
+        plan_id, = owned.connection.execute('SELECT plan_id FROM actions WHERE id=?', (aid,)).fetchone()
+        plan_before = owned.connection.execute(
+            'SELECT status,last_event_id FROM plans WHERE id=?', (plan_id,)).fetchone()
+        event_before, = owned.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
+        if pending_sibling:
+            sibling, = owned.connection.execute(
+                'SELECT id FROM actions WHERE plan_id=? AND id<>?', (plan_id, aid)).fetchone()
+            assert owned.connection.execute(
+                'SELECT status,execution_started FROM actions WHERE id=?', (sibling,)).fetchone() == (1, 0)
         wall[0] = _NOW + 1200000
         mono[0] += 1200000000
         await advance(aid, runtime)
@@ -106,6 +117,26 @@ async def test_native_empty_tail_uses_original_natural_target_and_retains_per_fi
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM file_copies"
         ).fetchone() == (0,)
+        plan_after = owned.connection.execute(
+            'SELECT status,last_event_id FROM plans WHERE id=?', (plan_id,)).fetchone()
+        assert plan_after[0] == (plan_before[0] if pending_sibling else 3)
+        action_events = owned.connection.execute(
+            "SELECT e.event_type,e.transaction_id FROM history_events e, json_each(e.body_json,'$.rows') r"
+            " WHERE e.id>? AND e.event_type=8 AND json_extract(r.value,'$.table')='actions'"
+            " AND json_extract(r.value,'$.id')=?", (event_before, aid)).fetchall()
+        marker_event, = owned.connection.execute(
+            'SELECT published_event_id FROM segment_sets').fetchone()
+        marker_tx, = owned.connection.execute(
+            'SELECT transaction_id FROM history_events WHERE id=?', (marker_event,)).fetchone()
+        assert action_events == [(8, marker_tx)]
+        if pending_sibling:
+            assert plan_after == plan_before
+            assert owned.connection.execute(
+                'SELECT status,execution_started FROM actions WHERE id=?', (sibling,)).fetchone() == (1, 0)
+        else:
+            assert owned.connection.execute(
+                'SELECT event_type,transaction_id FROM history_events WHERE id=?',
+                (plan_after[1],)).fetchone() == (9, marker_tx)
         driver.list_results.assert_awaited_once()
         if canceled:
             stop.stop.assert_awaited_once()
