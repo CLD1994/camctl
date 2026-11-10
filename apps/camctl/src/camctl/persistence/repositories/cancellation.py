@@ -581,9 +581,9 @@ class _ApplyCancelTargetCommand:
         start_events = []
         canceled_sync = None
         withdrawal_rows = self._withdrawal_rows(connection, item, target)
+        from camctl.cancellation.rules import validate_stored_cancel_mode
+        validate_stored_cancel_mode(target, mode)
         if mode is CancelApplyMode.PRE_START:
-            if target["status"] not in (1, 2) or target["cancel_requested"]:
-                raise ConsistencyError("未启动取消要求目标仍有效且未取消")
             if target["type"] in (1, 2, 3):
                 start = load_start_facts(connection, target, result_events=self._result_events)
                 if not start.not_started:
@@ -623,15 +623,11 @@ class _ApplyCancelTargetCommand:
             # 完成事实，否则执行前取消的计划无人推进（计划执行状态
             # 规格：全部动作在执行前取消的计划也进入完成）。
         elif mode is CancelApplyMode.WITH_STOP:
-            if target["status"] != 2 or target["cancel_requested"]:
-                raise ConsistencyError("停止收场取消要求目标执行中且未取消")
             action_rows = (_update(
                 "actions", target_id,
                 {"cancel_requested": 0}, {"cancel_requested": 1}),)
             effect_after = CancellationEffect.APPLIED.value
         elif mode is CancelApplyMode.TERMINAL:
-            if target["status"] not in _ACTION_TERMINAL:
-                raise ConsistencyError("终态取消要求目标已终态")
             if withdrawal_rows:
                 # 已发布交付的撤回是本次有限收场：成员保持处理中，
                 # 由结算端口推进撤回后按既有终态保存结果；位置未知
@@ -644,8 +640,6 @@ class _ApplyCancelTargetCommand:
                     outcome_event = None
                 effect_after = CancellationEffect.NOT_REQUIRED.value
         elif mode is CancelApplyMode.ALREADY:
-            if not target["cancel_requested"]:
-                raise ConsistencyError("复用取消责任要求目标取消已生效")
             effect_after = CancellationEffect.APPLIED.value
         else:
             raise ConsistencyError(f"取消生效方式不可解释: {mode!r}")
@@ -2057,7 +2051,8 @@ def _guard_cancel_result(event, context, items) -> None:
                 from .preparation import PreparationReads
                 if type(context.preparation_reads) is not PreparationReads or not context.preparation_reads.cancel_ready(target):
                     raise EventValidationError("拍摄取消结果仍有准备调用或占用责任")
-            if target["type"] == 7 and target["status"] not in _ACTION_TERMINAL:
+            from camctl.cancellation.rules import report_cancel_settled
+            if not report_cancel_settled(target):
                 raise EventValidationError("报告取消成功结果要求目标已终态")
             if values.get("outcome") not in (member.value for member in
                                              CancelOutcomeChoice):
@@ -2319,25 +2314,22 @@ def _source_start_rows(context, source):
 
 
 def _photo_preview_source_allowed(context, source, reserved_sources, *, allow_pending_reserved=False):
-    """仅消费原完整范围；取消及终态优先，其余按整次 START 入口分类。"""
-    from camctl.devices.start_entry import EntryPhase, entry_from_rows
+    """读取完整入口事实；业务规则决定关联并按需读取在途确认。"""
+    from camctl.cancellation.rules import existing_photo_preview_decision, photo_preview_entry_decision
+    from camctl.devices.start_entry import entry_from_rows
     facts, attempts_by_run = _source_start_rows(context, source)
-    if source['status'] in _ACTION_TERMINAL:
-        return True
-    if source['cancel_requested']:
-        from camctl.cancellation.rules import capture_eligibility_facts, decide_cancel_eligibility, may_link_auto_preview
-        return may_link_auto_preview(source, decide_cancel_eligibility(
-            capture_eligibility_facts(source, facts.activity)))
+    previous = existing_photo_preview_decision(source, facts.activity)
+    if previous is not None:
+        return previous
     attempts = () if facts.run is None else attempts_by_run[facts.run['id']]
     phase = entry_from_rows(source, facts.activity, attempts)
-    if phase is EntryPhase.ENTERED:
-        return False
-    if phase is EntryPhase.BLOCKED:
-        return not _pending_start_confirmation(context, source) and (bool(attempts) or source['id'] in reserved_sources)
-    return (allow_pending_reserved and source['id'] in reserved_sources and bool(attempts)
-            and not _pending_start_confirmation(context, source)
-            and all(a['status'] == int(enum_for('operation_attempts.status').RUNNING)
-                    and a['result_json'] is None for a in attempts))
+    options = {'reserved': source['id'] in reserved_sources,
+               'allow_pending_reserved': allow_pending_reserved}
+    result = photo_preview_entry_decision(phase, attempts, **options)
+    if result is None:
+        result = photo_preview_entry_decision(phase, attempts, **options,
+            confirmation_pending=_pending_start_confirmation(context, source))
+    return result
 
 
 def _pending_start_confirmation(context, source):

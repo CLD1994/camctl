@@ -90,3 +90,41 @@ def test_cancel_status_after_apply_keeps_running_capture_until_real_settlement()
         cancel_status_after_apply({'status': 2, 'type': 4}, CancelApplyMode.PRE_START)
     with pytest.raises(ValueError):
         cancel_status_after_apply({'status': 1, 'type': 2}, CancelApplyMode.WITH_STOP)
+
+
+@pytest.mark.parametrize('mode,action,allowed', [
+    ('PRE_START', {'status': 1, 'cancel_requested': 0}, True),
+    ('PRE_START', {'status': 2, 'cancel_requested': 1}, False),
+    ('WITH_STOP', {'status': 2, 'cancel_requested': 0}, True),
+    ('WITH_STOP', {'status': 1, 'cancel_requested': 0}, False),
+    ('TERMINAL', {'status': 6, 'cancel_requested': 1}, True),
+    ('TERMINAL', {'status': 2, 'cancel_requested': 0}, False),
+    ('ALREADY', {'status': 6, 'cancel_requested': 1}, True),
+    ('ALREADY', {'status': 2, 'cancel_requested': 0}, False),
+])
+def test_stored_mode_keeps_its_original_validation_partition(mode, action, allowed):
+    from camctl.cancellation.models import CancelApplyMode
+    from camctl.cancellation.rules import validate_stored_cancel_mode
+    from camctl.contracts.values import ConsistencyError
+    if allowed:
+        validate_stored_cancel_mode(action, CancelApplyMode[mode])
+    else:
+        with pytest.raises(ConsistencyError):
+            validate_stored_cancel_mode(action, CancelApplyMode[mode])
+
+
+def test_photo_preview_requires_confirmation_only_for_original_eligible_entry():
+    from camctl.cancellation.rules import photo_preview_entry_decision
+    from camctl.devices.start_entry import EntryPhase
+    running = ({'status': 1, 'result_json': None},)
+    def decide(phase, attempts=running, **kw):
+        return photo_preview_entry_decision(phase, attempts,
+            reserved=kw.pop('reserved', True), allow_pending_reserved=kw.pop('allowed', True), **kw)
+    assert decide(EntryPhase.ENTERED) is False
+    assert decide(EntryPhase.BLOCKED) is None
+    assert decide(EntryPhase.BLOCKED, confirmation_pending=True) is False
+    assert decide(EntryPhase.BLOCKED, confirmation_pending=False) is True
+    assert decide(EntryPhase.UNKNOWN, allowed=False) is False
+    assert decide(EntryPhase.UNKNOWN) is None
+    assert decide(EntryPhase.UNKNOWN, confirmation_pending=False) is True
+    assert decide(EntryPhase.UNKNOWN, ({'status': 2, 'result_json': {}},), confirmation_pending=False) is False
