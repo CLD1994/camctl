@@ -74,7 +74,7 @@ BUSINESS_PORT_NAMES = {"BusinessDatabase", "SharedSave", "settle_required"}
 HISTORY_APPLY_PREFIXES = (
     "camctl.contracts.public_projection",
     "camctl.persistence.row_history",
-    "camctl.persistence.transaction",
+    "camctl.persistence.repositories.transactions",
 )
 #: 共享层可以依赖的同层基础设施：包内权威资源读取。
 SHARED_ALLOWED = ("camctl.contracts", "camctl.resources")
@@ -148,7 +148,7 @@ def _starts_with(name: str, prefixes: tuple[str, ...]) -> bool:
 #: 业务流程可依赖的持久化层：类型、事务、历史行应用与仓储实现。
 _PERSISTENCE_ALLOWED = (
     "camctl.persistence.models",
-    "camctl.persistence.transaction",
+    "camctl.persistence.repositories.transactions",
     "camctl.persistence.row_history",
     "camctl.persistence.repositories",
 )

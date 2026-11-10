@@ -24,7 +24,7 @@ from camctl.outputs.catalog import FileReference, OutputCatalogFacts, OutputDraf
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, FinishDisposition
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from .result_consumer_fixtures import RESULT_EVIDENCE
 from ..support.binding_cases import (

@@ -17,7 +17,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_catalog_integrity import selection_database
 from .test_output_family import family_database

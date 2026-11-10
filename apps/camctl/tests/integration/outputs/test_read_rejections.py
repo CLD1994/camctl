@@ -15,7 +15,7 @@ from camctl.contracts.workflow_errors import (
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_read_associations import read_targets, _command
 from .test_local_read import local_read

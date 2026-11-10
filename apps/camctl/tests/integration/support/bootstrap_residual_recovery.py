@@ -12,7 +12,7 @@ from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverS
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .acceptance import accept_document
 from .bootstrap_recovery import record_world

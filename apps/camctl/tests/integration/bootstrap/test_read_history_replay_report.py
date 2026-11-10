@@ -19,7 +19,7 @@ from camctl.contracts.history_values import INITIAL_BOUNDARY
 from camctl.persistence.models import DbOutcomeKind
 from camctl.reporting.policy import register_report_guards, register_sync_guard
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.policy import ReportingRepository
 

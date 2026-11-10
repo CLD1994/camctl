@@ -1216,7 +1216,7 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
 def test_installed_sample_rejects_missing_matching_capability_before_plan(installed, tmp_path,
                                                                            stem, driver_id, device_id):
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
 
     config = tmp_path / "pending.toml"
     config.write_text(f'[devices.{device_id}]\nkind="camera"\ndriver="{driver_id}"\n'
@@ -1237,7 +1237,7 @@ def test_installed_sample_rejects_missing_matching_capability_before_plan(instal
 def test_installed_generator_rejects_duplicate_matching_parameter_type(
         installed, installed_camera_capabilities, tmp_path, stem):
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
 
     deployment, capabilities_path = _installed_timelapse_capabilities(
         installed_camera_capabilities, tmp_path, stem)
@@ -1272,7 +1272,7 @@ def test_installed_generator_rejects_duplicate_matching_parameter_type(
 def test_installed_generator_rejects_invalid_timelapse_time_before_plan(
         installed, installed_camera_capabilities, tmp_path, stem, case, interval_s, duration_s):
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
 
     deployment, capabilities_path = _installed_timelapse_capabilities(
         installed_camera_capabilities, tmp_path, stem)

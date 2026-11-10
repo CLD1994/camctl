@@ -57,6 +57,13 @@ from camctl.history.validators import (
     validate_event,
 )
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.transaction_data import (json_columns, encode_json_value, _read_sql_value,
+    row_facts, _load_row_facts, next_row_id)
+from camctl.persistence.history_transactions import (
+    _body_document, read_transaction_range, _load_transaction_range, SavedEvent,
+    SavedTransactionCursor, read_saved_transaction_page, saved_transaction_events)
+from camctl.persistence.atomic import (TransactionError, WriteReceipt, write_receipt_for, _attach_write_receipt,
+    _attach_control_receipt, execute_transaction)
 from camctl.persistence.fact_reads import (
     discard_operation_facts, operation_fact_scope, operation_fact_boundary,
     read_transaction, iter_transaction_events,
@@ -64,10 +71,6 @@ from camctl.persistence.fact_reads import (
 from camctl.logging_runtime.transaction_timing import (
     TransactionPhase, db_count, db_phase, timed_connection, trace_transaction,
 )
-
-
-class TransactionError(ValueError):
-    """写事务内核检测到命令或事实违反事务契约。"""
 
 
 @dataclass(frozen=True)
@@ -342,7 +345,7 @@ def _timed_events(events):
         yield event
 
 
-def _write_bounded_plan(plan, scope, operation_key):
+def _write_bounded_plan(plan, scope, operation_key, atomic_transaction):
     connection = scope.connection
     with db_phase(TransactionPhase.FINAL_CHECKS):
         allocation = scope.allocation
@@ -488,9 +491,9 @@ def _write_bounded_plan(plan, scope, operation_key):
         _finish_result_check_group(result_check_group)
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     try:
+        atomic_transaction.prepare_commit()
         discard_operation_facts(connection)
-        with db_phase(TransactionPhase.COMMIT):
-            connection.execute("COMMIT")
+        atomic_transaction.commit()
     except Exception as error:
         return WriteReceipt(kind="unknown",error=error)
     except BaseException as control:
@@ -498,85 +501,6 @@ def _write_bounded_plan(plan, scope, operation_key):
         raise
     return WriteReceipt(kind="completed",result=plan.result,
         boundary=HistoryBoundary(allocation.txn_id,allocation.last_event_id))
-
-
-@dataclass(frozen=True)
-class WriteReceipt:
-    """一次写事务的完成结果。"""
-
-    kind: str
-    result: Any = None
-    error: BaseException | None = None
-    boundary: HistoryBoundary | None = None
-    change_set: Any = None
-    secondary_errors: tuple[BaseException, ...] = ()
-
-
-_WRITE_RECEIPT_ATTRIBUTE = "_camctl_write_receipt"
-
-
-def write_receipt_for(error: BaseException) -> WriteReceipt | None:
-    """只读取事务内核附加的类型化收场事实。"""
-    receipt = getattr(error, _WRITE_RECEIPT_ATTRIBUTE, None)
-    return receipt if isinstance(receipt, WriteReceipt) else None
-
-
-def _attach_write_receipt(error: BaseException, receipt: WriteReceipt) -> None:
-    setattr(error, _WRITE_RECEIPT_ATTRIBUTE, receipt)
-
-
-def _attach_control_receipt(
-    control: BaseException,
-    kind: str,
-    secondary_errors: tuple[BaseException, ...] = (),
-) -> None:
-    unique_errors: list[BaseException] = []
-    for error in secondary_errors:
-        if error is control or any(error is saved for saved in unique_errors):
-            continue
-        unique_errors.append(error)
-    _attach_write_receipt(
-        control,
-        WriteReceipt(
-            kind=kind,
-            error=control,
-            secondary_errors=tuple(unique_errors),
-        ),
-    )
-
-
-@lru_cache(maxsize=1)
-def json_columns() -> dict[str, frozenset[str]]:
-    """从权威 SQL 收集按结构化值保存的 JSON 列。"""
-    collected: dict[str, set[str]] = {}
-    for name in SCHEMA_RESOURCES:
-        sql = resource_bytes(name).decode("utf-8")
-        for block in re.finditer(r"CREATE TABLE\s+(\w+)\s*\((.*?)\)\s*STRICT", sql, re.DOTALL):
-            table = block.group(1)
-            body = block.group(2)
-            for match in re.finditer(r"json_valid\(\s*(\w+)\s*\)", body):
-                collected.setdefault(table, set()).add(match.group(1))
-    return {table: frozenset(names) for table, names in collected.items()}
-
-
-def encode_json_value(value: Any) -> str:
-    """事件正文使用公共精确编码器，并保留原事务错误分类。"""
-    from camctl.contracts.json_encoding import encode_exact_json
-    return encode_exact_json(value, error_type=TransactionError)
-
-
-def _body_document(event: EventEnvelope) -> dict[str, Any]:
-    rows = []
-    for row in event.rows:
-        rows.append(
-            {
-                "table": row.table,
-                "id": row.row_id,
-                "before": {"exists": row.before.exists, "values": dict(row.before.values)},
-                "after": {"exists": row.after.exists, "values": dict(row.after.values)},
-            }
-        )
-    return {"reason": event.reason, "evidence": dict(event.evidence), "rows": rows}
 
 
 def _encode_body(event: EventEnvelope) -> str:
@@ -614,15 +538,6 @@ def _copy_rows(
 def _sql_value(table: str, column: str, value: Any) -> Any:
     if value is not None and column in json_columns().get(table, frozenset()):
         return encode_json_value(value)
-    return value
-
-
-def _read_sql_value(table: str, column: str, value: Any) -> Any:
-    if value is not None and column in json_columns().get(table, frozenset()):
-        try:
-            return parse_exact_json(value)
-        except ValueError as error:
-            raise ConsistencyError(f"{table}.{column} 不是有效精确 JSON") from error
     return value
 
 
@@ -778,27 +693,32 @@ def commit_operation(
 
 
 def _commit_operation(command, operation_key, connection) -> WriteReceipt:
-    begun = False
-    committing = False
-    rollback_attempted = False
+    work_started = False
+
+    def work(transaction):
+        nonlocal work_started
+        work_started = True
+        return _execute_business_work(command, operation_key, connection, transaction)
+
+    try:
+        return execute_transaction(connection, work)
+    except (TransactionError, ConsistencyError, EventValidationError, ChangeDerivationError) as error:
+        # BEGIN 之前没有事务可回滚；业务工作内的同类错误已原样收场。
+        if work_started:
+            raise
+        return WriteReceipt(kind="rolled_back", error=error)
+
+
+def _execute_business_work(command, operation_key, connection, atomic_transaction) -> WriteReceipt:
     fact_reads = ExitStack()
 
     def rollback_error(error: BaseException) -> WriteReceipt:
-        nonlocal rollback_attempted
-        if begun:
-            rollback_attempted = True
-        return _rollback_or_unknown(connection, begun, error)
+        return atomic_transaction.rollback_error(error, lambda: discard_operation_facts(connection))
 
     def rollback_control(control: BaseException) -> None:
-        nonlocal rollback_attempted
-        if begun:
-            rollback_attempted = True
-        _rollback_control_or_unknown(connection, control)
+        atomic_transaction.rollback_control(control, lambda: discard_operation_facts(connection))
 
     try:
-        with db_phase(TransactionPhase.BEGIN):
-            connection.execute("BEGIN IMMEDIATE")
-        begun = True
         with db_phase(TransactionPhase.READ_STATE):
             scope = TransactionScope(
                 connection,
@@ -817,7 +737,7 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
             return rollback_error(error)
         if isinstance(plan, BoundedCommandPlan):
             try:
-                return _write_bounded_plan(plan, scope, operation_key)
+                return _write_bounded_plan(plan, scope, operation_key, atomic_transaction)
             except SchemaRuleError:
                 raise
             except Exception as error:
@@ -852,10 +772,7 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
             except Exception as error:
                 return rollback_error(error)
             try:
-                rollback_attempted = True
-                discard_operation_facts(connection)
-                with db_phase(TransactionPhase.ROLLBACK):
-                    connection.execute("ROLLBACK")
+                atomic_transaction.rollback(lambda: discard_operation_facts(connection))
             except Exception as rollback_error:
                 # 该回滚已经尝试过；不重复发送 ROLLBACK，也不把只读
                 # 命令称为已完成。
@@ -1057,10 +974,9 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
         with db_phase(TransactionPhase.FINAL_CHECKS):
             _finish_baseline_read_group(baseline_read_group)
             _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
-        committing = True
+        atomic_transaction.prepare_commit()
         discard_operation_facts(connection)
-        with db_phase(TransactionPhase.COMMIT):
-            connection.execute("COMMIT")
+        atomic_transaction.commit()
         return WriteReceipt(
             kind="completed",
             result=result,
@@ -1077,7 +993,7 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
     except (TransactionError, ConsistencyError, EventValidationError, ChangeDerivationError) as error:
         return rollback_error(error)
     except sqlite3.Error as error:
-        if committing:
+        if atomic_transaction.committing:
             return WriteReceipt(kind="unknown", error=error)
         return rollback_error(error)
     except BaseException as control:
@@ -1086,60 +1002,14 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
         if (write_receipt_for(control) is not None
                 and write_receipt_for(control).kind == 'unknown'):
             raise
-        if committing:
+        if atomic_transaction.committing:
             _attach_control_receipt(control, "unknown")
             raise
-        if begun and not rollback_attempted:
+        if not atomic_transaction.rollback_attempted:
             rollback_control(control)
         raise
     finally:
         fact_reads.close()
-
-
-def _rollback_control_or_unknown(
-    connection: sqlite3.Connection,
-    control: BaseException,
-) -> None:
-    """回滚一次并在原控制对象上附加实际事务结果。"""
-    try:
-        discard_operation_facts(connection)
-        with db_phase(TransactionPhase.ROLLBACK):
-            connection.execute("ROLLBACK")
-    except BaseException as rollback_error:
-        _attach_control_receipt(control, "unknown", (rollback_error,))
-    else:
-        _attach_control_receipt(control, "rolled_back")
-    raise control
-
-
-def _rollback_or_unknown(
-    connection: sqlite3.Connection, begun: bool, error: BaseException
-) -> WriteReceipt:
-    if not begun:
-        return WriteReceipt(kind="rolled_back", error=error)
-    try:
-        discard_operation_facts(connection)
-        with db_phase(TransactionPhase.ROLLBACK):
-            connection.execute("ROLLBACK")
-    except BaseException as rollback_error:
-        if not isinstance(rollback_error, Exception):
-            if isinstance(error, Exception):
-                _attach_control_receipt(rollback_error, "unknown", (error,))
-                raise rollback_error
-            # 原操作控制对象先发生，回滚又交付控制对象时仍保留首个。
-            _attach_control_receipt(error, "unknown", (rollback_error,))
-            raise error
-        if not isinstance(error, Exception):
-            _attach_control_receipt(error, "unknown", (rollback_error,))
-            raise error
-        if rollback_error is error:
-            combined_error = error
-        else:
-            combined_error = ExceptionGroup(
-                "写事务操作及回滚均失败", [error, rollback_error]
-            )
-        return WriteReceipt(kind="unknown", error=combined_error)
-    return WriteReceipt(kind="rolled_back", error=error)
 
 
 # -- 仓储共享的事务构建辅助 -------------------------------------------
@@ -1203,158 +1073,3 @@ def event_envelope(
         evidence=evidence if evidence is not None else {},
         rows=tuple(rows),
     )
-
-
-def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
-    """读取完整行事实，按权威 SQL 的 JSON 列分类恢复精确结构化值。"""
-    from camctl.persistence.fact_reads import _reuse_current_row
-    return _reuse_current_row(connection, table, row_id,
-                              lambda: _load_row_facts(connection, table, row_id))
-
-
-def _load_row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
-    with closing(connection.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))) as cursor:
-        found = cursor.fetchone()
-        if found is None:
-            return None
-        description = cursor.description
-    return {
-        column[0]: _read_sql_value(table, column[0], value)
-        for column, value in zip(description, found)
-    }
-
-
-def next_row_id(connection: sqlite3.Connection, table: str) -> int:
-    """按已提交最大 ID 分配下一行编号。"""
-    with closing(connection.execute(f"SELECT MAX(id) FROM {table}")) as cursor:
-        row = cursor.fetchone()
-    return (int(row[0]) if row[0] is not None else 0) + 1
-
-
-def read_transaction_range(
-    connection: sqlite3.Connection, transaction_id: int,
-    validated: TransactionRange | None = None,
-) -> TransactionRange:
-    """核实完整事务范围、前一边界及成员；复用范围只限已核验的不可变历史。"""
-    if validated is not None and operation_fact_boundary(connection) is None:
-        return _load_transaction_range(connection, transaction_id, validated)
-    actual = read_transaction(connection, transaction_id)
-    if validated is not None and actual != validated:
-        raise ConsistencyError(f"已核验历史事务 {transaction_id} 的范围发生变化")
-    return actual
-
-
-def _load_transaction_range(
-    connection: sqlite3.Connection, transaction_id: int,
-    validated: TransactionRange | None,
-) -> TransactionRange:
-    with closing(connection.execute(
-        "SELECT id, first_event_id, last_event_id FROM history_transactions WHERE id = ?",
-        (transaction_id,),
-    )) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        raise ConsistencyError(f"历史事务 {transaction_id} 不存在")
-    try:
-        transaction = TransactionRange(*row)
-    except BoundaryError as error:
-        raise ConsistencyError(f"历史事务 {transaction_id} 的范围无效") from error
-    if transaction.txn_id != transaction_id:
-        raise ConsistencyError(f"历史事务 {transaction_id} 的身份不一致")
-    if transaction_id > 1:
-        with closing(connection.execute(
-            "SELECT last_event_id FROM history_transactions WHERE id = ?", (transaction_id - 1,),
-        )) as cursor:
-            previous = cursor.fetchone()
-    else:
-        previous = (0,)
-    if previous is None or previous[0] + 1 != transaction.first_event_id:
-        raise ConsistencyError(f"历史事务 {transaction_id} 与前一完整边界不连续")
-    if validated is not None:
-        if transaction != validated:
-            raise ConsistencyError(f"已核验历史事务 {transaction_id} 的范围发生变化")
-        return transaction
-    with closing(connection.execute(
-        "SELECT COUNT(*), MIN(id), MAX(id) FROM history_events WHERE transaction_id = ?",
-        (transaction_id,),
-    )) as cursor:
-        count, first, last = cursor.fetchone()
-    if (count != transaction.last_event_id - transaction.first_event_id + 1
-            or first != transaction.first_event_id or last != transaction.last_event_id):
-        raise ConsistencyError(f"历史事务 {transaction_id} 的成员与首尾范围不一致")
-    return transaction
-
-
-class SavedEvent(TypedDict):
-    """已存事件的身份、完整事务范围和精确正文，供原操作键核实使用。"""
-
-    event_id: int
-    occurred_at: int
-    transaction: TransactionRange
-    type: int
-    reason: int
-    body: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class SavedTransactionCursor:
-    instance_id: str
-    operation_key: str
-    transaction: TransactionRange
-    after_event_id: int
-
-
-def read_saved_transaction_page(connection, operation_key, transaction, cursor=None, limit=128):
-    """按固定原组分页精确解码；缺行、错组及查询失败均拒绝。"""
-    from camctl.contracts.pages import Page
-    if type(limit) is not int or not 1 <= limit <= 128:
-        raise ValueError("原组读取批次必须为1—128")
-    row = connection.execute("SELECT instance_id FROM database_metadata").fetchone()
-    instance = row[0]
-    found = connection.execute("SELECT id FROM history_transactions WHERE operation_key=?",(str(operation_key),)).fetchone()
-    if found is None or found[0] != transaction.txn_id:
-        raise ConsistencyError("原操作键与固定事务范围不同")
-    if cursor is None:
-        if read_transaction_range(connection,transaction.txn_id) != transaction:
-            raise ConsistencyError("原组完整范围与请求不同")
-        after = transaction.first_event_id-1
-    else:
-        if (not isinstance(cursor,SavedTransactionCursor) or cursor.instance_id != instance
-                or cursor.operation_key != str(operation_key) or cursor.transaction != transaction
-                or not transaction.first_event_id <= cursor.after_event_id < transaction.last_event_id):
-            raise ConsistencyError("原组游标不属于固定实例、操作键和完整范围")
-        after = cursor.after_event_id
-    size = min(limit,transaction.last_event_id-after)
-    from itertools import islice
-    events = tuple(record.event for record in islice(iter_transaction_events(
-        connection, transaction, after_event_id=after, batch_size=size), size))
-    following = after+size
-    return Page(events,None if following==transaction.last_event_id else
-        SavedTransactionCursor(instance,str(operation_key),transaction,following))
-
-
-def saved_transaction_events(
-    connection: sqlite3.Connection, operation_key: OperationKey
-) -> list[SavedEvent] | None:
-    """在调用方的同一事务内读取原键的完整、可解释事件事实。
-
-    仅缺键返回 None；已存事务的范围、成员或正文无效时整项失败，
-    不交付前缀，也不执行业务决定。取得的游标在所有出口释放。
-    """
-    with closing(connection.execute(
-        "SELECT id FROM history_transactions WHERE operation_key = ?",
-        (str(operation_key),),
-    )) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        return None
-    transaction = read_transaction_range(connection, row[0])
-    events: list[SavedEvent] = []
-    for record in iter_transaction_events(connection, transaction):
-        event = record.event
-        events.append(SavedEvent(
-            event_id=event.event_id, occurred_at=event.occurred_at,
-            transaction=transaction, type=event.event_type,
-            reason=event.reason, body=_body_document(event),
-        ))
-    return events

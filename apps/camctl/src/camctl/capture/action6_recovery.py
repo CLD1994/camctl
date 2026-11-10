@@ -247,7 +247,7 @@ async def advance_action6_recovery(runtime, action, decision=None):
     from camctl.outputs.qualification import OperationConfig
     from camctl.persistence.repositories.segments import SegmentRepository
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     from camctl.host_files.media import select_main_video_stream
 
     action_id = action["id"]

@@ -277,7 +277,7 @@ def require_repair_media_proof(connection, action_id: int, processing_id: int, o
     from camctl.contracts.json_values import parse_exact_json
     from camctl.host_files.models import FilePurpose
     from camctl.host_files.paths import validate_relative_file_path
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     def require(condition, message):
         if not condition:
             raise ConsistencyError(message)

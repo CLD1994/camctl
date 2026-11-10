@@ -14,7 +14,7 @@ from camctl.history.validators import ValidatedEvent
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_output_binding_changes import _NOW, environment  # noqa: F401
 from ..session.test_session import FixedClock

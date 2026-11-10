@@ -24,7 +24,7 @@ from camctl.host_files.tasks import FileTaskResult
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .media_retry_fixtures import _EVIDENCE, media_pipeline, original_recording_entry  # noqa: F401

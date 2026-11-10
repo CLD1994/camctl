@@ -214,7 +214,7 @@ def _watch_acceptance_error(monkeypatch) -> list[AcceptanceStateError]:
 
 
 def _receipt_for_control(control: BaseException, expected_kind: str):
-    from camctl.persistence import transaction as transaction_module
+    from camctl.persistence.repositories import transactions as transaction_module
 
     receipt_reader = getattr(transaction_module, "write_receipt_for", None)
     assert callable(receipt_reader)

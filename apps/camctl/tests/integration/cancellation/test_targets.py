@@ -295,7 +295,7 @@ class TestCancelTargetsGuard:
 
     @staticmethod
     def _state(owned):
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
 
         tables = ("actions", "plans", "cancel_items", "auto_preview_links")
         return {
@@ -307,7 +307,7 @@ class TestCancelTargetsGuard:
     def _cancel_event(self, owned, members, *, action_facts=None):
         from dataclasses import replace
 
-        from camctl.persistence.transaction import (
+        from camctl.persistence.repositories.transactions import (
             event_envelope, row_change, update_change)
 
         rows = (update_change("actions", 50,
@@ -385,7 +385,7 @@ class TestCancelTargetsGuard:
         from dataclasses import replace
 
         from camctl.history.validators import EventValidationError
-        from camctl.persistence.transaction import (
+        from camctl.persistence.repositories.transactions import (
             event_envelope, row_change, update_change)
 
         import pytest as _pytest

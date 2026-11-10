@@ -23,7 +23,7 @@ from camctl.operations.models import (
     AttemptStatus, CallInfo, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
 )
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_capture_contract import _NOW
 from .test_recording_start_runtime import (

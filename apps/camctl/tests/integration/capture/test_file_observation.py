@@ -31,7 +31,7 @@ from camctl.persistence.repositories.capture import (
 )
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     RowChange,
     RowImage,
     event_envelope,
@@ -550,7 +550,7 @@ _DEVICE_FILE_EVENT = 17
 
 
 def _guard_context(owned, rows, reason: int):
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     event = event_envelope(2, 2, _DEVICE_FILE_EVENT, reason, rows, _NOW)
     state = {"actions": {11: row_facts(owned.connection, "actions", 11)}}
     return event, state

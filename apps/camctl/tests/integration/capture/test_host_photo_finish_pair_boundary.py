@@ -13,7 +13,7 @@ from camctl.persistence.repositories.capture import (
     CaptureRepository,
     FinishCanceledCapture,
 )
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_host_photo_storage import _complete, _drafts, _photo_environment, _prepare
 from .test_recording_finish import _NOW, _finish

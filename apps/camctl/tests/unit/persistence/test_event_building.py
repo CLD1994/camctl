@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from camctl.persistence.transaction import TransactionError, update_change
+from camctl.persistence.repositories.transactions import TransactionError, update_change
 
 
 def test_update_builder_retains_only_changed_fields():

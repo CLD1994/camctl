@@ -13,7 +13,7 @@ from camctl.operations.models import ErrorValue
 from camctl.outputs.catalog import OutputCatalogFacts
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..support.close_cases import CloseFault, start_case, start_query_storage_case
 

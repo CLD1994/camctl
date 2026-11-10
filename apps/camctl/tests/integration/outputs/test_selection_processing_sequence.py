@@ -19,7 +19,7 @@ from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.transaction import commit_operation, event_envelope, update_change
+from camctl.persistence.repositories.transactions import commit_operation, event_envelope, update_change
 
 from .test_output_family import family_database  # noqa: F401  产物目录夹具
 from .test_selection_event_sequence import _Sequence

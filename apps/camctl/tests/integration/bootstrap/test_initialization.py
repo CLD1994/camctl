@@ -414,7 +414,7 @@ class TestExistingDatabase:
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
         try:
-            from camctl.persistence.transaction import commit_operation
+            from camctl.persistence.repositories.transactions import commit_operation
 
             receipt = commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned)
             assert receipt.kind == "completed"
@@ -440,7 +440,7 @@ class TestExistingDatabase:
         _create_legacy_v1_database(target, format_version=1, directories=directories)
         owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
         try:
-            from camctl.persistence.transaction import commit_operation
+            from camctl.persistence.repositories.transactions import commit_operation
 
             receipt = commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned)
             assert receipt.kind == "completed"

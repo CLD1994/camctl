@@ -62,7 +62,7 @@ from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.scheduling.resources import (baseline_start_reason, capture_scope_blocked,
     device_read_in_flight, device_start_in_flight)
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     TransactionError,
     commit_operation,

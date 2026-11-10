@@ -8,7 +8,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.history.events import load_event_registry
-from camctl.persistence.transaction import (CommandPlan, commit_operation, event_envelope,
+from camctl.persistence.repositories.transactions import (CommandPlan, commit_operation, event_envelope,
     row_facts, saved_transaction_events, update_change)
 
 

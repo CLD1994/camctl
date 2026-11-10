@@ -10,7 +10,7 @@ from camctl.history.validators import EventValidationError
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_selection_derived_sequence import _scenario, _file, _output
 from .test_selection_guard import selection_database, family_database

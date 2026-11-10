@@ -7,7 +7,7 @@ import pytest
 from camctl.contracts.history_values import HistoryBoundary, ReadOrder, ReadScope, TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import commit_operation, saved_transaction_events
+from camctl.persistence.repositories.transactions import commit_operation, saved_transaction_events
 
 from .test_runtime import _create_valid_database
 from .test_transactions import PlanCreateCommand, _open, plan_guards  # noqa: F401

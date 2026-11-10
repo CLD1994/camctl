@@ -23,7 +23,7 @@ from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import load_activity_of_action
 from camctl.persistence.runtime import OwnedConnection
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     TransactionError,
     commit_operation,

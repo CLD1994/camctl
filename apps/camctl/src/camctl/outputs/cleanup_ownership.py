@@ -36,7 +36,7 @@ def verify_cleanup_transaction(owned, key):
     connection = owned.connection
     if connection.in_transaction:
         raise ConsistencyError("原清理申请仍有未决事务，须先恢复可靠连接")
-    from camctl.persistence.transaction import saved_transaction_events
+    from camctl.persistence.repositories.transactions import saved_transaction_events
     connection.execute("BEGIN IMMEDIATE")
     try:
         return saved_transaction_events(connection, key)

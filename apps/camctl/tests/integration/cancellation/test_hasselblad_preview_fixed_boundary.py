@@ -44,7 +44,7 @@ async def test_direct_fixed_repository_rejects_ineligible_link_source(tmp_path,m
 @pytest.mark.parametrize('coverage',[True,False])
 async def test_bare_fixed_event_rejects_ineligible_or_missing_source_facts(tmp_path,monkeypatch,state,coverage):
     from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.transaction import row_facts,event_envelope,row_change,update_change
+    from camctl.persistence.repositories.transactions import row_facts,event_envelope,row_change,update_change
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext,EventValidationError
     from camctl.history.reads import ReadCoverage
@@ -193,7 +193,7 @@ async def test_mixed_composite_sources_keep_each_previews_own_source(tmp_path,mo
 
 def bare_context(owned,runtime):
     from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.transaction import row_facts,event_envelope,row_change,update_change
+    from camctl.persistence.repositories.transactions import row_facts,event_envelope,row_change,update_change
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext
     from camctl.history.reads import ReadCoverage
@@ -297,7 +297,7 @@ async def test_action_direct_preview_remains_independent(tmp_path,monkeypatch):
 @pytest.mark.parametrize('actual_transaction',[False,True])
 async def test_no_intent_header_alone_cannot_replace_atomic_source_apply(tmp_path,monkeypatch,actual_transaction):
     from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from camctl.history.reads import PlanReadScope
     from camctl.history.validators import EventValidationError
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'ready',monkeypatch)
@@ -351,7 +351,7 @@ async def test_independent_guard_does_not_classify_partial_source_as_another_dri
     'outside','before_fixed','duplicate','split','wrong_time','wrong_mode'])
 async def test_no_intent_guard_borrows_exact_same_transaction_source_apply(tmp_path,monkeypatch,fault):
     from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.transaction import event_envelope,update_change
+    from camctl.persistence.repositories.transactions import event_envelope,update_change
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.history.reads import PlanReadScope
     from camctl.contracts.history_values import TransactionRange
@@ -397,7 +397,7 @@ async def test_no_intent_guard_borrows_exact_same_transaction_source_apply(tmp_p
 @pytest.mark.parametrize('change',['sparse_other_plan','explicit_other_plan','new_in','move_out','delete','missing_owner','invalid_owner'])
 async def test_plan_iteration_merges_only_verified_current_members(tmp_path,monkeypatch,change):
     from types import SimpleNamespace
-    from camctl.persistence.transaction import event_envelope,update_change,row_change
+    from camctl.persistence.repositories.transactions import event_envelope,update_change,row_change
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.history.reads import PlanReadScope
     from camctl.contracts.values import ConsistencyError

@@ -73,7 +73,7 @@ def world(monkeypatch):
         except ValueError as error:
             return SimpleNamespace(kind="rolled_back", error=error)
 
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     for name, value in {"CommandPlan": plan, "commit_operation": commit,
         "event_envelope": lambda event_id, txn_id, event_type, reason, rows, at: SimpleNamespace(
             event_id=event_id, transaction_id=txn_id, event_type=event_type, reason=reason, rows=rows, occurred_at=at),

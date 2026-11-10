@@ -37,7 +37,7 @@ def assembly_module(monkeypatch):
         def __init__(self, action_id, identity, now, lead, occurred, trigger_copy_id=None, **kwargs):
             self.action_id, self.identity, self.trigger_copy_id = action_id, identity, trigger_copy_id
     stub("camctl.persistence.repositories.availability_create", CreateAvailabilityCheck=Request)
-    stub("camctl.persistence.transaction", row_facts=lambda connection, table, ident: {"identity_key": "key", "locator_json": {}})
+    stub("camctl.persistence.repositories.transactions", row_facts=lambda connection, table, ident: {"identity_key": "key", "locator_json": {}})
     wait = stub("camctl.persistence.repositories.availability_wait_finish")
     source = find_spec("camctl.bootstrap.availability_assembly")
     spec = spec_from_file_location("camctl.bootstrap._isolated_availability_assembly", source.origin)
@@ -73,7 +73,7 @@ def test_missing_current_identity_still_discovers_prior_failed_photo_check(assem
     async def pages(database, request):
         yield (9, 7, None)
     availability._binding_check_pages = pages
-    transaction = sys.modules["camctl.persistence.transaction"]
+    transaction = sys.modules["camctl.persistence.repositories.transactions"]
     transaction.row_facts = lambda connection, table, ident: {"expected_identity_json": {"serial": "old", "product_id": 10}}
     monkeypatch.setattr(module, "row_facts", transaction.row_facts)
     preparation = ModuleType("camctl.capture.preparation")

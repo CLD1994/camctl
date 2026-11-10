@@ -9,7 +9,7 @@ from camctl.outputs.cleanup_results import (
     _read_exact_cleanup_attempt,
     saved_query_presence,
 )
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     TransactionError,
     row_facts,

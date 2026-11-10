@@ -10,7 +10,7 @@ from camctl.persistence.repositories.segment_inspections import (
     read_inspection_for_member,
 )
 from camctl.persistence.repositories.segments import SegmentRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_action6_segmented_normal import _entry
 from .test_input_copy import _CONTENT

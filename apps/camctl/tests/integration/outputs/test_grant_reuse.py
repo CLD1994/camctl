@@ -16,7 +16,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 from .test_read_associations import read_targets, _command
 from .test_local_read import local_read

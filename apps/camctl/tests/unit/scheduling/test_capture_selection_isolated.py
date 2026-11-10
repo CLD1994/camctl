@@ -141,7 +141,7 @@ def test_selection_skips_candidates_without_resource_qualification(selection, mo
             raise target.AvailabilityTargetBlocked("读取仍占用设备")
         raise target.AvailabilityTargetNotRequired()
     create._qualify = qualify
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda *_: pytest.fail("无需读取已存在的检查")
     with patch.dict(sys.modules, {target.__name__: target, create.__name__: create,
                                  transaction.__name__: transaction}):
@@ -163,7 +163,7 @@ def test_selection_does_not_hide_database_failure(selection, monkeypatch):
     def fail(*args, **kwargs):
         raise OSError("database unavailable")
     create._qualify = fail
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda *_: None
     with patch.dict(sys.modules, {target.__name__: target, create.__name__: create,
                                  transaction.__name__: transaction}):

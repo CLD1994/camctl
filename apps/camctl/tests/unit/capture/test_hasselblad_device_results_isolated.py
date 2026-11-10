@@ -57,7 +57,7 @@ def api(monkeypatch):
         "camctl.persistence.repositories.capture": {"FinishCapture": object},
         "camctl.persistence.repositories.host_capture": {"HostPhotoComplete": object, "PrepareHostPhoto": object},
         "camctl.persistence.repositories.scheduling": {"ExpireActionRequest": object},
-        "camctl.persistence.transaction": {"row_facts": lambda *args: None},
+        "camctl.persistence.repositories.transactions": {"row_facts": lambda *args: None},
         "camctl.outputs.catalog": {"FileReference": object, "OutputCatalogFacts": object,
             "OutputDraft": object, "OutputKind": object},
     }

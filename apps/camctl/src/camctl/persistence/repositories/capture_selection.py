@@ -117,7 +117,7 @@ def selected_pending_capture(connection, request, boundary, *, exclude_attempt_i
     from .file_batch_reads import FileBatchReads
     if FileBatchReads(connection).holder(request.device_id) is not None:
         return None
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     from .availability_create import CreateAvailabilityCheck, _qualify
     from .availability_target import (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch,
                                       AvailabilityTargetNotRequired, AvailabilityTargetReuse)

@@ -21,7 +21,7 @@ from camctl.persistence.recovery import (
     resolve_commit,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from ..persistence.test_runtime import _create_valid_database
 from .test_transactions import PlanCreateCommand, plan_guards

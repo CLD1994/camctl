@@ -12,7 +12,7 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
 from camctl.operations.owned_calls import owned_tool_call, check_call_interruption
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.scheduling.rules import WindowPhase, window_phase
 
 

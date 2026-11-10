@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.derived_storage import configure_derived_connection
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 
 class FailureDeliveryIndex:

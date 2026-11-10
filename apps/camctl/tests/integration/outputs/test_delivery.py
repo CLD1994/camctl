@@ -35,7 +35,7 @@ from camctl.outputs.handoff import (
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_copy_segments import _CONTENT
 from .test_qualification import _NOW

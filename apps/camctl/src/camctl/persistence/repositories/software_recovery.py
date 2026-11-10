@@ -10,7 +10,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.contracts.enums import enum_for
 from camctl.history.events import reason_for_branch
 from camctl.history.validators import EventValidationError, register_guard
-from camctl.persistence.transaction import (CommandPlan, commit_operation, event_envelope,
+from camctl.persistence.repositories.transactions import (CommandPlan, commit_operation, event_envelope,
     next_row_id, row_change, row_facts, saved_transaction_events, update_change)
 
 

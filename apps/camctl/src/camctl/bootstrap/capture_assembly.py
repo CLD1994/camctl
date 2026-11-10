@@ -76,7 +76,7 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing, OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.logging_runtime.performance import measure_performance, record_performance
 from camctl.scheduling.rules import LaunchWindow
 from camctl.session.supervision import OwnedTask, Supervisor

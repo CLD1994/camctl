@@ -155,7 +155,7 @@ class RetryReadFactsTests(unittest.TestCase):
         basis = SimpleNamespace(ASSUMED=object())
         models = ModuleType("camctl.operations.models")
         models.AttemptStatus, models.EffectState, models.SettlementBasis = status, effect, basis
-        transaction = ModuleType("camctl.persistence.transaction")
+        transaction = ModuleType("camctl.persistence.repositories.transactions")
         transaction.row_facts = lambda connection, table, identity: {
             "status": 4, "effect_state": 4, "result_json": {}, "error_json": {}}
         result = ModuleType("camctl.operations.result_format")

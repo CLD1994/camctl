@@ -109,7 +109,7 @@ async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,p
     from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories import cancellation as module
     from camctl.persistence.repositories.scheduling import SchedulingRepository,ObserveWindowRequest,StartActionRequest
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     from camctl.cancellation.models import ApplyCancelTarget,CancelApplyMode
     from .test_residual_start_facts import residual
     from ..scheduling.test_resources import _seed_plan,_seed_record_action,_seed_activity

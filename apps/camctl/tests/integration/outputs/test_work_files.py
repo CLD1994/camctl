@@ -45,7 +45,7 @@ from camctl.outputs.work_files import (
     clean_work_files,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.repositories.outputs import OutputsRepository

@@ -9,7 +9,7 @@ from camctl.capture.segment_storage import (
 )
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories import segment_check_conclusions as storage
-from camctl.persistence import transaction
+from camctl.persistence.repositories import transactions as transaction
 from camctl.history import decoding
 from camctl.history.events import business_columns
 

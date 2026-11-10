@@ -42,7 +42,7 @@ def api(monkeypatch):
     records, states = {}, {}
     facts.read_event = lambda connection, event_id: records[event_id]
     facts.iter_transaction_events = lambda connection, transaction: transaction.events
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, identity: states.get((table, identity))
     reuse = ModuleType("camctl.outputs.segment_copy_reuse")
     seen = []

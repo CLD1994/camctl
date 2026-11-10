@@ -17,7 +17,7 @@ def guard():
         "camctl.contracts.values", "camctl.history.events", "camctl.history.validators",
         "camctl.history.reads", "camctl.operations.attempts", "camctl.operations.models",
         "camctl.operations.result_format", "camctl.persistence.models", "camctl.persistence.runtime",
-        "camctl.persistence.row_history", "camctl.scheduling.resources", "camctl.persistence.transaction",
+        "camctl.persistence.row_history", "camctl.scheduling.resources", "camctl.persistence.repositories.transactions",
     )
     modules = {}
     for name in names:

@@ -9,7 +9,7 @@ async def saved_source_binding(runtime, source_id, action_id, device_id, driver_
     from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
     if driver_id != DRIVER_ID:
         return None
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     from camctl.persistence.repositories.physical_alias import source_physical_identity
     from camctl.persistence.repositories.availability_wait_finish import saved_binding_check_failure
     def read(owned):
@@ -50,7 +50,7 @@ async def source_physical_binding(runtime, source_id, device_id, driver_id):
     from camctl.persistence.repositories.physical_alias import (source_physical_identity,
         physical_alias_conflict, verify_source_identity_mismatch)
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     config = read_camera_config(assembly.driver.devices[device_id])
     def read_alias(owned):
         source = row_facts(owned.connection, "device_files", source_id)

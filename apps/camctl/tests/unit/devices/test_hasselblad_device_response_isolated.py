@@ -826,7 +826,7 @@ def photo_page_guard_api(photo_driver_api, page_api, monkeypatch):
     actions = {"id": 1, "device_id": "camera", "driver_id": "hasselblad_cfv100c",
         "execution_spec_json": {"output_storage": "device"}, "effective_params_json": {"capture_format": "raw"}}
     attempts = {"id": 5, "intent_event_id": 20}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, identity: {"actions": actions, "operation_attempts": attempts}.get(table)
     transaction.event_envelope = transaction.update_change = lambda *args, **kwargs: None
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)

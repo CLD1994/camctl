@@ -11,7 +11,7 @@ from camctl.capture.files import FileCompletionSave, OwnershipFromResultPageSave
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 from camctl.persistence.repositories import capture as capture_storage
 from .transaction_fixtures import capture_operation_command
 
@@ -434,7 +434,7 @@ async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tm
         if bounded:
             from camctl.history.validators import EventContext
             from camctl.persistence.event_reads import SqlEventReads
-            from camctl.persistence.transaction import BoundedCommandPlan
+            from camctl.persistence.repositories.transactions import BoundedCommandPlan
             from camctl.persistence.repositories import segments as segment_storage
             class BoundedMembers:
                 def plan(self, scope):
@@ -599,7 +599,7 @@ async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.persistence.repositories.segments import SegmentRepository
-    from camctl.persistence.transaction import BoundedCommandPlan
+    from camctl.persistence.repositories.transactions import BoundedCommandPlan
     owned, runtime, saved, ids, _ = await _ready(tmp_path, [_entry('raw.LRF'), _entry('raw.OSV')])
     try:
         preview = ids['/DCIM/raw.LRF']

@@ -12,7 +12,7 @@ from camctl.contracts import enums
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
 from camctl.reporting.ack import AckReport
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 from camctl.history.events import load_event_registry
 
 

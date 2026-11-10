@@ -54,7 +54,7 @@ async def test_bounded_finish_is_atomic_and_reuses_original_receipt(tmp_path):
 
 from camctl.persistence.repositories import segment_transactions as transactions
 from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 from camctl.capture.segment_models import *
 from .test_segment_storage import _world,_assessment,_ok
 
@@ -162,7 +162,7 @@ async def test_late_batch_or_final_guard_failure_rolls_back_entire_group(tmp_pat
 @pytest.mark.asyncio
 @pytest.mark.parametrize('cut',['event','commit_before','commit_after'])
 async def test_control_exit_is_verified_only_after_original_connection_closes(tmp_path,monkeypatch,cut):
-    from camctl.persistence.transaction import write_receipt_for
+    from camctl.persistence.repositories.transactions import write_receipt_for
     class ControlledExit(BaseException):pass
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     path=owned.connection.execute('PRAGMA database_list').fetchone()[2]
@@ -206,7 +206,7 @@ async def test_commit_receipt_unknown_is_verified_by_original_range_without_allo
         before=_fingerprint(owned.connection)
         def forbidden(*args,**kwargs):raise AssertionError('核实禁止重新分配或全量读原事件')
         monkeypatch.setattr(transactions,'next_row_id',forbidden)
-        import camctl.persistence.transaction as kernel
+        import camctl.persistence.repositories.transactions as kernel
         monkeypatch.setattr(kernel,'saved_transaction_events',forbidden)
         result=transactions.verify_segment_finish(request,key,owned,execution_finished=True,batch_size=2)
         again=transactions.finish_segment_recording(request,key,owned)
@@ -260,7 +260,7 @@ async def test_saved_range_page_error_does_not_return_success_prefix(tmp_path):
 async def test_independent_cross_batch_guards_reject_tampered_proposal(tmp_path,mode,monkeypatch):
     count=21 if mode=='wrong_file' else 6
     owned,runtime,repo,ref,request=await _ready_world(tmp_path,count=count,sizes=(10,)*(count-1)+(0,))
-    from camctl.persistence.transaction import row_change,update_change
+    from camctl.persistence.repositories.transactions import row_change,update_change
     segment_event_type=load_event_registry()['events']['SEGMENT_FACTS']
     def plan(command,scope):
         result=command.plan(scope)
@@ -301,7 +301,7 @@ async def test_independent_cross_batch_guards_reject_tampered_proposal(tmp_path,
 @pytest.mark.parametrize('bad_origin',[False,True])
 async def test_cross_page_preview_keeps_exact_original_and_origin(tmp_path,bad_origin,monkeypatch):
     from .test_segment_storage import _preview_world
-    from camctl.persistence.transaction import row_change
+    from camctl.persistence.repositories.transactions import row_change
     owned,runtime,repo,ref,members,files,assessment=await _preview_world(tmp_path,original_sizes=(10,)*5,paired_index=1,page_size=1)
     _finish_attempt(owned,ref,runtime)
     row=repo.read_set(ref,owned);request=transactions.FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us())
@@ -365,7 +365,7 @@ async def test_original_receipt_rechecks_complete_frozen_gap_relations(tmp_path)
 @pytest.mark.asyncio
 async def test_original_receipt_does_not_change_after_output_or_file_observation(tmp_path):
     from camctl.capture.files import FileChecksumSave
-    from camctl.persistence.transaction import row_facts,update_change,event_envelope,CommandPlan
+    from camctl.persistence.repositories.transactions import row_facts,update_change,event_envelope,CommandPlan
     from camctl.history.reads import ProductReadScope
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     try:
@@ -389,7 +389,7 @@ async def test_same_key_changed_immutable_reference_is_rejected(tmp_path,field):
 
 @pytest.mark.asyncio
 async def test_reliable_absence_and_bound_cursor_errors_are_distinct(tmp_path):
-    from camctl.persistence.transaction import read_saved_transaction_page
+    from camctl.persistence.repositories.transactions import read_saved_transaction_page
     from camctl.contracts.history_values import TransactionRange
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     try:
@@ -572,7 +572,7 @@ async def test_fixed_batch_reads_and_output_identity_lookup_keep_their_bounds(tm
 @pytest.mark.asyncio
 @pytest.mark.parametrize('omit_progress',[False,'missing_reads','unreliable_reads'])
 async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_path,monkeypatch,omit_progress):
-    from camctl.persistence.transaction import update_change,event_envelope
+    from camctl.persistence.repositories.transactions import update_change,event_envelope
     from camctl.persistence.repositories.outputs import register_outputs_guards
     register_outputs_guards()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
@@ -607,7 +607,7 @@ async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_pat
 @pytest.mark.asyncio
 @pytest.mark.parametrize('omit_header',[False,True])
 async def test_direct_terminal_request_cannot_omit_its_complete_group(tmp_path,monkeypatch,omit_header):
-    from camctl.persistence.transaction import TransactionScope,CommandPlan
+    from camctl.persistence.repositories.transactions import TransactionScope,CommandPlan
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.reads import PlanReadScope
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
@@ -697,7 +697,7 @@ async def test_segmented_prestart_failure_keeps_original_finite_contract(tmp_pat
 @pytest.mark.asyncio
 @pytest.mark.parametrize('closure',['run','plan'])
 async def test_final_activation_independently_requires_applicable_closure(tmp_path,monkeypatch,closure):
-    from camctl.persistence.transaction import update_change,event_envelope
+    from camctl.persistence.repositories.transactions import update_change,event_envelope
     from camctl.persistence.repositories.outputs import register_outputs_guards
     register_outputs_guards()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
@@ -904,7 +904,7 @@ async def test_record_stop_saves_exact_elapsed_with_original_group_and_reuses_ke
 
 @pytest.mark.asyncio
 async def test_direct_elapsed_update_cannot_supplement_an_already_saved_stop(tmp_path):
-    from camctl.persistence.transaction import CommandPlan,update_change,event_envelope,row_facts
+    from camctl.persistence.repositories.transactions import CommandPlan,update_change,event_envelope,row_facts
     from camctl.history.reads import PlanReadScope
     owned,runtime,action_id,finish=await _pending_stop_world(tmp_path)
     try:
@@ -943,7 +943,7 @@ async def test_later_stronger_control_fact_does_not_upgrade_frozen_unknown(tmp_p
 async def test_original_control_proof_rejects_changed_stop_reference_after_assessment_was_saved(tmp_path):
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     proof=transactions.verify_completion_proof(request,owned)
     raw=owned.connection.execute('SELECT body_json FROM history_events WHERE id=?',(proof.control_event_id,)).fetchone()[0]
     body=parse_exact_json(raw)
@@ -1076,7 +1076,7 @@ def _complete_persisted_state(owned):
 @pytest.mark.parametrize('mode',['valid','name','time','id','batch','direct'])
 async def test_accepted_completion_matches_original_full_request(tmp_path,monkeypatch,mode):
     from .test_segment_storage import _completion_command
-    from camctl.persistence.transaction import row_change
+    from camctl.persistence.repositories.transactions import row_change
     if mode=='direct':
         owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
         row=repo.read_set(ref,owned)
@@ -1137,7 +1137,7 @@ async def test_accepted_completion_matches_original_full_request(tmp_path,monkey
     ('run','time'),('run','before'),('plan','clock'),('L','time')])
 async def test_every_actual_stage_must_match_frozen_protocol(tmp_path,monkeypatch,entry,stage,field):
     from .test_segment_storage import _preview_world,_candidate_drafts,_completion_command
-    from camctl.persistence.transaction import row_change
+    from camctl.persistence.repositories.transactions import row_change
     owned,runtime,repo,ref,members,_,_=await _preview_world(tmp_path,original_sizes=(10,)*3,paired_index=1,page_size=1)
     _finish_attempt(owned,ref,runtime)
     row=repo.read_set(ref,owned)

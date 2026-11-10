@@ -16,7 +16,7 @@ from camctl.persistence.repositories import segment_transactions as transactions
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..persistence.transaction_fixtures import decorate_transaction_command
-from camctl.persistence.transaction import BoundedCommandPlan
+from camctl.persistence.repositories.transactions import BoundedCommandPlan
 
 from ..persistence.test_segment_storage import _ok, _preview_world, _world
 from ..persistence.test_segment_transaction_batches import _ready_world, _request_for, _finish_attempt, ConnectionProbe
@@ -113,7 +113,7 @@ def _identity_totals(connection):
 
 def _assert_original_receipt(owned, request, key, result, monkeypatch):
     """原键核实及重送必须只读，不分配、不读完整组事件。"""
-    import camctl.persistence.transaction as kernel
+    import camctl.persistence.repositories.transactions as kernel
     before = _identity_totals(owned.connection)
     def forbidden(*args, **kwargs):
         raise AssertionError('原完成核实不得分配或整组读取')
@@ -204,7 +204,7 @@ async def test_bounded_completion_keeps_original_h_after_checksum_and_cleanup(tm
                                            else enum_for('actions.status').FAILED)
         assert not hasattr(result, 'output_ids')
         transaction = transactions.read_transaction_range(owned.connection, boundary.txn_id)
-        from camctl.persistence.transaction import read_saved_transaction_page
+        from camctl.persistence.repositories.transactions import read_saved_transaction_page
         first_page = read_saved_transaction_page(owned.connection, key, transaction, limit=BATCH)
         assert len(first_page.items) == BATCH and first_page.next_cursor is not None
         assert first_page.items[0].occurred_at == request.occurred_at

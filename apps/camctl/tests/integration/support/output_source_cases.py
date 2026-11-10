@@ -117,7 +117,7 @@ class SourceSequence:
         from camctl.history.reads import SourceResolutionReadScope,ObtainInitializationReadScope,ReadCoverage
         from camctl.history.validators import EventContext
         from camctl.persistence.event_reads import SqlEventReads
-        from camctl.persistence.transaction import CommandPlan,BoundedCommandPlan,row_facts
+        from camctl.persistence.repositories.transactions import CommandPlan,BoundedCommandPlan,row_facts
         allocation=scope.allocate(len(self.events))
         events=tuple(replace(event,event_id=allocation.first_event_id+index,
             transaction_id=allocation.txn_id,change_seq=None) for index,event in enumerate(self.events))
@@ -158,7 +158,7 @@ def commit_source(owned,request,*,start=False,batch_size=1,finite=False,mutation
     """实际规范事件可独立变造，规划代码始终来自测试拥有的公开事件输入。"""
     from dataclasses import replace
     from camctl.persistence.models import DbOutcome,DbOutcomeKind
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from camctl.persistence.event_reads import SqlEventReads
     proposal,key,result=captured_source(owned,request,start=start,batch_size=batch_size)
     events=list(proposal.events)
@@ -193,7 +193,7 @@ def commit_source(owned,request,*,start=False,batch_size=1,finite=False,mutation
     elif mutation=='whole_source_plan':
         def change(context,event,transaction):
             from copy import deepcopy
-            from camctl.persistence.transaction import row_facts
+            from camctl.persistence.repositories.transactions import row_facts
             if event.event_id!=transaction.first_event_id:return context
             state=deepcopy(context.state_rows)
             state['actions'].update({identity:row_facts(owned.connection,'actions',identity)

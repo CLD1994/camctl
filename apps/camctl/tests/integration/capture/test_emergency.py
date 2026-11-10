@@ -28,7 +28,7 @@ from camctl.persistence.repositories.capture import (
     register_capture_guards,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action

@@ -22,7 +22,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, TransactionError, commit_operation, event_envelope, row_facts, update_change,
 )
 

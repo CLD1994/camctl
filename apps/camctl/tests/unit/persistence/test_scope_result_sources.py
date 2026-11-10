@@ -11,7 +11,7 @@ from camctl.history.events import load_event_registry
 from camctl.operations.models import CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.result_format import result_document
 from camctl.persistence.repositories import capture, result_sources
-from camctl.persistence.transaction import event_envelope, row_change, update_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change, update_change
 
 
 @pytest.fixture

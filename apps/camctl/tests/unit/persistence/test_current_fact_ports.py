@@ -8,7 +8,8 @@ import pytest
 
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence import transaction, fact_reads
+from camctl.persistence import fact_reads, transaction_data
+from camctl.persistence.repositories import transactions as transaction
 
 
 @pytest.fixture
@@ -19,8 +20,8 @@ def database(monkeypatch):
     state = {"row": (1, '{"values":[1.0000000000000001]}'),
              "range": (2, 3, 4), "previous": (2,), "members": (2, 3, 4),
              "cursors": [], "failure": None, "failure_prefix": ""}
-    monkeypatch.setattr(transaction, "json_columns", create_autospec(
-        transaction.json_columns, return_value={"sample": frozenset({"payload_json"})}))
+    monkeypatch.setattr(transaction_data, "json_columns", create_autospec(
+        transaction_data.json_columns, return_value={"sample": frozenset({"payload_json"})}))
 
     def execute(statement, parameters=()):
         cursor = create_autospec(sqlite3.Cursor, instance=True)

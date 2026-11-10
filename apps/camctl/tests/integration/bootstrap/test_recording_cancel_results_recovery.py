@@ -9,7 +9,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, FinishCanceledCapture
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 from ..capture.test_input_copy import _CONTENT, _NOW

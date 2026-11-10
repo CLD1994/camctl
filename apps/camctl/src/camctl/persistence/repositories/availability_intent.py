@@ -4,7 +4,7 @@ from dataclasses import replace
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from .availability_create import _qualify, _request
 from .availability_target import AvailabilityTargetBlocked
 

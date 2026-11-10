@@ -15,7 +15,7 @@ from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.models import AttemptStatus, EffectState
 from camctl.operations.result_format import read_result_document
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.transaction import CommandPlan, TransactionError, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change
+from camctl.persistence.repositories.transactions import CommandPlan, TransactionError, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change
 
 _BRANCH = load_event_registry()['events']['DEVICE_OBSERVED']
 _TYPE = _BRANCH['id']

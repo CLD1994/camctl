@@ -12,7 +12,7 @@ from camctl.history.reads import ReadCoverage, CurrentEventReads
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.outputs.catalog import OutputCatalogFacts
 from camctl.persistence.repositories.capture import FinishCapture, register_capture_guards
-from camctl.persistence.transaction import event_envelope, row_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change
 
 
 def _registration(kind=1):

@@ -26,7 +26,7 @@ def address(kind):
 
 def context_for(owned,runtime,origin,entries):
     from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.transaction import row_facts,event_envelope,row_change,update_change
+    from camctl.persistence.repositories.transactions import row_facts,event_envelope,row_change,update_change
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext
     from camctl.history.reads import ReadCoverage
@@ -115,7 +115,7 @@ async def test_complete_model_rejects_omissions_extra_members_and_wrong_effects(
 @pytest.mark.parametrize('state',['ready','unknown','entered','no_effect','zero_tools','terminal','blocked'])
 async def test_original_sql_and_complete_rows_keep_same_start_partition(tmp_path,monkeypatch,state):
     from camctl.persistence.repositories import capture_facts as module
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,state,monkeypatch)
     try:
         action=read_action(owned,1)

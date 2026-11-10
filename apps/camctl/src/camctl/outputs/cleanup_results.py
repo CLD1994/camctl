@@ -13,7 +13,7 @@ from camctl.devices.evidence import DeviceObservation
 from camctl.history.events import event_type_name
 from camctl.operations.models import AttemptTicket
 from camctl.operations.result_format import read_result_document
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 
 @dataclass(frozen=True)
@@ -196,7 +196,7 @@ def _read_cleanup_attempt_creation(connection, ticket, item_id):
                 or any(not json_equal(runs[0]["after"]["values"].get(name), value)
                        for name, value in expected_run.items())):
             raise ConsistencyError("原清理流程的固定身份与创建历史不同")
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         current = row_facts(connection, "operation_attempts", attempt_id)
         mutable = {"status", "effect_state", "result_json", "error_json", "result_event_id"}
         if any(not json_equal(current[name], value) for name, value in original_attempt.items()

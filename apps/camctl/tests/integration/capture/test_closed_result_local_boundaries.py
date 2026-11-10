@@ -14,7 +14,7 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from .result_consumer_fixtures import returned
 from .test_natural_wait_time_eligibility import _request_cancel

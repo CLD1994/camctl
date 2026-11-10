@@ -14,7 +14,7 @@ from camctl.logging_runtime.service import LogChannel
 from camctl.logging_runtime.transaction_timing import trace_transaction
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.transaction import WriteReceipt
+from camctl.persistence.repositories.transactions import WriteReceipt
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from support.business_database import inline_business_database
 

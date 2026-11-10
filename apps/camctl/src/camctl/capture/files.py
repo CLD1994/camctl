@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ObjectId, UtcMicros, parse_object_id
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 if TYPE_CHECKING:
     from camctl.capture.result_pages import ResultPageRef

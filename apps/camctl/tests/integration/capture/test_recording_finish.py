@@ -22,7 +22,7 @@ from camctl.outputs.catalog import (
     OutputKind,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
     FinishCanceledCapture,

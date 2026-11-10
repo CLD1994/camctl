@@ -197,7 +197,7 @@ from camctl.persistence.repositories.scheduling import (
     ExpireActionRequest, ExpireOutcome, GrantRequest, SchedulingRepository,
 )
 from camctl.persistence.repositories.timelapse import ScheduleWait, TimelapseRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.scheduling.rules import LaunchWindow
 from camctl.scheduling.service import ActionHandler
 
@@ -3228,7 +3228,7 @@ async def _finish_capture(
             finish_segmented_start_failure,
             _save,
         )
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
 
         run_id = (await runtime.database.read(lambda owned, inputs=("SELECT id FROM operation_runs WHERE action_id=? AND kind=?", (action_id, int(_RUN_KIND.START))): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
         if run_id is not None and (await runtime.database.read(lambda owned, inputs=("operation_runs", run_id[0]): row_facts(owned.connection, *inputs), description="读取拍摄直接事实"))["status"] in (1, 2):

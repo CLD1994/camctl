@@ -579,7 +579,7 @@ async def test_handoff_history_replays_and_preserves_frozen_report_bytes(
         expected = dict(
             zip((column[0] for column in cursor.description), cursor.fetchone())
         )
-        from camctl.persistence.transaction import json_columns
+        from camctl.persistence.repositories.transactions import json_columns
         from camctl.contracts.json_values import parse_exact_json
 
         for column in json_columns().get(table, ()):
@@ -639,7 +639,7 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.decoding import decode_event_row
     from camctl.history.validators import EventContext, EventValidationError, validate_event
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     from ..support.output_planning import complete_reads
 
     request = _request(owned, item_id)

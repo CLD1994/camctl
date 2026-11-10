@@ -23,7 +23,7 @@ def finish_module(monkeypatch):
     monkeypatch.setattr(enums, "enum_for", lambda name: kinds[name])
     history = ModuleType("camctl.history.events")
     history.load_event_registry = lambda: {}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     for name in ("CommandPlan", "commit_operation", "event_envelope", "row_facts",
                  "saved_transaction_events", "update_change"):
         setattr(transaction, name, object())
@@ -137,7 +137,7 @@ def failure_module(monkeypatch):
     errors = ModuleType("camctl.contracts.workflow_errors")
     errors.action_error_id = lambda name: 31
     errors.validate_error_details = lambda name, details: None
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     for name in ("CommandPlan", "commit_operation", "event_envelope", "row_facts",
                  "saved_transaction_events", "update_change"):
         setattr(transaction, name, object())

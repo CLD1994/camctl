@@ -29,7 +29,7 @@ from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import require_host_photo_format
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, TransactionError, TransactionScope, commit_operation,
     event_envelope, next_row_id, row_change, row_facts, saved_transaction_events, update_change,
 )

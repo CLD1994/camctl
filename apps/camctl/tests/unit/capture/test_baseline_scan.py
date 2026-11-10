@@ -155,7 +155,7 @@ def _segmented_world(mocker, *, scanning=True):
     db.execute.return_value.fetchone.return_value = None
     runtime.owned = OwnedConnection(db, runtime.owned.metadata)
     runtime.database = capture_database(runtime.owned)
-    rows = mocker.patch("camctl.persistence.transaction.row_facts")
+    rows = mocker.patch("camctl.persistence.repositories.transactions.row_facts")
     # 两个生产入口从同一原动作及活动事实读取。
     action = {"id": 2, "device_id": BINDING.device_id, "driver_id": BINDING.driver_id,
               "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "execution_started": 1, "cancel_requested": 0}

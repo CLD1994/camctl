@@ -68,7 +68,7 @@ def test_saved_scope_page_restores_original_ticket_with_unknown_metadata(monkeyp
     from camctl.devices.evidence import DeviceObservation
     from camctl.operations.models import AttemptTicket, CallOutcome, EvidenceValue, Settlement, SettlementBasis
     from camctl.operations.result_format import result_document
-    from camctl.persistence.transaction import event_envelope, update_change
+    from camctl.persistence.repositories.transactions import event_envelope, update_change
 
     connection = create_autospec(sqlite3.Connection, instance=True)
     run = {'id': 5, 'activity_id': 8, 'kind': int(result_pages._RUN_KIND.RESOLVE_OUTPUT_SCOPE),
@@ -108,7 +108,7 @@ def test_result_read_scope_checks_original_responsibility(monkeypatch, kind, key
     from camctl.contracts.values import ConsistencyError
     from camctl.history.reads import CaptureResultReadScope
     from camctl.operations.models import AttemptTicket
-    from camctl.persistence import transaction
+    from camctl.persistence.repositories import transactions as transaction
     from camctl.persistence.event_reads import SqlEventReads
 
     connection = create_autospec(sqlite3.Connection, instance=True)

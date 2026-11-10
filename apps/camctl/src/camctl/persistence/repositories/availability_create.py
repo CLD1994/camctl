@@ -12,7 +12,7 @@ from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.start_entry import is_hasselblad_photo
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventContext, register_guard
-from camctl.persistence.transaction import (BoundedCommandPlan, CommandPlan, commit_operation,
+from camctl.persistence.repositories.transactions import (BoundedCommandPlan, CommandPlan, commit_operation,
     event_envelope, next_row_id, row_change, row_facts, read_saved_transaction_page,
     read_transaction_range)
 from .availability_target import (AvailabilityCreationTargets, AvailabilityTargetBlocked,

@@ -22,7 +22,7 @@ from .test_product_competition import competition_database, _seed_many_actions  
 from .test_qualification import qualification_environment, _candidate, _Seedling  # noqa: F401
 from .test_obtain_summary import _roots
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 from ..support.output_planning import EventSequence, capture_operation
 from ..support.public_delivery_cases import prepare_public_delivery
 from ..support.read_batch_cases import acquire_read_batch

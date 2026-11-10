@@ -1236,7 +1236,7 @@ async def _settle_saved_read_binding_failure(runtime, copy_id, error):
     source_id = facts["source_device_file_id"]
     if source_id is None:
         from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
-        from camctl.persistence.transaction import row_facts, saved_transaction_events
+        from camctl.persistence.repositories.transactions import row_facts, saved_transaction_events
 
         def photo_source(owned):
             copy = row_facts(owned.connection, "file_copies", copy_id)
@@ -1373,7 +1373,7 @@ async def _copy_delivery(
     deferred = False
     if isinstance(sessions, DriverReadSessions) and facts["source_device_file_id"] is not None:
         from camctl.persistence.repositories.outputs import _deferred_photo_source
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         deferred = await runtime.database.read(lambda owned: _deferred_photo_source(
             owned.connection, row_facts(owned.connection, "device_files", facts["source_device_file_id"])))
     session = None
@@ -1979,7 +1979,7 @@ def _stored_read_attempt_config(connection, copy_id: int) -> AttemptConfig:
 
 def _photo_recopy_end(connection, copy_id, ticket):
     from camctl.persistence.repositories.outputs import _photo_cache_recopy_proof
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     with closing(connection.execute(
         "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
         (ticket.run_id, ticket.attempt_id))) as cursor:
@@ -2026,7 +2026,7 @@ def _failed_inspection_read_request(connection, facts: Mapping):
         return None
     if details.get("source_failed") is not True:
         from camctl.persistence.repositories.outputs import _photo_cache_recopy_proof
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         copy = row_facts(connection, "file_copies", facts["id"])
         attempt = row_facts(connection, "operation_attempts", attempt_id)
         if (details.get("photo_cache_checksum_mismatch") is not True
@@ -2144,7 +2144,7 @@ async def _finish_local_attempt_phase(
         copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
             runtime.occurred_at, file_executor=runtime.file_executor, read_runtime=runtime, hold_reset=True)
         await copies.prepare(facts["id"])
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         reset_ready = await runtime.database.read(lambda owned: row_facts(
             owned.connection, "file_copies", facts["id"])["reset_state"])
         if reset_ready != int(enum_for("file_copies.reset_state").READY):

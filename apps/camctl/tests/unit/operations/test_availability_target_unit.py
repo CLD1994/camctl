@@ -192,7 +192,7 @@ def creation_facts(facts, monkeypatch):
     check, activity, action = deepcopy(facts)
     activity["id"] = 25
     rows = {("device_activities", 25): activity, ("actions", 7): action}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     capture_facts = ModuleType("camctl.persistence.repositories.capture_facts")
@@ -310,7 +310,7 @@ def test_target_group_rejects_another_event_branch(target_group, target_rules):
 
 @pytest.fixture
 def creation_module(target_rules, monkeypatch):
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     for name in ("BoundedCommandPlan", "CommandPlan", "commit_operation", "event_envelope", "next_row_id",
                  "row_change", "update_change", "row_facts", "read_saved_transaction_page", "read_transaction_range"):
         setattr(transaction, name, object())
@@ -564,7 +564,7 @@ def release_facts(target_rules, facts, monkeypatch):
     second_action["id"] = 8
     rows = {("device_activities", 25): first, ("actions", 7): action,
             ("device_activities", 26): second, ("actions", 8): second_action}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     monkeypatch.setattr(target_rules, "iter_fixed_targets", lambda *args, **kwargs:
@@ -831,7 +831,7 @@ def isolated_result_guard(target_rules, monkeypatch):
     for name in ("baseline_start_reason", "capture_scope_blocked", "device_read_in_flight", "device_start_in_flight"):
         setattr(scheduling, name, object())
     monkeypatch.setitem(sys.modules, scheduling.__name__, scheduling)
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     for name in ("CommandPlan", "commit_operation", "event_envelope", "next_row_id", "row_change", "row_facts",
                  "saved_transaction_events", "SavedEvent", "update_change"):
         setattr(transaction, name, object())
@@ -898,7 +898,7 @@ def test_generic_finish_guard_accepts_the_validated_prior_result(
     release = ModuleType("camctl.persistence.repositories.availability_release")
     release.ReleaseGroup = type("ReleaseGroup", (), {})
     monkeypatch.setitem(sys.modules, release.__name__, release)
-    monkeypatch.setattr(sys.modules["camctl.persistence.transaction"], "row_facts",
+    monkeypatch.setattr(sys.modules["camctl.persistence.repositories.transactions"], "row_facts",
                         lambda connection, table, identity: {"run_id": 3})
     attempt = SimpleNamespace(table="operation_attempts", row_id=5, before=SimpleNamespace(exists=True),
         after=SimpleNamespace(exists=True, values={"status": 3, "result_event_id": 7, "result_json": {}}))
@@ -1199,7 +1199,7 @@ def test_check_retry_requires_the_last_attempts_completed_interval(intent_guard,
 
 @pytest.fixture
 def retry_module(creation_module, monkeypatch):
-    transaction = sys.modules["camctl.persistence.transaction"]
+    transaction = sys.modules["camctl.persistence.repositories.transactions"]
     transaction.saved_transaction_events = object()
     source = find_spec("camctl.persistence.repositories.availability_retry")
     spec = spec_from_file_location("camctl.persistence.repositories._isolated_retry", source.origin)
@@ -1300,7 +1300,7 @@ def test_logical_held_identity_checks_every_page_before_returning_mismatch(targe
     damaged = {**activity, "id": 26, "action_id": 8, "resource_key": "invalid"}
     rows = {("device_activities", 25): activity, ("actions", 7): action,
             ("device_activities", 26): damaged, ("actions", 8): {**action, "id": 8}}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     from camctl.contracts.values import ConsistencyError
@@ -1319,7 +1319,7 @@ def test_logical_held_identity_rejects_missing_or_contradictory_facts(target_rul
         activity["action_id"] = 8
     rows = {("device_activities", 25): None if fault == "missing_activity" else activity,
             ("actions", 7): None if fault == "missing_action" else action}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     from camctl.contracts.values import ConsistencyError
@@ -1336,7 +1336,7 @@ def test_existing_photo_check_keeps_its_full_fixed_identity(target_rules, facts,
     check.update(id=31, trigger_copy_id=None)
     action = {"id": 12, "device_id": "hb0", "driver_id": "hasselblad_cfv100c"}
     run = {"id": 3, "action_id": 12, "availability_check_id": 31, "responsibility_key": "availability/31", "status": 3, "kind": 12}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, ident: check if table == "device_availability_checks" else run
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     class Connection:
@@ -1361,7 +1361,7 @@ def test_binding_check_targets_validate_direct_facts_without_reopening_old_start
     if fault == "wrong_occupancy": activity["occupancy_state"] = True
     rows = {("device_activities", 25): None if fault == "missing_activity" else activity,
             ("actions", 7): action}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, ident: rows.get((table, ident))
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     monkeypatch.setattr(target_rules, "iter_fixed_targets", lambda *args:

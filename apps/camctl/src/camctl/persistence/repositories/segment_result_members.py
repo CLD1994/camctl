@@ -10,7 +10,7 @@ from camctl.contracts.values import ConsistencyError,OperationKey,UtcMicros
 from .segment_profiles import profile_for_action
 from camctl.history.events import load_event_registry
 from camctl.history.reads import SegmentReadScope
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,event_envelope,next_row_id,row_change,row_facts,saved_transaction_events,update_change)
 from .segment_result_sets import _one,_retained_input,_run_files,read_result_set
 

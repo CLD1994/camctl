@@ -11,7 +11,7 @@ from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.transaction import commit_operation, saved_transaction_events
+from camctl.persistence.repositories.transactions import commit_operation, saved_transaction_events
 
 from .test_grant_reuse import granted, read_request, read_targets, local_read, _change_event, _reuse
 from ..operations.test_read_attempt_slot import _intent

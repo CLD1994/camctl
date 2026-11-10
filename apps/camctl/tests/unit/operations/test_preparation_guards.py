@@ -11,7 +11,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.persistence.repositories.operations import _attempt_intent_guard, _attempt_result_guard
 from camctl.persistence.repositories.preparation import PreparationReads
-from camctl.persistence.transaction import event_envelope, row_change, update_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change, update_change
 
 
 def _database(*, start_recorded=False):

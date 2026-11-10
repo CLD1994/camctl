@@ -9,7 +9,7 @@ from camctl.bootstrap.flows import cancel_flow
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.directory_switch import canonical_to_path
 from camctl.persistence.repositories.cancellation import CancellationRepository
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 from camctl.session.service import StateDbFailure
 
 from ..support.bootstrap_recovery import TransactionFault

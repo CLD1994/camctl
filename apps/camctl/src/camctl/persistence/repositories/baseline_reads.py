@@ -17,7 +17,7 @@ from camctl.history.events import load_event_registry
 from camctl.history.reads import BaselineReadWriteScope
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, TransactionScope, row_change, event_envelope, read_transaction_range,
     row_facts, saved_transaction_events, update_change)
 from camctl.operations.models import ErrorValue

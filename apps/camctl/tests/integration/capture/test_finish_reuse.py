@@ -22,7 +22,7 @@ from camctl.persistence.repositories.capture import (
     register_capture_guards,
 )
 from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 from camctl.outputs.catalog import (
     FileReference,

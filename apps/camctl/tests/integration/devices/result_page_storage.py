@@ -9,7 +9,7 @@ import shlex
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from ..support.capture import capture_database
 
 

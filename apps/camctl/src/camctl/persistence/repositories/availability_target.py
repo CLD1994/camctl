@@ -148,7 +148,7 @@ def iter_logical_held_activities(connection, device_id: str, *, batch_size: int 
 def logical_held_identity_mismatch(connection, device_id, current, *, batch_size=128):
     """读取同逻辑设备所有仍持有限制的固定机身，核对完整身份。"""
     from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
 
     if not isinstance(current, CameraIdentity):
         raise ConsistencyError("当前配置缺少可靠固定机身身份")
@@ -178,7 +178,7 @@ def logical_held_identity_mismatch(connection, device_id, current, *, batch_size
 
 def photo_check_identity_mismatch(connection, action, current, *, batch_size=128):
     """按尚可采用的原拍摄检查固定身份核对当前机身。"""
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     if not isinstance(current, CameraIdentity):
         raise ConsistencyError("当前配置缺少可靠固定机身身份")
     if type(batch_size) is not int or not 1 <= batch_size <= 128:
@@ -327,7 +327,7 @@ def require_original_settled(connection, activity, action):
 
 def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
     """从原写事务读取检查的完整旧目标；结果不授予设备执行资格。"""
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
 
     if logical_held_identity_mismatch(connection, check["device_id"],
                                       CameraIdentity(**check["expected_identity_json"]), batch_size=batch_size):
@@ -381,7 +381,7 @@ def iter_fixed_targets(connection, check_id: int, *, batch_size: int = 128):
 
 def verify_binding_check_targets(connection, check, run):
     """核对原检查的直接归属与全部固定目标，返回目标是否全部释放。"""
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     if (run.get("kind") != int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY)
             or run.get("action_id") != check.get("action_id")
             or run.get("availability_check_id") != check.get("id")
@@ -417,7 +417,7 @@ def verify_binding_check_targets(connection, check, run):
 
 def iter_release_targets(connection, check: Mapping, *, batch_size: int = 128):
     """先核对完整固定目标，再分页返回仍须按本次检查释放的活动。"""
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     identity = CameraIdentity(**check["expected_identity_json"])
     if check["resource_key"] != identity.resource_key:
         raise AvailabilityTargetStateError("检查资源键与固定机身身份不一致")

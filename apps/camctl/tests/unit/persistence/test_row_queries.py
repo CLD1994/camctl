@@ -5,7 +5,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.persistence.transaction import next_row_id
+from camctl.persistence.repositories.transactions import next_row_id
 
 
 @pytest.fixture

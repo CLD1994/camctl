@@ -8,7 +8,7 @@ from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID
 from camctl.devices.tasks import CaptureResultPolicy, StartReturn
 from camctl.persistence.fact_reads import read_event
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 def verify_normal_recording_stop(connection, event, attempt, run, action, *, check_start=True):

@@ -16,7 +16,7 @@ from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories import result_file_pairing as pairing, result_file_proofs as files, segments
 from camctl.persistence.fact_reads import EventRecord
-from camctl.persistence.transaction import event_envelope, row_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change
 
 
 def _connection():

@@ -45,7 +45,7 @@ from camctl.persistence.repositories.capture_facts import (
 )
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     TransactionError,
     commit_operation,

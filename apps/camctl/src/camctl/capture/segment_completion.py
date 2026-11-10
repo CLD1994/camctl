@@ -35,7 +35,7 @@ from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.result_sources import ResultSourceKind
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.logging_runtime.performance import measure_performance
 from camctl.logging_runtime.transaction_timing import db_operation_context
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error

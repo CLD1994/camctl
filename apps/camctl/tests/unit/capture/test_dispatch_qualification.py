@@ -63,7 +63,7 @@ def world(mocker):
 
     mocker.patch("camctl.capture.preparation.row_facts", autospec=True, side_effect=row)
     mocker.patch("camctl.capture.handlers.row_facts", autospec=True, side_effect=row)
-    mocker.patch("camctl.persistence.transaction.row_facts", autospec=True, side_effect=row)
+    mocker.patch("camctl.persistence.repositories.transactions.row_facts", autospec=True, side_effect=row)
 
     def execute(sql, parameters=()):
         cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)

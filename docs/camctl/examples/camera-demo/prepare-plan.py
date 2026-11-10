@@ -10,7 +10,7 @@ from camctl.acceptance.schema import validate_precise
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import MAX_OBJECT_ID
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.transaction_data import encode_json_value
 from camctl.resources import available_resources, resource_bytes
 
 

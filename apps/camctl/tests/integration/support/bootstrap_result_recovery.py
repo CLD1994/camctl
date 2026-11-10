@@ -18,7 +18,7 @@ from camctl.operations.models import CallOutcome, EffectState, EvidenceValue, Se
 from camctl.devices.evidence import DeviceObservation
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from .bootstrap_recovery import DefaultRecoveryWorld, StorageGate, TransactionFault
 from .capture import capture_database

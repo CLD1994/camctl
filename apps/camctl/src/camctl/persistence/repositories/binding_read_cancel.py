@@ -10,7 +10,7 @@ def binding_cancel_event(connection, action_id, max_txn_id):
     from camctl.contracts.enums import load_registry
     from camctl.history.decoding import decode_event_row
     from camctl.history.events import load_event_registry
-    from camctl.persistence.transaction import read_transaction_range
+    from camctl.persistence.repositories.transactions import read_transaction_range
 
     action_type = load_registry()["history_objects"]["action"]["id"]
     event_type = load_event_registry()["events"]["CANCEL_CHANGED"]["id"]
@@ -38,7 +38,7 @@ _NOT_PROVIDED = object()
 
 def saved_binding_read_failure(connection, key, action_id, copy_id, error, current_identity=_NOT_PROVIDED):
     """仅接受原键对应的完整真实读取结果和绑定失败。"""
-    from camctl.persistence.transaction import row_facts, saved_transaction_events
+    from camctl.persistence.repositories.transactions import row_facts, saved_transaction_events
 
     events = saved_transaction_events(connection, key)
     if events is None or len(events) != 2 or [(e["type"], e["reason"]) for e in events] != [(12, 1), (10, 3)]:
@@ -73,7 +73,7 @@ def saved_binding_read_failure(connection, key, action_id, copy_id, error, curre
 
 def load_saved_binding_read_failure(connection, action_id, copy_id, error):
     """按原尝试结果事件找到完整事务，返回原键与原次配置身份。"""
-    from camctl.persistence.transaction import saved_transaction_events
+    from camctl.persistence.repositories.transactions import saved_transaction_events
 
     with closing(connection.execute(
         "SELECT h.operation_key FROM operation_runs r"

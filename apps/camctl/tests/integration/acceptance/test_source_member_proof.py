@@ -11,7 +11,7 @@ from camctl.persistence.repositories.acceptance import register_acceptance_guard
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import CommandPlan, commit_operation, event_envelope, row_change, row_facts
+from camctl.persistence.repositories.transactions import CommandPlan, commit_operation, event_envelope, row_change, row_facts
 from camctl.history.reads import AdmissionSourceReadScope
 
 from .test_acceptance import Catalog, _NOW, _plan_body
@@ -143,7 +143,7 @@ def _bounded_admission(plan, connection):
     """真实逐事件写入；当前事实只来自原连接，不把未来提案放入 context。"""
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.transaction import BoundedCommandPlan
+    from camctl.persistence.repositories.transactions import BoundedCommandPlan
     def context(event, transaction):
         state = {table: {} for table in plan.state_rows}
         for proposed in plan.events:

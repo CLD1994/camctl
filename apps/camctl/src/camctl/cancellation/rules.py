@@ -21,7 +21,7 @@ from camctl.cancellation.models import (
     OriginCancelDecision,
 )
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.repositories.capture_facts import load_start_facts
 
 __all__ = [

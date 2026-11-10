@@ -37,7 +37,7 @@ from camctl.persistence.repositories.outputs import (
     ObtainFinishDisposition,
     OutputsRepository, load_obtain_facts,
 )
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 from .test_copy_segments import _CONTENT
 from .test_qualification import _NOW, _seed_action

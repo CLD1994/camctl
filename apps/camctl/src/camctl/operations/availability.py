@@ -523,7 +523,7 @@ class AvailabilityCoordinator:
 
 
 def _run_facts(owned, run_id):
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     run = row_facts(owned.connection, "operation_runs", run_id)
     if run is None:
         raise ConsistencyError("设备检查流程不存在")
@@ -538,7 +538,7 @@ def _run_facts(owned, run_id):
 
 def _open_check(owned, request):
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     rows = owned.connection.execute(
         "SELECT c.id,r.id,c.trigger_copy_id FROM device_availability_checks c"
         " JOIN operation_runs r ON r.availability_check_id=c.id"
@@ -564,7 +564,7 @@ def _open_check(owned, request):
 def _action_binding_checks(owned, request, *, after=0):
     """读取一页当前仍需消费的检查，保留原始页的继续位置。"""
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     if request.trigger_copy_id is None:
         condition, params = "c.trigger_copy_id IS NULL", (request.action_id,)
     else:
@@ -620,7 +620,7 @@ async def _binding_check_pages(database, request):
 
 
 def _action_facts(owned, action_id):
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     action = row_facts(owned.connection, "actions", action_id)
     if action is None:
         raise ConsistencyError("设备检查触发动作不存在")

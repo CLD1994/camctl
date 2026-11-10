@@ -21,7 +21,7 @@ from camctl.history.validators import EventContext,ValidatedEvent
 from camctl.persistence import fact_reads
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.repositories import segment_transactions as finish
-from camctl.persistence.transaction import CommandPlan,encode_json_value,event_envelope,row_change
+from camctl.persistence.repositories.transactions import CommandPlan,encode_json_value,event_envelope,row_change
 from camctl.history.events import business_columns
 
 
@@ -124,7 +124,7 @@ def test_finite_proposal_real_guard_and_seal_chain(monkeypatch,defect,ref_kind):
         qualification,lambda:iter(()),lambda:iter(()),lambda *_:None))
     if defect=="forged_failure":
         from dataclasses import replace
-        from camctl.persistence.transaction import update_change
+        from camctl.persistence.repositories.transactions import update_change
         events=(replace(events[0],rows=(update_change("actions",1,{"status":2,"error_code":None,"error_details_json":None},
             {"status":4,"error_code":outcome[1],"error_details_json":{"activity_id":"3","reason":"invalid_outputs"}}),)),events[1])
     plan=CommandPlan(events,{}, {table:{row["id"]:row} for table,row in rows.items()})
@@ -169,7 +169,7 @@ def test_finite_proposal_real_guard_and_seal_chain(monkeypatch,defect,ref_kind):
 
 
 def test_constructor_proposal_cannot_replace_kernel_actual_prefix():
-    from camctl.persistence.transaction import update_change
+    from camctl.persistence.repositories.transactions import update_change
     db=create_autospec(sqlite3.Connection,instance=True,spec_set=True)
     db.in_transaction=True
     tx=TransactionRange(7,10,13)

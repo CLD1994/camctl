@@ -247,7 +247,7 @@ def test_same_numeric_cleanup_and_obtain_owners_are_independent(tmp_path):
         # 相同数值的 ticket target 也不能互换责任键和 run。
         ticket = second.value.ticket
         bad = replace(ticket, responsibility_key=first.value.ticket.responsibility_key)
-        from camctl.persistence.transaction import TransactionError
+        from camctl.persistence.repositories.transactions import TransactionError
         refused = _unchanged(owned, lambda: repository.finish_attempt(
             _finish_value(bad), new_operation_key(), owned))
         assert refused.kind is DbOutcomeKind.ROLLED_BACK
@@ -362,7 +362,7 @@ def _mutate_identity_proposal(plan, mutation):
 def test_registered_guards_reject_forged_identity_in_complete_transaction(tmp_path, bounded, mutation):
     import sqlite3
     from camctl.history.validators import EventValidationError
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     _, owned = _environment(tmp_path)
     try:
         owned.connection.execute("INSERT INTO cleanup_items (id,action_id,requested_output_id,status,restriction_state) VALUES (1,2,1,1,1)")
@@ -398,7 +398,7 @@ def test_registered_guards_reject_forged_identity_in_complete_transaction(tmp_pa
 
 @pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
 def test_registered_guards_accept_legal_owner_in_complete_transaction(tmp_path, bounded):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     _, owned = _environment(tmp_path)
     try:
         key = new_operation_key()
@@ -503,7 +503,7 @@ def test_followup_registered_guards_preserve_previous_receipt_and_identity(tmp_p
     import sqlite3
     from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories.history import HistoryRepository
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     path, owned = _environment(tmp_path)
     try:
         repository = OperationRepository()
@@ -576,7 +576,7 @@ def test_new_configuration_updates_only_new_attempt_and_old_key_keeps_adopted_in
 
 @pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
 def test_actual_running_previous_ticket_cannot_borrow_context_completion(tmp_path, bounded):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     _, owned = _environment(tmp_path)
     try:
         original_key = new_operation_key()
@@ -626,7 +626,7 @@ def _proposal_command(saved, bounded, *, caller_obtain_check_reads=None):
 
 def _assert_legal_proposal(owned, plan, bounded, key):
     import sqlite3
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     with sqlite3.connect(':memory:') as baseline:
         owned.connection.backup(baseline)
         accepted = commit_operation(_proposal_command(plan, bounded), key, owned)
@@ -641,7 +641,7 @@ def test_followup_guard_reads_actual_previous_result_event(tmp_path, bounded, da
     import json, sqlite3
     from ..operations.test_result_reuse import _FaultConnection
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     _, owned = _environment(tmp_path)
     try:
         repository = OperationRepository()
@@ -699,7 +699,7 @@ def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
     from copy import deepcopy
     import sqlite3
     from camctl.history.validators import EventValidationError
-    from camctl.persistence.transaction import commit_operation, row_facts
+    from camctl.persistence.repositories.transactions import commit_operation, row_facts
     _, owned = _environment(tmp_path, host=False)
     try:
         # 合法 host 文件仅供虚构上下文引用；实际 requested output 仍由 device 承载。
@@ -731,7 +731,7 @@ def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
 
 def test_bounded_obtain_check_rejects_caller_supplied_read_port(tmp_path):
     import sqlite3
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     _, owned = _environment(tmp_path)
     try:
         key = new_operation_key()
@@ -755,7 +755,7 @@ def test_bounded_obtain_check_rejects_caller_supplied_read_port(tmp_path):
 @pytest.mark.parametrize('shape', ['missing', 'mixed_before', 'mixed_after', 'duplicate'])
 def test_every_obtain_intent_run_requires_exactly_one_own_new_attempt(tmp_path, bounded, existing, shape):
     from copy import deepcopy
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     _, owned = _environment(tmp_path)
     try:
         repository = OperationRepository()

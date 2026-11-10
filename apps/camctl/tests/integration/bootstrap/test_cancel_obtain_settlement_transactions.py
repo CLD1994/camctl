@@ -20,7 +20,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import TransactionError, saved_transaction_events
+from camctl.persistence.repositories.transactions import TransactionError, saved_transaction_events
 
 from .test_binding_transactions import _CommitFailure
 from .test_cancel_work_file_first_result import _active_obtain

@@ -55,7 +55,7 @@ def load_pairing():
     module('camctl.history.validators', EventValidationError=type('EventValidationError', (Exception,), {}), register_guard=lambda *a: None, validate_event_structure=lambda event: None)
     module('camctl.persistence.event_reads', SqlEventReads=type('SqlEventReads', (), {}))
     module('camctl.persistence.fact_reads', opened_operation_fact_scope=None, read_event=None, read_operation_transaction=None, read_transaction=None)
-    module('camctl.persistence.transaction', CommandPlan=lambda events, owners, state, **kw: SimpleNamespace(events=events, owners=owners, state=state, **kw), TransactionError=TransactionError, event_envelope=None, next_row_id=None, read_transaction_range=None, row_change=None, row_facts=None, update_change=None)
+    module('camctl.persistence.repositories.transactions', CommandPlan=lambda events, owners, state, **kw: SimpleNamespace(events=events, owners=owners, state=state, **kw), TransactionError=TransactionError, event_envelope=None, next_row_id=None, read_transaction_range=None, row_change=None, row_facts=None, update_change=None)
     pages = module('camctl.persistence.repositories.result_pages')
     module('camctl.persistence.repositories.result_file_ownership', ownership_guard_boundary=None, ownership_request_from_event=None, request_document=None)
     module('camctl.persistence.repositories.result_file_proofs', read_file_at_boundary=None, read_fixed_file=None, read_result_file_input=None)
@@ -342,7 +342,7 @@ def test_segment_observations_submits_original_scan_without_reading_boundary():
     module('camctl.persistence.business', 'SharedSave settle_required')
     module('camctl.persistence.repositories.segments', 'SegmentRepository')
     module('camctl.persistence.repositories.result_sources', 'ResultSourceKind')
-    module('camctl.persistence.transaction', 'row_facts')
+    module('camctl.persistence.repositories.transactions', 'row_facts')
     module('camctl.logging_runtime.performance', 'measure_performance')
     module('camctl.logging_runtime.transaction_timing', 'db_operation_context')
     module('camctl.logging_runtime.diagnostics', 'DiagnosticState record_error')
@@ -386,6 +386,8 @@ def test_segment_observations_submits_original_scan_without_reading_boundary():
 
 
 def test_public_pairing_request_freezes_scan_and_time_without_boundary():
+    from camctl.contracts.values import parse_object_id
+
     modules = {}
     def module(name, **values):
         item = ModuleType(name)
@@ -395,8 +397,8 @@ def test_public_pairing_request_freezes_scan_and_time_without_boundary():
     class EnumValues:
         def __getattr__(self, name): return 1
     module('camctl.contracts.enums', enum_for=lambda name: EnumValues())
-    module('camctl.contracts.values', ObjectId=int, UtcMicros=int)
-    module('camctl.persistence.transaction', encode_json_value=lambda value: '')
+    module('camctl.contracts.values', ObjectId=int, UtcMicros=int, parse_object_id=parse_object_id)
+    module('camctl.persistence.repositories.transactions', encode_json_value=lambda value: '')
     @dataclass(frozen=True)
     class Ticket:
         run_id: int = 1

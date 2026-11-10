@@ -9,7 +9,7 @@ from camctl.capture.segment_storage import SegmentResultRef
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 @dataclass(frozen=True)
@@ -165,7 +165,7 @@ def saved_result_failure(request, setrow, conclusion):
 def verify_disposition_event(db, ref, event):
     from camctl.capture.segment_storage import document
     from camctl.history.events import load_event_registry
-    from camctl.persistence.transaction import update_change
+    from camctl.persistence.repositories.transactions import update_change
 
     read_saved_result_disposition(ref, db)
     expected = update_change("segment_sets", ref.set_id, {"state": 2}, {"state": 3})
@@ -195,7 +195,7 @@ class DecideResultCommand:
         from camctl.capture.segment_storage import document
         from camctl.history.events import load_event_registry
         from camctl.history.reads import SegmentReadScope
-        from camctl.persistence.transaction import (
+        from camctl.persistence.repositories.transactions import (
             CommandPlan,
             event_envelope,
             saved_transaction_events,

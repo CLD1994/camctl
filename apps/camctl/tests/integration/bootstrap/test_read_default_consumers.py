@@ -6,7 +6,7 @@ import pytest
 
 from camctl.contracts.enums import enum_for
 from camctl.history.events import business_columns
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 
@@ -115,7 +115,7 @@ async def test_default_session_stops_on_unknown_verification_commit(pipeline, ca
     from camctl.bootstrap import capture_assembly, lifecycle
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.outputs import OutputsRepository
-    from camctl.persistence.transaction import saved_transaction_events
+    from camctl.persistence.repositories.transactions import saved_transaction_events
     from ..capture.media_retry_fixtures import _Catalog
     from ..capture.test_capture_contract import ResultsDouble, _entry
     from ..capture.test_input_copy import _CONTENT
@@ -176,7 +176,7 @@ async def test_capture_flow_requires_original_verification_before_device_executi
     from types import SimpleNamespace
     from camctl.bootstrap.flows import capture_flow
     from camctl.capture.media_flow import resume_prepared_internal_reads
-    from camctl.persistence.transaction import saved_transaction_events
+    from camctl.persistence.repositories.transactions import saved_transaction_events
     from camctl.session.service import StateDbFailure
     from ..support.bootstrap_consumers import StorageGate, held_default_read
 

@@ -36,7 +36,7 @@ from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_copy_resume import _command, _make_roots, _qualified, _seed_failed_attempts
 from .test_copy_segments import _CONTENT, _drive, _target_path

@@ -20,7 +20,7 @@ from camctl.outputs.sources import (
 )
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     BoundedCommandPlan, CommandPlan, TransactionError, row_facts, next_row_id,
     row_change, update_change, event_envelope, encode_json_value,
     read_transaction_range, read_saved_transaction_page,

@@ -72,7 +72,7 @@ def test_canonical_empty_finish_uses_only_supplied_facts(monkeypatch):
 def test_finish_plan_does_not_reprove_saved_assessment(monkeypatch):
     from camctl.capture.segment_models import DefaultScopeState
     from camctl.contracts.values import new_operation_key
-    from camctl.persistence.transaction import TransactionScope, update_change
+    from camctl.persistence.repositories.transactions import TransactionScope, update_change
 
     db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
     scope = TransactionScope(db, 6, 9)
@@ -149,10 +149,10 @@ def test_canonical_orders_originals_before_preview_and_uses_actual_mapping(wrong
 def test_fixed_conclusion_checks_its_direct_creation_version(monkeypatch, defect):
     from camctl.history.events import business_columns
     from camctl.persistence import fact_reads
-    from camctl.persistence.transaction import event_envelope, row_change
+    from camctl.persistence.repositories.transactions import event_envelope, row_change
 
     db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     values = {column: None for column in business_columns("segment_check_conclusions")}
     values.update(set_id=2, reason=int(enum_for("segment_check_conclusions.reason").NATIVE_RESULT_DECIDED))
     saved = {"id": 8, "created_event_id": 7, **values}
@@ -220,7 +220,7 @@ def test_seal_independently_uses_guard_facts_and_closes_progress(monkeypatch, fo
     from camctl.history.reads import PlanReadScope
     from camctl.history.validators import ValidatedEvent
     from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.transaction import update_change
+    from camctl.persistence.repositories.transactions import update_change
 
     request = FinishSegmentRecording(SegmentResultRef(1, 2, 1), 3, 4, 5)
     tx = TransactionRange(7, 10, 11)
@@ -366,7 +366,7 @@ def test_assessment_formation_proves_actual_sources_without_saved_assessment(mon
 def test_explicit_failure_rule_consumes_only_supplied_error_facts(monkeypatch, defect):
     from camctl.capture.segment_models import SegmentSetRef, SegmentAssessmentReason
     from camctl.contracts.workflow_errors import registered_error
-    from camctl.persistence.transaction import update_change
+    from camctl.persistence.repositories.transactions import update_change
 
     failure = RecordingFailure("capture_failed", {"activity_id": "3", "reason": "device_failed"})
     request = FinishSegmentRecording(SegmentSetRef(1, 8, 9, 1), 3, 4, 5, failure,

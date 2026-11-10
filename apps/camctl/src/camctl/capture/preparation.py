@@ -34,7 +34,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 _PREPARE_KIND = int(enum_for("operation_runs.kind").PREPARE_CAPTURE)
 

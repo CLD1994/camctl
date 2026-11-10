@@ -8,7 +8,7 @@ from .capture_facts import preparation_calls_resolved
 def require_action_preparation_format(owned, action_id):
     """准备写入口按原动作类型核对其所需的数据库格式。"""
     from camctl.persistence.runtime import require_capture_preparation_format
-    from camctl.persistence.transaction import TransactionError, row_facts
+    from camctl.persistence.repositories.transactions import TransactionError, row_facts
     action = row_facts(owned.connection, "actions", action_id)
     if action is None:
         raise TransactionError("拍摄准备缺少原动作")
@@ -46,7 +46,7 @@ class PreparationReads:
         from contextlib import closing
         from camctl.contracts.values import ConsistencyError
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
 
         if not isinstance(device_id, str) or not device_id:
             raise ConsistencyError("设备检查缺少逻辑设备身份")
@@ -108,7 +108,7 @@ class PreparationReads:
     def _device_in_flight(self, device_id, kind_name):
         from contextlib import closing
         from camctl.contracts.values import ConsistencyError
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
 
         projected = {}
         changed_bindings = {"actions": set(), "file_copies": set()}
@@ -329,7 +329,7 @@ def recheck_start_availability(owned, ticket):
     from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
     from camctl.operations.models import AttemptTicket
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
 
     if not isinstance(ticket, AttemptTicket) or ticket.operation != "control":
         raise ValueError("START 派发复核需要原控制票据")
@@ -398,7 +398,7 @@ def verify_unstarted_availability_checks(connection, action, details, current_id
             page = tuple(cursor.fetchmany(128))
         if not page:
             return
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         from .availability_finish import AvailabilityFinishReads
         from .availability_target import verify_binding_check_targets
         for (run_id,) in page:

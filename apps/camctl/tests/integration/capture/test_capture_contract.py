@@ -721,7 +721,7 @@ class TestInterruptionRecovery:
         from ..support.capture import capture_runtime
         from camctl.contracts.values import ConsistencyError
         from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-        from camctl.persistence.transaction import saved_transaction_events
+        from camctl.persistence.repositories.transactions import saved_transaction_events
         from .test_result_consumer_saves import _actual, _assert_actual_saved
         from .test_result_file_recovery import FileObservationSpy, _fresh_runtime, _result_driver
 
@@ -805,7 +805,7 @@ class TestInterruptionRecovery:
             self, tmp_path: Path, result_case, monkeypatch):
         from camctl.contracts.values import ConsistencyError
         from camctl.devices.evidence import EvidenceContract
-        from camctl.persistence.transaction import saved_transaction_events
+        from camctl.persistence.repositories.transactions import saved_transaction_events
         from ..support.result_cases import ResultPageFault
         from .test_result_consumer_saves import _actual, _assert_actual_saved
 

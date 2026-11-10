@@ -22,7 +22,7 @@ from camctl.host_files.tasks import (
     AsyncFileTask, FileTaskError, FileTaskExecutor, FileTaskId,
 )
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import read_transaction_range, row_facts
+from camctl.persistence.repositories.transactions import read_transaction_range, row_facts
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
 
 

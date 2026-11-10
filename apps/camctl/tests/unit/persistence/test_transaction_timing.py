@@ -15,7 +15,8 @@ from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventContext, ValidatedEvent
 from camctl.logging_runtime.performance import performance_logging
 from camctl.logging_runtime.service import LogChannel
-from camctl.persistence import transaction as tx
+from camctl.persistence.repositories import transactions as tx
+from camctl.persistence import atomic
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 
 
@@ -57,6 +58,8 @@ class _ObservedEvents:
 @pytest.fixture
 def transaction_ports(monkeypatch):
     active, observed, generated = [], [], []
+    tx.load_event_registry()
+    tx.load_enum_registry()
     original_phase = tx.db_phase
 
     @contextmanager
@@ -70,6 +73,7 @@ def transaction_ports(monkeypatch):
                 active.pop()
 
     monkeypatch.setattr(tx, "db_phase", phase)
+    monkeypatch.setattr(atomic, "db_phase", phase)
     connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
     change_counts = {}
 
@@ -460,3 +464,13 @@ def test_fact_scope_is_inactive_before_each_real_transaction_exit(transaction_po
         expected = 'completed' if outcome == 'commit' else 'rolled_back' if outcome == 'rollback' else 'unknown'
         assert result.kind == expected
     assert planned and all(operation_fact_boundary(connection) is None for connection in planned)
+
+
+@pytest.mark.parametrize('bounded', [False, True])
+def test_failure_starting_commit_keeps_unknown_without_rollback(transaction_ports, monkeypatch, bounded):
+    owned, active, observed, _ = transaction_ports
+    failure = sqlite3.OperationalError('释放事务事实失败')
+    monkeypatch.setattr(tx, 'discard_operation_facts', lambda connection: (_ for _ in ()).throw(failure))
+    result = tx.commit_operation(_one_event_command(active=active, bounded=bounded), new_operation_key(), owned)
+    assert result.kind == 'unknown' and result.error is failure
+    assert not any(sql in ('COMMIT', 'ROLLBACK') for sql, _ in observed)

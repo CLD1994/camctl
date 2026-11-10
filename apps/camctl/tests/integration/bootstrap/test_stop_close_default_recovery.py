@@ -10,7 +10,7 @@ from camctl.contracts.workflow_errors import registered_error
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..support.bootstrap_recovery import record_world, StorageGate, TransactionFault
 from .test_start_close_default_recovery import _rows

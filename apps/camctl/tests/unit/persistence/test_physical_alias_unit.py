@@ -175,7 +175,7 @@ def test_mismatch_finish_preserves_cancellation_and_unsettled_read(eligible, att
 def test_read_binding_classifies_before_any_driver_call(monkeypatch, current, conflict, expected):
     configuration = ModuleType("camctl.devices.drivers.hasselblad.configuration")
     configuration.read_camera_config = lambda declaration: SimpleNamespace(serial=current[0], product_id=current[1])
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     source = {"observer_action_id": 2, "source_action_id": 3}
     transaction.row_facts = lambda connection, table, identity: source if table == "device_files" else {"id": identity, "device_id": "old"}
     monkeypatch.setitem(sys.modules, configuration.__name__, configuration)
@@ -323,7 +323,7 @@ def test_device_source_rechecks_same_logical_held_identity(monkeypatch, blocked)
 def test_read_binding_rejects_old_logical_held_identity_before_any_driver_call(monkeypatch):
     configuration = ModuleType("camctl.devices.drivers.hasselblad.configuration")
     configuration.read_camera_config = lambda declaration: SimpleNamespace(serial="SERIAL", product_id=1)
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     source = {"observer_action_id": 2, "source_action_id": 3}
     transaction.row_facts = lambda connection, table, identity: source if table == "device_files" else {"id": identity, "device_id": "old"}
     target = ModuleType("camctl.persistence.repositories.availability_target")
@@ -404,7 +404,7 @@ def test_preparation_rechecks_original_check_and_settlement(monkeypatch, case, a
         activity["occupancy_state"] = 2 if case == "released_failed" else 1
     rows = {("operation_runs", 3): run, ("device_availability_checks", 9): check,
             ("device_activities", 4): activity, ("actions", 5): owner}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, ident: rows.get((table, ident))
     targets = ModuleType("camctl.persistence.repositories.availability_target")
     targets.iter_fixed_targets = lambda *args: iter(() if case == "missing_target" else [((1, 1, 4),)])
@@ -444,7 +444,7 @@ def test_preparation_rechecks_original_check_and_settlement(monkeypatch, case, a
 
 
 def test_saved_device_check_failure_keeps_original_identity_after_configuration_recovers(monkeypatch):
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     source = {"observer_action_id": 2, "source_action_id": 3}
     transaction.row_facts = lambda connection, table, ident: source if table == "device_files" else {"id": ident}
     finish = ModuleType("camctl.persistence.repositories.availability_wait_finish")

@@ -13,7 +13,7 @@ from camctl.persistence.repositories.capture import (
 )
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 from ..support.bootstrap_residual_recovery import residual_case
 from ..support.bootstrap_recovery import StorageGate, TransactionFault

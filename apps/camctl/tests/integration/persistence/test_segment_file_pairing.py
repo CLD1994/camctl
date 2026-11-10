@@ -17,7 +17,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.history.validators import EventContext
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import BoundedCommandPlan, commit_operation, row_facts
+from camctl.persistence.repositories.transactions import BoundedCommandPlan, commit_operation, row_facts
 from camctl.persistence.repositories import capture as capture_storage
 from .transaction_fixtures import capture_operation_command
 from camctl.persistence.repositories import result_pages
@@ -225,7 +225,7 @@ async def test_real_sql_proof_is_required_before_saving(tmp_path, case):
 @pytest.mark.parametrize('case', ['missing_index', 'binding', 'activity', 'physical_attempt', 'baseline', 'format'])
 async def test_independent_guard_rechecks_actual_proof_after_proposal(tmp_path, bounded, case):
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     owned, runtime, source, saved = await _world(tmp_path, [_entry('orphan.LRF')], independent_activity=True)
     try:
         changed = []
@@ -343,7 +343,7 @@ async def test_old_ownership_branch_cannot_use_new_page_method(tmp_path, bounded
 @pytest.mark.parametrize('bounded', [False, True])
 @pytest.mark.parametrize('fake_single_context', [False, True])
 async def test_real_legal_file_prefix_cannot_join_single_ownership_group(tmp_path, bounded, fake_single_context):
-    from camctl.persistence.transaction import CommandPlan, TransactionScope
+    from camctl.persistence.repositories.transactions import CommandPlan, TransactionScope
     from camctl.contracts.history_values import TransactionRange
     owned, runtime, _, saved = await _world(tmp_path, [_entry('orphan.LRF')])
     request, key = _command(runtime, saved), new_operation_key()

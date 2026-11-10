@@ -714,7 +714,7 @@ async def _advance_photo_copy_cleanup(cfg, owned, cleanup_state):
     from camctl.persistence.repositories.outputs import OutputsRepository
     from camctl.contracts.enums import enum_for
     from ..support.output_planning import capture_operation, EventSequence
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
 
     if cleanup_state == "completed":
         await _maintain(cfg, owned)
@@ -814,7 +814,7 @@ async def test_device_transaction_rejects_forged_partial_pair(tmp_path, monkeypa
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.runtime import OwnedConnection
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from ..support.output_planning import EventSequence, capture_operation
 
     cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device")

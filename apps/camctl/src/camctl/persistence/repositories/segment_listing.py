@@ -7,7 +7,7 @@ from camctl.capture.segment_models import (
 )
 from camctl.capture.segment_storage import StoredSegmentMember, document, decode_enum, key
 from camctl.contracts.json_values import parse_exact_json
-from camctl.persistence.transaction import row_facts, encode_json_value
+from camctl.persistence.repositories.transactions import row_facts, encode_json_value
 from camctl.persistence.segment_order import temporary_segment_index
 
 

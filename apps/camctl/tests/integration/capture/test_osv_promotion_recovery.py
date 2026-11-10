@@ -12,7 +12,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, FinishDisposition
 from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 from .test_osv_success_proof import alter_source_history
 from .test_output_promotion import _repaired_draft, promotion_environment, _successful_osv_repair

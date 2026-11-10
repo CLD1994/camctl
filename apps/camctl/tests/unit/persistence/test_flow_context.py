@@ -10,8 +10,8 @@ import pytest
 from camctl.operations.attempts import AttemptTarget, OperationKind, QueryPurpose
 from camctl.contracts import enums
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence import transaction
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories import transactions as transaction
+from camctl.persistence.repositories.transactions import TransactionError
 
 
 @pytest.fixture

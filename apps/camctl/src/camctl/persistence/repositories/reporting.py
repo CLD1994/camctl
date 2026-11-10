@@ -9,7 +9,7 @@ from camctl.contracts.values import ConsistencyError, OperationKey, ObjectId, MA
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.contracts.enums import decode_member, load_registry as load_enum_registry
 from camctl.contracts.json_values import parse_exact_json
-from camctl.persistence.transaction import row_facts, saved_transaction_events
+from camctl.persistence.repositories.transactions import row_facts, saved_transaction_events
 from camctl.history.events import load_event_registry
 from camctl.reporting.ack import AckFacts, AckReport, SyncResponsibility
 from camctl.reporting.models import FrozenReport, ReportBytes, ReportOpportunity, ReportPublication, ReportStatus, validate_report_management

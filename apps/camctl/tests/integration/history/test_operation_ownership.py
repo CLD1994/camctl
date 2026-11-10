@@ -26,7 +26,7 @@ from camctl.persistence.repositories.history import SqliteSnapshotStore
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from ..persistence.test_motor_transactions import NOW, owned
 from .test_object_closure import _business_rows, _history

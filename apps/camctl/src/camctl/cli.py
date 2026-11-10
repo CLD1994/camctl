@@ -186,7 +186,7 @@ def encode_describe_document(document: Mapping[str, Any]) -> bytes:
     能力说明中的参数规则可包含精确 Decimal（倍数、默认值），编码
     使用精确数值写法，不经过 float。
     """
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
 
     validate_document(_CAPABILITIES_SCHEMA, document)
     encoded = encode_json_value(document)

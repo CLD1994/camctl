@@ -8,7 +8,7 @@ import pytest
 from camctl.capture.models import ActivityCapabilities, activity_capabilities
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.repositories import scheduling
-from camctl.persistence.transaction import TransactionError, TransactionScope
+from camctl.persistence.repositories.transactions import TransactionError, TransactionScope
 from camctl.persistence.repositories.capture_facts import StartFacts
 from camctl.persistence.repositories.capture_facts import unstarted_events
 from camctl.contracts.workflow_errors import validate_error_details

@@ -10,7 +10,7 @@ from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
 from camctl.history.reads import AdmissionSourceReadScope
 from camctl.outputs.sources import _CAPTURE_TYPES, read_source_spec
-from camctl.persistence.transaction import encode_json_value, row_facts
+from camctl.persistence.repositories.transactions import encode_json_value, row_facts
 
 _ACTION = load_event_registry()['events']['ACTION_ADMITTED']['id']
 _SOURCE = load_event_registry()['events']['SOURCE_RESOLVED']['id']

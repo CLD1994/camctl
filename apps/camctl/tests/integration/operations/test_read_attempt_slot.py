@@ -12,7 +12,7 @@ from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarg
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionError, commit_operation
+from camctl.persistence.repositories.transactions import TransactionError, commit_operation
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards

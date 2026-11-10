@@ -49,7 +49,7 @@ from camctl.persistence.repositories.segment_queries import (
     settle_queried_item,
 )
 from camctl.persistence.repositories.segment_selections import is_segmented_source
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 @dataclass

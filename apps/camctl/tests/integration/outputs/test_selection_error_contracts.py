@@ -11,7 +11,7 @@ from camctl.contracts.workflow_errors import item_error_id, registered_error_spe
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.outputs import FixSelection, load_selection_facts
-from camctl.persistence.transaction import commit_operation, row_facts
+from camctl.persistence.repositories.transactions import commit_operation, row_facts
 from camctl.history.validators import EventValidationError
 from camctl.history.decoding import decode_event_row
 from ..support.output_planning import EventSequence, capture_operation, proposal_state

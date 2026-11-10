@@ -84,7 +84,7 @@ def test_forward_update_uses_snapshot_null_and_only_event_interval(monkeypatch, 
 
 
 def test_forward_create_uses_original_event_and_authoritative_derived_methods(monkeypatch):
-    from camctl.persistence import transaction
+    from camctl.persistence.repositories import transactions as transaction
     rows = {}
     handle = _forward_handle(monkeypatch, rows)
     monkeypatch.setattr(transaction, 'load_enum_registry', create_autospec(
@@ -102,7 +102,7 @@ def test_forward_create_uses_original_event_and_authoritative_derived_methods(mo
 
 
 def test_forward_creates_member_and_scope_from_same_original_event(monkeypatch):
-    from camctl.persistence import transaction
+    from camctl.persistence.repositories import transactions as transaction
     rows = {}
     after = {
         'segment_members': {'set_id': 4, 'file_id': 7, 'created_event_id': 41},

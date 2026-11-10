@@ -19,7 +19,7 @@ from camctl.history.reads import BaselineRangeRead
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.persistence.fact_reads import read_event, read_events
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (CommandPlan, TransactionError, event_envelope,
+from camctl.persistence.repositories.transactions import (CommandPlan, TransactionError, event_envelope,
     read_transaction_range, row_facts, saved_transaction_events, update_change)
 
 _EVENT = load_event_registry()["events"]["BASELINE_CHUNK"]

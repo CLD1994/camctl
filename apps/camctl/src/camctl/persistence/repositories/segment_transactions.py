@@ -27,7 +27,7 @@ from camctl.history.reads import PlanReadScope, ReadCoverage
 from camctl.history.validators import EventContext
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.fact_reads import opened_operation_fact_scope
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     BoundedCommandPlan, CommandPlan, TransactionError, commit_operation, row_facts,
     row_change, update_change, event_envelope, next_row_id, read_transaction_range,
     read_saved_transaction_page,

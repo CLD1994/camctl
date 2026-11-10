@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from camctl.contracts.enums import enum_for
 from camctl.devices.start_entry import is_hasselblad_photo, entry_from_rows, EntryPhase
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.transaction import event_envelope, row_facts, update_change
+from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
 
 _DISPATCH = enum_for("device_activities.dispatch_state")
 _ATTEMPT = enum_for("operation_attempts.status")

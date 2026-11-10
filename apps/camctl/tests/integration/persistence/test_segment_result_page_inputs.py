@@ -19,7 +19,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, file_discovery_row
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories import capture as capture_repository
-from camctl.persistence.transaction import (BoundedCommandPlan, CommandPlan,
+from camctl.persistence.repositories.transactions import (BoundedCommandPlan, CommandPlan,
     commit_operation, event_envelope, next_row_id, row_change, row_facts)
 from camctl.history.reads import ResultPageWriteScope
 from camctl.capture.files import FileObservationSave, file_identity_key

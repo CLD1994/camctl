@@ -8,7 +8,7 @@ import pytest
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
 from camctl.history.events import EventEnvelope
-from camctl.persistence import transaction
+from camctl.persistence import transaction_data as transaction
 
 
 @pytest.fixture

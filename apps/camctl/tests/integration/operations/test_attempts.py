@@ -47,7 +47,7 @@ from camctl.persistence.repositories.operations import (
     register_operation_guards,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 from ..persistence.test_runtime import _create_valid_database
 

@@ -52,7 +52,7 @@ async def _baseline_end_world(tmp_path,*,unconfirmed=False,success=False,early_b
 def _save_baseline_end(owned,runtime,action_id,*,unconfirmed=False,success=False,early_boundary=False):
     activity=owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?',
         (action_id,)).fetchone()[0]
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     action=row_facts(owned.connection,"actions",action_id)
     request=BaselineReadIntent(action_id,activity,DeviceBinding(action['device_id'],action['driver_id']),
         ('/DCIM',),None,Decimal('1.25'),runtime.capture.baseline_ref(activity,owned),1,
@@ -116,7 +116,7 @@ async def test_decision_cannot_share_actual_transaction_with_another_legal_decis
     from camctl.persistence.repositories.scheduling import ObserveWindowRequest,SchedulingRepository,StartActionRequest
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.transaction import BoundedCommandPlan,TransactionScope,commit_operation
+    from camctl.persistence.repositories.transactions import BoundedCommandPlan,TransactionScope,commit_operation
     from .test_segment_transaction_batches import _fingerprint
     class Catalog(_BaselineCatalog):
         def device_exists(self,device_id):return device_id in ('cam-1','cam-2')
@@ -174,7 +174,7 @@ async def test_decision_cannot_share_actual_transaction_with_another_legal_decis
 async def test_decision_guard_rechecks_actual_source_and_fields(tmp_path,bounded,damage):
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
+    from camctl.persistence.repositories.transactions import BoundedCommandPlan,commit_operation
     owned,runtime,repository,ref,actual=await _baseline_end_world(tmp_path)
     try:
         request=models.ResultCheckConclusionSave(ref,models.ResultCheckEndReason.NO_RESULT_WORK,
@@ -275,7 +275,7 @@ async def test_decision_commit_unknown_recovers_original_only_after_save_closes(
     import sqlite3
     from pathlib import Path
     from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
-    from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
+    from camctl.persistence.repositories.transactions import BoundedCommandPlan,commit_operation
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.persistence.repositories import segment_check_conclusions as storage

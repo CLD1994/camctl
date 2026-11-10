@@ -9,7 +9,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.replay import EntityImage, ReplayError, apply_forward, apply_reverse
 from camctl.history.validators import ValidatedEvent
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import PlanCreateCommand, PlanStartCommand, _open, plan_guards  # noqa: F401

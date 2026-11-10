@@ -21,7 +21,7 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.result_sources import ResultSource, ResultSourceKind
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 from support.capture_database import capture_database
 
 from .test_result_page_saves import _request

@@ -10,7 +10,7 @@ from camctl.contracts.json_values import json_equal,parse_exact_json
 from camctl.contracts.values import ConsistencyError,OperationKey
 from camctl.history.events import load_event_registry
 from camctl.history.reads import ResultCheckWriteScope,SegmentReadScope
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,TransactionScope,event_envelope,next_row_id,row_change,row_facts,saved_transaction_events,update_change,
     _read_sql_value)
 from .segment_result_sets import _boundary,_one,_read_transaction,read_result_set
@@ -168,7 +168,7 @@ def no_result_preparation_failure(db, setrow, anchor):
             or attempt["result_event_id"] != anchor or attempt["error_json"] is None):
         raise ConsistencyError("准备决定没有同票真实失败或返回未知")
     from camctl.history.decoding import decode_event_row
-    from camctl.persistence.transaction import read_transaction_range
+    from camctl.persistence.repositories.transactions import read_transaction_range
     from .result_pages import _COLUMNS
 
     raw = _one(db, f"SELECT {_COLUMNS} FROM history_events WHERE id=?", (anchor,))

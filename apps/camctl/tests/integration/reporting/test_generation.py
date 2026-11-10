@@ -37,7 +37,7 @@ from camctl.persistence.repositories.outputs import (
     StartObtainAction,
     load_selection_facts,
 )
-from camctl.persistence.transaction import encode_json_value, row_facts
+from camctl.persistence.repositories.transactions import encode_json_value, row_facts
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file

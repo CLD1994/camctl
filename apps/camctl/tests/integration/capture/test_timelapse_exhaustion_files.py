@@ -18,7 +18,7 @@ from camctl.operations.models import (
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from .result_consumer_fixtures import result_driver
 from ..support.result_cases import result_case, result_case_for

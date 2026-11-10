@@ -25,7 +25,7 @@ from camctl.persistence.repositories.capture import (
     CaptureRepository, FinishCapture, register_capture_guards,
 )
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.transaction import TransactionScope
+from camctl.persistence.repositories.transactions import TransactionScope
 from camctl.history.changes import event_report_targets
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 

@@ -265,7 +265,7 @@ def read_candidates(connection, scope, cursor=None, *, limit, _basis_cache=None,
             try:
                 connection.execute("ROLLBACK")
             except BaseException as rollback_error:
-                from camctl.persistence.transaction import _attach_control_receipt
+                from camctl.persistence.repositories.transactions import _attach_control_receipt
                 _attach_control_receipt(error, "unknown", (rollback_error,))
         raise
 

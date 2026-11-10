@@ -3,7 +3,7 @@
 import pytest
 
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 from .test_read_default_consumers import _snapshot

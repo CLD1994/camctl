@@ -53,7 +53,7 @@ async def _settle(future):
 
 def _attach_actual(error, outcome):
     _attach_db_outcome(error, outcome)
-    from camctl.persistence.transaction import _attach_write_receipt, write_receipt_for
+    from camctl.persistence.atomic import _attach_write_receipt, write_receipt_for
     for original in (outcome.control, outcome.error):
         if original is not None and (receipt := write_receipt_for(original)) is not None:
             _attach_write_receipt(error, receipt)

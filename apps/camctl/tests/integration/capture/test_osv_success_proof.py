@@ -8,7 +8,7 @@ import pytest
 from camctl.capture.media_flow import run_recording_media, load_processing_status
 from camctl.capture.processing import RepairSuccess, RepairResultSave, RepairOutcome
 from camctl.contracts.json_values import parse_exact_json
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 from camctl.contracts.values import new_operation_key
 from camctl.host_files.media import MediaProbe
 from camctl.persistence.models import DbOutcomeKind

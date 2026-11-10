@@ -210,7 +210,7 @@ async def test_full_second_pass_and_assessment_are_required(tmp_path):
 from camctl.history.events import load_event_registry
 from camctl.operations.models import AttemptTicket
 from camctl.history.reads import SegmentReadScope
-from camctl.persistence.transaction import CommandPlan,commit_operation,row_change,event_envelope,next_row_id
+from camctl.persistence.repositories.transactions import CommandPlan,commit_operation,row_change,event_envelope,next_row_id
 
 
 @pytest.mark.asyncio
@@ -219,7 +219,7 @@ async def test_direct_event_cannot_forge_original_set_identity(tmp_path):
     try:
         other=replace(ref,version=2)
         original=owned.connection.execute('SELECT id FROM segment_sets').fetchone()[0]
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         row=row_facts(owned.connection,'segment_sets',original)
         values={k:v for k,v in row.items() if k!='id'}
         values.update(version=2,target_duration_ms=1)
@@ -453,7 +453,7 @@ def _completion_command(owned,ref,members,at,key,*,mode='valid',drafts=None,batc
     from camctl.outputs.catalog import OutputKind
     from camctl.persistence.repositories.capture import CaptureResult
     from camctl.persistence.repositories.capture import CaptureRepository
-    from camctl.persistence.transaction import row_change
+    from camctl.persistence.repositories.transactions import row_change
     from camctl.history.reads import PlanReadScope
     from ..support.output_planning import capture_operation,EventSequence
     from .test_segment_transaction_batches import _request_for
@@ -521,7 +521,7 @@ def _completion_command(owned,ref,members,at,key,*,mode='valid',drafts=None,batc
 @pytest.mark.asyncio
 @pytest.mark.parametrize('scope_state',list(DefaultScopeState))
 async def test_unique_active_set_is_composed_with_terminal_and_outputs(tmp_path,scope_state):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,scope_state)
     try:
         key=new_operation_key()
@@ -540,7 +540,7 @@ async def test_unique_active_set_is_composed_with_terminal_and_outputs(tmp_path,
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode',['omit_scope','wrong_identity','omit_outputs'])
 async def test_activation_refuses_incomplete_or_wrong_identity_scope(tmp_path,mode):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     try:
         key=new_operation_key()
@@ -576,7 +576,7 @@ async def test_terminal_action_cannot_be_activated_later_or_again_with_new_key(t
     from camctl.persistence.repositories.capture import CaptureRepository,FinishCapture
     from camctl.outputs.catalog import OutputDraft,OutputKind,FileReference,OutputCatalogFacts
     from camctl.persistence.repositories.segments import segment_event,segment_activation_rows
-    from camctl.persistence.transaction import commit_operation,CommandPlan,row_facts
+    from camctl.persistence.repositories.transactions import commit_operation,CommandPlan,row_facts
     from camctl.history.reads import SegmentReadScope
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.UNKNOWN)
     try:
@@ -601,7 +601,7 @@ async def test_terminal_action_cannot_be_activated_later_or_again_with_new_key(t
 @pytest.mark.asyncio
 async def test_multiple_versions_never_replace_the_explicit_active_reference(tmp_path):
     from camctl.persistence.repositories.segments import iter_segment_members,segment_event
-    from camctl.persistence.transaction import commit_operation,CommandPlan,update_change,row_facts
+    from camctl.persistence.repositories.transactions import commit_operation,CommandPlan,update_change,row_facts
     from camctl.history.reads import SegmentReadScope
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     try:
@@ -637,7 +637,7 @@ async def test_multiple_versions_never_replace_the_explicit_active_reference(tmp
 
 @pytest.mark.asyncio
 async def test_unpublished_version_under_failed_source_does_not_advance_public_watermark(tmp_path):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.EMPTY)
     try:
         key=new_operation_key()
@@ -653,7 +653,7 @@ async def test_unpublished_version_under_failed_source_does_not_advance_public_w
 
 @pytest.mark.asyncio
 async def test_publish_without_same_transaction_marker_rolls_back(tmp_path):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     try:
         before=_publication_snapshot(owned)
@@ -747,7 +747,7 @@ async def _preview_world(tmp_path, *, original_sizes=(10,0), paired_index=2, pre
 
 @pytest.mark.asyncio
 async def test_preview_paired_to_zero_tail_is_optional_and_does_not_block_completion(tmp_path):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members,files,assessment=await _preview_world(tmp_path)
     try:
         assert assessment.status is SegmentAssessmentStatus.SUCCEEDED
@@ -763,8 +763,8 @@ async def test_preview_paired_to_zero_tail_is_optional_and_does_not_block_comple
 
 
 def _tampered_completion(owned,ref,members,at,key,*,tamper='valid',read_scope='plan',bounded_command=None,source_command=None):
-    from camctl.persistence.transaction import TransactionScope
-    from camctl.persistence.transaction import update_change
+    from camctl.persistence.repositories.transactions import TransactionScope
+    from camctl.persistence.repositories.transactions import update_change
     from camctl.history.reads import PlanReadScope
     from camctl.history.events import load_event_registry
     source_command=source_command or _completion_command(owned,ref,members,at,key)
@@ -791,7 +791,7 @@ def _tampered_completion(owned,ref,members,at,key,*,tamper='valid',read_scope='p
                 events=[event for event in events if event.event_type!=load_event_registry()['events']['ACTION_FINISHED']['id']]
             elif tamper=='unexpected_scope':
                 from camctl.persistence.repositories.segments import segment_event
-                from camctl.persistence.transaction import next_row_id
+                from camctl.persistence.repositories.transactions import next_row_id
                 setrow=SegmentRepository().read_set(ref,scope)
                 member=SegmentRepository().read_members(ref,None,1,scope).items[0]
                 identity=next_row_id(scope.connection,'segment_scope_members')
@@ -820,7 +820,7 @@ def _tampered_completion(owned,ref,members,at,key,*,tamper='valid',read_scope='p
 
 
 def _commit_marker_plan(owned,ref,members,at,key,read_scope,monkeypatch,*,tamper='valid'):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     if read_scope!='bounded':
         return commit_operation(_tampered_completion(owned,ref,members,at,key,tamper=tamper,read_scope=read_scope),key,owned)
     from camctl.capture.media import RecordingFailure
@@ -849,7 +849,7 @@ def _commit_marker_plan(owned,ref,members,at,key,read_scope,monkeypatch,*,tamper
 @pytest.mark.parametrize('read_scope',['plan','bounded'])
 @pytest.mark.parametrize('tamper',['omit_marker','fake_final_marker','wrong_action','wrong_version','wrong_scan','wrong_set','wrong_event_type','duplicate_marker','marker_points_to_publish','omit_terminal'])
 async def test_marker_proof_rejects_tampered_direct_transaction_and_preserves_all_state(tmp_path,read_scope,tamper,monkeypatch):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     try:
         before=_publication_snapshot(owned);key=new_operation_key()
@@ -863,7 +863,7 @@ async def test_marker_proof_rejects_tampered_direct_transaction_and_preserves_al
 @pytest.mark.parametrize('read_scope',['plan','bounded','cross_plan'])
 @pytest.mark.parametrize('scope_state',list(DefaultScopeState))
 async def test_marker_proof_validates_same_reference_through_transaction_entrypoints(tmp_path,read_scope,scope_state,monkeypatch):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,scope_state)
     try:
         before=_publication_snapshot(owned);key=new_operation_key()
@@ -894,7 +894,7 @@ def _candidate_drafts(repo,ref,owned,*,batch=2):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('case', ['valid','tail_zero','non_tail_zero','original_size_unknown','original_completion_unknown','original_incomplete','original_ownership_unknown','preview_zero','preview_completion_unknown','preview_incomplete','preview_unpaired','preview_pair_unknown'])
 async def test_frozen_preview_candidates_and_publication_use_identical_eligibility(tmp_path,case):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from camctl.outputs.catalog import OutputKind
     arguments={'original_sizes':(10,10)}
     if case=='tail_zero':arguments['original_sizes']=(10,0)
@@ -929,7 +929,7 @@ async def test_frozen_preview_candidates_and_publication_use_identical_eligibili
 
 @pytest.mark.asyncio
 async def test_preview_candidate_pair_and_original_cross_page_and_batch_boundaries(tmp_path):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members,files,assessment=await _preview_world(tmp_path,original_sizes=(10,)*129,paired_index=128)
     try:
         drafts=_candidate_drafts(repo,ref,owned,batch=7)
@@ -947,7 +947,7 @@ async def test_preview_candidate_pair_and_original_cross_page_and_batch_boundari
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode',['omit_preview','duplicate_preview','omit_origin','wrong_origin','extra_zero_preview','extra_frozen_unknown_original'])
 async def test_preview_output_and_origin_identity_errors_roll_back_entire_completion(tmp_path,mode):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from camctl.outputs.catalog import OutputDraft,FileReference,OutputKind
     arguments={'original_sizes':(10,10)}
     if mode=='extra_zero_preview':arguments['preview_size']=0
@@ -993,7 +993,7 @@ async def test_candidate_cursor_can_advance_past_empty_page_and_point_reads_keep
 @pytest.mark.asyncio
 @pytest.mark.parametrize('preview_size',[10,0])
 async def test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped(tmp_path,preview_size):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from camctl.persistence.repositories.segments import segment_output_candidate
     owned,runtime,repo,ref,members,files,assessment=await _preview_world(tmp_path,exclude_paired_original=True,preview_size=preview_size)
     try:
@@ -1014,7 +1014,7 @@ async def test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_sk
 @pytest.mark.asyncio
 @pytest.mark.parametrize('scope_state',[DefaultScopeState.UNKNOWN,DefaultScopeState.EMPTY])
 async def test_no_publish_members_can_be_invented_for_unknown_or_empty_scope(tmp_path,scope_state):
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,scope_state)
     try:
         before=_publication_snapshot(owned);key=new_operation_key()

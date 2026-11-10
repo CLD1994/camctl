@@ -37,7 +37,7 @@ from camctl.logging_runtime.copies import (
 from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.persistence.models import DbOutcomeKind, DirectoryBindingError
 from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
-from camctl.persistence.transaction import write_receipt_for
+from camctl.persistence.repositories.transactions import write_receipt_for
 from camctl.session.clock import (
     ClockBecameUntrusted,
     ClockCheckInput,

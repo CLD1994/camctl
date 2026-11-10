@@ -6,7 +6,8 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.history.events import EventEnvelope, RowChange, RowImage
-from camctl.persistence import transaction
+from camctl.persistence.repositories import transactions as transaction
+from camctl.persistence import transaction_data
 
 
 def _write(monkeypatch, raw):
@@ -14,8 +15,8 @@ def _write(monkeypatch, raw):
     cursor.fetchone.return_value = (raw,)
     connection = create_autospec(sqlite3.Connection, instance=True)
     connection.execute.return_value = cursor
-    monkeypatch.setattr(transaction, "json_columns", create_autospec(
-        transaction.json_columns, return_value={"sample": frozenset({"payload_json"})}))
+    monkeypatch.setattr(transaction_data, "json_columns", create_autospec(
+        transaction_data.json_columns, return_value={"sample": frozenset({"payload_json"})}))
     event = EventEnvelope(1, 1, 1, 1, 0, 1, None, 1, {}, (
         RowChange("sample", 7,
                   RowImage(True, {"payload_json": {"count": 1, "ready": True}}),

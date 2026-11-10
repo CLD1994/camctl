@@ -15,7 +15,7 @@ from .segment_result_sets import _one, _read_transaction
 
 def segment_start_from_set(connection, setrow):
     """逐文件读取原 H0，不用合格产物过滤起点，也不借旧扫描补当前扫描。"""
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
 
     unknown = SegmentStart()
     if setrow["current_attempt_id"] is None or setrow["run_id"] is None:

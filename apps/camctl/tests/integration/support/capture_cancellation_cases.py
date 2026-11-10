@@ -251,7 +251,7 @@ def finite_end_proposal(world, *, before_event=None):
     from camctl.persistence.fact_reads import EVENT_COLUMNS
     from camctl.persistence.repositories.capture import CaptureRepository
     from camctl.persistence.repositories.history import HistoryRepository
-    from camctl.persistence.transaction import event_envelope, update_change
+    from camctl.persistence.repositories.transactions import event_envelope, update_change
     from .result_cases import current_result_ticket
 
     connection = world.owned.connection
@@ -376,7 +376,7 @@ async def store_result_end(world, *, finalized=False):
 def output_set_proposal(world):
     """完整集合的独立静态提案，当前文件来源仍由正式有限读取端口核对。"""
     from camctl.history.events import load_event_registry
-    from camctl.persistence.transaction import event_envelope, update_change
+    from camctl.persistence.repositories.transactions import event_envelope, update_change
     template, context = finite_end_proposal(world)
     registry = load_event_registry()["events"]["RESULT_SET_CONFIRMED"]
     attempt, = (row for row in context.state_rows["operation_attempts"].values()

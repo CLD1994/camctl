@@ -15,7 +15,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import business_columns, HistoryEventError, load_event_registry
 from camctl.history.replay import ReplayError, reverse_row_values
-from camctl.persistence.transaction import read_transaction_range
+from camctl.persistence.history_transactions import read_transaction_range
 
 _BATCH_LIMIT = 128
 

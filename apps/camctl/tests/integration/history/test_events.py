@@ -18,7 +18,7 @@ from camctl.history.decoding import decode_event_row
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-from camctl.persistence.transaction import CommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
 
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import PlanCreateCommand, plan_guards

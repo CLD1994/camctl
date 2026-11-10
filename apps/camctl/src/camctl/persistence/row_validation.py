@@ -18,7 +18,7 @@ from typing import Any, Mapping
 
 from camctl.contracts.json_values import is_json_integer
 from camctl.history.events import SCHEMA_RESOURCES, load_event_registry
-from camctl.persistence.transaction import encode_json_value, json_columns
+from camctl.persistence.transaction_data import encode_json_value, json_columns
 from camctl.persistence.derived_storage import configure_derived_connection
 from camctl.resources import resource_bytes
 

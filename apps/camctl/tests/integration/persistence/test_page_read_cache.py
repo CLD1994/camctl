@@ -7,7 +7,7 @@ import pytest
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.repositories import capture as capture_repository, result_pages
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .result_page_fixtures import begin_result_check
 from .transaction_fixtures import capture_operation_command
