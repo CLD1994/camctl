@@ -4,7 +4,8 @@ from decimal import Decimal, InvalidOperation
 import uuid
 from typing import Mapping
 
-from camctl.capture.software_recovery import RecoveryPhase, recovery_blocker, recovery_state
+from camctl.capture.recovery_types import RecoveryPhase
+from camctl.capture.software_recovery import recovery_blocker, recovery_state
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.enums import enum_for

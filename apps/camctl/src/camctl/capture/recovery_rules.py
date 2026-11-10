@@ -1,6 +1,8 @@
 """软件恢复责任的阶段和可靠结束规则。"""
 
-from camctl.capture.software_recovery import RecoveryPhase
+from collections.abc import Mapping
+
+from camctl.capture.recovery_types import RecoveryPhase
 from camctl.contracts.json_values import json_equal
 
 _IMMUTABLE = ("version", "origin_trigger_id", "device_id", "driver_id", "serial", "fingerprint",
