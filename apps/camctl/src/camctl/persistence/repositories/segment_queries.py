@@ -11,7 +11,8 @@ from camctl.history.validators import EventValidationError
 from camctl.operations.result_format import read_result_document
 from camctl.outputs.segment_query_rules import (
     queried_output_values, queried_item_values, require_query_output_projection,
-    require_query_resolution,
+    require_query_resolution, query_presence_from_outcome, require_query_target,
+    require_query_observable_output, require_query_observed_file,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.transactions import (
@@ -176,19 +177,8 @@ def _query_presence(connection, item_id, result_event_id):
         parse_exact_json(attempt[4]),
         None if attempt[5] is None else parse_exact_json(attempt[5]),
     )
-    observations = [
-        value
-        for value in outcome.observations
-        if value.type == "file_presence" and value.version == 2
-    ]
-    if len(observations) > 1:
-        raise ConsistencyError("QUERY v2 结果重复报告在场事实")
-    if observations:
-        observation = observations[0]
-        if observation.data.get("obtain_item_id") != str(item_id):
-            raise ConsistencyError("QUERY v2 观察改变原取回项身份")
-        return observation.data["present"], run_id, owner_id, outcome, attempt
-    return None, run_id, owner_id, outcome, attempt
+    present = query_presence_from_outcome(outcome, item_id)
+    return present, run_id, owner_id, outcome, attempt
 
 
 def _segment_observation_guard(event, context):
@@ -262,18 +252,9 @@ def _facts(connection, item_id, saved):
     output_id = item["requested_output_id"]
     output = _at(connection, "outputs", output_id, saved, ("output", output_id))
     source = row_facts(connection, "actions", source_id)
-    if (
-        item["status"] != 1
-        or item["basis"] != 5
-        or item["output_id"] is not None
-        or selection["status"] != 2
-        or selection["error_code"] is not None
-        or owner["status"] != 2
-        or owner["cancel_requested"]
-        or output is None
-        or output["source_action_id"] != source_id
-        or not is_segmented_source(connection, source["id"])
-    ):
+    require_query_target(item=item, selection=selection, owner=owner,
+                         output=output, source_id=source_id)
+    if not is_segmented_source(connection, source["id"]):
         raise ConsistencyError("QUERY 结算要求执行中显式未解析项和原分段产物")
     state = {
         "actions": {owner_id: owner, source_id: source},
@@ -333,15 +314,9 @@ class _ObserveCommand:
             raise ConsistencyError("产物观察申请与 QUERY v2 原结果不同")
         item, output, owner, state = _facts(c, r.item_id, transaction)
         output_id = output["id"]
-        if (
-            output["device_file_id"] is None
-            or output["availability"] != 5
-            or output["cleanup_status"] not in (1, 6)
-        ):
-            raise ConsistencyError("只有未知且无清理限制的显式设备产物可应用 QUERY v2")
+        require_query_observable_output(output)
         file = state["device_files"][output["device_file_id"]]
-        if file is None or file["presence_state"] != (2 if present else 3):
-            raise ConsistencyError("文件存在性事实尚未先行保存")
+        require_query_observed_file(file, present)
         after = queried_output_values(present, output_id)
         row = update_change(
             "outputs",

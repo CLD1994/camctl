@@ -6,8 +6,11 @@ from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.outputs.segment_query_rules import (
     queried_item_values, queried_output_values, require_query_output_projection,
-    require_query_resolution,
+    require_query_resolution, query_presence_from_outcome, require_query_target,
+    require_query_observable_output, require_query_observed_file,
 )
+from camctl.devices.evidence import DeviceObservation
+from camctl.operations.models import CallOutcome
 
 
 @pytest.mark.parametrize('present', [True, False])
@@ -66,3 +69,40 @@ def test_unavailable_without_query_must_preserve_saved_output_state():
         queried_item_values(output=output, present=None, error_code=code,
                             error_details={'output_id': '17', 'availability': 'missing'},
                             result_event_id=None)
+
+
+def test_presence_observation_is_unique_and_bound_to_the_original_item():
+    actual = DeviceObservation('file_presence', 2, {'obtain_item_id': '17', 'present': False})
+    assert query_presence_from_outcome(CallOutcome(observations=(actual,)), 17) is False
+    assert query_presence_from_outcome(CallOutcome(), 17) is None
+    with pytest.raises(ConsistencyError, match='重复'):
+        query_presence_from_outcome(CallOutcome(observations=(actual, actual)), 17)
+    with pytest.raises(ConsistencyError, match='身份'):
+        query_presence_from_outcome(CallOutcome(observations=(actual,)), 18)
+
+
+def test_query_target_requires_original_unresolved_item_and_active_owner():
+    item = {'status': 1, 'basis': 5, 'output_id': None}
+    selection = {'status': 2, 'error_code': None}
+    owner = {'status': 2, 'cancel_requested': 0}
+    output = {'source_action_id': 4}
+    require_query_target(item=item, selection=selection, owner=owner, output=output, source_id=4)
+    for changes in ({'status': 3}, {'basis': 1}, {'output_id': 9}):
+        with pytest.raises(ConsistencyError):
+            require_query_target(item=item | changes, selection=selection, owner=owner,
+                                 output=output, source_id=4)
+    with pytest.raises(ConsistencyError):
+        require_query_target(item=item, selection=selection, owner=owner | {'cancel_requested': 1},
+                             output=output, source_id=4)
+    with pytest.raises(ConsistencyError):
+        require_query_target(item=item, selection=selection, owner=owner, output=output, source_id=5)
+
+
+def test_observation_requires_unknown_unrestricted_output_and_saved_file():
+    output = {'device_file_id': 9, 'availability': 5, 'cleanup_status': 1}
+    require_query_observable_output(output)
+    require_query_observed_file({'presence_state': 2}, True)
+    with pytest.raises(ConsistencyError):
+        require_query_observable_output(output | {'cleanup_status': 2})
+    with pytest.raises(ConsistencyError):
+        require_query_observed_file({'presence_state': 3}, True)

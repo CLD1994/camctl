@@ -10,6 +10,42 @@ _UNCONFIRMED = item_error_id('obtain_items', 'source_file_unconfirmed')
 _BINDING = item_error_id('obtain_items', 'device_binding_unavailable')
 
 
+def query_presence_from_outcome(outcome, item_id):
+    """从一次实际调用结果读取与原取回项绑定的唯一 v2 观察。"""
+    observations = [value for value in outcome.observations
+                    if value.type == 'file_presence' and value.version == 2]
+    if len(observations) > 1:
+        raise ConsistencyError('QUERY v2 结果重复报告在场事实')
+    if observations:
+        observation = observations[0]
+        if observation.data.get('obtain_item_id') != str(item_id):
+            raise ConsistencyError('QUERY v2 观察改变原取回项身份')
+        return observation.data['present']
+    return None
+
+
+def require_query_target(*, item, selection, owner, output, source_id):
+    """只有执行中的显式未解析项及其原产物可以进行查询结算。"""
+    if (item['status'] != 1 or item['basis'] != 5 or item['output_id'] is not None
+            or selection['status'] != 2 or selection['error_code'] is not None
+            or owner['status'] != 2 or owner['cancel_requested']
+            or output is None or output['source_action_id'] != source_id):
+        raise ConsistencyError('QUERY 结算要求执行中显式未解析项和原分段产物')
+
+
+def require_query_observable_output(output):
+    """实际查询只应用于未知且没有清理限制的设备产物。"""
+    if (output['device_file_id'] is None or output['availability'] != 5
+            or output['cleanup_status'] not in (1, 6)):
+        raise ConsistencyError('只有未知且无清理限制的显式设备产物可应用 QUERY v2')
+
+
+def require_query_observed_file(file, present):
+    """产物变化必须跟随同一在场结果的实际文件事实。"""
+    if file is None or file['presence_state'] != (2 if present else 3):
+        raise ConsistencyError('文件存在性事实尚未先行保存')
+
+
 def queried_output_values(present, output_id):
     """根据真实 QUERY 在场结果生成产物可用状态及错误事实。"""
     return {
