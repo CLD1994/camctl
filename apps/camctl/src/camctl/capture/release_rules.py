@@ -39,4 +39,3 @@ def occupancy_release_allowed(facts: Mapping[str, Any], *, unstarted: bool = Fal
     return (preparation_calls_resolved and facts["occupancy_state"] == 1 and release_basis_holds(facts)
             and (facts["ownership_mode"] != 2 or (unstarted and preparation_resolved)
                  or output_scope_resolved(facts)))
-

@@ -278,5 +278,3 @@ def _host_photo_registered_pair(
                      if values.get("output_id") == preview_id]
     if original_links or len(preview_links) != 1 or preview_links[0].get("original_output_id") != original_id:
         raise _HostPhotoPairError("正式预览必须唯一关联同动作正式原图")
-
-
