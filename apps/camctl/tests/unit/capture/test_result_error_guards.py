@@ -1,6 +1,7 @@
 """活动与结果守卫核实际保存值；公共错误资源由内存替身提供。"""
 
 from copy import deepcopy
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -8,10 +9,12 @@ import pytest
 from camctl.contracts import schemas, workflow_errors
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.schemas import SchemaRuleError
-from camctl.history import validators
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventContext, EventValidationError
-from camctl.persistence.repositories.capture import register_capture_guards
+from camctl.persistence.repositories.validation import build_business_rules
+from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+from camctl.persistence.repositories.preparation import PreparationReads
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
 
 from .test_result_error_contract import error_resources
 
@@ -30,14 +33,45 @@ _BRANCHES = ["create", "observe", "release", "complete", "unsatisfied",
              "unconfirmed", "emergency"]
 
 
+class _Cursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return self.rows
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def close(self):
+        pass
+
+
+class _CreateFacts:
+    """内存替身提供当前版本、空批次和没有在途设备检查的事实。"""
+
+    def execute(self, sql, parameters=()):
+        if "database_metadata" in sql and "format_version" in sql:
+            return _Cursor([(CURRENT_FORMAT_VERSION,)])
+        if "device_file_batches" in sql or "device_availability_checks" in sql:
+            return _Cursor([])
+        raise AssertionError(f"未预期的读取: {sql}")
+
+
+@pytest.fixture(scope="module")
+def business_rules():
+    return build_business_rules()
+
+
 @pytest.fixture
-def guards(error_resources, monkeypatch):
-    """隔离守卫登记和派生缓存，不隔离被测校验器。"""
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
-    register_capture_guards()
+def guards(error_resources, business_rules):
+    """隔离派生缓存，不替换被测校验器。"""
     workflow_errors._public_json_registry.cache_clear()
     workflow_errors._public_json_validator.cache_clear()
-    yield validators.NAMED_GUARDS
+    yield business_rules
     workflow_errors._public_json_registry.cache_clear()
     workflow_errors._public_json_validator.cache_clear()
 
@@ -103,9 +137,13 @@ def _world(branch="observe", *, current=None, changes=None):
         TransactionRange(1, 1, 1),
         {("device_activities", _ACTIVITY_ID): ("action", _ACTION_ID)},
         {"device_activities": {_ACTIVITY_ID: facts},
-         "actions": {_ACTION_ID: {"id": _ACTION_ID, "type": 1, "driver_id": "driver"}},
+         "actions": {_ACTION_ID: {"id": _ACTION_ID, "type": 1, "driver_id": "driver", "device_id": "camera"}},
          "operation_runs": {9: {"id": 9, "status": 3, "activity_id": _ACTIVITY_ID}}},
     )
+    if branch == "create":
+        connection = _CreateFacts()
+        context = replace(context, file_batch_reads=FileBatchReads(connection),
+                          preparation_reads=PreparationReads(connection))
     return event, context
 
 

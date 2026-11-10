@@ -5,10 +5,9 @@ import pytest
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import TransactionRange
 from camctl.devices.tasks import CompletionMode, EndControl, StartReturn
-from camctl.history import validators
 from camctl.history.events import load_event_registry
-from camctl.history.validators import EventContext, EventValidationError, validate_event
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
+from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.persistence.repositories.transactions import event_envelope, update_change
 
 from ..support.capture_guard_cases import history_body
@@ -28,11 +27,9 @@ _ATTEMPT_ID = 30
 
 
 @pytest.fixture
-def wait_guard(monkeypatch):
-    """在本用例私有注册表中装入真实等待守卫，结束后恢复原注册表。"""
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
-    register_timelapse_guards()
-    return validators.NAMED_GUARDS["capture_wait"]
+def storage():
+    """使用本次测试独立装配的完整业务规则。"""
+    return BusinessStorage()
 
 
 def _sent_result(activity_id: int):
@@ -232,21 +229,21 @@ def _memory_wait_case(
 
 @pytest.mark.parametrize("startup", [0, 1000])
 @pytest.mark.parametrize("branch", ["schedule", "complete"])
-def test_wait_schedule_and_completion_accept_original_finite_sent(wait_guard, startup, branch):
+def test_wait_schedule_and_completion_accept_original_finite_sent(storage, startup, branch):
     event, context = _memory_wait_case(startup, branch)
 
-    assert validate_event(event, context).envelope == event
+    assert storage.validate_event(event, context).envelope == event
 
 
 @pytest.mark.parametrize("startup", [0, 1000])
 @pytest.mark.parametrize("extra_wait_ms", [1, 1000])
 def test_wait_reconfigure_accepts_both_explicit_millisecond_values(
-    wait_guard, startup, extra_wait_ms,
+    storage, startup, extra_wait_ms,
 ):
     event, context = _memory_wait_case(
         startup, "reconfigure", extra_wait_ms=extra_wait_ms)
 
-    assert validate_event(event, context).envelope == event
+    assert storage.validate_event(event, context).envelope == event
 
 
 @pytest.mark.parametrize("startup", [0, 1000])
@@ -255,18 +252,18 @@ def test_wait_reconfigure_accepts_both_explicit_millisecond_values(
     "change",
     ["photo_taken", "start_confirmed", "wrong_activity", "no_observation", "failed", "unknown_effect"],
 )
-def test_wait_event_rejects_unreliable_start_result(wait_guard, startup, branch, change):
+def test_wait_event_rejects_unreliable_start_result(storage, startup, branch, change):
     event, context = _memory_wait_case(startup, branch, change=change)
 
     with pytest.raises(EventValidationError):
-        validate_event(event, context)
+        storage.validate_event(event, context)
 
 
 @pytest.mark.parametrize("startup", [0, 1000])
 @pytest.mark.parametrize("branch", ["schedule", "reconfigure", "complete"])
 @pytest.mark.parametrize("change", ["q", "a", "r", "d", "source"])
-def test_wait_event_rejects_changed_original_timing_or_source(wait_guard, startup, branch, change):
+def test_wait_event_rejects_changed_original_timing_or_source(storage, startup, branch, change):
     event, context = _memory_wait_case(startup, branch, change=change)
 
     with pytest.raises(EventValidationError):
-        validate_event(event, context)
+        storage.validate_event(event, context)
