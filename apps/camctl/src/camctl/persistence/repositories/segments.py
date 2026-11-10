@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from itertools import zip_longest
 
 from camctl.capture.segment_models import *
+from camctl.capture.segment_candidates import eligible_original
 from camctl.capture.segment_storage import (
     SegmentSetCreate,
     SegmentMemberInput,
@@ -250,13 +251,6 @@ def _read_member_facts(db, row, *, setrow=None):
         row['file_event_id'], member,row['pairing_fact_id']), file, fact)
 
 
-def _eligible_original(member):
-    return (member.role is SegmentMemberRole.ORIGINAL
-        and member.ownership is OwnershipState.OWNED
-        and member.completion is FileCompletionState.COMPLETE
-        and member.size_bytes is not None and member.size_bytes>0)
-
-
 def _output_candidate(db,setrow,facts, *, paired_members=None):
     """统一两方向资格，只使用冻结成员及其固定file_event事实。"""
     stored, file = facts.stored, facts.file
@@ -267,7 +261,7 @@ def _output_candidate(db,setrow,facts, *, paired_members=None):
             and member.completion is FileCompletionState.COMPLETE
             and member.size_bytes is not None and member.size_bytes > 0):
         return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
-    if _eligible_original(member):
+    if eligible_original(member):
         return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
     if member.role is not SegmentMemberRole.PREVIEW or member.pairing_state is not PreviewPairingState.PAIRED:
         return None
@@ -303,7 +297,7 @@ def _output_candidate(db,setrow,facts, *, paired_members=None):
     if (member.ownership is not OwnershipState.OWNED
             or member.completion is not FileCompletionState.COMPLETE
             or member.size_bytes is None or member.size_bytes<=0
-            or not _eligible_original(paired.member)):
+            or not eligible_original(paired.member)):
         return None
     return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.PREVIEW,paired.member_id,paired.file_id)
 
@@ -831,7 +825,7 @@ def _verify_action6_decision(db, setrow, decision):
         page = read_segment_members(_ref(setrow), cursor, 128, Reader)
         for stored in page.items:
             member = stored.member
-            if not _eligible_original(member):
+            if not eligible_original(member):
                 continue
             eligible_count += 1
             if member.cursor is None:

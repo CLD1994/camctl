@@ -578,12 +578,12 @@ async def advance_segmented_recording(runtime, action, decision):
         ).fetchone()))[0]
         selected = 0
         batch = []
-        from camctl.persistence.repositories.segments import _eligible_original
+        from camctl.capture.segment_candidates import eligible_original
 
         async for stored in _members(repository, scan_ref, runtime):
             member = stored.member
             if (
-                not _eligible_original(member)
+                not eligible_original(member)
                 or member.cursor is None
                 or not assessment.default_scope.first_cursor
                 <= member.cursor
@@ -617,11 +617,11 @@ async def advance_segmented_recording(runtime, action, decision):
     failure = None
     if assessment.status is not SegmentAssessmentStatus.SUCCEEDED:
         if assessment.reason is SegmentAssessmentReason.GAP:
-            from camctl.persistence.repositories.segments import _eligible_original
+            from camctl.capture.segment_candidates import eligible_original
 
             original_count = 0
             async for stored in _members(repository, scan_ref, runtime):
-                original_count += _eligible_original(stored.member)
+                original_count += eligible_original(stored.member)
             failure = RecordingFailure(
                 "capture_segment_gap",
                 segment_error_header(assessment, original_count).details(
