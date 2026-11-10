@@ -49,11 +49,11 @@ v2 使用 `memory.max` 配合 `memory.swap.max=0`，以零交换约束使内存�
 
 ```bash
 python scripts/run-memory-budget.py --camctl-memory-limit 2GiB -- \
-  python -m pytest apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency -q
+  python -m pytest apps/camctl/tests/integration/outputs/test_source_capacity.py::test_source_write_and_original_key_fit_process_group_budget -q
 
 python scripts/run-memory-budget.py --camctl-memory-limit 2GiB -- \
   python scripts/run-integration.py --scope camctl \
-  --target apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency
+  --target apps/camctl/tests/integration/outputs/test_source_capacity.py::test_source_write_and_original_key_fit_process_group_budget
 ```
 
 启动器在终端打印本次 `launcher.json` 的位置。可以用 `--evidence-dir` 指定一个尚不存在的证据目录；不指定时创建独立临时目录。该收据保存实际命令、调用用户、委派目录身份、退出状态及最终清理结果，各被测实例的资源和业务证据仍由测试保存。启动器收到中断或终止信号时，先通知原测试命令按其中断流程收场，再执行有界的最终清理；外层保留对应的中断退出状态。
@@ -61,23 +61,25 @@ python scripts/run-memory-budget.py --camctl-memory-limit 2GiB -- \
 已有可写委派目录时，直接使用相同预算参数：
 
 ```bash
-python -m pytest apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency \
+python -m pytest apps/camctl/tests/integration/outputs/test_source_capacity.py::test_source_write_and_original_key_fit_process_group_budget \
   --camctl-memory-limit 2GiB \
   --camctl-memory-cgroup-root /path/to/delegated-group -q
 
 python scripts/run-integration.py --scope camctl \
-  --target apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency \
+  --target apps/camctl/tests/integration/outputs/test_source_capacity.py::test_source_write_and_original_key_fit_process_group_budget \
   --camctl-memory-limit 2GiB \
   --camctl-memory-cgroup-root /path/to/delegated-group
 ```
 
 大规模容量验收集中在专门的真实业务见证中；读取批次、缓存释放、索引访问和事务正确性按其责任保留较窄测试。具体运行范围、通过结果和环境错误分别记录，不把辅助执行器单元测试通过解释为 2GiB 业务验收通过。
 
-固定批量持久化用例保留 `test_fixed_batch_write_and_verification_have_bounded_residency` 入口。父测试在组外准备 513 项输入，形成五个原结果页，关闭数据库连接后启动独立业务进程。该进程执行真实完成写入、原操作键核实、同键重试，再分别为三个文件写入后续观察并重复核实原操作。父测试随后重开数据库，核对全部产物字段、范围绑定和历史事件。这个用例覆盖跨页与同库历史增长，不能证明任意数据规模或长期运行均符合预算。
+来源保存容量用例位于 `apps/camctl/tests/integration/outputs/test_source_capacity.py`。父测试在组外通过正式入口准备 2400 个来源成员并开始取回，关闭准备连接后启动独立业务进程。业务进程使用公开来源仓储，以批次 4 完成来源保存，再按同一申请和原操作键执行复用与重送。该输入形成 601 个历史事件，真实跨过写入和原结果读取边界。
 
-`test_fixed_batch_reads_and_output_identity_lookup_keep_their_bounds` 使用 129 项输入，独立验证跨过 128 项读取边界后的读取上限和索引访问；它不承担内存预算验收。容量工作进程的较小功能检查同样不承担预算验收。
+每阶段返回后，父测试在组外独立核对成员、事件和完整返回；复用及重送前后的状态摘要须保持一致。预算组覆盖业务进程及其全部后代，准备和断言保持在组外。业务进程不导入 pytest，不启用 Python 分配追踪或逐条 SQL 观察器。这项用例只证明已执行负载，不能单凭 2400 个成员推导任意规模均符合预算。
 
-容量用例另存 `capacity-timing.json`，区分输入准备、受限业务进程及组外结果核对。业务结果中的 `timing_seconds` 记录完成写入、核实、同键重试及后续观察各阶段的实际耗时。这些固定次数的计时不追踪逐次对象分配，pytest 总耗时也不代替业务阶段耗时。
+`test_segment_transaction_batches.py` 继续验证批量写入、整组回滚、读取上限和原键核实。其中的容量工作进程功能检查、预算前置条件和合成结果格式检查，不承担真实内存预算验收。
+
+容量用例的 `capacity-timing.json` 分别记录预算预检、组外准备、包含组外核对等待的进程时间，以及保存、复用和重送的工作时间。`memory-budget.json` 保存实际限额、峰值、事件、退出和资源组回收结果；pytest 总耗时不代替业务阶段耗时。
 
 共享配置及资源组执行器位于 `scripts/camctl_memory.py`，pytest 参数与跨组件启动接缝位于 `scripts/camctl_memory_plugin.py`。正常子进程接口使用预算代理；需要保留 host 持有的 PID 和进程组身份时，启动器入组后直接替换为原入口。后者由组外 pytest 读取最终证据。启动握手需要 Linux 环境中的 `/bin/bash`。
 
