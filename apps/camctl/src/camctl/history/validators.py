@@ -551,15 +551,15 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
         except (TypeError, ValueError) as error:
             _fail(f"事件 {event_id} 的正常停止来源无效: {error}")
     elif member == "capture_selection":
-        from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+        from camctl.capture.selection import CaptureSelectionInput
         try:
             CaptureSelectionInput.from_document(value)
         except (TypeError, ValueError) as error:
             _fail(f"事件 {event_id} 的拍摄选择申请无效: {error}")
     elif member == "availability_wait_finish_request":
-        from camctl.persistence.repositories.availability_wait_finish import _request
+        from camctl.operations.availability_wait import parse_waiting_finish_request
         try:
-            _request(value)
+            parse_waiting_finish_request(value)
         except (TypeError, ValueError) as error:
             _fail(f"检查等待终结申请无效: {error}")
     elif member == "availability_failure_request":
@@ -596,7 +596,7 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
     elif member == "preparation_failure_request":
         parse_preparation_failure_request(value)
     elif member == "preparation_binding_request":
-        from camctl.persistence.repositories.scheduling import FailBindingPreparationRequest
+        from camctl.scheduling.preparation_types import FailBindingPreparationRequest
         if not isinstance(value, Mapping) or set(value) != {
                 "action_id", "trusted_wall_now", "occurred_at", "details", "prepare_lead_s", "current_identity"}:
             _fail("准备绑定失败申请成员无效")

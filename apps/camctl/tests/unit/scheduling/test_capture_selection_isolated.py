@@ -114,7 +114,7 @@ def test_history_structure_uses_same_selection_parser(selection):
     program = ast.Module(body=[function], type_ignores=[])
     namespace = {"Any": object, "_fail": lambda message: (_ for _ in ()).throw(ValueError(message))}
     exec(compile(ast.fix_missing_locations(program), str(source), "exec"), namespace)
-    with patch.dict(sys.modules, {"camctl.persistence.repositories.capture_selection": module}):
+    with patch.dict(sys.modules, {"camctl.capture.selection": module}):
         namespace["_check_evidence_member"](1, "capture_selection", request(selection, 10).document(), 1)
         with pytest.raises(ValueError, match="拍摄选择申请无效"):
             namespace["_check_evidence_member"](1, "capture_selection", {"device_id": "camera"}, 1)
