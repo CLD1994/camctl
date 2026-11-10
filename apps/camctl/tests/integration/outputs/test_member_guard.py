@@ -11,7 +11,6 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventValidationError
 from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
 from camctl.history.reads import ReadCoverage
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.transactions import (
     CommandPlan, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change,
 )
@@ -24,7 +23,6 @@ from ..support.output_planning import storage_fault as _FaultConnection
 @pytest.fixture
 def member_context(read_targets):
     _complete_source(read_targets.connection)
-    register_outputs_guards()
     return proposal_state(read_targets, owners={("obtain_items", 101): ("action", 31)})
 
 
@@ -196,7 +194,6 @@ def test_member_event_and_projection_commit_or_rollback_together(read_targets, r
     )
     owned.connection.commit()
     before = tuple(owned.connection.iterdump())
-    register_outputs_guards()
     target = replace(owned, connection=_FaultConnection(owned.connection, "UPDATE obtain_items SET")) if write_failure else owned
     key = new_operation_key()
     receipt = commit_operation(_AdvanceMember(reason), key, target)
