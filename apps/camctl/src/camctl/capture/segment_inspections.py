@@ -280,7 +280,7 @@ async def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
 
 
 async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
-                                         occurred_at: int) -> bool:
+                                         occurred_at: int, *, retry: bool = False) -> bool:
     """检查结果可靠终态后，按原 release_read_slot 申请补齐机会释放。"""
     from camctl.outputs.read_attempts import save_read_business
 
@@ -354,6 +354,7 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
     outcome = (await save_read_business(
         flow, copy_id, "release_read_slot",
         SlotRequest(copy_id, occurred_at), OutputsRepository().release_read_slot,
+        retry=retry,
     ))
     return outcome.value.outcome in (SlotOutcome.RELEASED, SlotOutcome.ALREADY_RELEASED)
 
@@ -634,7 +635,7 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             if ticket is not None and int(ticket.target_id) == copy_id:
                 identity = (ticket.run_id, ticket.attempt_id)
                 pending_read_identities.append(identity)
-                (await _save_internal_read_and_settle(flow, pending_read))
+                (await _save_internal_read_and_settle(flow, pending_read, retry=True))
 
     # 原 inspection request/key 的未知回执先重送；它可能已在数据库
     # 可靠提交，只是本进程尚未收到回执。
@@ -652,7 +653,7 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             pending_read = flow.pending_read_results.get(identity)
             if pending_read is None:
                 continue
-            (await _save_internal_read_and_settle(flow, pending_read))
+            (await _save_internal_read_and_settle(flow, pending_read, retry=True))
             if identity in flow.pending_read_results:
                 return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
                     ref.inspection_id, copy_id, reason="result_save_unknown")
@@ -660,7 +661,7 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
     ref = (await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned)))
     if ref.state != int(_INSPECTION_STATE.PENDING):
         if copy_id is not None:
-            (await settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at()))
+            (await settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at(), retry=True))
         return _step_from_ref(ref, copy_id)
 
     # 原完整 ReadEnd 的本地续接必须先于任何 run-ended 合成。
@@ -675,7 +676,7 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
     ref = (await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned)))
     if ref.state != int(_INSPECTION_STATE.PENDING):
         if copy_id is not None:
-            (await settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at()))
+            (await settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at(), retry=True))
         return _step_from_ref(ref, copy_id)
 
     owner = (await flow.database.read(lambda owned, inputs=("SELECT status,cancel_requested FROM actions WHERE id=?", (request.action_id,)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
