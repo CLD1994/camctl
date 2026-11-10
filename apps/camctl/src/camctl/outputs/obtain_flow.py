@@ -889,8 +889,11 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         from camctl.persistence.repositories.file_batch_reads import FileBatchReads
         legacy = await runtime.database.read(lambda owned: FileBatchReads(owned.connection).legacy_read_held(
             candidate.copy_id, candidate.action_id, candidate.device_id))
+        assembly = runtime.devices.get(candidate.device_id)
         if legacy or await acquire_file_batch(runtime.database,
-                BatchRequest(candidate.action_id, candidate.device_id, runtime.occurred_at()),
+                BatchRequest(candidate.action_id, candidate.device_id, runtime.occurred_at(),
+                             capture_read_parallel_supported=(False if assembly is None
+                                                              else assembly.capture_read_parallel)),
                 pending=runtime.pending_file_batches):
             batch_ready.append(candidate)
     candidates = tuple(batch_ready)
@@ -982,7 +985,8 @@ async def _advance_read(
     legacy = await runtime.database.read(lambda owned: FileBatchReads(owned.connection).legacy_read_held(
         copy_id, facts["action_id"], assembly.binding.device_id))
     if not legacy and not await acquire_file_batch(runtime.database,
-            BatchRequest(facts["action_id"], assembly.binding.device_id, runtime.occurred_at()),
+            BatchRequest(facts["action_id"], assembly.binding.device_id, runtime.occurred_at(),
+                         capture_read_parallel_supported=assembly.capture_read_parallel),
             pending=runtime.pending_file_batches):
         return False
     if await _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
