@@ -79,4 +79,3 @@ def internal_input_requirement(processing) -> str | None:
     if decision is _CHECK_DECISION.UNDETERMINED or repair is _REPAIR_STATE.UNDETERMINED:
         return "input_undecided"
     return "input_not_needed"
-
