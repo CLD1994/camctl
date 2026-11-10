@@ -1955,14 +1955,14 @@ def _guard_cancel_apply(event, context, items) -> None:
             change = target_changes[0]
             if change.row_id != target_id or effect != CancellationEffect.APPLIED.value:
                 raise EventValidationError("首次取消的目标身份与成员效果不符")
+            from camctl.cancellation.rules import cancel_status_after_apply
+            try:
+                status = cancel_status_after_apply(target, mode)
+            except ValueError as error:
+                raise EventValidationError(str(error)) from error
             expected = {"cancel_requested": 1}
-            if mode is CancelApplyMode.PRE_START:
-                if target["status"] == 1:
-                    expected["status"] = 6
-                elif target["status"] != 2 or target["type"] not in (1, 2, 3):
-                    raise EventValidationError("未启动取消要求待执行或可靠未启动的拍摄目标")
-            elif target["status"] != 2:
-                raise EventValidationError("停止收场取消要求目标运行中")
+            if status is not None:
+                expected["status"] = status
             if change.after.values != expected:
                 raise EventValidationError("原取消模式与目标状态转换不符")
         elif mode is CancelApplyMode.TERMINAL:

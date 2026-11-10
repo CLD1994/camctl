@@ -14,6 +14,7 @@ from typing import Any
 
 from camctl.cancellation.models import (
     CancelOriginFacts,
+    CancelApplyMode,
     CancelProgress,
     CancellationResult,
     CancellationStatus,
@@ -238,6 +239,21 @@ def action_eligibility_facts(action, *, motor_facts=None, motor_permit=None):
         dispatch=(DispatchPhase.STARTED if action["execution_started"] == 1
                   else DispatchPhase.NOT_STARTED),
         stop_supported=True)
+
+
+def cancel_status_after_apply(target, mode):
+    """首次取消按原派发分区确定目标是否立即进入取消终态。"""
+    if mode is CancelApplyMode.PRE_START:
+        if target["status"] == 1:
+            return 6
+        if target["status"] != 2 or target["type"] not in _CAPTURE_TYPES:
+            raise ValueError("未启动取消要求待执行或可靠未启动的拍摄目标")
+    elif mode is CancelApplyMode.WITH_STOP:
+        if target["status"] != 2:
+            raise ValueError("停止收场取消要求目标运行中")
+    else:
+        raise ValueError("只有首次取消确定目标状态")
+    return None
 
 
 def needs_capture_start_facts(action):
