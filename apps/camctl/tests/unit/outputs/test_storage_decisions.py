@@ -81,3 +81,38 @@ def test_photo_length_requires_original_live_attempt(object_name, field, value):
     assert photo_read_attempt_matches(**facts)
     facts[object_name][field] = value
     assert not photo_read_attempt_matches(**facts)
+
+
+def _source_facts():
+    action = enum_for("actions.status")
+    return dict(
+        selection=dict(status=int(enum_for("obtain_source_selections.status").FIXED), error_code=None, error_details_json=None),
+        owner=dict(type=int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS), status=int(action.RUNNING),
+                   cancel_requested=0, source_resolution_state=int(enum_for("actions.source_resolution_state").FIXED),
+                   resolved_source_plan_id=22),
+        source=dict(type=int(enum_for("actions.type").CAMERA_TAKE_PHOTO), status=int(action.SUCCEEDED), plan_id=22),
+    )
+
+
+@pytest.mark.parametrize("object_name,field,value", [
+    ("selection", "error_code", 1), ("owner", "cancel_requested", 1),
+    ("owner", "resolved_source_plan_id", 23), ("source", "status", int(enum_for("actions.status").RUNNING)),
+    ("source", "type", int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)),
+])
+def test_obtain_source_must_be_fixed_terminal_and_owned(object_name, field, value):
+    from camctl.outputs.sources import obtain_source_ready
+    facts = _source_facts()
+    assert obtain_source_ready(**facts)
+    facts[object_name][field] = value
+    assert not obtain_source_ready(**facts)
+
+
+def test_obtain_member_requires_unresolved_explicit_identity():
+    from camctl.outputs.sources import obtain_member_verification_error
+    status, basis = enum_for("obtain_items.status"), enum_for("obtain_items.basis")
+    item = dict(status=int(status.UNRESOLVED), basis=int(basis.EXPLICIT), requested_output_id=3,
+                output_id=None, source_dependency=0, delivery_id=None, error_code=None, error_details_json=None)
+    assert obtain_member_verification_error(item) is None
+    assert obtain_member_verification_error(item | {"delivery_id": 5}) == "只有尚未建档或结束的取回项能核实或拒绝"
+    assert obtain_member_verification_error(item | {"output_id": 3}) == "未核实成员必须是尚未关联产物的显式请求"
+    assert obtain_member_verification_error(item | {"requested_output_id": None}) == "显式成员必须保留原请求产物 ID"

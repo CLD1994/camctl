@@ -7761,34 +7761,14 @@ def _obtain_member_guard(event, context) -> None:
     dependency = _required_current_facts(context, "action_dependencies", selection.get("dependency_id"))
     owner = _required_current_facts(context, "actions", dependency.get("action_id"))
     source = _required_current_facts(context, "actions", dependency.get("depends_on_action_id"))
-    if (
-        selection.get("status") != int(_SELECTION_STATUS.FIXED)
-        or selection.get("error_code") is not None
-        or selection.get("error_details_json") is not None
-        or owner.get("type") != _OBTAIN_TYPE
-        or owner.get("status") != int(_ACTION_STATUS.RUNNING)
-        or owner.get("cancel_requested") != 0
-        or owner.get("source_resolution_state") != int(_RESOLUTION_STATE.FIXED)
-        or owner.get("resolved_source_plan_id") is None
-        or owner.get("resolved_source_plan_id") != source.get("plan_id")
-        or source.get("type") not in _CAPTURE_TYPES
-        or source.get("status") not in _ACTION_TERMINAL
-    ):
+    from camctl.outputs.sources import obtain_member_verification_error, obtain_source_ready
+    if not obtain_source_ready(selection=selection, owner=owner, source=source):
         raise EventValidationError("取回成员要求来源拍摄已终态、选择已固定且无来源级错误，取回仍在执行中并未取消")
-    if (
-        item.get("status") not in (int(_ITEM_STATUS.UNRESOLVED), int(_ITEM_STATUS.SELECTED))
-        or item.get("source_dependency") != 0
-        or item.get("delivery_id") is not None
-        or item.get("error_code") is not None
-        or item.get("error_details_json") is not None
-    ):
-        raise EventValidationError("只有尚未建档或结束的取回项能核实或拒绝")
+    error = obtain_member_verification_error(item)
+    if error is not None:
+        raise EventValidationError(error)
     unresolved = item["status"] == int(_ITEM_STATUS.UNRESOLVED)
     explicit = item.get("basis") == int(_ITEM_BASIS.EXPLICIT)
-    if unresolved and (not explicit or item.get("output_id") is not None):
-        raise EventValidationError("未核实成员必须是尚未关联产物的显式请求")
-    if explicit and item.get("requested_output_id") is None:
-        raise EventValidationError("显式成员必须保留原请求产物 ID")
     if event.reason == _REJECT_REASON:
         _validate_obtain_error({**item, **row.after.values}, dependency["depends_on_action_id"])
         code = row.after.values.get("error_code")
