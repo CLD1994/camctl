@@ -15,6 +15,7 @@ import os
 import stat
 import json
 import time
+from contextlib import closing
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
 from functools import partial
@@ -733,7 +734,6 @@ def _open_runtime_connection(deps: RuntimeDeps) -> OwnedConnection:
 
 async def _initialize_recovery(deps: RuntimeDeps, database) -> None:
     """固定数据库恢复输入，再在主协程更新驱动和文件责任。"""
-    from contextlib import closing
     from camctl.devices.drivers.adb_cameras.registration import begin_builtin_camera_session
     from camctl.devices.drivers.hasselblad.registration import begin_builtin_hasselblad_session
 
