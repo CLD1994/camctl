@@ -11106,11 +11106,8 @@ class _AdvanceWithdrawalCommand:
                 return ()
             return (_update("deliveries", delivery["id"], {"withdrawal_state": state},
                             {"withdrawal_state": int(_WITHDRAWAL.PENDING)}),)
-        choice_states = {WithdrawalChoice.WITHDRAWN: _WITHDRAWAL.WITHDRAWN,
-                         WithdrawalChoice.NOT_RETRACTABLE: _WITHDRAWAL.NOT_RETRACTABLE,
-                         WithdrawalChoice.FAILED: _WITHDRAWAL.FAILED,
-                         WithdrawalChoice.UNKNOWN: _WITHDRAWAL.UNKNOWN}
-        result_state = int(choice_states[command.choice])
+        from camctl.outputs.handoff import withdrawal_item_result, withdrawal_result_state
+        result_state = withdrawal_result_state(command.choice)
         failed = command.choice in (WithdrawalChoice.FAILED, WithdrawalChoice.UNKNOWN)
         rows = []
         if state == int(_WITHDRAWAL.PENDING):
@@ -11127,16 +11124,7 @@ class _AdvanceWithdrawalCommand:
                 raise TransactionError("后到撤回请求采用的原错误依据不同")
         else:
             return ()
-        if command.choice is WithdrawalChoice.WITHDRAWN:
-            item_status, code, details = 2, None, None
-        elif command.choice is WithdrawalChoice.NOT_RETRACTABLE:
-            item_status, code, details = 3, None, None
-        else:
-            name = ("delivery_withdrawal_failed" if command.choice is WithdrawalChoice.FAILED
-                    else "delivery_position_unconfirmed")
-            item_status, code = 4, item_error_id("cancel_delivery_items", name)
-            details = {"delivery_id": str(delivery["id"])}
-            validate_error_details(name, details)
+        item_status, code, details = withdrawal_item_result(command.choice, delivery["id"])
         for item in self._items:
             rows.append(_update("cancel_delivery_items", item["id"],
                 {"status": item["status"], "error_code": item["error_code"],

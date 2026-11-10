@@ -799,6 +799,32 @@ class WithdrawalChoice(Enum):
     UNKNOWN = "unknown"
 
 
+def withdrawal_result_state(choice: WithdrawalChoice) -> int:
+    """把可靠撤回结果映射到交付自身的撤回状态。"""
+    states = enum_for("deliveries.withdrawal_state")
+    return int({WithdrawalChoice.WITHDRAWN: states.WITHDRAWN,
+                WithdrawalChoice.NOT_RETRACTABLE: states.NOT_RETRACTABLE,
+                WithdrawalChoice.FAILED: states.FAILED,
+                WithdrawalChoice.UNKNOWN: states.UNKNOWN}[choice])
+
+
+def withdrawal_item_result(choice: WithdrawalChoice, delivery_id: int) -> tuple:
+    """把交付撤回结果交给等待此交付的取消明细。"""
+    from camctl.contracts.workflow_errors import item_error_id
+
+    status = enum_for("cancel_delivery_items.status")
+    if choice is WithdrawalChoice.WITHDRAWN:
+        return int(status.WITHDRAWN), None, None
+    if choice is WithdrawalChoice.NOT_RETRACTABLE:
+        return int(status.NOT_RETRACTABLE), None, None
+    name = {WithdrawalChoice.FAILED: "delivery_withdrawal_failed",
+            WithdrawalChoice.UNKNOWN: "delivery_position_unconfirmed"}[choice]
+    code = item_error_id("cancel_delivery_items", name)
+    details = {"delivery_id": str(delivery_id)}
+    validate_error_details(name, details)
+    return int(status.FAILED), code, details
+
+
 @dataclass(frozen=True)
 class AdvanceWithdrawal:
     """推进一份交付撤回责任的申请输入（DELIVERY_CHANGED.WITHDRAW）。"""

@@ -116,3 +116,19 @@ def test_obtain_member_requires_unresolved_explicit_identity():
     assert obtain_member_verification_error(item | {"delivery_id": 5}) == "只有尚未建档或结束的取回项能核实或拒绝"
     assert obtain_member_verification_error(item | {"output_id": 3}) == "未核实成员必须是尚未关联产物的显式请求"
     assert obtain_member_verification_error(item | {"requested_output_id": None}) == "显式成员必须保留原请求产物 ID"
+
+
+@pytest.mark.parametrize("choice_name,state_name,item_name,error_name", [
+    ("WITHDRAWN", "WITHDRAWN", "WITHDRAWN", None),
+    ("NOT_RETRACTABLE", "NOT_RETRACTABLE", "NOT_RETRACTABLE", None),
+    ("FAILED", "FAILED", "FAILED", "delivery_withdrawal_failed"),
+    ("UNKNOWN", "UNKNOWN", "FAILED", "delivery_position_unconfirmed"),
+])
+def test_withdrawal_result_preserves_delivery_and_waiter_meaning(choice_name, state_name, item_name, error_name):
+    from camctl.contracts.workflow_errors import item_error_id
+    from camctl.outputs.handoff import WithdrawalChoice, withdrawal_item_result, withdrawal_result_state
+    choice = WithdrawalChoice[choice_name]
+    assert withdrawal_result_state(choice) == int(enum_for("deliveries.withdrawal_state")[state_name])
+    expected_error = None if error_name is None else item_error_id("cancel_delivery_items", error_name)
+    expected_details = None if error_name is None else {"delivery_id": "7"}
+    assert withdrawal_item_result(choice, 7) == (int(enum_for("cancel_delivery_items.status")[item_name]), expected_error, expected_details)
