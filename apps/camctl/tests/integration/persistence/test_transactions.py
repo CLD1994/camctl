@@ -1,7 +1,7 @@
 """P3 完整事件事务的组件集成测试。
 
 真实 SQLite 与事务内核组合：编号范围、H1/H2 校验派生、整组提交
-与逐阶段回滚。业务守卫以测试替身注册，正式守卫随受理任务接入。
+与逐阶段回滚。计划业务检查使用仓储实例内的测试替身。
 """
 
 from __future__ import annotations
@@ -16,10 +16,9 @@ import pytest
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import new_operation_key
 from camctl.history.events import EventEnvelope, RowChange, RowImage
-from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
 import camctl.persistence.repositories.transactions as transaction_module
-from camctl.persistence.repositories.transactions import commit_operation
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.session.locks import LockError
 
 from .test_runtime import _create_valid_database
@@ -29,19 +28,11 @@ _CREATED_AT = 1_700_000_000_000_000
 
 @pytest.fixture()
 def plan_guards():
-    """注册计划事件所需的业务守卫替身；测试后恢复原状。"""
-    from camctl.history import validators
-
-    saved = {}
-    for name in ("admission", "plan_aggregate"):
-        saved[name] = validators.NAMED_GUARDS.get(name)
-        register_guard(name, lambda event, context: None)
-    yield
-    for name, guard in saved.items():
-        if guard is None:
-            validators.NAMED_GUARDS.pop(name, None)
-        else:
-            validators.NAMED_GUARDS[name] = guard
+    """只替换计划业务检查，保留事务编排和事件事实检查。"""
+    return BusinessStorage(overrides={
+        "admission": lambda event, context: None,
+        "plan_aggregate": lambda event, context: None,
+    })
 
 
 def _open(tmp_path: Path) -> OwnedConnection:
@@ -153,9 +144,8 @@ class PlanStartCommand:
         )
 
 
-def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path, plan_guards, monkeypatch):
+def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path):
     """后续创建和变化可证明固定关联，不倒推当前事件的状态。"""
-    from camctl.history import validators
     from camctl.persistence.repositories.transactions import CommandPlan
 
     _create_valid_database(tmp_path / "state.db")
@@ -166,8 +156,7 @@ def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path
                          context.state_rows.get("plans", {}).get(1, {}).get("status"),
                          context.transaction_rows["plans"][1]["status"]))
 
-    monkeypatch.setitem(validators.NAMED_GUARDS, "admission", inspect)
-    monkeypatch.setitem(validators.NAMED_GUARDS, "plan_aggregate", inspect)
+    plan_guards = BusinessStorage(overrides={"admission": inspect, "plan_aggregate": inspect})
 
     class CreateAndStart:
         def plan(self, scope):
@@ -181,7 +170,7 @@ def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path
 
     owned = _open(tmp_path)
     try:
-        receipt = commit_operation(CreateAndStart(), new_operation_key(), owned)
+        receipt = plan_guards.commit_operation(CreateAndStart(), new_operation_key(), owned)
         assert receipt.kind == "completed", receipt.error
         assert set(observed) == {(1, None, 2), (9, 1, 2)}
     finally:
@@ -189,7 +178,7 @@ def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path
 
 
 @pytest.mark.parametrize("covered", [True, False])
-def test_complete_query_tracks_prior_events_without_using_future_rows(tmp_path, plan_guards, monkeypatch, covered):
+def test_complete_query_tracks_prior_events_without_using_future_rows(tmp_path, covered):
     """可靠空范围随前序创建推进；没有覆盖时不能用当前或未来行补证。"""
     from contextlib import closing
 
@@ -205,8 +194,7 @@ def test_complete_query_tracks_prior_events_without_using_future_rows(tmp_path, 
         observed.append((event.event_type, event.rows[0].row_id,
                          current.get(1, {}).get("status"), tuple(later)))
 
-    monkeypatch.setitem(validators.NAMED_GUARDS, "admission", inspect)
-    monkeypatch.setitem(validators.NAMED_GUARDS, "plan_aggregate", inspect)
+    plan_guards = BusinessStorage(overrides={"admission": inspect, "plan_aggregate": inspect})
 
     class CreateStartAndCreate:
         def plan(self, scope):
@@ -227,7 +215,7 @@ def test_complete_query_tracks_prior_events_without_using_future_rows(tmp_path, 
     owned = _open(tmp_path)
     try:
         before = tuple(owned.connection.iterdump())
-        receipt = commit_operation(CreateStartAndCreate(), new_operation_key(), owned)
+        receipt = plan_guards.commit_operation(CreateStartAndCreate(), new_operation_key(), owned)
         if covered:
             assert receipt.kind == "completed", receipt.error
             assert set(observed) == {(1, 1, None, ()), (9, 1, 1, ()), (1, 2, 2, ())}
@@ -314,7 +302,7 @@ class TestCommittedTransaction:
         connection = owned.connection
         try:
             key = new_operation_key()
-            receipt = commit_operation(PlanCreateCommand((1,)), key, owned)
+            receipt = plan_guards.commit_operation(PlanCreateCommand((1,)), key, owned)
             assert receipt.kind == "completed"
             assert (receipt.boundary.txn_id, receipt.boundary.last_event_id) == (1, 1)
             assert receipt.result == {"created": 1}
@@ -356,7 +344,7 @@ class TestCommittedTransaction:
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            receipt = commit_operation(PlanCreateCommand((1, 2)), new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(PlanCreateCommand((1, 2)), new_operation_key(), owned)
             assert receipt.kind == "completed"
             assert (receipt.boundary.txn_id, receipt.boundary.last_event_id) == (1, 2)
             assert _row(connection, "SELECT first_event_id, last_event_id FROM history_transactions") == (1, 2)
@@ -380,8 +368,8 @@ class TestCommittedTransaction:
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            first = commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned)
-            second = commit_operation(PlanCreateCommand((2,)), new_operation_key(), owned)
+            first = plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned)
+            second = plan_guards.commit_operation(PlanCreateCommand((2,)), new_operation_key(), owned)
             assert (first.boundary.txn_id, first.boundary.last_event_id) == (1, 1)
             assert (second.boundary.txn_id, second.boundary.last_event_id) == (2, 2)
             assert _row(connection, "SELECT MAX(id) FROM history_events")[0] == 2
@@ -400,12 +388,12 @@ class TestCurrentStateRecheck:
         connection = owned.connection
         try:
             # 事实基线：计划创建并推进到 RUNNING。
-            assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
-            assert commit_operation(
+            assert plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+            assert plan_guards.commit_operation(
                 PlanStartCommand(1, before_status=1), new_operation_key(), owned
             ).kind == "completed"
             # 竞争者持事务外旧状态（认为仍是 1）提交：内核按当前值拒绝。
-            stale = commit_operation(
+            stale = plan_guards.commit_operation(
                 PlanStartCommand(1, before_status=1), new_operation_key(), owned
             )
             assert stale.kind == "rolled_back"
@@ -414,7 +402,7 @@ class TestCurrentStateRecheck:
             assert _row(connection, "SELECT status FROM plans")[0] == 2
 
             # 重新读取当前状态后按原资格重做：成功且保留全部既有事实。
-            fresh = commit_operation(
+            fresh = plan_guards.commit_operation(
                 PlanStartCommand(1, before_status=2, after_status=3), new_operation_key(), owned
             )
             assert fresh.kind == "completed"
@@ -449,7 +437,7 @@ class TestCurrentStateRecheck:
                         state_rows={"plans": {}},
                     )
 
-            receipt = commit_operation(CreateThenStart(), new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(CreateThenStart(), new_operation_key(), owned)
             assert receipt.kind == "completed"
             row = _row(
                 connection,
@@ -478,7 +466,7 @@ class TestAllocationContract:
                     )
                     return CommandPlan(events=events, owners={}, state_rows={"plans": {}})
 
-            receipt = commit_operation(WrongCount(), new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(WrongCount(), new_operation_key(), owned)
             assert receipt.kind == "rolled_back"
             assert "不符" in str(receipt.error)
             assert _count(connection, "history_events") == 0
@@ -500,7 +488,7 @@ class TestAllocationContract:
                     )
                     return CommandPlan(events=(event,), owners={("plans", 1): ("plan", 1)}, state_rows={"plans": {}})
 
-            receipt = commit_operation(SkippedIds(), new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(SkippedIds(), new_operation_key(), owned)
             assert receipt.kind == "rolled_back"
             assert _count(connection, "history_transactions") == 0
         finally:
@@ -521,7 +509,7 @@ class TestAllocationContract:
                         state_rows={"plans": {}},
                     )
 
-            receipt = commit_operation(NoAllocation(), new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(NoAllocation(), new_operation_key(), owned)
             assert receipt.kind == "rolled_back"
             assert "没有分配" in str(receipt.error)
         finally:
@@ -538,7 +526,7 @@ class TestAtomicRollback:
         owned = _open(tmp_path)
         try:
             if read_only:
-                assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+                assert plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
             before = tuple(owned.connection.iterdump())
             observed = []
             planned = []
@@ -565,7 +553,7 @@ class TestAtomicRollback:
                     return plan
 
             with pytest.raises(SchemaRuleError) as raised:
-                commit_operation(ResultCommand(), new_operation_key(), owned)
+                plan_guards.commit_operation(ResultCommand(), new_operation_key(), owned)
             assert observed == [1, raised.value]
             assert not owned.connection.in_transaction
             assert tuple(owned.connection.iterdump()) == before
@@ -594,7 +582,7 @@ class TestAtomicRollback:
         try:
             real.execute("PRAGMA journal_mode=wal")
             failing = _owned_with(FailingConnection(real, fail_prefix))
-            receipt = commit_operation(PlanCreateCommand((1,)), new_operation_key(), failing)
+            receipt = plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), failing)
             assert receipt.kind == "rolled_back"
             assert isinstance(receipt.error, sqlite3.OperationalError)
             check = sqlite3.connect(tmp_path / "state.db")
@@ -625,7 +613,7 @@ class TestAtomicRollback:
         # 先提交一次创建，让更新路径分段（投影 UPDATE 与派生 UPDATE）可达。
         seed = _open(tmp_path)
         try:
-            assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), seed).kind == "completed"
+            assert plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), seed).kind == "completed"
         finally:
             seed.connection.close()
         real = sqlite3.connect(tmp_path / "state.db")
@@ -637,7 +625,7 @@ class TestAtomicRollback:
                 if fail_prefix.startswith("UPDATE")
                 else PlanCreateCommand((2,))
             )
-            receipt = commit_operation(command, new_operation_key(), failing)
+            receipt = plan_guards.commit_operation(command, new_operation_key(), failing)
             assert receipt.kind == "rolled_back"
             assert isinstance(receipt.error, sqlite3.OperationalError)
             check = sqlite3.connect(tmp_path / "state.db")
@@ -661,7 +649,7 @@ class TestAtomicRollback:
         try:
             real.execute("PRAGMA journal_mode=wal")
             failing = _owned_with(FailingConnection(real, "COMMIT"))
-            receipt = commit_operation(PlanCreateCommand((1,)), new_operation_key(), failing)
+            receipt = plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), failing)
             assert receipt.kind == "unknown"
             assert isinstance(receipt.error, sqlite3.OperationalError)
         finally:
@@ -675,7 +663,7 @@ class TestAtomicRollback:
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+            assert plan_guards.commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
 
             class IllegalTransition:
                 def plan(self, scope):
@@ -705,7 +693,7 @@ class TestAtomicRollback:
                         state_rows={"plans": {}},
                     )
 
-            receipt = commit_operation(IllegalTransition(), new_operation_key(), owned)
+            receipt = plan_guards.commit_operation(IllegalTransition(), new_operation_key(), owned)
             assert receipt.kind == "rolled_back"
             assert _row(connection, "SELECT status FROM plans")[0] == 1
             assert _count(connection, "history_events") == 1
@@ -713,9 +701,7 @@ class TestAtomicRollback:
             connection.close()
 
     def test_unimplemented_business_guard_rejects_write(self, tmp_path) -> None:
-        # 受理守卫已随 A4 正式注册；文件守卫已随采集观察登记注册。用
-        # 窗口观察事件展示未接入守卫（调度接线）的明确拒绝：即使行内
-        # SQL 可以接受也不能提交。
+        # 窗口规则缺失时，即使 SQL 可以接受事件行，也不能提交。
         from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
@@ -758,17 +744,9 @@ class TestAtomicRollback:
                             "cancel_requested": 0}}, "outputs": {}},
                     )
 
-            from camctl.history import validators
-
-            # 窗口守卫可能已被同进程更早的装配测试注册；临时摘除并
-            # 在结束后恢复，使本用例不依赖测试执行顺序。
-            saved_guard = validators.NAMED_GUARDS.pop("window", None)
-            try:
-                receipt = commit_operation(
-                    WindowObserveCommand(), new_operation_key(), owned)
-            finally:
-                if saved_guard is not None:
-                    validators.NAMED_GUARDS["window"] = saved_guard
+            storage = BusinessStorage(overrides={"window": None})
+            receipt = storage.commit_operation(
+                WindowObserveCommand(), new_operation_key(), owned)
             assert receipt.kind == "rolled_back"
             assert "具名校验未接入" in str(receipt.error)
             assert _count(connection, "actions") == 0
@@ -786,7 +764,7 @@ class TestTransactionControlReceipt:
 
     @pytest.mark.parametrize("location", ["command", "complete_result"])
     def test_precommit_control_rolls_back_once_and_keeps_same_object(
-        self, tmp_path, location
+        self, tmp_path, plan_guards, location
     ) -> None:
         from camctl.persistence.repositories.transactions import CommandPlan
 
@@ -811,7 +789,7 @@ class TestTransactionControlReceipt:
         tracked = RecordingFailureConnection(real, {})
         try:
             with pytest.raises(asyncio.CancelledError) as caught:
-                commit_operation(
+                plan_guards.commit_operation(
                     ControlCommand(), new_operation_key(), _owned_with(tracked)
                 )
 
@@ -831,7 +809,7 @@ class TestTransactionControlReceipt:
 
     @pytest.mark.parametrize("location", ["command", "complete_result"])
     def test_precommit_control_and_rollback_error_keep_control_and_secondary(
-        self, tmp_path, location
+        self, tmp_path, plan_guards, location
     ) -> None:
         from camctl.persistence.repositories.transactions import CommandPlan
 
@@ -856,7 +834,7 @@ class TestTransactionControlReceipt:
         tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_error})
         try:
             with pytest.raises(asyncio.CancelledError) as caught:
-                commit_operation(
+                plan_guards.commit_operation(
                     ControlCommand(), new_operation_key(), _owned_with(tracked)
                 )
 
@@ -894,7 +872,7 @@ class TestTransactionControlReceipt:
         )
         try:
             with pytest.raises(asyncio.CancelledError) as caught:
-                commit_operation(
+                plan_guards.commit_operation(
                     CountedCommand(), new_operation_key(), _owned_with(tracked)
                 )
 
@@ -924,7 +902,7 @@ class TestTransactionControlReceipt:
         "control", [False, True], ids=["sqlite-error", "control"]
     )
     def test_read_only_end_failure_is_unknown_and_not_retried(
-        self, tmp_path, control
+        self, tmp_path, plan_guards, control
     ) -> None:
         from camctl.persistence.repositories.transactions import CommandPlan
 
@@ -966,7 +944,7 @@ class TestTransactionControlReceipt:
         try:
             if control:
                 with pytest.raises(asyncio.CancelledError) as caught:
-                    commit_operation(
+                    plan_guards.commit_operation(
                         ReadOnlyCommand(), new_operation_key(), _owned_with(tracked)
                     )
                 assert caught.value is failure
@@ -980,7 +958,7 @@ class TestTransactionControlReceipt:
                 assert receipt.secondary_errors == ()
                 assert failure.__notes__ == ["原控制附注"]
             else:
-                receipt = commit_operation(
+                receipt = plan_guards.commit_operation(
                     ReadOnlyCommand(), new_operation_key(), _owned_with(tracked)
                 )
                 assert receipt.kind == "unknown"
@@ -996,7 +974,7 @@ class TestTransactionControlReceipt:
             real.close()
 
     def test_rollback_control_preserves_operation_error_and_is_not_retried(
-        self, tmp_path
+        self, tmp_path, plan_guards
     ) -> None:
         _create_valid_database(tmp_path / "state.db")
         real = sqlite3.connect(tmp_path / "state.db")
@@ -1010,7 +988,7 @@ class TestTransactionControlReceipt:
         tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_control})
         try:
             with pytest.raises(asyncio.CancelledError) as caught:
-                commit_operation(
+                plan_guards.commit_operation(
                     FailingCommand(), new_operation_key(), _owned_with(tracked)
                 )
 
@@ -1028,7 +1006,7 @@ class TestTransactionControlReceipt:
             real.close()
 
     def test_rollback_control_does_not_replace_earlier_control(
-        self, tmp_path
+        self, tmp_path, plan_guards
     ) -> None:
         _create_valid_database(tmp_path / "state.db")
         real = sqlite3.connect(tmp_path / "state.db")
@@ -1042,7 +1020,7 @@ class TestTransactionControlReceipt:
         tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_control})
         try:
             with pytest.raises(asyncio.CancelledError) as caught:
-                commit_operation(
+                plan_guards.commit_operation(
                     ControlCommand(), new_operation_key(), _owned_with(tracked)
                 )
 
@@ -1059,7 +1037,7 @@ class TestTransactionControlReceipt:
             real.close()
 
     def test_ordinary_operation_and_rollback_errors_keep_ordered_group(
-        self, tmp_path
+        self, tmp_path, plan_guards
     ) -> None:
         _create_valid_database(tmp_path / "state.db")
         real = sqlite3.connect(tmp_path / "state.db")
@@ -1072,7 +1050,7 @@ class TestTransactionControlReceipt:
 
         tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_error})
         try:
-            receipt = commit_operation(
+            receipt = plan_guards.commit_operation(
                 FailingCommand(), new_operation_key(), _owned_with(tracked)
             )
 
