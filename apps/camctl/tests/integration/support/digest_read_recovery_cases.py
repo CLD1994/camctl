@@ -16,8 +16,6 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.devices.read_session import ReadSession
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.outputs.obtain_flow import advance_obtain
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.session.supervision import Supervisor
 
 from ..bootstrap.test_media_assembly import _config
@@ -82,7 +80,6 @@ class Driver:
 
 async def prepare_request(tmp_path, *, now, sibling=False):
     """通过受理、实际拍摄处理和选择建立普通交付，尚未开始读取。"""
-    register_file_batch_guards()
     cfg = _config(tmp_path)
     staging = Path(cfg.paths.staging)
 
@@ -126,11 +123,7 @@ def factory(tmp_path, driver, *, now, boundary, horizon, executor):
 
 async def interrupted_process(path, root, marker, now):
     """在 READ_END 更新的真实 SQLite 授权点等待父进程结束本进程。"""
-    register_file_batch_guards()
-    register_outputs_guards()
     from camctl.capture.recovery import RecoveryBoundary
-    from camctl.persistence.repositories.operations import register_operation_guards
-    register_operation_guards()
     async with business_database(path) as database:
         def authorize(operation, table, column, _database, _trigger):
             if operation == sqlite3.SQLITE_UPDATE and table == 'file_copies' and column == 'read_end_event_id':

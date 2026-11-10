@@ -382,7 +382,7 @@ async def exhausted_result_world(case, home):
     from camctl.capture.results import FileKind
     from camctl.capture.timelapse import CaptureWaitConfig
     from camctl.operations.attempts import AttemptConfig
-    from camctl.session.clock import ClockCheckInput, check_clock, register_clock_guard
+    from camctl.session.clock import ClockCheckInput, check_clock
     from camctl.persistence.repositories.session import SessionRepository
     from camctl.contracts.values import new_operation_key
     from camctl.contracts.json_values import parse_exact_json
@@ -402,7 +402,6 @@ async def exhausted_result_world(case, home):
     status, used, raw = case.owned.connection.execute("SELECT status,attempts_used,error_json FROM operation_runs"
         " WHERE responsibility_key=?", (f"results/{case.activity_id}",)).fetchone()
     assert (status, used) == (6, 2) and case.results.calls == [case.activity_id, case.activity_id]
-    register_clock_guard()
     clock = SimpleNamespace(utc_micros=lambda: case.clock.wall + 1)
     bound = check_clock(ClockCheckInput(None, 0, 0, 1), clock)
     saved = SessionRepository().update_lower_bound(bound, new_operation_key(), case.owned)

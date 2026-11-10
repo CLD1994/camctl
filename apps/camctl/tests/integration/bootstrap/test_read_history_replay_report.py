@@ -17,8 +17,6 @@ from camctl.history.replay import EntityImage, RestoreSeed, restore
 from camctl.history.validators import ValidatedEvent
 from camctl.contracts.history_values import INITIAL_BOUNDARY
 from camctl.persistence.models import DbOutcomeKind
-from camctl.reporting.policy import register_report_guards, register_sync_guard
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.transactions import row_facts
 from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.policy import ReportingRepository
@@ -32,9 +30,6 @@ def _boundary_of(owned):
 
 
 pytestmark = pytest.mark.asyncio
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
 
 _META = {"id", "created_event_id", "last_event_id", "change_count"}
 _TABLES = ("file_copies", "operation_runs", "operation_attempts")

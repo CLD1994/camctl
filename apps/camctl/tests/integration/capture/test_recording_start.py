@@ -38,10 +38,7 @@ from camctl.operations.models import (
     SettlementBasis,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import (
     GrantRequest,
     SchedulingRepository,
@@ -57,7 +54,6 @@ from ..scheduling.test_resources import (
     _seed_record_action,
 )
 
-register_operation_guards()
 
 _NOW = 1_750_000_000_000_000
 _ANCHOR_NS = 7_200_000_000_000

@@ -37,10 +37,7 @@ from camctl.operations.models import (
 from camctl.operations.validation import validate_outcome
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import (
     GrantOutcome,
     GrantRequest,
@@ -55,8 +52,6 @@ from camctl.scheduling.resources import (
 from camctl.scheduling.rules import LaunchWindow
 
 from ..persistence.test_runtime import _create_valid_database
-
-register_operation_guards()
 
 _NOW = 1_750_000_000_000_000
 

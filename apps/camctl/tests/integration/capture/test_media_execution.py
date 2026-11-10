@@ -53,18 +53,12 @@ from camctl.host_files.media import ProbeRequest, RepairRequest
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
 from camctl.host_files.tasks import FileTaskExecutor, FileTaskId
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.session.supervision import Supervisor
 
 from ..persistence.test_runtime import _create_valid_database
 
-register_capture_guards()
-register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
 _POLICY = MediaPolicy(repair_margin_s=Decimal("10"))

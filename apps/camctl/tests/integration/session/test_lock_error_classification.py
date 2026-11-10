@@ -28,7 +28,7 @@ from camctl.persistence.runtime import (
     OwnedConnection,
     open_existing,
 )
-from camctl.reporting.policy import ReportingRepository, register_report_guards
+from camctl.reporting.policy import ReportingRepository
 from camctl.session import locks
 from camctl.session import service as session_service
 from camctl.session.service import run_session
@@ -184,7 +184,6 @@ def lock_environment(environment):
 
 
 def _seed_acknowledgeable_report(runtime) -> int:
-    register_report_guards()
     owned = open_existing(runtime.state_db, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         seeded = _process(_plan_body(request_id="41"), owned.connection)

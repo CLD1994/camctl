@@ -15,7 +15,6 @@ from camctl.outputs.definitions import SelectionMode
 from camctl.outputs.sources import SelectionSnapshot, select_outputs
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import commit_operation
 
@@ -196,7 +195,6 @@ async def test_obtain_runtime_consumes_saved_default_exclusions(tmp_path, media_
     from camctl.host_files.tasks import FileTaskExecutor
     from camctl.session.supervision import Supervisor
 
-    register_file_batch_guards()
     owned, staging = await recording_environment(
         tmp_path, check_decision=3,
         check_basis='{"reason": 2, "target_duration_ms": 60000}')

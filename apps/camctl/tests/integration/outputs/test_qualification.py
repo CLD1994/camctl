@@ -13,12 +13,7 @@ import pytest
 from camctl.capture.files import file_identity_key
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import (
-    OutputsRepository,
-    register_outputs_guards,
-)
+from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.outputs.qualification import (
     FileCandidate,
@@ -28,9 +23,6 @@ from camctl.outputs.qualification import (
 
 from ..persistence.test_runtime import _create_valid_database
 
-register_acceptance_guards()
-register_operation_guards()
-register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
 _LATER = _NOW + 60_000_000

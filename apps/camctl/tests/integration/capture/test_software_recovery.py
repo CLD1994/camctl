@@ -15,8 +15,6 @@ from camctl.operations.attempts import AttemptConfig
 from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
 from .test_baseline_start import _prepared, _accept_plan
 from ..support.baseline_cases import (baseline_case, baseline_case_for,
     advance_existing_recovery, saved_recovery, request_baseline_cancel, RecoveryCommitFault)
@@ -28,8 +26,6 @@ from ..acceptance.test_acceptance import _plan_body
 from ..acceptance.test_adb_camera_definitions import _catalog, _params
 
 pytestmark = pytest.mark.asyncio
-register_capture_guards()
-register_operation_guards()
 _BEFORE = "00000000-0000-4000-8000-000000000001"
 _AFTER = "00000000-0000-4000-8000-000000000002"
 from camctl.devices.drivers.adb_cameras.firmware_identity import firmware_fingerprint, RecoveryQualification

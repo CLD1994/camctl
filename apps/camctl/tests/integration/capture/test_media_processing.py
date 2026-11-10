@@ -42,16 +42,11 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import capture as capture_module
-from camctl.persistence.repositories.capture import (
-    CaptureRepository, register_capture_guards,
-)
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.transaction_fixtures import decorate_transaction_command
 
-register_capture_guards()
-register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
 

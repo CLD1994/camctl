@@ -21,7 +21,6 @@ from camctl.devices.ports import DriverDeclaration
 from ..bootstrap.test_media_assembly import _SessionDriver, _config
 from ..support.capture import capture_runtime
 from camctl.host_files.tasks import FileTaskResult
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.transactions import TransactionError
@@ -35,7 +34,6 @@ from .test_input_copy import _CONTENT, _NOW
 from ..bootstrap.test_binding_transactions import _CommitFailure
 
 pytestmark = pytest.mark.asyncio
-register_outputs_guards()
 
 
 class _WaitingProbe:

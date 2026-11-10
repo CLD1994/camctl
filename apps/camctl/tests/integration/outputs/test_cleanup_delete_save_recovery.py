@@ -478,7 +478,7 @@ async def test_cleanup_begin_same_key_rejects_changed_original_input(environment
     from camctl.contracts.values import new_operation_key
     from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind
     from camctl.outputs.batches import BatchOutcome, BatchRequest
-    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+    from camctl.persistence.repositories.file_batches import FileBatchRepository
     from ..bootstrap.test_output_binding_changes import _NOW
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=True)
     action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
@@ -487,7 +487,6 @@ async def test_cleanup_begin_same_key_rejects_changed_original_input(environment
         " JOIN device_files f ON f.id=o.device_file_id JOIN actions a ON a.id=f.observer_action_id"
         " WHERE c.id=?", (item_id,),
     ).fetchone()
-    register_file_batch_guards()
     batch = FileBatchRepository().acquire(
         BatchRequest(action_id, device_id, _NOW), new_operation_key(), owned)
     assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch
