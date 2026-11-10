@@ -53,6 +53,16 @@ def _require_digest(name: str, value) -> None:
         raise ValueError(f"{name} 必须是 64 位小写十六进制摘要: {value!r}")
 
 
+def publishable_copy_error(*, verification_state, committed_bytes, source_size) -> str | None:
+    """返回阻止准备或发布的副本事实，按校验、字节顺序检查。"""
+    verification = enum_for("file_copies.verification_state")
+    if verification_state not in (int(verification.MATCHED), int(verification.SOURCE_CHECKSUM_UNAVAILABLE)):
+        return "副本未完成字节校验不能准备或发布"
+    if committed_bytes != source_size:
+        return "副本字节未完整保存不能准备或发布"
+    return None
+
+
 class HandoffPlace(Enum):
     """交接决策涉及的位置：工作目录与两个主程序接管目录。"""
 

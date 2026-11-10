@@ -7110,13 +7110,12 @@ def _require_publishable_copy(context, delivery_id: int) -> None:
     if len(copies) != 1:
         raise EventValidationError("准备或发布必须对应唯一交付拷贝")
     copy = copies[0]
-    if copy.get("verification_state") not in (
-        int(_VERIFICATION.MATCHED),
-        int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
-    ):
-        raise EventValidationError("副本未完成字节校验不能准备或发布")
-    if copy.get("committed_bytes") != copy.get("source_size"):
-        raise EventValidationError("副本字节未完整保存不能准备或发布")
+    from camctl.outputs.handoff import publishable_copy_error
+    error = publishable_copy_error(verification_state=copy.get("verification_state"),
+                                   committed_bytes=copy.get("committed_bytes"),
+                                   source_size=copy.get("source_size"))
+    if error is not None:
+        raise EventValidationError(error)
 
 
 def _photo_cache_recopy_proof(connection, copy, attempt, *, require_reset=False):
@@ -7311,7 +7310,8 @@ def _copy_round_chain_proven(
 def _copy_guard(event, context) -> None:
     """拷贝建档、进度段、目标重置、校验与重拷守卫。"""
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _PHOTO_READ_START_REASON:
-        from camctl.outputs.photo_read import parse_photo_read_start, decide_photo_read_start
+        from camctl.outputs.photo_read import (parse_photo_read_start, decide_photo_read_start,
+                                                photo_read_attempt_matches)
 
         try:
             if len(event.rows) != 1 or event.rows[0].table != "file_copies":
@@ -7333,19 +7333,9 @@ def _copy_guard(event, context) -> None:
                     or copy.get("source_intermediate_file_id") is not None
                     or copy.get("processing_id") is not None or copy.get("inspection_id") is not None
                     or read_action_spec(origin).get("photo_source_policy") != "deferred"
-                    or source.get("size_bytes") is not None or source.get("sha256") is not None
-                    or run.get("kind") != int(_RUN_KIND.READ_FILE) or run.get("status") != int(_RUN_STATUS.ACTIVE)
-                    or run.get("copy_id") != row.row_id or run.get("delivery_id") != delivery.get("id")
-                    or run.get("action_id") != delivery.get("action_id")
-                    or run.get("attempts_used") != request.ticket.attempt_id
-                    or run.get("responsibility_key") != request.ticket.responsibility_key
-                    or attempts[0].get("status") != int(_ATTEMPT_STATUS.RUNNING)
-                    or attempts[0].get("intent_event_id") is None or attempts[0].get("result_event_id") is not None
-                    or attempts[0].get("copy_round") != copy.get("round")
-                    or copy.get("slot_device_id") != origin.get("device_id")
-                    or copy.get("read_end_event_id") is not None
-                    or copy.get("verification_state") != int(_VERIFICATION.NOT_PERFORMED)
-                    or copy.get("source_sha256") is not None or copy.get("target_sha256") is not None):
+                    or not photo_read_attempt_matches(copy_id=row.row_id, copy=copy, source=source,
+                        origin=origin, run=run, attempt=attempts[0], delivery=delivery,
+                        ticket=request.ticket)):
                 raise ValueError("照片读取长度缺少持槽的原读取尝试及按需来源")
             completion = source.get("completion_evidence_json")
             observation = completion.get("observation") if isinstance(completion, Mapping) else None
