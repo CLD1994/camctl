@@ -205,7 +205,7 @@ async def test_start_with_reliable_zero_initialization_preserves_source_state(so
         owned.connection.close()
 
 
-async def _real_environment(tmp_path, *, storage, cleanup=False, source=None, captures=3):
+async def _real_environment(tmp_path, *, storage=None, cleanup=False, source=None, captures=3):
     """实际受理和实际开始建立完整主对象目录，供 H/原键核实。"""
     from camctl.acceptance.input import ParsedInput
     from camctl.acceptance.service import CommandMode, ProcessInput

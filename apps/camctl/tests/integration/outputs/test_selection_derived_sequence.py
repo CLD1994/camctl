@@ -74,7 +74,7 @@ def _output(connection, identity, kind, file_id):
         return cursor.fetchone()[0]
 
 
-def _scenario(owned, mode, case, *, storage):
+def _scenario(owned, mode, case, *, storage=None):
     connection = owned.connection
     kind, size, previous_kind, previous_size = _CASES[case]
     if previous_kind is not None:
