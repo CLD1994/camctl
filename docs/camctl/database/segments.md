@@ -108,7 +108,7 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 `read_set(ref, owned)` 返回有限元信息；`read_members`、`read_gaps`、`read_scope` 使用 `(ref, cursor, batch, owned)` 返回 `Page`，每页最多 128 项。三种继续位置分别为 `SegmentMemberCursor`、`SegmentGapCursor` 和 `SegmentScopeCursor`，均绑定完整引用，不能跨种类或版本复用。成员完整顺序包含目录整数、index、稳定身份及行 ID；空键排在可靠键之前。`read_assessment(ref, owned)` 返回有限 P1 判断。`read_active_set(action_id, owned)` 只返回明确发布的唯一 SegmentSetRef，尚未发布返回 None，不按版本或最大ID猜测。正式 `read_scope` 要求来源已经终态、该集合具有明确 published_event_id，且全部原判断数量的 output 关联均已发布；`published=False` 仅用于内部准备及核实。
 
-`segment_activation_rows(ref, event_id, owned)`、`segment_scope_publication_rows(ref, bindings, owned)` 和 `segment_event(ref, branch, rows, event_id, transaction_id, occurred_at, request_input=...)` 提供 P3 组合终态的有限构造基础，不自行提交完整终态事务。`bindings` 每项为 `(scope_member_id, output_id)`；PUBLISH 事件的原申请使用相同二项元组批次。`register_segment_guards()` 接入独立守卫；`SegmentReadScope` 只授权同集合的有限复核，不授权任意 SQL、设备操作或全动作驻留。
+`segment_activation_rows(ref, event_id, owned)`、`segment_scope_publication_rows(ref, bindings, owned)` 和 `segment_event(ref, branch, rows, event_id, transaction_id, occurred_at, request_input=...)` 提供 P3 组合终态的有限构造基础，不自行提交完整终态事务。`bindings` 每项为 `(scope_member_id, output_id)`；PUBLISH 事件的原申请使用相同二项元组批次。分段规则由业务存储的正式规则集合装配；`SegmentReadScope` 只授权同集合的有限复核，不授权任意 SQL、设备操作或全动作驻留。
 
 报告生成由 `reporting/bounded_generation.py` 在报告固定历史边界恢复来源动作、独立文件事实及关联实体；分段缺口、默认范围和保留产物逐批展开，再按公共错误登记流式校验和编码。动作中的有限错误头继续保持有限，报告中的完整详情引用同一边界的实际产物身份。独立 `state_sync` 通过历史归属关系读取，不要求它属于动作。实际完成与验证范围由[正式实施计划](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md)及[组件验证记录](../verification.md)跟踪。
 
