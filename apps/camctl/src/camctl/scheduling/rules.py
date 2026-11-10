@@ -16,9 +16,11 @@ __all__ = [
     "LaunchWindow",
     "ScheduleDecision",
     "ScheduleFacts",
+    "WindowObservationError",
     "WindowPhase",
     "decide",
     "expiration_reason",
+    "validate_window_observation",
     "window_phase",
 ]
 
@@ -52,6 +54,28 @@ def window_phase(window: LaunchWindow, trusted_wall_now: int) -> WindowPhase:
     if trusted_wall_now > window.window_end:
         return WindowPhase.AFTER_WINDOW
     return WindowPhase.IN_WINDOW
+
+
+class WindowObservationError(ValueError):
+    """首次窗口观察与原观察或启动窗口不一致。"""
+
+
+def validate_window_observation(
+    *, action_id: int, previous: object, observed: object,
+    scheduled_at: object, max_delay_ms: object,
+) -> None:
+    """核对首次观察及动作已保存的窗口，不读取外部状态。"""
+    if previous is not None:
+        raise WindowObservationError("首次观察不能覆盖已有观察时间")
+    if not isinstance(observed, int) or isinstance(observed, bool):
+        raise WindowObservationError(f"观察时间必须是整数微秒: {observed!r}")
+    if (not isinstance(scheduled_at, int) or isinstance(scheduled_at, bool)
+            or not isinstance(max_delay_ms, int) or isinstance(max_delay_ms, bool)):
+        raise WindowObservationError(
+            f"窗口观察要求动作保存启动窗口: actions#{action_id}")
+    window = LaunchWindow(scheduled_at, scheduled_at + max_delay_ms * 1000)
+    if window_phase(window, observed) is not WindowPhase.IN_WINDOW:
+        raise WindowObservationError(f"观察时间不在启动窗口内: actions#{action_id}")
 
 
 class LaunchFact(Enum):
