@@ -491,13 +491,22 @@ class TestPendingExpiration:
         assert first.value.outcome is ExpireOutcome.EXPIRED
         # 计划内仍有待执行动作：计划不完成。
         assert _row(owned, "SELECT status FROM plans WHERE id = 1") == (1,)
+        assert _row(owned, "SELECT status, execution_started FROM actions WHERE id = 1") == (5, 0)
+        assert _row(owned, "SELECT status, execution_started FROM actions WHERE id = 2") == (1, 0)
         assert _events(owned, 9, 2) == 0
 
+        boundary = _row(owned, "SELECT MAX(id) FROM history_events")[0]
         second = _expire(owned, 2, now=_AFTER_WINDOW)
         assert second.value.outcome is ExpireOutcome.EXPIRED
         # 计划完成事实与最后的终态同事务保存。
         assert _row(owned, "SELECT status FROM plans WHERE id = 1") == (3,)
+        assert _row(owned, "SELECT status, execution_started FROM actions WHERE id = 2") == (5, 0)
         assert _events(owned, 9, 2) == 1
+        events = owned.connection.execute(
+            "SELECT event_type, transaction_id FROM history_events WHERE id > ? ORDER BY id",
+            (boundary,)).fetchall()
+        assert [event[0] for event in events] == [8, 9]
+        assert len({event[1] for event in events}) == 1
 
     async def test_expire_same_key_replay_restores_result(self, owned, tmp_path):
         await _accept_plan(owned, tmp_path, _photo_body())

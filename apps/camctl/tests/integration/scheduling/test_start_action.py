@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from decimal import Decimal
+import json
 
 import pytest
 
@@ -162,6 +164,85 @@ class TestStartGranted:
             " completion_mode FROM device_activities WHERE action_id = 1").fetchone()
         # 延时能力与受理时固定任务契约一致；无停止能力则无安全重复停止。
         assert activity == (0, 0, 1, 2)
+
+
+@pytest.mark.parametrize("failure", ["binding", "baseline"])
+@pytest.mark.parametrize("has_pending_sibling", [False, True])
+async def test_preparation_failure_aggregates_plan(owned, tmp_path, failure, has_pending_sibling):
+    from camctl.capture.baseline_models import BaselineReadIntent, BaselineReadReturn
+    from camctl.contracts.workflow_errors import action_error_id
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.directory import DirectoryRead
+    from camctl.operations.models import ErrorValue
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.repositories.scheduling import (
+        FailBindingPreparationRequest, FailPreparationRequest, ReservePreparationRequest,
+    )
+    from ..acceptance.test_adb_camera_definitions import _catalog as adb_catalog, _params
+    from ..acceptance.test_hasselblad_definitions import PHOTO_PARAMS, _catalog as photo_catalog
+
+    body = _plan_body()
+    if failure == "binding":
+        params = dict(PHOTO_PARAMS)
+        params["exposure"] = {**params["exposure"], "aperture": 8}
+        body["actions"][0]["params"] = params
+        catalog = photo_catalog()
+    else:
+        body["actions"][0].update(type="camera_timelapse",
+            params=_params("dji-action6", "camera_timelapse"))
+        catalog = adb_catalog("dji-action6")
+    if has_pending_sibling:
+        body["actions"].append({"name": "future-report", "type": "report_status",
+            "scheduled_at": "2026-01-15 10:00:00", "params": {"scope": "full"}})
+    plan_id = await _accept_plan(owned, tmp_path, body, catalog)
+    members = owned.connection.execute(
+        "SELECT id, status, execution_started FROM actions WHERE plan_id=? ORDER BY input_index",
+        (plan_id,)).fetchall()
+    assert members == ([(1, 1, 0), (2, 1, 0)] if has_pending_sibling else [(1, 1, 0)])
+    assert _value(owned, "SELECT status FROM plans WHERE id=?", plan_id) == 1
+    repository = SchedulingRepository()
+    if failure == "binding":
+        details = {"device_id": "cam-1", "expected_driver_id": "hasselblad_cfv100c", "reason": "missing"}
+        request = FailBindingPreparationRequest(1, _SCHEDULED, _SCHEDULED, details)
+        save = repository.fail_binding_preparation
+        expected_code = action_error_id("device_binding_unavailable")
+    else:
+        reserved = repository.reserve_preparation(
+            ReservePreparationRequest(1, _SCHEDULED, _SCHEDULED, Decimal(0)), new_operation_key(), owned)
+        assert reserved.kind is DbOutcomeKind.COMPLETED, reserved.error
+        assert reserved.value.outcome.value == "reserved"
+        activity = reserved.value.activity_id
+        capture = CaptureRepository()
+        intent = BaselineReadIntent(1, activity, DeviceBinding("cam-1", "dji-action6"),
+            ("/mnt/media_rw/emulated/DCIM", "/mnt/media_rw/sd/DCIM"), None, Decimal(1),
+            capture.baseline_ref(activity, owned), 1, new_operation_key(), new_operation_key(), _SCHEDULED)
+        saved = capture.save_baseline_read_intent(intent, intent.call_key, owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+        error = ErrorValue("transport_timeout", "baseline", {"command": "directory"})
+        returned = capture.save_baseline_read_return(
+            BaselineReadReturn(saved.value.call_id, _SCHEDULED + 1, error, DirectoryRead(None, error, None)),
+            intent.result_save_key, owned)
+        assert returned.kind is DbOutcomeKind.COMPLETED, returned.error
+        assert returned.value.error == error
+        details = {"activity_id": str(activity), "reason": "baseline_read_failed"}
+        request = FailPreparationRequest(1, _SCHEDULED + 2, "baseline_read_failed")
+        save = repository.fail_preparation
+        expected_code = action_error_id("capture_failed")
+    boundary = _value(owned, "SELECT MAX(id) FROM history_events")
+    outcome = save(request, new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    assert outcome.value.outcome.value == "failed"
+    row = owned.connection.execute(
+        "SELECT status, execution_started, error_code, error_details_json FROM actions WHERE id=1").fetchone()
+    assert (row[0], row[1], row[2], json.loads(row[3])) == (4, 0, expected_code, details)
+    assert _value(owned, "SELECT status FROM plans WHERE id=?", plan_id) == (1 if has_pending_sibling else 3)
+    if has_pending_sibling:
+        assert owned.connection.execute("SELECT status, execution_started FROM actions WHERE id=2").fetchone() == (1, 0)
+    events = owned.connection.execute(
+        "SELECT event_type, transaction_id FROM history_events WHERE id>? ORDER BY id", (boundary,)).fetchall()
+    assert [event[0] for event in events].count(8) == 1
+    assert [event[0] for event in events].count(9) == (0 if has_pending_sibling else 1)
+    assert len({event[1] for event in events}) == 1
 
 
 class TestStartIdempotent:

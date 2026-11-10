@@ -27,6 +27,7 @@ from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.reporting.policy import (
     cancel_sync,
+    finish_canceled_sync_action,
     record_local_report,
     register_report_guards,
     register_sync_guard,
@@ -202,8 +203,12 @@ class TestStartSync:
             "SELECT id, event_type FROM history_events WHERE id >= 2"
             " ORDER BY id").fetchall()]
         assert events == [(2, 5), (3, 9), (4, 8)]
+        assert len({r[0] for r in owned.connection.execute(
+            "SELECT transaction_id FROM history_events WHERE id IN (2, 3, 4)"
+        ).fetchall()}) == 1
         # 动作失败后计划仍处于执行中（其余动作尚未开始）。
         assert _value(owned, "SELECT status FROM plans WHERE id = 1") == (2,)
+        assert _value(owned, "SELECT status, execution_started FROM actions WHERE id = 40") == (1, 0)
         # 恢复：失败不改写其他报告动作的正常开始。
         recovery = start_sync(
             new_operation_key(), owned, action_id=40, mode=SyncMode.FULL,
@@ -218,6 +223,27 @@ class TestStartSync:
             occurred_at=_NOW)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
         assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (1,)
+
+    def test_missing_anchor_failure_of_last_action_completes_plan(self, pipeline):
+        owned = pipeline
+        owned.connection.execute(
+            "UPDATE actions SET status = 6, cancel_requested = 1 WHERE id IN (40, 11)")
+        owned.connection.commit()
+        boundary = _value(owned, "SELECT MAX(id) FROM history_events")[0]
+        outcome = start_sync(new_operation_key(), owned, action_id=41,
+            mode=SyncMode.INCREMENTAL, after_report_id=99, occurred_at=_NOW)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert outcome.value.disposition.value == "failed"
+        assert outcome.value.sync_id is None
+        status, started, code, details = _value(owned,
+            "SELECT status, execution_started, error_code, error_details_json FROM actions WHERE id=41")
+        assert (status, started, code, json.loads(details)) == (4, 1, 26, {"after_report_id": "99"})
+        assert _value(owned, "SELECT status FROM plans WHERE id=1") == (3,)
+        assert _value(owned, "SELECT COUNT(*) FROM state_syncs WHERE action_id=41") == (0,)
+        events = owned.connection.execute(
+            "SELECT event_type, transaction_id FROM history_events WHERE id>? ORDER BY id", (boundary,)).fetchall()
+        assert [row[0] for row in events] == [5, 8, 9]
+        assert len({row[1] for row in events}) == 1
 
     def test_canceled_before_start_does_not_start(self, pipeline):
         owned = pipeline
@@ -320,6 +346,33 @@ class TestLocalReport:
 
 
 class TestCancelSync:
+    @pytest.mark.parametrize("last_action", [False, True])
+    def test_finish_canceled_action_aggregates_plan(self, pipeline, last_action):
+        owned = pipeline
+        if last_action:
+            owned.connection.execute(
+                "UPDATE actions SET status = 6, cancel_requested = 1 WHERE id IN (41, 11)")
+            owned.connection.commit()
+        started = start_sync(new_operation_key(), owned, action_id=40,
+                             mode=SyncMode.FULL, occurred_at=_NOW)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        _apply_cancel_request(owned, 40)
+        canceled = cancel_sync(new_operation_key(), owned, action_id=40, occurred_at=_NOW)
+        assert canceled.kind is DbOutcomeKind.COMPLETED, canceled.error
+        before_sync = _value(owned, "SELECT status, ended_event_id FROM state_syncs WHERE action_id=40")
+        assert before_sync[0] == 3
+        boundary = _value(owned, "SELECT MAX(id) FROM history_events")[0]
+        outcome = finish_canceled_sync_action(new_operation_key(), owned, action_id=40, occurred_at=_NOW)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert _value(owned, "SELECT status, execution_started, cancel_requested FROM actions WHERE id=40") == (6, 1, 1)
+        assert _value(owned, "SELECT status, ended_event_id FROM state_syncs WHERE action_id=40") == before_sync
+        assert _value(owned, "SELECT status FROM plans WHERE id=1") == ((3 if last_action else 2),)
+        assert _value(owned, "SELECT status FROM actions WHERE id=41") == ((6 if last_action else 1),)
+        events = owned.connection.execute(
+            "SELECT event_type, transaction_id FROM history_events WHERE id>? ORDER BY id", (boundary,)).fetchall()
+        assert [row[0] for row in events] == ([8, 9] if last_action else [8])
+        assert len({row[1] for row in events}) == 1
+
     def test_cancel_ends_running_action_sync_only(self, pipeline):
         owned = pipeline
         start_sync(new_operation_key(), owned, action_id=41,
