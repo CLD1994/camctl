@@ -209,10 +209,10 @@ async def test_cancel_target_fix_records_only_first_save(mocker, disposition):
     mocker.patch("camctl.bootstrap.flows._current_cancel_origin", autospec=True, return_value=(2, False))
     mocker.patch("camctl.cancellation.targets.resolve_cancel_target", autospec=True,
         return_value=TargetResolution(action_ids=(7,)))
-    mocker.patch("camctl.cancellation.rules.load_eligibility_inputs", autospec=True,
-        return_value=LoadedEligibility({"type": 4, "status": 3, "cancel_requested": 0},
-            EligibilityFacts(terminal=True, cancel_applied=False,
-                dispatch=DispatchPhase.NOT_STARTED, stop_supported=False)))
+    repository.read_eligibility_inputs.return_value = LoadedEligibility(
+        {"type": 4, "status": 3, "cancel_requested": 0},
+        EligibilityFacts(terminal=True, cancel_applied=False,
+            dispatch=DispatchPhase.NOT_STARTED, stop_supported=False))
     mocker.patch("camctl.persistence.repositories.cancellation.sqlite_auto_candidates",
         autospec=True, return_value=())
     mocker.patch("camctl.cancellation.service.apply_cancel", autospec=True,

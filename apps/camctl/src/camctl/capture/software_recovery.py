@@ -5,8 +5,8 @@ from camctl.persistence.models import db_failure
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import StrEnum
 
+from camctl.capture.recovery_types import RecoveryPhase
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
@@ -17,11 +17,6 @@ from camctl.scheduling.rules import WindowPhase, window_phase
 
 
 from camctl.contracts.enums import enum_for
-
-
-#: 普通 phase 列的编号由组件枚举登记维护，内存只派生成员名的小写文本。
-RecoveryPhase = StrEnum("RecoveryPhase", {member.name: member.name.lower()
-    for member in enum_for("software_recoveries.phase")})
 
 
 def recovery_state(row):

@@ -851,7 +851,7 @@ async def _resolve_and_fix(
     )
     from camctl.cancellation.rules import (
         current_eligibility_facts, decide_cancel_eligibility,
-        load_eligibility_inputs, may_link_auto_preview,
+        may_link_auto_preview,
     )
     from camctl.cancellation.targets import missing_target_error, prepare_cancel_set, resolve_cancel_target
     from camctl.persistence.repositories.cancellation import SqliteCancelLookup, sqlite_auto_candidates
@@ -871,8 +871,8 @@ async def _resolve_and_fix(
         inputs = []
         candidates = []
         for identity in resolution.action_ids:
-            loaded = load_eligibility_inputs(
-                connection, identity, motor_permit=permits[identity])
+            loaded = repository.read_eligibility_inputs(
+                owned, identity, motor_permit=permits[identity])
             inputs.append((identity, loaded))
             original = loaded.action
             if (is_hasselblad_photo(original) and original["status"] not in (3,4,5,6)

@@ -32,7 +32,6 @@ from camctl.cancellation.rules import (
     decide_cancel_eligibility,
     decide_origin_cancel,
     current_eligibility_facts,
-    load_eligibility_inputs,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.logging_runtime.diagnostics import record_error
@@ -106,8 +105,8 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
             motor_permit = (None if runtime.motor_permits is None else
                             runtime.motor_permits.get(target_id))
             loaded = await database.read(
-                lambda owned: load_eligibility_inputs(
-                    owned.connection, target_id, motor_permit=motor_permit),
+                lambda owned: runtime.repository.read_eligibility_inputs(
+                    owned, target_id, motor_permit=motor_permit),
                 description="读取取消资格事实",
             )
             start_entry = (None if runtime.start_entries is None else

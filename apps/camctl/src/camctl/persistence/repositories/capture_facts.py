@@ -890,7 +890,7 @@ def output_scope_resolved(facts: Mapping[str, Any], recovery=None) -> bool:
         return True
     if not isinstance(recovery, Mapping):
         return False
-    from camctl.capture.software_recovery import RecoveryPhase
+    from camctl.capture.recovery_types import RecoveryPhase
     return (facts.get("baseline_state") == 3 and facts.get("activity_state") == 3
         and recovery.get("phase") == RecoveryPhase.READY.value
         and recovery.get("prepared") is True and recovery.get("scope_finalized") is True
