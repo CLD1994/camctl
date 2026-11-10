@@ -227,8 +227,8 @@ def _ownership_from_result_page_guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_ownership_from_result_page_guard():
-    register_guard('ownership_from_result_page', _ownership_from_result_page_guard)
+def register_ownership_from_result_page_guard(register=register_guard):
+    register('ownership_from_result_page', _ownership_from_result_page_guard)
 
 
 class _FileOwnershipFromResultPageCommand:

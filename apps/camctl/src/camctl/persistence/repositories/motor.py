@@ -784,8 +784,8 @@ def _motor_guard(event, context):
         raise EventValidationError(f"电机共同事务违反契约: {error}") from error
 
 
-def register_motor_guards():
-    register_guard("motor", _motor_guard)
+def register_motor_guards(register=register_guard):
+    register("motor", _motor_guard)
 
 
 class MotorRepository:

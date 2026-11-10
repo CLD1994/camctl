@@ -168,8 +168,8 @@ def _guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_software_recovery_guard():
-    register_guard("software_recovery", _guard)
+def register_software_recovery_guard(register=register_guard):
+    register("software_recovery", _guard)
 
 
 class _Save:

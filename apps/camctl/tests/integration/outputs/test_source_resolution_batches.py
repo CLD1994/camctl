@@ -56,6 +56,32 @@ async def test_source_resolution_streams_bounded_events_and_returns_finite_resul
         owned.connection.close()
 
 
+async def test_bounded_source_write_uses_its_business_storage_rules(tmp_path):
+    from camctl.history.validators import EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
+
+    _, owned = _six_form_environment(tmp_path)
+    try:
+        request = _request(owned, SourceSpec(plan_instance_id=2), count=3)
+        rejection = EventValidationError("test-specific source rejection")
+        def reject_source(event, context):
+            raise rejection
+        blocked = outputs.OutputsRepository(1, storage=BusinessStorage({"source_members": reject_source}))
+        normal = outputs.OutputsRepository(1, storage=BusinessStorage())
+        before = tuple(owned.connection.iterdump())
+        key = new_operation_key()
+        failed = blocked.resolve_sources(request, key, owned)
+        assert failed.kind is DbOutcomeKind.ROLLED_BACK and failed.error is rejection
+        assert tuple(owned.connection.iterdump()) == before
+        saved = normal.resolve_sources(request, key, owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+        assert saved.value.fixed and saved.value.member_count == 4
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM action_dependencies WHERE action_id=30").fetchone() == (4,)
+    finally:
+        owned.connection.close()
+
+
 async def test_source_resolution_rejects_request_different_from_saved_input(tmp_path):
     _, owned = _six_form_environment(tmp_path)
     try:

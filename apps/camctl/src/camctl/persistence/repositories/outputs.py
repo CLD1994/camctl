@@ -6318,118 +6318,124 @@ def _completion_siblings(connection, action):
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
 
-    def __init__(self, read_batch_size=DEFAULT_BATCH_SIZE):
+    def __init__(self, read_batch_size=DEFAULT_BATCH_SIZE, *, storage=None):
         self.read_batch_size = positive_limit(read_batch_size)
+        self._storage = storage
+
+    def _commit_operation(self, command, key, owned):
+        if self._storage is None:
+            return commit_operation(command, key, owned)
+        return self._storage.commit_operation(command, key, owned)
 
     def start_obtain_action(
         self, command: StartObtainAction, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ObtainStartResult]:
-        receipt = commit_operation(_StartObtainCommand(command, key, self.read_batch_size), key, owned)
+        receipt = self._commit_operation(_StartObtainCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def start_cleanup_action(
         self, command: StartCleanupAction, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupStartResult]:
-        receipt = commit_operation(_StartCleanupCommand(command, key), key, owned)
+        receipt = self._commit_operation(_StartCleanupCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def resolve_sources(
         self, command: ResolveSources, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ResolveSourcesOutcome]:
-        receipt = commit_operation(_ResolveSourcesCommand(command, key, self.read_batch_size), key, owned)
+        receipt = self._commit_operation(_ResolveSourcesCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def finish_obtain(
         self, command: FinishObtain, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ObtainFinishResult]:
-        receipt = commit_operation(_FinishObtainCommand(command, key, self.read_batch_size), key, owned)
+        receipt = self._commit_operation(_FinishObtainCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def settle_canceled_obtain(
         self, command: SettleCanceledObtain, key: OperationKey, owned: OwnedConnection,
     ) -> DbOutcome[CanceledObtainSettlement]:
-        receipt = commit_operation(_SettleCanceledObtainCommand(command, key), key, owned)
+        receipt = self._commit_operation(_SettleCanceledObtainCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def fix_selection(
         self, command: FixSelection, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SelectionSaved]:
-        receipt = commit_operation(_FixSelectionCommand(command, key), key, owned)
+        receipt = self._commit_operation(_FixSelectionCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def grant_file(
         self, command: FileCandidate, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FileQualification]:
-        receipt = commit_operation(_GrantFileCommand(command, key, self.read_batch_size), key, owned)
+        receipt = self._commit_operation(_GrantFileCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def fallback_read_source(
         self, request: ReadSourceFallback, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[ReadSourceFallbackOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _ReadSourceFallbackCommand(request, key, owned), key, owned)
         return _outcome_of(receipt)
 
     def grant_read_slot(
         self, request: SlotRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SlotDecision]:
-        receipt = commit_operation(_SlotChangeCommand(request, _SLOT_GRANT, key), key, owned)
+        receipt = self._commit_operation(_SlotChangeCommand(request, _SLOT_GRANT, key), key, owned)
         return _outcome_of(receipt)
 
     def release_read_slot(
         self, request: SlotRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SlotDecision]:
-        receipt = commit_operation(_SlotChangeCommand(request, _SLOT_RELEASE, key), key, owned)
+        receipt = self._commit_operation(_SlotChangeCommand(request, _SLOT_RELEASE, key), key, owned)
         return _outcome_of(receipt)
 
     def load_copy_state(self, copy_id: int, owned: OwnedConnection) -> CopyStateFacts:
         return _load_copy_state_facts(owned.connection, copy_id)
 
     def save_photo_read_start(self, request, key: OperationKey, owned: OwnedConnection) -> DbOutcome:
-        return _outcome_of(commit_operation(_PhotoReadStartCommand(request, key), key, owned))
+        return _outcome_of(self._commit_operation(_PhotoReadStartCommand(request, key), key, owned))
 
     def reset_copy_target(
         self, request: TargetResetRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[TargetResetDecision]:
-        receipt = commit_operation(_CopyResetCommand(request, key), key, owned)
+        receipt = self._commit_operation(_CopyResetCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
     def save_segment(
         self, command: ReliableSegment, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SegmentSaveOutcome]:
-        receipt = commit_operation(_SegmentSaveCommand(command, key), key, owned)
+        receipt = self._commit_operation(_SegmentSaveCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def save_verification(
         self, command: VerificationSave, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[VerificationResult]:
-        receipt = commit_operation(_IntegritySaveCommand(command, key), key, owned)
+        receipt = self._commit_operation(_IntegritySaveCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def register_recopy(
         self, command: RecopyRegistration, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[RecopyResult]:
-        receipt = commit_operation(_RecopyCommand(command, key), key, owned)
+        receipt = self._commit_operation(_RecopyCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def save_prepared(
         self, request: PreparedRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[PreparedSaveOutcome]:
-        receipt = commit_operation(_PreparedSaveCommand(request, key), key, owned)
+        receipt = self._commit_operation(_PreparedSaveCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
     def fail_read_delivery(
         self, command: FailReadDelivery, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FailureSaveOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _ReadDeliveryFailCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def fail_read_binding(
         self, command: FailReadBinding, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FailureSaveOutcome]:
-        return _outcome_of(commit_operation(_ReadBindingFailCommand(command, key), key, owned))
+        return _outcome_of(self._commit_operation(_ReadBindingFailCommand(command, key), key, owned))
 
     def load_delivery_state(
         self, delivery_id: int, owned: OwnedConnection
@@ -6440,7 +6446,7 @@ class OutputsRepository:
         self, request: PublicationIntentRequest, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[IntentSaveOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _PublicationIntentCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
@@ -6448,7 +6454,7 @@ class OutputsRepository:
         self, request: PublicationSaveRequest, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[PublicationSaveOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _PublicationSaveCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
@@ -6456,7 +6462,7 @@ class OutputsRepository:
         self, request: UnconfirmedFailureSave, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[FailureSaveOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _UnconfirmedFailureCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
@@ -6469,7 +6475,7 @@ class OutputsRepository:
         self, request: RetentionRelease, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[RetentionReleaseOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _RetentionReleaseCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
@@ -6477,7 +6483,7 @@ class OutputsRepository:
         self, request: CleanupIntent, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[CleanupIntentOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _CleanupIntentCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
@@ -6485,7 +6491,7 @@ class OutputsRepository:
         self, request: CleanupResultSave, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[CleanupResultSaveOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _CleanupResultCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
@@ -6493,14 +6499,14 @@ class OutputsRepository:
         self, request: CleanupChecked, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[CleanupCheckedOutcome]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _CleanupCheckedCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
     def fix_cleanup_targets(
         self, command: FixCleanupTargets, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupTargetsSaved]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _FixCleanupTargetsCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -6511,20 +6517,20 @@ class OutputsRepository:
     def restrict_cleanup_item(
         self, command: RestrictCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
-        receipt = commit_operation(_RestrictCleanupCommand(command, key), key, owned)
+        receipt = self._commit_operation(_RestrictCleanupCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
     def progress_cleanup_item(
         self, command: ProgressCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
-        receipt = commit_operation(_ProgressCleanupCommand(command, key), key, owned)
+        receipt = self._commit_operation(_ProgressCleanupCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
     def begin_cleanup_attempt(
         self, intent: AttemptIntent, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[BeginAttemptResult]:
         """清理首次处理归属、操作流程与第一次尝试的共同建档事务。"""
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _BeginCleanupAttemptCommand(intent, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -6536,7 +6542,7 @@ class OutputsRepository:
         self, finish: AttemptFinish, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FinishAttemptResult]:
         """清理 DELETE 尝试结果与不可撤销限制事实的共同保存事务。"""
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _FinishCleanupAttemptCommand(finish, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -6547,43 +6553,43 @@ class OutputsRepository:
     def finish_cleanup_item(
         self, command: FinishCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
-        receipt = commit_operation(_FinishCleanupItemCommand(command, key), key, owned)
+        receipt = self._commit_operation(_FinishCleanupItemCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
     def handoff_cleanup_absence(self, command, key, owned):
         from camctl.persistence.repositories.cleanup_absence import HandoffCleanupAbsenceCommand
         if command.database_id != owned.metadata.instance_id:
             raise ConsistencyError("缺席交接申请不属于原数据库")
-        return self._cleanup_item_outcome(commit_operation(
+        return self._cleanup_item_outcome(self._commit_operation(
             HandoffCleanupAbsenceCommand(command, key), key, owned))
 
     def fail_cleanup_item(
         self, command: FailCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
-        receipt = commit_operation(_FailCleanupItemCommand(command, key), key, owned)
+        receipt = self._commit_operation(_FailCleanupItemCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
     def fail_cleanup_binding(
         self, command: FailCleanupBinding, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
-        return self._cleanup_item_outcome(commit_operation(
+        return self._cleanup_item_outcome(self._commit_operation(
             _CleanupBindingFailCommand(command, key), key, owned))
 
     def ensure_withdrawal_waiter(self, command, key, owned):
-        return _outcome_of(commit_operation(_EnsureWithdrawalWaiterCommand(command, key), key, owned))
+        return _outcome_of(self._commit_operation(_EnsureWithdrawalWaiterCommand(command, key), key, owned))
 
     def advance_withdrawal(
         self, command: AdvanceWithdrawal, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[CleanupItemSaved]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _AdvanceWithdrawalCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
     def cancel_cleanup_item(
         self, command: CancelCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _CancelCleanupItemCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
@@ -6591,7 +6597,7 @@ class OutputsRepository:
         self, command: FinishCleanupAction, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[CleanupActionFinished]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _FinishCleanupActionCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -6603,7 +6609,7 @@ class OutputsRepository:
         self, command: FinishCanceledCleanupAction, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[CleanupActionFinished]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             _FinishCanceledCleanupCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -11204,29 +11210,29 @@ class _AdvanceWithdrawalCommand:
         return self._already()
 
 
-def register_outputs_guards() -> None:
+def register_outputs_guards(register=register_guard) -> None:
     """注册来源、选择与读取资格事件的正式业务守卫（装配期调用）。"""
-    register_guard("selection_initialization", _selection_initialization_guard)
-    register_guard("source_selection", _source_selection_guard)
-    register_guard("intermediate", _intermediate_guard)
-    register_guard("cursor", _cursor_guard)
-    register_guard("delivery", _delivery_guard)
-    register_guard("copy", _copy_guard)
+    register("selection_initialization", _selection_initialization_guard)
+    register("source_selection", _source_selection_guard)
+    register("intermediate", _intermediate_guard)
+    register("cursor", _cursor_guard)
+    register("delivery", _delivery_guard)
+    register("copy", _copy_guard)
     from .read_end import read_end_guard
-    register_guard("read_end", read_end_guard)
-    register_guard("copy_links", _copy_links_guard)
-    register_guard("read_slot", _read_slot_guard)
-    register_guard("read_permission", _read_permission_guard)
-    register_guard("processing", _processing_guard)
-    register_guard("recording_source", _recording_source_guard)
-    register_guard("obtain_member", _obtain_member_guard)
-    register_guard("target_set", _target_set_guard)
-    register_guard("cleanup_member", _cleanup_member_guard)
-    register_guard("cleanup", _cleanup_guard)
+    register("read_end", read_end_guard)
+    register("copy_links", _copy_links_guard)
+    register("read_slot", _read_slot_guard)
+    register("read_permission", _read_permission_guard)
+    register("processing", _processing_guard)
+    register("recording_source", _recording_source_guard)
+    register("obtain_member", _obtain_member_guard)
+    register("target_set", _target_set_guard)
+    register("cleanup_member", _cleanup_member_guard)
+    register("cleanup", _cleanup_guard)
     from camctl.persistence.repositories.cleanup_absence import cleanup_result_source_guard
-    register_guard("cleanup_result_source", cleanup_result_source_guard)
+    register("cleanup_result_source", cleanup_result_source_guard)
     from camctl.persistence.repositories.segment_queries import (
         register_segment_query_guards,
     )
 
-    register_segment_query_guards()
+    register_segment_query_guards(register)

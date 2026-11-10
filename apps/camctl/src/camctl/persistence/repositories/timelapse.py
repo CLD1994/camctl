@@ -412,6 +412,6 @@ def _validate_wait_values(values) -> None:
                 raise EventValidationError(f"{column} 必须是非负毫秒: {value!r}")
 
 
-def register_timelapse_guards() -> None:
+def register_timelapse_guards(register=register_guard) -> None:
     """注册等待安排事件的正式业务守卫（装配期调用）。"""
-    register_guard("capture_wait", _capture_wait_guard)
+    register("capture_wait", _capture_wait_guard)

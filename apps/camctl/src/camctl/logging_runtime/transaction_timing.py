@@ -103,15 +103,15 @@ def db_operation_context(**fields):
 
 def trace_transaction(function):
     @wraps(function)
-    def traced(command, operation_key, owned):
+    def traced(command, operation_key, owned, **kwargs):
         if not performance_enabled():
-            return function(command, operation_key, owned)
+            return function(command, operation_key, owned, **kwargs)
         measurement = _Measurement()
         token = _current.set(measurement)
         fields = {**_fields.get(), "command": type(command).__name__,
                   "operation_key": str(operation_key), "outcome": "raised"}
         try:
-            result = function(command, operation_key, owned)
+            result = function(command, operation_key, owned, **kwargs)
             fields["outcome"] = result.kind
             return result
         finally:

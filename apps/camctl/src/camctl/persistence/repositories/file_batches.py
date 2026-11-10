@@ -95,8 +95,8 @@ def _batch_guard(event, context):
             raise EventValidationError("文件批次尚未可靠结束，不能释放")
 
 
-def register_file_batch_guards():
-    register_guard("file_batch", _batch_guard)
+def register_file_batch_guards(register=register_guard):
+    register("file_batch", _batch_guard)
 
 
 class FileBatchRepository:

@@ -2492,14 +2492,14 @@ def _retry_guard(event, context) -> None:
             _fail("只有未结束流程保存重试等待责任")
 
 
-def register_operation_guards() -> None:
+def register_operation_guards(register=register_guard) -> None:
     """注册操作事务的正式业务守卫（装配期调用，替换测试替身）。"""
     from .availability_create import register_availability_guard
-    register_availability_guard()
-    register_guard("operation_identity", _operation_identity_guard)
-    register_guard("query_configuration", _query_configuration_guard)
-    register_guard("attempt_intent", _attempt_intent_guard)
-    register_guard("attempt_result", _attempt_result_guard)
-    register_guard("read_resume", _read_resume_guard)
-    register_guard("operation_finish", _operation_finish_guard)
-    register_guard("retry", _retry_guard)
+    register_availability_guard(register)
+    register("operation_identity", _operation_identity_guard)
+    register("query_configuration", _query_configuration_guard)
+    register("attempt_intent", _attempt_intent_guard)
+    register("attempt_result", _attempt_result_guard)
+    register("read_resume", _read_resume_guard)
+    register("operation_finish", _operation_finish_guard)
+    register("retry", _retry_guard)

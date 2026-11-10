@@ -142,9 +142,9 @@ async def check_with_recheck(
     return check
 
 
-def register_clock_guard() -> None:
+def register_clock_guard(register=register_guard) -> None:
     """注册可信时间下界事件的正式守卫。"""
-    register_guard("clock", _clock_guard)
+    register("clock", _clock_guard)
 
 
 def _clock_guard(event, context) -> None:
