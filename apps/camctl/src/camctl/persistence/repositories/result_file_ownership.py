@@ -8,6 +8,9 @@ from camctl.capture.files import (
     file_identity_key,
 )
 from camctl.capture.result_pages import ResultPageRef
+from camctl.capture.result_ownership import (
+    validate_result_ownership_policy, result_observation_role, resolved_result_role,
+)
 from camctl.devices.tasks import CaptureResultPolicy
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
@@ -85,9 +88,8 @@ def _load_proof(connection, request, *, current_boundary=None):
     if first is None or last is None or not first <= ref.event_id <= last:
         raise ConsistencyError('归属原页不在真实尝试可靠页范围')
     scope_only = run['kind'] == int(enum_for('operation_runs.kind').RESOLVE_OUTPUT_SCOPE)
-    if not scope_only and action['execution_spec_json'].get('result_policy') not in {
-            item.value for item in CaptureResultPolicy}:
-        raise ConsistencyError('原动作没有声明 OSMO 结果策略')
+    policy = action['execution_spec_json'].get('result_policy')
+    validate_result_ownership_policy(scope_only=scope_only, policy=policy)
     old_action, old_activity, attempt, old_run = pages.committed_page_proof(
         connection, saved, raw, event, transaction)
     if (old_action['id'] != action['id'] or old_activity['id'] != activity['id']
@@ -102,59 +104,20 @@ def _load_proof(connection, request, *, current_boundary=None):
     if len(entries) != 1:
         raise ConsistencyError('原差集文件没有唯一实际观察')
     entry = entries[0]
-    suffix = entry.identity.rpartition('.')[2].lower()
-    policy = action['execution_spec_json'].get('result_policy')
-    action6 = action['execution_spec_json'].get('result_policy') == (
-        CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
-    )
-    if scope_only:
-        # 范围页仅保证身份与差集；用途只消费冻结策略或原页明确信息。
-        role = int(_ROLE.UNDETERMINED)
-        if policy in {item.value for item in CaptureResultPolicy}:
-            from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
-
-            kind = profile_for_policy(policy).classify_file(entry.identity).kind
-            if kind is SegmentFileKind.PREVIEW:
-                role = int(_ROLE.PREVIEW)
-            elif kind in (SegmentFileKind.VIDEO, SegmentFileKind.PHOTO):
-                role = int(_ROLE.ORIGINAL)
-        elif entry.paired_identity is not None:
-            role = int(_ROLE.PREVIEW)
-        elif entry.format_id is not None:
-            role = int(_ROLE.ORIGINAL)
-    elif action6:
-        from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
+    action6_format_id = None
+    if not scope_only and policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
         from camctl.devices.drivers.adb_cameras.action6_formats import format_for_suffix
-
-        profile = profile_for_policy(action['execution_spec_json']['result_policy'])
-        kind = profile.classify_file(entry.identity).kind
-        photo_format = format_for_suffix("." + suffix)
-        expected_format = (
-            "mp4" if kind is SegmentFileKind.VIDEO
-            else "lrf" if kind is SegmentFileKind.PREVIEW
-            else None if photo_format is None else photo_format.format_id
-        )
-        if (expected_format is None or not isinstance(entry.format_id, str)
-                or entry.format_id.casefold() != expected_format):
-            raise ConsistencyError('Action6 原观察格式与冻结文件类别不一致')
-        role = int(
-            _ROLE.PREVIEW
-            if kind is SegmentFileKind.PREVIEW
-            else _ROLE.ORIGINAL
-        )
-    else:
-        if (suffix not in {'osv', 'lrf'} or not isinstance(entry.format_id, str)
-                or entry.format_id.lower() != suffix):
-            raise ConsistencyError('原观察格式与 OSV/LRF 文件后缀不一致')
-        role = int(_ROLE.ORIGINAL if suffix == 'osv' else _ROLE.PREVIEW)
+        suffix = entry.identity.rpartition('.')[2].lower()
+        format_info = format_for_suffix('.' + suffix)
+        action6_format_id = None if format_info is None else format_info.format_id
+    role = result_observation_role(scope_only=scope_only, policy=policy,
+        observed_file=entry, action6_format_id=action6_format_id)
     file = row_facts(connection, 'device_files', request.file_id)
     if (file is None or file['identity_key'] != file_identity_key(
             action['device_id'], action['driver_id'], entry.identity)):
         raise ConsistencyError('差集文件与原设备绑定的实际稳定身份不符')
-    if (scope_only and role == int(_ROLE.UNDETERMINED)
-            and file.get('source_action_id') == action['id']
-            and file.get('ownership_evidence_json') is not None):
-        role = file['role']
+    role = resolved_result_role(scope_only=scope_only, role=role,
+        action_id=action['id'], saved_file=file)
     return action['id'], role, file
 
 
