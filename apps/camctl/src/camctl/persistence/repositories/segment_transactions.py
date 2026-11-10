@@ -45,9 +45,10 @@ def _one(db,sql,params=()):
 def _verify_action6_inspections_finished(db, action, setrow, assessment):
     """来源成功前核对已建立的检查责任与其实际读取结果。"""
     from camctl.capture.segment_models import CoverageStatus
+    from camctl.capture.inspection_rules import inspection_result_requires_read
     from camctl.devices.tasks import CaptureResultPolicy
     from camctl.persistence.repositories.segment_inspections import (
-        _result_requires_read, inspection_input_read_succeeded,
+        inspection_input_read_succeeded,
     )
 
     if action["execution_spec_json"].get("result_policy") != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
@@ -70,7 +71,7 @@ def _verify_action6_inspections_finished(db, action, setrow, assessment):
             result = inspection["result_json"]
             if result is None:
                 raise ConsistencyError("已结束分段检查缺少结果")
-            if (_result_requires_read(inspection["state"], result)
+            if (inspection_result_requires_read(inspection["state"], result)
                     and not inspection_input_read_succeeded(db, inspection)):
                 raise ConsistencyError("来源成功前检查副本的原读取必须可靠成功")
         cursor_id = rows[-1][0]
