@@ -10,8 +10,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import capture as capture_repository
-from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.history.validators import EventContext
 from camctl.persistence.repositories.transactions import BoundedCommandPlan, commit_operation
 
@@ -19,8 +18,6 @@ from .transaction_fixtures import capture_operation_command
 from ..capture.test_baseline_history import _activity, _fix, _ref
 from ..scheduling.test_start_action import _SCHEDULED, owned
 
-register_capture_guards()
-register_operation_guards()
 pytestmark = pytest.mark.asyncio
 
 
