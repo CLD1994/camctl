@@ -4326,7 +4326,7 @@ async def _saved_recording_media_listing(runtime: CaptureRuntime, action, proces
     activity_id = await _activity_id_of(runtime, action["id"])
     def read(owned):
         with closing(owned.connection.execute(
-            "SELECT r.status,r.attempts_used,r.max_attempts_used,t.status,t.result_event_id,"
+            "SELECT r.status,r.attempts_used,t.status,t.result_event_id,"
             "f.source_action_id,f.completion_state,f.identity_key"
             " FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
             " JOIN device_files f ON f.id=?"
@@ -4334,16 +4334,17 @@ async def _saved_recording_media_listing(runtime: CaptureRuntime, action, proces
             (processing[6], f"results/{activity_id}"))) as cursor:
             return cursor.fetchone()
     facts = await runtime.database.read(read, description="读取已保存的录像媒体来源")
-    if (facts is None or facts[0] != int(_RUN_STATUS.ACTIVE) or facts[1] < facts[2]
-            or facts[3] != int(_ATTEMPT_STATUS.SUCCEEDED) or facts[4] is None
-            or facts[5] != action["id"]
-            or facts[6] != int(enum_for("device_files.completion_state").COMPLETE)):
+    if (facts is None or facts[0] != int(_RUN_STATUS.ACTIVE)
+            or facts[1] < runtime.check_config.max_attempts
+            or facts[2] != int(_ATTEMPT_STATUS.SUCCEEDED) or facts[3] is None
+            or facts[4] != action["id"]
+            or facts[5] != int(enum_for("device_files.completion_state").COMPLETE)):
         return None
     listing = await _saved_result_listing(runtime, action["id"])
     from camctl.capture.files import file_identity_key
     if not await any_result(entry.complete and entry.kind is FileKind.VIDEO
             and entry.paired_identity is None
-            and file_identity_key(action["device_id"], action["driver_id"], entry.identity) == facts[7]
+            and file_identity_key(action["device_id"], action["driver_id"], entry.identity) == facts[6]
             async for entry in iter_result_entries(listing.entries)):
         return None
     return listing

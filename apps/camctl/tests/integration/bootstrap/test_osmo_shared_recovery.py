@@ -113,12 +113,12 @@ class Channel:
 
 
 async def _world(owned, tmp_path, *, finite=False, binding=BINDING,
-                 single_original=False):
+                 single_original=False, result_attempts=1):
     cfg = load_config({"paths": {name: str(tmp_path / name) for name in ("staging", "ready", "processing")},
         "devices": {"cam-1": {"kind": "camera", "driver": binding.driver_id,
             "video": {"result_mode": "segmented" if binding == BINDING and not single_original else "single_file"},
             "adb": {"serial": "serial-1"}, "recording": {"start_retry_interval_s": "0"},
-            "result_check": {"max_attempts": 1, "retry_interval_s": "0"},
+            "result_check": {"max_attempts": result_attempts, "retry_interval_s": "0"},
             "copy": {"retry_interval_s": "0"}}}}, ConfigDefaults())
     for directory in (cfg.paths.staging, cfg.paths.ready, cfg.paths.processing):
         Path(directory).mkdir(parents=True, exist_ok=True)
@@ -339,7 +339,7 @@ async def _obtain(world, **kwargs):
     return await driver_world_obtain(world, **kwargs)
 
 
-async def _pending_read(world, tmp_path, monkeypatch, *, internal):
+async def _pending_read(world, tmp_path, monkeypatch, *, internal, lower_result_limit=False):
     runtime, result_ticket = await _result_attempt(world, monkeypatch,
         elapsed_us=5_000_000 if internal else 11_000_000, pages='terminal')
     original = _saved_actual_page(world, result_ticket, 'terminal')
@@ -355,6 +355,13 @@ async def _pending_read(world, tmp_path, monkeypatch, *, internal):
         record_driver_state(world, "winddown_saved_required_check_and_source")
 
     horizon = await _reopen(world)
+    if lower_result_limit:
+        declaration = world.cfg.devices[BINDING.device_id]
+        world.cfg = replace(world.cfg, devices={BINDING.device_id: {**declaration,
+            "result_check": {**declaration["result_check"], "max_attempts": 1}}})
+        assert world.owned.connection.execute(
+            "SELECT attempts_used,max_attempts_used FROM operation_runs WHERE responsibility_key=?",
+            (f"results/{world.activity_id}",)).fetchone() == (1, 3)
     runtime = await _capture(world, media_enabled=internal,
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
         recovery_max_event_id=lambda: horizon)
@@ -394,6 +401,24 @@ async def _pending_read(world, tmp_path, monkeypatch, *, internal):
         ' ON f.id=c.target_file_id WHERE c.id=?', (copy_id,)).fetchone()[0]
     assert (Path(world.cfg.paths.staging) / target).read_bytes() == b'part'
     return ticket, source_id, target
+
+
+async def test_current_lower_result_limit_keeps_original_media_read(owned, tmp_path, monkeypatch):
+    world = await _world(owned, tmp_path, single_original=True, result_attempts=3)
+    try:
+        ticket, _, target = await _pending_read(
+            world, tmp_path, monkeypatch, internal=True, lower_result_limit=True)
+        assert ticket.operation == "read"
+        assert (Path(world.cfg.paths.staging) / target).read_bytes() == b"part"
+        assert world.owned.connection.execute(
+            "SELECT attempts_used,max_attempts_used FROM operation_runs WHERE responsibility_key=?",
+            (f"results/{world.activity_id}",)).fetchone() == (1, 3)
+        run_id, = world.owned.connection.execute(
+            "SELECT id FROM operation_runs WHERE responsibility_key=?",
+            (f"results/{world.activity_id}",)).fetchone()
+        assert [value for value in world.channel.result_tickets if value is not None] == [(run_id, 1)]
+    finally:
+        await close_driver_world(world)
 
 
 @pytest.mark.parametrize("internal", [False, True])
