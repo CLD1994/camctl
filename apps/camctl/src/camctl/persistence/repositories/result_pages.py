@@ -89,16 +89,16 @@ def iter_result_file_facts(reader, action, ticket, last_page_event_id):
 
 def verify_output_scope_ownership(reader, action, ticket, last_page_event_id):
     """当前新增必要成员必须可靠归属；明确可选预览只留发现也可确定范围。"""
-    from camctl.capture.results import ProductRule, is_optional_preview
+    from camctl.capture.result_ownership import require_result_file_ownership
+    from camctl.capture.results import ProductRule
     rules = tuple(ProductRule.from_json(value) for value in action['execution_spec_json'].get('product_rules', ()))
     for entry, facts in iter_result_file_facts(reader, action, ticket, last_page_event_id):
-        if (facts['source_action_id'] == action['id'] and facts['ownership_evidence_json'] is not None):
-            continue
-        if (ticket.responsibility_key != f"scope/{ticket.target_id}"
-                and facts['source_action_id'] is None and is_optional_preview(
-                entry.kind, entry.format_id, entry.paired_identity, rules)):
-            continue
-        raise ConsistencyError('原完整扫描仍有未确认归属的新增必要文件')
+        require_result_file_ownership(action_id=action['id'],
+            source_action_id=facts['source_action_id'],
+            ownership_evidence=(facts['ownership_evidence_json']
+                                if facts['source_action_id'] == action['id'] else None),
+            responsibility_key=ticket.responsibility_key, target_id=ticket.target_id,
+            observed_file=entry, product_rules=rules)
 
 
 class _BaselineCursor:
