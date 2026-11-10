@@ -71,11 +71,6 @@ def _world(mocker, *, enter_during_read):
         return loaded
 
     mocker.patch(
-        "camctl.cancellation.rules.load_eligibility_inputs",
-        autospec=True,
-        side_effect=load_inputs,
-    )
-    mocker.patch(
         "camctl.cancellation.targets.resolve_cancel_target",
         autospec=True,
         return_value=TargetResolution(action_ids=(_ACTION_ID,)),
@@ -112,6 +107,7 @@ def _world(mocker, *, enter_during_read):
             value=CancelTargetsSaved(CancelTargetsDisposition.SAVED, item_ids),
         )
 
+    repository.read_eligibility_inputs.side_effect = lambda owned, action_id, motor_permit=None: load_inputs(owned.connection, action_id, motor_permit=motor_permit)
     repository.fix_cancel_targets.side_effect = save
     return metadata, database, entries, permit, ticket, repository, saves
 

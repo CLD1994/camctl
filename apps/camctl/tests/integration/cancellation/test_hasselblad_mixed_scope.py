@@ -39,7 +39,8 @@ class MixedCatalog:
 @pytest.mark.parametrize('add_denied_hb_preview',[False,True])
 async def test_each_mixed_camera_keeps_its_original_preview_permission(tmp_path,generic_state,allowed,add_denied_hb_preview):
     from camctl.persistence.repositories import cancellation as module
-    from camctl.cancellation.rules import load_eligibility_facts,decide_cancel_eligibility,may_apply_cancel
+    from camctl.cancellation.rules import decide_cancel_eligibility,may_apply_cancel
+    from camctl.persistence.repositories.cancellation import load_eligibility_facts
     from camctl.persistence.repositories.scheduling import SchedulingRepository,ObserveWindowRequest,StartActionRequest
     from camctl.history.validators import EventValidationError
     generic={'name':'普通单张','type':'camera_take_photo','device_id':'cam-2','group':'g','scheduled_at':_input_time(),

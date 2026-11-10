@@ -14,10 +14,10 @@ from camctl.cancellation.models import (
     StartCancelAction,
     TargetFacts,
 )
+from camctl.persistence.repositories.cancellation import load_eligibility_facts
 from camctl.cancellation.rules import (
     CancelEligibility,
     decide_cancel_eligibility,
-    load_eligibility_facts,
 )
 from camctl.cancellation.targets import prepare_cancel_set, resolve_cancel_target
 from camctl.contracts.values import new_operation_key

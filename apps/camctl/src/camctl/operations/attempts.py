@@ -640,3 +640,14 @@ class ReadResumeRequest:
                 f"只有读取尝试可以恢复配置: {self.ticket.operation!r}"
             )
         _utc_micros(self.occurred_at)
+
+
+def retry_wait_violation(status, retry_interval):
+    """只有未结束且保存重试间隔的流程可以建立重试等待。"""
+    from camctl.contracts.enums import enum_for
+    if retry_interval is None:
+        return "建立重试等待要求已保存的重试间隔"
+    states = enum_for("operation_runs.status")
+    if status not in (int(states.PENDING), int(states.ACTIVE)):
+        return "只有未结束流程保存重试等待责任"
+    return None

@@ -9,7 +9,8 @@ from decimal import Decimal
 import pytest
 
 from camctl.capture.handlers import capture_handler
-from camctl.cancellation.rules import load_eligibility_facts, decide_cancel_eligibility, CancelEligibility
+from camctl.cancellation.rules import decide_cancel_eligibility, CancelEligibility
+from camctl.persistence.repositories.cancellation import load_eligibility_facts
 from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
 from camctl.operations.process import RawToolOutcome, LocalExit
 from camctl.contracts.json_values import parse_exact_json

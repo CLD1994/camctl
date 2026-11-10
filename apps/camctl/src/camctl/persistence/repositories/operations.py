@@ -46,6 +46,7 @@ from camctl.operations.attempts import (
     StaleRunFinishResult,
     responsibility_key,
     seconds_from_json,
+    retry_wait_violation,
     ticket_target_id,
     ticket_target_for_identity,
     operation_responsibility_key,
@@ -2483,13 +2484,9 @@ def _retry_guard(event, context) -> None:
                     _fail("读取等待完成要求原尝试已收场且所属工作仍有资格")
         if row.after.values.get("retry_wait_required") != 1:
             continue
-        if facts.get("retry_interval_s_json") is None:
-            _fail("建立重试等待要求已保存的重试间隔")
-        if facts.get("status") not in (
-            int(_RUN_STATUS.PENDING),
-            int(_RUN_STATUS.ACTIVE),
-        ):
-            _fail("只有未结束流程保存重试等待责任")
+        violation = retry_wait_violation(facts.get("status"), facts.get("retry_interval_s_json"))
+        if violation is not None:
+            _fail(violation)
 
 
 def register_operation_guards(register) -> None:

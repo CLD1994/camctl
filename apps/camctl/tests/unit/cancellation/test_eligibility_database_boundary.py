@@ -152,13 +152,9 @@ async def test_apply_cancel_uses_start_entry_phase_changed_during_fact_read(mock
         permit.enter(ticket)
         return loaded
 
-    mocker.patch(
-        "camctl.cancellation.service.load_eligibility_inputs",
-        autospec=True,
-        side_effect=load_inputs,
-    )
     repository = create_autospec(
         CancellationRepository, instance=True, spec_set=True)
+    repository.read_eligibility_inputs.side_effect = lambda owned, action_id, motor_permit=None: load_inputs(owned.connection, action_id, motor_permit=motor_permit)
     repository.record_cancel_result.return_value = DbOutcome(
         kind=DbOutcomeKind.COMPLETED)
     settlement = create_autospec(

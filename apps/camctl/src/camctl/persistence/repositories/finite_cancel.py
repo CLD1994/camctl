@@ -2,17 +2,15 @@
 from dataclasses import dataclass
 from collections.abc import Mapping
 
-from camctl.capture.finite_cancel import finite_cancel_policy
+from camctl.capture.finite_cancel import require_finite_cancel_end, require_failed_stop, require_capture_sent
 from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.results import CaptureFile, CaptureFileSet, FileKind, ProductRequirements, ProductRule, assess_capture_files, is_optional_preview
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, new_operation_key
-from camctl.devices.tasks import EndControl, StartReturn, CompletionMode
 from camctl.devices.capture_timing import CaptureTiming
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError
-from camctl.operations.models import AttemptStatus, EffectState
 from camctl.operations.result_format import read_result_document
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.transactions import CommandPlan, TransactionError, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change
@@ -109,26 +107,16 @@ def _verify_sources(state, request, evidence, *, event_id):
     from .result_sources import ResultSourceKind, result_source_from_state
     action, activity, start, stop, results, sent, stopped, result = _facts(state, request.action_id)
     spec = action['execution_spec_json']
-    if (not finite_cancel_policy(action) or not action['cancel_requested']
-            or spec.get('end_control') != int(EndControl.DEVICE)
-            or spec.get('start_return_meaning') != int(StartReturn.SENT)
-            or spec.get('completion_mode') != int(CompletionMode.TIME_AND_OUTPUTS)
-            or spec.get('wait_after_send') is not True or spec.get('duration_based') is not True):
-        raise ConsistencyError('有限取消结束要求原冻结策略、有限设备任务和已生效取消')
+    require_finite_cancel_end(action)
     if not json_equal(evidence, _evidence(state, request)):
         raise ConsistencyError('有限取消结束改变原调用、等待或结果页身份')
     for run, kind in ((start, _KIND.START), (stop, _KIND.STOP), (results, _KIND.CHECK_CAPTURE_RESULTS)):
         if (run['kind'] != int(kind) or run['action_id'] != action['id']
                 or run['activity_id'] != activity['id']):
             raise ConsistencyError('有限取消结束的原责任不属于同一活动')
-    if (stop['status'] != int(_RUN.FAILED) or stop['attempts_used'] != 1
-            or stopped['status'] == int(_ATTEMPT.RUNNING)
-            or stopped['effect_state'] == int(enum_for('operation_attempts.effect_state').CONFIRMED)):
-        raise ConsistencyError('有限取消结束缺少第一次停止失败的终局责任')
+    require_failed_stop(stop, stopped)
     original = read_result_document(sent['status'], sent['effect_state'], sent['result_json'], sent['error_json'])
-    if (original.status is not AttemptStatus.SUCCEEDED or original.effect is not EffectState.CONFIRMED
-            or not any(o.type == 'timelapse_sent' and o.data.get('activity_id') == str(activity['id']) for o in original.observations)):
-        raise ConsistencyError('有限取消结束缺少原活动的可靠 SENT')
+    require_capture_sent(original, activity['id'])
     for attempt in (sent, stopped, result):
         source = _history_source_event(state, attempt['result_event_id'])
         original_rows = [row for row in source.rows if row.table == 'operation_attempts']
