@@ -22,6 +22,11 @@ from camctl.capture.photo_pair_rules import (
     _host_photo_source_pair, _FILE_ROLE, _FILE_ROLE_FOR_KIND, _HOST_PHOTO_PURPOSE_CODES,
     _HOST_PHOTO_SHA256, _HOST_PURPOSE_FOR_KIND, _KIND_CODES, _OUTPUT_KIND,
 )
+from camctl.capture.device_file_rules import (
+    checksum_decision_error, checksum_value_error, completion_facts_error,
+    completion_wait_reference_error, incomplete_facts_error, ownership_claim_error,
+    ownership_pair_error,
+)
 from camctl.capture.activity_completion_rules import (
     result_page_confirms_completion, start_result_confirms_completion,
     stop_result_confirms_completion,
@@ -6456,45 +6461,19 @@ def _device_file_row_guard(event, row, context) -> None:
         raise EventValidationError("文件归属、形成状态、摘要及存在性必须是更新行")
     if reason == _FILE_OWNERSHIP_REASON:
         before, after = row.before.values, row.after.values
-        if (before.get("source_action_id") is not None
-                or before.get("ownership_evidence_json") is not None):
-            raise EventValidationError("文件来源只能从未知一次确认")
-        if before.get("role") != int(_FILE_ROLE.UNDETERMINED):
-            raise EventValidationError("已确认用途的文件不能再次确认归属")
-        source = after.get("source_action_id")
-        if not is_json_integer(source) or source < 1:
-            raise EventValidationError(f"确认来源必须是合法动作身份: {source!r}")
-        role = after.get("role")
-        if role not in (int(_FILE_ROLE.ORIGINAL), int(_FILE_ROLE.PREVIEW)):
-            raise EventValidationError(f"归属确认的用途必须是原片或预览: {role!r}")
+        error = ownership_claim_error(row.row_id, before, after)
+        if error is not None:
+            raise EventValidationError(error)
+        source, role = after.get("source_action_id"), after.get("role")
         evidence = after.get("ownership_evidence_json")
-        if isinstance(evidence, dict) and evidence.get("method") == int(_OWNERSHIP_METHOD.RESULT_PAGE_DIFFERENCE):
-            raise EventValidationError("原页差集归属只能使用独立原页分支")
-        if not isinstance(evidence, dict) or evidence.get("method") not in (
-                int(member) for member in _OWNERSHIP_METHOD):
-            raise EventValidationError("归属证据缺少登记的方法编号")
-        if not isinstance(evidence.get("observation"), dict):
-            raise EventValidationError("归属证据缺少驱动观察依据")
-        if (evidence.get("method") == int(_OWNERSHIP_METHOD.BASELINE_DIFFERENCE)
-                and not is_json_integer(evidence.get("activity_id"))):
-            raise EventValidationError("固定基准差集证据必须填写活动身份")
         paired = after.get("original_device_file_id")
-        pairing = after.get("pairing_evidence_json")
         if role == int(_FILE_ROLE.PREVIEW):
-            if not is_json_integer(paired) or paired < 1 or paired == row.row_id:
-                raise EventValidationError(f"预览配对必须是其他文件身份: {paired!r}")
-            if (not isinstance(pairing, dict)
-                    or pairing.get("method") != int(_PAIRING_METHOD.DRIVER_PAIRING)
-                    or not isinstance(pairing.get("observation"), dict)):
-                raise EventValidationError("预览配对缺少驱动配对证据")
             original = context.state_rows.get("device_files", {}).get(paired)
             if original is None:
                 raise EventValidationError("预览配对缺少原片当前事实")
-            if (original.get("role") != int(_FILE_ROLE.ORIGINAL)
-                    or original.get("source_action_id") != source):
-                raise EventValidationError("配对两端必须属于同一来源任务且原片用途为原片")
-        elif paired is not None or pairing is not None:
-            raise EventValidationError("原片不携带配对")
+            error = ownership_pair_error(original, source)
+            if error is not None:
+                raise EventValidationError(error)
         _photo_source_file_guard(context, event, row.row_id, evidence.get("observation"), role=role)
         return
 
@@ -6511,26 +6490,14 @@ def _device_file_row_guard(event, row, context) -> None:
         if state == int(_FILE_COMPLETION.COMPLETE):
             size = observed.get("size_bytes")
             evidence = observed.get("completion_evidence_json")
-            observation = evidence.get("observation") if isinstance(evidence, dict) else None
-            deferred_photo = (size is None and isinstance(observation, Mapping)
-                              and "photo_start" in observation)
-            if not deferred_photo and (not is_json_integer(size) or size < 0):
-                raise EventValidationError(f"完成状态必须携带非负完整大小: {size!r}")
-            if (not isinstance(evidence, dict)
-                    or not is_json_integer(evidence.get("basis"))
-                    or evidence.get("basis") not in (
-                        int(member) for member in _COMPLETION_BASIS)):
-                raise EventValidationError("完成状态缺少登记依据")
-            if deferred_photo and evidence.get("basis") != int(_COMPLETION_BASIS.DEVICE_GUARANTEE):
-                raise EventValidationError("未知大小的照片必须依据原设备完成保证")
-            if not isinstance(evidence.get("observation"), dict):
-                raise EventValidationError("完成状态缺少驱动观察依据")
+            error = completion_facts_error(size, evidence)
+            if error is not None:
+                raise EventValidationError(error)
             _photo_source_file_guard(context, event, row.row_id, evidence.get("observation"),
                                      role=facts.get("role"), size_bytes=size, check_size=True)
-            if (evidence.get("basis") == int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
-                    and (not is_json_integer(evidence.get("activity_id"))
-                         or not is_json_integer(evidence.get("wait_completed_event_id")))):
-                raise EventValidationError("等待与产物契约依据必须引用任务及等待完成事件")
+            error = completion_wait_reference_error(evidence)
+            if error is not None:
+                raise EventValidationError(error)
             try:
                 if (evidence["basis"] == int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
                         and ("result_page_event_id" in evidence or _native_wait_file(facts, context.state_rows))):
@@ -6542,31 +6509,25 @@ def _device_file_row_guard(event, row, context) -> None:
                     raise ConsistencyError("停止后等待的录像文件首次完成必须使用原停止与等待依据")
             except (ConsistencyError, ValueError, KeyError, TypeError) as error:
                 raise EventValidationError("文件完成的原停止与等待依据不一致") from error
-        elif observed.get("size_bytes") is not None:
-            raise EventValidationError("只有完成状态携带完整大小")
-        if state == int(_FILE_COMPLETION.UNCONFIRMED):
-            if not isinstance(observed.get("last_error_json"), dict):
-                raise EventValidationError("未确认状态必须携带实际失败证据")
+        else:
+            error = incomplete_facts_error(state, observed)
+            if error is not None:
+                raise EventValidationError(error)
         return
 
     if reason == _FILE_CHECKSUM_REASON:
         support = after.get("checksum_support")
-        if (facts.get("checksum_support") != int(_FILE_CHECKSUM.UNDETERMINED)
-                or support not in (int(_FILE_CHECKSUM.SUPPORTED),
-                                   int(_FILE_CHECKSUM.UNSUPPORTED))):
-            raise EventValidationError("摘要能力只能从未判定一次决定")
+        error = checksum_decision_error(facts, support)
+        if error is not None:
+            raise EventValidationError(error)
         sha256 = after.get("sha256")
         completion = facts.get("completion_evidence_json")
         _photo_source_file_guard(context, event, row.row_id,
             completion.get("observation") if isinstance(completion, Mapping) else None,
             role=facts.get("role"), sha256=sha256, check_sha=True)
-        if sha256 is not None:
-            if (support != int(_FILE_CHECKSUM.SUPPORTED)
-                    or facts.get("completion_state") != int(_FILE_COMPLETION.COMPLETE)):
-                raise EventValidationError("摘要只能在已完成的受支持文件上保存")
-            if (not isinstance(sha256, str) or len(sha256) != 64
-                    or any(char not in "0123456789abcdef" for char in sha256)):
-                raise EventValidationError(f"摘要必须是 64 位小写十六进制: {sha256!r}")
+        error = checksum_value_error(facts, support, sha256)
+        if error is not None:
+            raise EventValidationError(error)
         return
 
     if reason == _FILE_PRESENCE_REASON:
