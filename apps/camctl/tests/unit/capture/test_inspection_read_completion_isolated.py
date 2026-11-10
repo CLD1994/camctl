@@ -133,7 +133,7 @@ class ReadCompletionTests(unittest.TestCase):
             "_STATE": SimpleNamespace(PENDING=1), "EventValidationError": ValueError,
             "_binding_read_error": lambda doc: {"code": "device_binding_unavailable"},
             "_binding_read_result": lambda connection, inspection, doc: checks.append(inspection["id"]),
-            "_result_requires_read": lambda state, doc: False}
+            "inspection_result_requires_read": lambda state, doc: False}
         guard = extract(ROOT / "persistence/repositories/segment_inspections.py", "_segment_inspection_guard", namespace)
         row = SimpleNamespace(table="segment_inspections", row_id=8, after=SimpleNamespace(values={
             "state": 3, "result_event_id": 20, "result_json": {"failure": "binding"}}))
@@ -173,7 +173,8 @@ class ReadCompletionTests(unittest.TestCase):
         tasks = ModuleType("camctl.devices.tasks")
         tasks.CaptureResultPolicy = SimpleNamespace(ACTION6_VIDEO_SEGMENTS_V1=SimpleNamespace(value="action6"))
         inspections = ModuleType("camctl.persistence.repositories.segment_inspections")
-        inspections._result_requires_read = lambda state, result: result["requires_read"]
+        rules = ModuleType("camctl.capture.inspection_rules")
+        rules.inspection_result_requires_read = lambda state, result: result["requires_read"]
         inspections.inspection_input_read_succeeded = lambda connection, inspection: inspection["read_finished"]
         row = {"state": 1, "result_json": {"requires_read": True}, "read_finished": False}
         ns = {"closing": closing, "row_facts": lambda db, table, identity: row,
@@ -182,7 +183,7 @@ class ReadCompletionTests(unittest.TestCase):
         db = SimpleNamespace(execute=lambda sql, params: Cursor([(8,)] if params[2] == 0 else []))
         action = {"id": 6, "execution_spec_json": {"result_policy": "action6"}}
         assessment = SimpleNamespace(coverage_status=object())
-        with patch.dict(sys.modules, {models.__name__: models, tasks.__name__: tasks, inspections.__name__: inspections}):
+        with patch.dict(sys.modules, {models.__name__: models, tasks.__name__: tasks, inspections.__name__: inspections, rules.__name__: rules}):
             with self.assertRaises(ValueError): verify(db, action, {"id": 7}, assessment)
             row["state"] = 2
             with self.assertRaises(ValueError): verify(db, action, {"id": 7}, assessment)
