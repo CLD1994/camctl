@@ -5979,6 +5979,8 @@ async def _resume_discontinued_listings(runtime: CaptureRuntime, action_id: int)
         if pending.result_listing is None:
             continue
         ticket = pending.finish.ticket
+        if ticket.responsibility_key != f"results/{ticket.target_id}":
+            continue
         if await runtime.action_id_of_ticket(ticket) != action_id:
             continue
         if pending.result_disposition_ready:

@@ -1,13 +1,15 @@
 """范围末页沿公共保存入口交给原仓储，可靠完成后释放内存责任。"""
 
 import sqlite3
+from dataclasses import replace
 from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.capture.handlers import (
-    CaptureRuntime, ListingPhase, ListingRound, _finish_listing_result, _hold_recovered_result_page,
+    CaptureRuntime, ListingPhase, ListingRound, capture_handler, _finish_listing_result, _hold_recovered_result_page,
 )
+from camctl.capture.scope_closure import settle_scope_listing
 from camctl.capture.result_inputs import page_from_outcome
 from camctl.capture.result_pages import ResultPageRef, SavedResultPage
 from camctl.contracts.enums import enum_for
@@ -84,6 +86,44 @@ async def test_finalized_result_reaches_repository_with_original_page_and_attemp
     assert call.kwargs == {"completion_page": None, "finalized_page": ref}
     assert not runtime.pending_start_results
     runtime.operations.finish_attempt.assert_not_called()
+
+
+@pytest.mark.parametrize("finalized", [False, True], ids=["incomplete", "complete"])
+async def test_canceled_recording_leaves_original_scope_result_for_scope_consumer(mocker, finalized):
+    runtime, listing, _, _ = _world(mocker, _KINDS.RESOLVE_OUTPUT_SCOPE)
+    if not finalized:
+        listing = replace(listing, scan_complete=False, set_finalized=False)
+    held = runtime.pending_start_results[(listing.ticket.run_id, listing.ticket.attempt_id)]
+    for name in ("resume_result_check_closes", "resume_capture_completions", "resume_baselines",
+                 "resume_file_observations", "resume_start_results"):
+        mocker.patch.object(runtime, name, autospec=True)
+    mocker.patch.object(runtime, "action", autospec=True,
+                        return_value={"status": 6, "cancel_requested": 1})
+    runtime.on_recording_deadline = None
+
+    await capture_handler("camera_record")(43, runtime)
+
+    assert runtime.pending_start_results[(listing.ticket.run_id, listing.ticket.attempt_id)] is held
+    runtime.capture.finish_result_check.assert_not_called()
+    runtime.operations.finish_attempt.assert_not_called()
+    mocker.patch("camctl.capture.handlers._qualify_listing_collection", autospec=True, return_value=listing)
+    mocker.patch("camctl.capture.handlers._register_listing", autospec=True)
+    release = mocker.patch("camctl.capture.segment_completion.release_segment_occupancy", autospec=True)
+    runtime.operations.finish_attempt.return_value = DbOutcome(
+        DbOutcomeKind.COMPLETED, FinishAttemptResult(FinishDisposition.SAVED))
+
+    assert await settle_scope_listing(runtime, 43, listing) is finalized
+    if finalized:
+        finish = runtime.capture.finish_result_check.call_args.args[0]
+        assert finish.run_finish.status is RunOutcome.SUCCEEDED
+        release.assert_awaited_once_with(runtime, 43)
+    else:
+        finish = runtime.operations.finish_attempt.call_args.args[0]
+        assert finish.retry_wait is True and finish.run_finish is None
+        release.assert_not_awaited()
+    assert finish.ticket == listing.ticket and finish.outcome.outcome is listing.outcome
+    assert finish.occurred_at == listing.occurred_at
+    assert not runtime.pending_start_results
 
 
 async def test_unrelated_operation_cannot_save_a_result_range(mocker):
