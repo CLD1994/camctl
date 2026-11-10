@@ -6301,7 +6301,7 @@ def plan_complete(siblings, current_action_id: int) -> bool:
 
 
 def _completion_siblings(connection, action):
-    """只取一个未终态兄弟；独立聚合守卫另按原事务视图逐批复核。"""
+    """在原写事务查询其他未终态动作，最多返回一个阻止计划完成的成员。"""
     terminal = tuple(sorted(_ACTION_TERMINAL))
     marks = ",".join("?" for _ in terminal)
     with closing(connection.execute(

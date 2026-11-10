@@ -1121,7 +1121,7 @@ def _cleanup_aggregate_guard(event, context) -> None:
 
 
 def _plan_aggregate_guard(event, context) -> None:
-    """计划状态与动作聚合一致性（受理创建与终态推进共用）。"""
+    """受理创建时，计划初始状态与全部动作的受理结果一致。"""
     for row in event.rows:
         if row.table != "plans":
             continue
@@ -1137,32 +1137,6 @@ def _plan_aggregate_guard(event, context) -> None:
             if row.after.values.get("status") != expected:
                 raise EventValidationError(f"计划状态与动作聚合不符: 期望 {expected}")
             continue
-        if row.after.values.get("status") == _PLAN_COMPLETE:
-            plan_id = row.row_id
-            reads = context.current_reads
-            if reads is not None:
-                from camctl.history.reads import PlanReadScope
-
-                if not isinstance(reads.scope, PlanReadScope) or reads.scope.plan_id != plan_id:
-                    raise EventValidationError("计划聚合的读取范围不属于当前计划")
-                found = False
-                for batch in reads.iter_members("actions", "plan_id", plan_id, columns=reads.ACTION_COLUMNS):
-                    for _, values in batch:
-                        found = True
-                        if values.get("status") not in _ACTION_TERMINAL:
-                            raise EventValidationError("计划完成要求全部动作终态")
-                if not found:
-                    raise EventValidationError("计划完成要求至少一个动作")
-                continue
-            actions = [
-                values
-                for values in context.state_rows.get("actions", {}).values()
-                if values.get("plan_id") == plan_id
-            ]
-            if not actions or any(
-                values.get("status") not in _ACTION_TERMINAL for values in actions
-            ):
-                raise EventValidationError("计划完成要求全部动作终态")
 
 
 def register_capture_guards() -> None:

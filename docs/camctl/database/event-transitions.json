@@ -1191,7 +1191,7 @@
     },
     "plan_aggregate": {
       "contract": "plans-actions.md#计划与动作的运行状态",
-      "rule": "同一事务全部动作都终态则计划 COMPLETED；否则存在 execution_started=1 则 RUNNING，否则 PENDING。只保存实际变化，不能仅按本次报告或缓存子集聚合。",
+      "rule": "受理创建时核对计划初始状态与本事务全部动作的受理结果一致：包含合法待执行动作时为 PENDING，全部动作受理失败时为 COMPLETED。",
       "scope": "transaction"
     },
     "source_members": {
@@ -5183,8 +5183,7 @@
             "row_shape",
             "transaction",
             "ownership",
-            "report_impact",
-            "plan_aggregate"
+            "report_impact"
           ],
           "evidence": [
             "source_resolution_request",
