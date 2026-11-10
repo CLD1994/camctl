@@ -3,7 +3,8 @@
 from contextlib import closing
 
 from camctl.contracts.values import ConsistencyError
-from camctl.outputs.batches import read_member_finished
+from camctl.outputs.batches import (BatchActionMode, classify_batch_action, batch_source_selected,
+    obtain_batch_member_finished, internal_read_precedes_batch)
 
 
 class FileBatchReads:
@@ -121,7 +122,7 @@ class FileBatchReads:
         )) as cursor:
             while rows := cursor.fetchmany(64):
                 for source_id, status, selection in rows:
-                    if status not in (3, 4, 5, 6) or selection != 2:
+                    if not batch_source_selected(status, selection):
                         return False
                     if not _processing_completed(self.connection, source_id):
                         return False
@@ -153,10 +154,8 @@ class FileBatchReads:
         if not self.source_ready(action_id, device_id):
             return False
         for status, dependency, copy_id, verification, ended, retry, unsettled, delivery in self._obtain_members(action_id, device_id):
-            if not read_member_finished(
-                    item_terminal=status in (4, 5) or (delivery in (5, 6, 7, 8) and not dependency),
-                    has_copy=copy_id is not None, verification_complete=verification in (3, 5),
-                    read_ended=ended is not None, retry_wait=bool(retry), unsettled=bool(unsettled)):
+            if not obtain_batch_member_finished(status, dependency, copy_id, verification, ended,
+                                                retry, unsettled, delivery):
                 return False
         return True
 
@@ -226,21 +225,20 @@ class FileBatchReads:
 
     def ready(self, action_id, device_id, now):
         action = self.action(action_id)
-        if action["scheduled_at"] > now:
-            return False
-        if action["status"] != 2 or action["cancel_requested"]:
-            return (action["type"] == 5 and self.cleanup_residual(action_id, device_id)
+        mode = classify_batch_action(action, now)
+        if mode is BatchActionMode.CLEANUP_RESIDUAL:
+            return (self.cleanup_residual(action_id, device_id)
                 and not self.cleanup_blocked(action_id, device_id)
                 and not self.cleanup_finished(action_id, device_id))
-        if action["type"] == 4:
-            return (action["source_resolution_state"] == 2
-                and self.source_ready(action_id, device_id)
+        if mode is BatchActionMode.OBTAIN:
+            return (self.source_ready(action_id, device_id)
                 and self.obtain_device_ready(action_id, device_id)
                 and not self.obtain_finished(action_id, device_id))
-        return (action["type"] == 5 and action["target_selection_state"] == 2
-            and self.cleanup_device_ready(action_id, device_id)
-            and not self.cleanup_blocked(action_id, device_id)
-            and not self.cleanup_finished(action_id, device_id))
+        if mode is BatchActionMode.CLEANUP:
+            return (self.cleanup_device_ready(action_id, device_id)
+                and not self.cleanup_blocked(action_id, device_id)
+                and not self.cleanup_finished(action_id, device_id))
+        return False
 
     def cleanup_device_ready(self, action_id, device_id):
         return self.connection.execute(
@@ -287,7 +285,7 @@ class FileBatchReads:
             action = self.action(action_id)
             if other is None:
                 raise ConsistencyError("内部读取缺少批次排序依据")
-            if tuple(other) < (action["scheduled_at"], action["plan_id"], action["input_index"]):
+            if internal_read_precedes_batch(other, action):
                 return True
         if self.connection.execute(
                 "SELECT 1 FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3"

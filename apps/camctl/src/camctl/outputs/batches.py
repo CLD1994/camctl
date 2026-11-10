@@ -99,3 +99,40 @@ async def release_finished_batches(database, now, *, pending):
         after = rows[-1][0]
         for _, action_id, device_id in rows:
             await _save_batch(database, BatchRequest(action_id, device_id, now), release=True, pending=pending)
+
+
+class BatchActionMode(StrEnum):
+    NOT_READY = 'not_ready'
+    OBTAIN = 'obtain'
+    CLEANUP = 'cleanup'
+    CLEANUP_RESIDUAL = 'cleanup_residual'
+
+
+def classify_batch_action(action, now):
+    """按原动作与时间选择取回、清理或取消后清理责任。"""
+    if action['scheduled_at'] > now:
+        return BatchActionMode.NOT_READY
+    if action['status'] != 2 or action['cancel_requested']:
+        return BatchActionMode.CLEANUP_RESIDUAL if action['type'] == 5 else BatchActionMode.NOT_READY
+    if action['type'] == 4:
+        return BatchActionMode.OBTAIN if action['source_resolution_state'] == 2 else BatchActionMode.NOT_READY
+    if action['type'] == 5 and action['target_selection_state'] == 2:
+        return BatchActionMode.CLEANUP
+    return BatchActionMode.NOT_READY
+
+
+def batch_source_selected(status, selection):
+    """来源动作终态且取回选择已固定，才继续等待来源处理。"""
+    return status in (3, 4, 5, 6) and selection == 2
+
+
+def obtain_batch_member_finished(status, dependency, copy_id, verification, ended, retry, unsettled, delivery):
+    """从原取回、交付和副本事实判断设备阶段是否收场。"""
+    return read_member_finished(
+        item_terminal=status in (4, 5) or (delivery in (5, 6, 7, 8) and not dependency),
+        has_copy=copy_id is not None, verification_complete=verification in (3, 5),
+        read_ended=ended is not None, retry_wait=bool(retry), unsettled=bool(unsettled))
+
+
+def internal_read_precedes_batch(other, action):
+    return tuple(other) < (action['scheduled_at'], action['plan_id'], action['input_index'])
