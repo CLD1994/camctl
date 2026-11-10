@@ -567,4 +567,5 @@ def _segment_inspection_guard(event, context) -> None:
             raise EventValidationError("分段检查事件分支未登记")
 
 
-register_guard("segment_inspection", _segment_inspection_guard)
+def register_segment_inspection_guard(register=register_guard):
+    register("segment_inspection", _segment_inspection_guard)

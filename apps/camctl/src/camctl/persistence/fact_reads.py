@@ -10,6 +10,7 @@ from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY, T
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import EventEnvelope
+from camctl.persistence.row_cache import row_cache_scope
 
 
 MAX_FACT_ENTRIES = 128
@@ -67,11 +68,12 @@ def operation_fact_scope(connection, boundary):
     state = _Facts(connection, boundary)
     token = _CURRENT.set(state)
     try:
-        if boundary != INITIAL_BOUNDARY:
-            complete = read_transaction(connection, boundary.txn_id)
-            if complete.last_event_id != boundary.last_event_id:
-                raise ConsistencyError('事实C0不是完整已提交事务的末位')
-        yield
+        with row_cache_scope(_reuse_current_row):
+            if boundary != INITIAL_BOUNDARY:
+                complete = read_transaction(connection, boundary.txn_id)
+                if complete.last_event_id != boundary.last_event_id:
+                    raise ConsistencyError('事实C0不是完整已提交事务的末位')
+            yield
     finally:
         state.discard()
         _CURRENT.reset(token)

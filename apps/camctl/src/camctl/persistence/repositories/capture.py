@@ -1141,31 +1141,33 @@ def _plan_aggregate_guard(event, context) -> None:
             continue
 
 
-def register_capture_guards() -> None:
+def register_capture_guards(register=register_guard) -> None:
     """注册采集终态事务的正式业务守卫（装配期调用）。"""
-    register_guard("action_finish", _action_finish_guard)
-    register_guard("output", _output_guard)
-    register_guard("cleanup_aggregate", _cleanup_aggregate_guard)
-    register_guard("plan_aggregate", _plan_aggregate_guard)
-    register_guard("device_file", _device_file_guard)
-    register_guard("emergency", _emergency_guard)
+    register("action_finish", _action_finish_guard)
+    register("output", _output_guard)
+    register("cleanup_aggregate", _cleanup_aggregate_guard)
+    register("plan_aggregate", _plan_aggregate_guard)
+    register("device_file", _device_file_guard)
+    register("emergency", _emergency_guard)
     from .finite_cancel import register_finite_cancel_guard
-    register_finite_cancel_guard()
+    register_finite_cancel_guard(register)
     from .software_recovery import register_software_recovery_guard
-    register_software_recovery_guard()
-    register_guard("activity", _activity_guard)
-    register_guard("release", _release_guard)
-    register_guard("result_check", _result_check_guard)
+    register_software_recovery_guard(register)
+    register("activity", _activity_guard)
+    register("release", _release_guard)
+    register("result_check", _result_check_guard)
     from .baseline import register_baseline_guard
-    register_baseline_guard()
+    register_baseline_guard(register)
     from .baseline_reads import register_baseline_read_guard
-    register_baseline_read_guard()
+    register_baseline_read_guard(register)
     from .result_pages import register_result_page_guard
-    register_result_page_guard()
+    register_result_page_guard(register)
     from .result_file_ownership import register_ownership_from_result_page_guard
-    register_ownership_from_result_page_guard()
+    register_ownership_from_result_page_guard(register)
     from .result_file_pairing import register_result_scan_pairing_guard
-    register_result_scan_pairing_guard()
+    register_result_scan_pairing_guard(register)
+    from .segment_inspections import register_segment_inspection_guard
+    register_segment_inspection_guard(register)
 
 
 class FinishCaptureCommand:

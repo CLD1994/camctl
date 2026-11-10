@@ -345,7 +345,7 @@ def _timed_events(events):
         yield event
 
 
-def _write_bounded_plan(plan, scope, operation_key, atomic_transaction):
+def _write_bounded_plan(plan, scope, operation_key, atomic_transaction, event_validator):
     connection = scope.connection
     with db_phase(TransactionPhase.FINAL_CHECKS):
         allocation = scope.allocation
@@ -423,7 +423,7 @@ def _write_bounded_plan(plan, scope, operation_key, atomic_transaction):
                 ObjectId(sequence)
             event = replace(proposed,change_seq=sequence if targets else None)
         with db_phase(TransactionPhase.VALIDATE):
-            validated = validate_event(event,context)
+            validated = event_validator(event,context)
         with db_phase(TransactionPhase.CONTEXT):
             _seal_event_reads(reads, validated, source_guard_state,baseline_read_group,result_check_group)
             if availability_group is not None:
@@ -682,6 +682,7 @@ def commit_operation(
     command: AtomicCommand,
     operation_key: OperationKey,
     owned: OwnedConnection,
+    *, storage=None,
 ) -> WriteReceipt:
     """在所属连接上执行一项完整事件事务。
 
@@ -689,16 +690,17 @@ def commit_operation(
     派生目录。业务拒绝由命令作为普通结果返回，同样是已提交结果。
     """
     connection: sqlite3.Connection = timed_connection(owned.connection)
-    return _commit_operation(command, operation_key, connection)
+    event_validator = validate_event if storage is None else storage.validate_event
+    return _commit_operation(command, operation_key, connection, event_validator)
 
 
-def _commit_operation(command, operation_key, connection) -> WriteReceipt:
+def _commit_operation(command, operation_key, connection, event_validator) -> WriteReceipt:
     work_started = False
 
     def work(transaction):
         nonlocal work_started
         work_started = True
-        return _execute_business_work(command, operation_key, connection, transaction)
+        return _execute_business_work(command, operation_key, connection, transaction, event_validator)
 
     try:
         return execute_transaction(connection, work)
@@ -709,7 +711,7 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
         return WriteReceipt(kind="rolled_back", error=error)
 
 
-def _execute_business_work(command, operation_key, connection, atomic_transaction) -> WriteReceipt:
+def _execute_business_work(command, operation_key, connection, atomic_transaction, event_validator) -> WriteReceipt:
     fact_reads = ExitStack()
 
     def rollback_error(error: BaseException) -> WriteReceipt:
@@ -737,7 +739,7 @@ def _execute_business_work(command, operation_key, connection, atomic_transactio
             return rollback_error(error)
         if isinstance(plan, BoundedCommandPlan):
             try:
-                return _write_bounded_plan(plan, scope, operation_key, atomic_transaction)
+                return _write_bounded_plan(plan, scope, operation_key, atomic_transaction, event_validator)
             except SchemaRuleError:
                 raise
             except Exception as error:
@@ -858,7 +860,7 @@ def _execute_business_work(command, operation_key, connection, atomic_transactio
                     validated=validated, planned_events=sequenced,
                     baseline_read_group=baseline_read_group,result_check_group=result_check_group)
             with db_phase(TransactionPhase.VALIDATE):
-                accepted = validate_event(event, context)
+                accepted = event_validator(event, context)
             with db_phase(TransactionPhase.CONTEXT):
                 _seal_event_reads(reads, accepted, source_guard_state,baseline_read_group,result_check_group)
             with db_phase(TransactionPhase.DERIVE):

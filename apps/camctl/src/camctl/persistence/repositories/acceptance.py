@@ -731,13 +731,13 @@ def _ack_guard(event, context) -> None:
             raise EventValidationError("累计确认水位只严格提高")
 
 
-def register_acceptance_guards() -> None:
+def register_acceptance_guards(register=register_guard) -> None:
     """注册受理事务的正式业务守卫（装配期调用，替换测试替身）。"""
-    register_guard("admission", _admission_guard)
-    register_guard("plan_aggregate", _plan_aggregate_guard)
-    register_guard("source_members", _source_members_guard)
-    register_guard("diagnostic", _diagnostic_guard)
-    register_guard("ack", _ack_guard)
+    register("admission", _admission_guard)
+    register("plan_aggregate", _plan_aggregate_guard)
+    register("source_members", _source_members_guard)
+    register("diagnostic", _diagnostic_guard)
+    register("ack", _ack_guard)
     from camctl.reporting.policy import register_sync_guard
 
-    register_sync_guard()
+    register_sync_guard(register)

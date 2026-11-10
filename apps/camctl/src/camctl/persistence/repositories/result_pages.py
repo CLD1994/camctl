@@ -1687,6 +1687,6 @@ def _page_index_guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_result_page_guard():
-    register_guard("result_page", _page_guard)
-    register_guard("result_page_index", _page_index_guard)
+def register_result_page_guard(register=register_guard):
+    register("result_page", _page_guard)
+    register("result_page_index", _page_index_guard)

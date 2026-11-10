@@ -112,9 +112,9 @@ _EXPIRATION_CODES = {
 }
 
 
-def register_window_guard() -> None:
+def register_window_guard(register=register_guard) -> None:
     """注册窗口观察事件的正式守卫（装配期调用）。"""
-    register_guard("window", _window_guard)
+    register("window", _window_guard)
 
 
 def _window_guard(event, context) -> None:
@@ -1236,24 +1236,32 @@ class GrantStartCommand:
 class SchedulingRepository:
     """调度开始、观察、过期与授予事务的 SQLite 仓储。"""
 
+    def __init__(self, storage=None):
+        self._storage = storage
+
+    def _commit_operation(self, command, key, owned):
+        if self._storage is None:
+            return commit_operation(command, key, owned)
+        return self._storage.commit_operation(command, key, owned)
+
     def reserve_preparation(self, request, key, owned):
         from .preparation import require_action_preparation_format
         require_action_preparation_format(owned, request.action_id)
-        return _preparation_outcome(commit_operation(ReservePreparationCommand(request, key), key, owned))
+        return _preparation_outcome(self._commit_operation(ReservePreparationCommand(request, key), key, owned))
 
     def fail_preparation(self, request, key, owned):
         from .preparation import require_action_preparation_format
         require_action_preparation_format(owned, request.action_id)
-        return _preparation_outcome(commit_operation(FailPreparationCommand(request, key), key, owned))
+        return _preparation_outcome(self._commit_operation(FailPreparationCommand(request, key), key, owned))
 
     def fail_binding_preparation(self, request, key, owned):
-        return _preparation_outcome(commit_operation(FailBindingPreparationCommand(request, key), key, owned))
+        return _preparation_outcome(self._commit_operation(FailBindingPreparationCommand(request, key), key, owned))
 
     def start_action(
         self, request: StartActionRequest, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[StartActionResult]:
-        receipt = commit_operation(StartActionCommand(request, key), key, owned)
+        receipt = self._commit_operation(StartActionCommand(request, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -1264,7 +1272,7 @@ class SchedulingRepository:
         self, request: ObserveWindowRequest, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[ObserveWindowResult]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             ObserveWindowCommand(request, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -1276,7 +1284,7 @@ class SchedulingRepository:
         self, request: ExpireActionRequest, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[ExpireActionResult]:
-        receipt = commit_operation(
+        receipt = self._commit_operation(
             ExpireActionCommand(request, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -1287,7 +1295,7 @@ class SchedulingRepository:
     def grant_start(
         self, request: GrantRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[GrantResult]:
-        receipt = commit_operation(GrantStartCommand(request, key), key, owned)
+        receipt = self._commit_operation(GrantStartCommand(request, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":

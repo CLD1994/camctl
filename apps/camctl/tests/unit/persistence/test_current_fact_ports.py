@@ -82,6 +82,25 @@ def test_missing_current_row_becomes_visible_after_write(database):
         assert transaction.row_facts(connection, 'sample', 1) == {'id': 1, 'payload_json': {}}
 
 
+def test_current_row_scope_restores_outer_connection_after_inner_failure(database):
+    connection, _ = database
+    other = create_autospec(sqlite3.Connection, instance=True)
+    other.in_transaction = True
+    other.total_changes = 0
+    other.execute.side_effect = connection.execute.side_effect
+    with fact_reads.operation_fact_scope(connection, HistoryBoundary(0, 0)):
+        transaction.row_facts(connection, 'sample', 1)
+        with pytest.raises(RuntimeError, match='inner'):
+            with fact_reads.operation_fact_scope(other, HistoryBoundary(0, 0)):
+                transaction.row_facts(other, 'sample', 1)
+                raise RuntimeError('inner')
+        transaction.row_facts(connection, 'sample', 1)
+        assert connection.execute.call_count == 1
+        assert other.execute.call_count == 1
+    transaction.row_facts(connection, 'sample', 1)
+    assert connection.execute.call_count == 2
+
+
 @pytest.mark.parametrize('failure', [sqlite3.OperationalError('读取失败'), KeyboardInterrupt()])
 def test_current_row_query_error_is_original_and_cursor_closes(database, failure):
     connection, state = database

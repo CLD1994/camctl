@@ -738,9 +738,8 @@ def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[st
     return event_name, branch_name, branch
 
 
-@trace_detail("history_event_validation")
-def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEvent:
-    """完整结构校验后执行业务守卫，再解析实际对象引用。"""
+def validate_event_facts(event: EventEnvelope, context: EventContext):
+    """校验事件结构以及本次状态变化的前后条件。"""
     event_name, branch_name, branch = validate_event_structure(event)
     for row in event.rows:
         if not row.before.exists:
@@ -757,12 +756,12 @@ def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEven
                 if not any(json_equal(facts[column], value) for value in allowed):
                     _fail(f"{row.table}#{row.row_id} 的 {side}.{column} 不满足分支条件")
 
-    for guard_name in branch["guards"]:
-        guard = NAMED_GUARDS.get(guard_name)
-        if guard is None:
-            _fail(f"{event_name}.{branch_name} 要求的具名校验未接入: {guard_name}")
-        guard(event, context)
+    return event_name, branch_name, branch
 
+
+def resolve_validated_event(event: EventEnvelope, context: EventContext,
+                            event_name: str, branch_name: str) -> ValidatedEvent:
+    """从已经检查的事件及上下文形成历史对象引用。"""
     objects = _history_objects()
     references: list[tuple[int, int]] = []
     referenced: set[tuple[int, int]] = set()
@@ -781,3 +780,15 @@ def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEven
         references=tuple(references),
         row_owners=row_owners,
     )
+
+
+@trace_detail("history_event_validation")
+def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEvent:
+    """现有调用方使用的完整事件校验。"""
+    event_name, branch_name, branch = validate_event_facts(event, context)
+    for guard_name in branch["guards"]:
+        guard = NAMED_GUARDS.get(guard_name)
+        if guard is None:
+            _fail(f"{event_name}.{branch_name} 要求的具名校验未接入: {guard_name}")
+        guard(event, context)
+    return resolve_validated_event(event, context, event_name, branch_name)

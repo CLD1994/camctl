@@ -408,5 +408,5 @@ def availability_guard(event, context):
         raise ConsistencyError("设备检查事件缺少原内核独立事务组")
 
 
-def register_availability_guard():
-    register_guard("availability_check", availability_guard)
+def register_availability_guard(register=register_guard):
+    register("availability_check", availability_guard)

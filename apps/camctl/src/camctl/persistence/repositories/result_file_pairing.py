@@ -254,8 +254,8 @@ def _pairing_guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_result_scan_pairing_guard():
-    register_guard('result_scan_pairing', _pairing_guard)
+def register_result_scan_pairing_guard(register=register_guard):
+    register('result_scan_pairing', _pairing_guard)
 
 
 class PairResultFilesCommand:

@@ -319,9 +319,9 @@ def _report_guard(event, context) -> None:
             raise EventValidationError("新登记报告尚无文件处理错误")
 
 
-def register_report_guards() -> None:
-    register_guard("report", _report_guard)
-    register_sync_guard()
+def register_report_guards(register=register_guard) -> None:
+    register("report", _report_guard)
+    register_sync_guard(register)
 
 
 def validate_report_publication_result(result: PublishResult) -> None:
@@ -1091,6 +1091,6 @@ def _action_start_guard(event, context) -> None:
                 f" actions#{action_id} status={facts.get('status')!r}")
 
 
-def register_sync_guard() -> None:
-    register_guard("sync", _sync_guard)
-    register_guard("action_start", _action_start_guard)
+def register_sync_guard(register=register_guard) -> None:
+    register("sync", _sync_guard)
+    register("action_start", _action_start_guard)

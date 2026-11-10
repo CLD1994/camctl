@@ -323,5 +323,5 @@ def _guard(event, context):
         raise EventValidationError(f'有限取消结束依据无效: {error}') from error
 
 
-def register_finite_cancel_guard():
-    register_guard('finite_cancel_end', _guard)
+def register_finite_cancel_guard(register=register_guard):
+    register('finite_cancel_end', _guard)

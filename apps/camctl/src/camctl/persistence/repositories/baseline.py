@@ -410,5 +410,5 @@ def baseline_guard(event, context):
         raise EventValidationError(f"基准历史校验失败: {error}") from error
 
 
-def register_baseline_guard():
-    register_guard("baseline", baseline_guard)
+def register_baseline_guard(register=register_guard):
+    register("baseline", baseline_guard)

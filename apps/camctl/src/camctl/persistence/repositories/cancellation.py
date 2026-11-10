@@ -2108,10 +2108,10 @@ def _withdrawal_guard(event, context) -> None:
                 raise EventValidationError("撤回明细必须属于仍有效的原取消责任")
 
 
-def register_cancellation_guards() -> None:
+def register_cancellation_guards(register=register_guard) -> None:
     """注册取消目标固定事件的正式业务守卫（装配期调用）。"""
-    register_guard("cancel", _cancel_targets_guard)
-    register_guard("withdrawal", _withdrawal_guard)
+    register("cancel", _cancel_targets_guard)
+    register("withdrawal", _withdrawal_guard)
 
 
 def include_photo_entry_rows(connection, action, state, owners):

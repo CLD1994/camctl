@@ -256,9 +256,9 @@ def _segment_resolution_guard(event, context):
         raise EventValidationError("QUERY v2 结算必须只更新原取回项")
 
 
-def register_segment_query_guards():
-    register_guard("segment_query_observation", _segment_observation_guard)
-    register_guard("segment_query_resolution", _segment_resolution_guard)
+def register_segment_query_guards(register=register_guard):
+    register("segment_query_observation", _segment_observation_guard)
+    register("segment_query_resolution", _segment_resolution_guard)
 
 
 def _facts(connection, item_id, saved):

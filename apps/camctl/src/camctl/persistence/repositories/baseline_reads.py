@@ -376,8 +376,8 @@ def baseline_read_guard(event, context):
         raise EventValidationError(f'基准调用事实不符合原始输入: {error}') from error
 
 
-def register_baseline_read_guard():
-    register_guard('baseline_read', baseline_read_guard)
+def register_baseline_read_guard(register=register_guard):
+    register('baseline_read', baseline_read_guard)
 
 
 def _return_raw(call_id, returned_at, error, cursor, chunk_event_id):
