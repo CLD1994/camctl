@@ -38,6 +38,7 @@ from camctl.persistence.repositories.outputs import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.plan_completion import assert_action_plan, plan_before
 
 register_acceptance_guards()
 register_capture_guards()  # SOURCE_RESOLVED.FAIL 复用动作终态守卫
@@ -352,8 +353,9 @@ def test_resolve_sources_failure_saves_terminal_action(tmp_path: Path) -> None:
         owned.connection.close()
 
 
+@pytest.mark.parametrize("unfinished_sibling", [False, True])
 def test_resolve_sources_failure_completes_last_action_plan(
-    tmp_path: Path,
+    tmp_path: Path, unfinished_sibling: bool,
 ) -> None:
     """解析失败也是动作终态：同计划兄弟全部终态时计划同事务完成。
 
@@ -365,11 +367,16 @@ def test_resolve_sources_failure_completes_last_action_plan(
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(
         "UPDATE actions SET status = 3 WHERE id IN (11, 12, 13, 14)")
+    connection.execute("UPDATE plans SET status=2 WHERE id IN (1,2)")
     connection.commit()
     repository = OutputsRepository()
     owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
         (json.dumps({"params":{"source":{"action_instance_id":"99"}}}),))
+    if unfinished_sibling:
+        connection.execute("UPDATE actions SET status=2 WHERE id=11")
     owned.connection.commit()
+    before_plan = plan_before(connection, 1)
+    key = new_operation_key()
     try:
         outcome = repository.resolve_sources(
             ResolveSources(
@@ -377,13 +384,49 @@ def test_resolve_sources_failure_completes_last_action_plan(
                 spec=SourceSpec(action_instance_id=99),
                 occurred_at=_NOW,
             ),
-            new_operation_key(),
+            key,
             owned,
         )
-        assert outcome.kind is DbOutcomeKind.COMPLETED
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         assert outcome.value.fixed is False
-        assert _value(
-            owned, "SELECT status FROM plans WHERE id = 1") == (3,)
+        action = _value(owned, "SELECT status,error_code,error_details_json FROM actions WHERE id=30")
+        assert action[:2] == (4, 20)
+        assert json.loads(action[2]) == {
+            "reason": "action_not_found", "source": {"action_instance_id": 99}}
+        assert_action_plan(connection, 30, 1, key, action_status=4,
+                           previous_plan=before_plan, completed=not unfinished_sibling)
+        assert _value(owned, "SELECT status FROM actions WHERE id=11") == ((2 if unfinished_sibling else 3),)
+        # 另一个计划仍有运行中动作，不能阻止本计划完成。
+        assert _value(owned, "SELECT status FROM actions WHERE id=21") == (2,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("unfinished_sibling", [False, True])
+def test_canceled_obtain_settlement_observes_own_plan_siblings(tmp_path, unfinished_sibling):
+    """仓储格式准备已生效取消；独立事务保存取回终态及适用的计划终态。"""
+    from camctl.persistence.repositories.outputs import SettleCanceledObtain
+
+    _, owned = _six_form_environment(tmp_path)
+    connection = owned.connection
+    try:
+        connection.execute("UPDATE actions SET status=3 WHERE id IN (11,12,13,14)")
+        connection.execute("UPDATE plans SET status=2 WHERE id IN (1,2)")
+        if unfinished_sibling:
+            connection.execute("UPDATE actions SET status=2 WHERE id=11")
+        connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=30")
+        connection.commit()
+        before_plan = plan_before(connection, 1)
+        key = new_operation_key()
+        result = OutputsRepository().settle_canceled_obtain(
+            SettleCanceledObtain(30, _NOW, ()), key, owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.complete and result.value.file_ids == ()
+        assert_action_plan(connection, 30, 1, key, action_status=6,
+                           previous_plan=before_plan, completed=not unfinished_sibling)
+        assert _value(owned, "SELECT status,cancel_requested FROM actions WHERE id=30") == (6, 1)
+        assert _value(owned, "SELECT status FROM actions WHERE id=11") == ((2 if unfinished_sibling else 3),)
+        assert _value(owned, "SELECT status FROM actions WHERE id=21") == (2,)
     finally:
         owned.connection.close()
 

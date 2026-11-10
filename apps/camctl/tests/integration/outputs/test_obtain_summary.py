@@ -14,6 +14,7 @@ from contextlib import closing
 import pytest_asyncio
 
 from ..support.outputs import output_operation
+from ..support.plan_completion import assert_action_plan, plan_before
 from ..support.public_delivery_cases import prepare_public_delivery
 
 from camctl.contracts.values import new_operation_key
@@ -212,10 +213,14 @@ def test_finish_obtain_succeeds_after_all_published(
     plan_status, = _value(owned, "SELECT status FROM plans WHERE id=?", plan_id)
     assert plan_status == 2
     _publish(owned, roots, qualification.delivery_id, tmp_path)
+    before_plan = plan_before(owned.connection, plan_id)
+    key = new_operation_key()
     outcome = OutputsRepository().finish_obtain(
         FinishObtain(action_id=qualification.action_id, occurred_at=_NOW + 20),
-        new_operation_key(), owned)
+        key, owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    assert_action_plan(owned.connection, qualification.action_id, plan_id, key,
+                       action_status=3, previous_plan=before_plan, completed=False)
     result = outcome.value
     assert (result.action_status, result.plan_status) == (3, plan_status)
     assert _value(owned, "SELECT status FROM actions WHERE id=?", sibling_id) == (2,)
@@ -343,9 +348,13 @@ def test_finish_obtain_completes_plan_with_terminal_siblings(
     owned.connection.execute(
         "UPDATE actions SET status=4, error_code=20, error_details_json='{}' WHERE id=?", (first + 1,))
     owned.connection.commit()
+    before_plan = plan_before(owned.connection, plan_id)
+    key = new_operation_key()
     outcome = OutputsRepository().finish_obtain(
         FinishObtain(action_id=qualification.action_id, occurred_at=_NOW + 20),
-        new_operation_key(), owned)
+        key, owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     assert outcome.value.plan_status == 3
+    assert_action_plan(owned.connection, qualification.action_id, plan_id, key,
+                       action_status=3, previous_plan=before_plan, completed=True)
     assert _value(owned, "SELECT status FROM plans WHERE id=?", plan_id)[0] == 3
