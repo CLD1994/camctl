@@ -52,3 +52,18 @@ def test_host_and_device_obtain_checks_keep_different_timeout_contracts():
         require_obtain_check_config(host_source=True, timeout=1, interval=None)
     with pytest.raises(ConsistencyError):
         require_obtain_check_config(host_source=False, timeout=None, interval=0)
+
+
+@pytest.mark.parametrize('cancelled,status,error,binding_error,expected', [
+    (True, 'CANCELED', None, {'code': 'device_binding_unavailable'}, True),
+    (True, 'FAILED', {'code': 'device_binding_unavailable'}, {'code': 'device_binding_unavailable'}, False),
+    (True, 'CANCELED', {'code': 'x'}, {'code': 'device_binding_unavailable'}, False),
+    (False, 'FAILED', {'code': 'device_binding_unavailable'}, {'code': 'device_binding_unavailable'}, True),
+    (False, 'FAILED', {'code': 'other'}, {'code': 'device_binding_unavailable'}, False),
+    (False, 'FAILED', None, {'code': 'device_binding_unavailable'}, False),
+    (False, 'CANCELED', None, {'code': 'device_binding_unavailable'}, False),
+])
+def test_binding_read_finish_keeps_cancel_and_original_error_partition(cancelled, status, error, binding_error, expected):
+    from camctl.operations.ownership_rules import binding_read_finish_matches
+    status_code = int(enum_for('operation_runs.status')[status])
+    assert binding_read_finish_matches(cancelled, status_code, error, binding_error) is expected

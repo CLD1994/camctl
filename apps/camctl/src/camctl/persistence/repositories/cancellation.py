@@ -523,9 +523,9 @@ def _motor_cancel_request(command):
 
 
 def _preparation_cancel_pending(facts):
-    """无START效果的取消只在原准备与占用都收场后结束。"""
-    return facts.not_started and (not facts.preparation_resolved or (
-        facts.activity is not None and facts.activity["occupancy_state"] == 1))
+    from camctl.cancellation.rules import preparation_cancel_pending
+    return preparation_cancel_pending(not_started=facts.not_started,
+        preparation_resolved=facts.preparation_resolved, activity=facts.activity)
 
 
 class _ApplyCancelTargetCommand:
@@ -581,7 +581,8 @@ class _ApplyCancelTargetCommand:
         start_events = []
         canceled_sync = None
         withdrawal_rows = self._withdrawal_rows(connection, item, target)
-        from camctl.cancellation.rules import validate_stored_cancel_mode
+        from camctl.cancellation.rules import (validate_stored_cancel_mode, pre_start_cancel_finishes_target,
+            immediate_cancel_member_outcome)
         validate_stored_cancel_mode(target, mode)
         if mode is CancelApplyMode.PRE_START:
             if target["type"] in (1, 2, 3):
@@ -610,12 +611,13 @@ class _ApplyCancelTargetCommand:
             elif target["status"] != 1:
                 raise ConsistencyError("非拍摄目标的未启动取消要求待执行状态")
             before, after = {"cancel_requested": 0}, {"cancel_requested": 1}
-            if target["status"] == 1 or target["type"] == 8:
+            if pre_start_cancel_finishes_target(target):
                 before["status"], after["status"] = target["status"], _ACTION_CANCELED
-                outcome_event = _ITEM_SUCCEEDED, CancelOutcomeChoice.CANCELED.value
-                if target["type"] in (1, 2, 3) and _preparation_cancel_pending(start):
-                    # 目标先终态以阻止新业务；取消成员等待原准备调用及占用释放。
-                    outcome_event = None
+                preparation_pending = target["type"] in (1, 2, 3) and _preparation_cancel_pending(start)
+                outcome = immediate_cancel_member_outcome(mode, target,
+                    withdrawal_pending=False, preparation_pending=preparation_pending)
+                if outcome is not None:
+                    outcome_event = _ITEM_SUCCEEDED, outcome.value
                 plan_row = self._pre_start_plan_row(connection, target)
             action_rows = (_update("actions", target_id, before, after),)
             effect_after = CancellationEffect.APPLIED.value
@@ -628,17 +630,14 @@ class _ApplyCancelTargetCommand:
                 {"cancel_requested": 0}, {"cancel_requested": 1}),)
             effect_after = CancellationEffect.APPLIED.value
         elif mode is CancelApplyMode.TERMINAL:
-            if withdrawal_rows:
-                # 已发布交付的撤回是本次有限收场：成员保持处理中，
-                # 由结算端口推进撤回后按既有终态保存结果；位置未知
-                # 时保留等待核实的轮次。
-                effect_after = CancellationEffect.NOT_REQUIRED.value
-            else:
-                outcome_event = (_ITEM_SUCCEEDED,
-                                 CancelOutcomeChoice.ALREADY_TERMINAL.value)
-                if target["type"] in (1, 2, 3) and _preparation_cancel_pending(load_start_facts(connection, target)):
-                    outcome_event = None
-                effect_after = CancellationEffect.NOT_REQUIRED.value
+            preparation_pending = False
+            if not withdrawal_rows and target["type"] in (1, 2, 3):
+                preparation_pending = _preparation_cancel_pending(load_start_facts(connection, target))
+            outcome = immediate_cancel_member_outcome(mode, target,
+                withdrawal_pending=bool(withdrawal_rows), preparation_pending=preparation_pending)
+            if outcome is not None:
+                outcome_event = _ITEM_SUCCEEDED, outcome.value
+            effect_after = CancellationEffect.NOT_REQUIRED.value
         elif mode is CancelApplyMode.ALREADY:
             effect_after = CancellationEffect.APPLIED.value
         else:

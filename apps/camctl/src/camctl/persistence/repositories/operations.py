@@ -62,7 +62,7 @@ from camctl.operations.models import (
 from camctl.operations.ownership_rules import (require_obtain_check_action, require_obtain_check_output,
     require_obtain_check_carrier, require_obtain_check_config, require_host_read_slot,
     require_device_read_slot, read_round_matches, require_run_activity_owner,
-    require_copy_read_owner, start_camera_matches)
+    require_copy_read_owner, start_camera_matches, binding_read_finish_matches)
 from camctl.operations.result_format import result_document, read_result_document, error_document as _error_json
 from camctl.operations.validation import (ResultErrorIssue, result_error_issue, confirmed_effect_has_observation,
     not_dispatched_has_no_effect, run_finish_error_issue, preparation_result_is_confirmed)
@@ -2302,14 +2302,14 @@ def _operation_finish_guard(event, context) -> None:
                         or load_read_end(copy["id"], SimpleNamespace(connection=reads.connection)) is None):
                     _fail("配置缺失收场缺少原读取结束及已保存的不一致摘要")
             if action["cancel_requested"]:
-                if status != int(_RUN_STATUS.CANCELED) or error is not None:
+                if not binding_read_finish_matches(action["cancel_requested"], status, error, binding_error):
                     _fail("已取消动作的读取必须按取消结束")
                 actual_cancel = _binding_cancel_event(reads.connection, after["action_id"], event.transaction_id - 1)
                 if (not json_equal(binding_evidence["cancel_event"], actual_cancel)
                         or event.occurred_at != max(previous[0].occurred_at, actual_cancel["occurred_at"])):
                     _fail("读取取消结束缺少更早已提交的原取消事件")
-            elif (status != int(_RUN_STATUS.FAILED) or not isinstance(error, Mapping)
-                    or not json_equal(error, binding_error) or binding_evidence["cancel_event"] is not None
+            elif (not binding_read_finish_matches(action["cancel_requested"], status, error, binding_error)
+                    or binding_evidence["cancel_event"] is not None
                     or event.occurred_at != previous[0].occurred_at):
                 _fail("未取消动作的读取必须保存原绑定失败")
         if after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):

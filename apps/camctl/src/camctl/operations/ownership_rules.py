@@ -69,3 +69,13 @@ def require_copy_read_owner(action_id, parent):
 def start_camera_matches(original, current, resource_key):
     """新启动只能使用活动首次固定的同一机身和资源键。"""
     return current == original and resource_key == original.resource_key
+
+
+def binding_read_finish_matches(cancel_requested, status, error, binding_error):
+    """已取消的读取按取消结束，否则保留原绑定失败。"""
+    from collections.abc import Mapping
+    statuses = enum_for('operation_runs.status')
+    if cancel_requested:
+        return status == int(statuses.CANCELED) and error is None
+    return (status == int(statuses.FAILED) and isinstance(error, Mapping)
+            and json_equal(error, binding_error))
