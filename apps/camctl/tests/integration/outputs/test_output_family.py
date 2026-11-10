@@ -6,6 +6,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
@@ -153,6 +154,9 @@ def test_family_lookup_preserves_later_file_existence_states(family_database, ta
     connection.execute("UPDATE outputs SET availability=?, cleanup_status=?, error_json=? WHERE source_action_id=11",
                        (availability, 4 if availability == 3 else 1, None if availability == 3 else '{}'))
     connection.execute("UPDATE device_files SET presence_state=? WHERE source_action_id=11", (presence,))
+    if availability == 3:
+        connection.execute("UPDATE intermediate_files SET cleanup_state=? WHERE id=801",
+                           (int(enum_for("intermediate_files.cleanup_state").COMPLETED),))
     connection.commit()
     before = tuple(connection.iterdump())
     result = outputs.load_output_family(connection, target)

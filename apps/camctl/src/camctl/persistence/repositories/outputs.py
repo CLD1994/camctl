@@ -1392,6 +1392,13 @@ def _host_source_purpose(kind, action_type):
     raise ConsistencyError("主机产物种类与来源动作不一致")
 
 
+
+def _verify_host_cleanup_consistency(output, source_file) -> None:
+    """主机正式产物与承载文件必须对可靠清理完成保持一致。"""
+    if ((output["availability"] == int(_AVAILABILITY.CLEANED))
+            != (source_file["cleanup_state"] == int(_FILE_CLEANUP.COMPLETED))):
+        raise ConsistencyError("主机产物清理状态与源文件完成事实不一致")
+
 def _family_members(reads: _FamilyReads, output_id: int) -> tuple[_CatalogMember, ...]:
     """逐产物、完整来源及当前事实解释共用的固定关系边界。"""
     ObjectId(output_id)
@@ -1448,9 +1455,7 @@ def _family_members(reads: _FamilyReads, output_id: int) -> tuple[_CatalogMember
                     or file["retention_state"] != int(_RETENTION.PROMOTED)
                     or file["cleanup_state"] not in (int(_FILE_CLEANUP.NOT_NEEDED), int(_FILE_CLEANUP.COMPLETED))):
                 raise ConsistencyError("主机产物必须由来源动作的已提升角色文件承载")
-            if (file["cleanup_state"] == int(_FILE_CLEANUP.COMPLETED)
-                    and entry["availability"] != int(_AVAILABILITY.CLEANED)):
-                raise ConsistencyError("已清理主机源必须保留对应产物的可靠清理状态")
+            _verify_host_cleanup_consistency(entry, file)
             validate_relative_file_path(FilePurpose[purpose.name], file["id"], file["relative_path"])
             if kind is OutputKind.PREVIEW and original["intermediate_file_id"] is None:
                 raise ConsistencyError("主机预览必须关联同源主机原图")
@@ -1863,11 +1868,12 @@ class _GrantFileCommand:
             or source_file["owner_delivery_id"] is not None
             or source_file["purpose"] != int(_host_source_purpose(output["kind"], source_action["type"]))
             or source_file["retention_state"] != int(_RETENTION.PROMOTED)
-            or source_file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)
+            or source_file["cleanup_state"] not in (int(_FILE_CLEANUP.NOT_NEEDED), int(_FILE_CLEANUP.COMPLETED))
             or source_file["size_bytes"] is None
         ):
             raise ConsistencyError("主机产物必须关联来源动作已提升的完整角色文件")
         if command.source_intermediate_file_id is not None and not reuse_device_cache:
+            _verify_host_cleanup_consistency(output, source_file)
             try:
                 validate_relative_file_path(
                     FilePurpose[_host_source_purpose(output["kind"], source_action["type"]).name], command.source_intermediate_file_id,

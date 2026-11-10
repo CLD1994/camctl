@@ -43,6 +43,9 @@ def _availability(connection, command, value, cleanup=1):
     if command.source_device_file_id is not None:
         presence = {1: 2, 2: 2, 3: 3, 4: 3, 5: 1}[value]
         connection.execute("UPDATE device_files SET presence_state=? WHERE id=501", (presence,))
+    elif value == 3:
+        connection.execute("UPDATE intermediate_files SET cleanup_state=? WHERE id=?",
+            (int(enum_for("intermediate_files.cleanup_state").COMPLETED), command.source_intermediate_file_id))
 
 
 def _cleanup(connection, status, restriction, identity=1):
