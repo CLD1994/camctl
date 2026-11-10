@@ -807,17 +807,6 @@ def isolated_result_guard(target_rules, monkeypatch):
                  "seconds_from_json", "ticket_target_id", "ticket_target_for_identity", "operation_responsibility_key"):
         setattr(attempts, name, object())
     monkeypatch.setitem(sys.modules, attempts.__name__, attempts)
-    models = ModuleType("camctl.operations.models")
-    class AttemptStatus(Enum):
-        SUCCEEDED = "succeeded"
-        FAILED = "failed"
-        UNKNOWN = "unknown"
-    class Basis(Enum):
-        OBSERVED = "observed"
-        NOT_DISPATCHED = "not_dispatched"
-    models.AttemptStatus, models.SettlementBasis = AttemptStatus, Basis
-    models.AttemptTicket = models.ValidatedOutcome = object
-    monkeypatch.setitem(sys.modules, models.__name__, models)
     results = ModuleType("camctl.operations.result_format")
     results.result_document = results.read_result_document = results.error_document = object()
     monkeypatch.setitem(sys.modules, results.__name__, results)
