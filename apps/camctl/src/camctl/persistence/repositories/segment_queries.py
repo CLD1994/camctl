@@ -12,6 +12,7 @@ from camctl.operations.result_format import read_result_document
 from camctl.outputs.segment_query_rules import (
     queried_output_values, queried_item_values, require_query_output_projection,
     require_query_resolution, query_presence_from_outcome, require_query_target,
+    require_query_operation_source,
     require_query_observable_output, require_query_observed_file,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -106,16 +107,10 @@ def _query_presence(connection, item_id, result_event_id):
     source = (
         None if dependency is None else row_facts(connection, "actions", dependency[1])
     )
-    if (
-        kind != 5
-        or target != item_id
-        or responsibility != f"obtain-exists/{item_id}"
-        or action_type != 4
-        or dependency is None
-        or dependency[0] != owner_id
-        or source is None
-        or not is_segmented_source(connection, source["id"])
-    ):
+    require_query_operation_source(kind=kind, target=target, item_id=item_id,
+        responsibility=responsibility, action_type=action_type, dependency=dependency,
+        owner_id=owner_id, source=source)
+    if not is_segmented_source(connection, source["id"]):
         raise ConsistencyError("QUERY v2 责任不属于原分段来源取回")
     attempt = _one(
         connection,

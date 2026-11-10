@@ -24,6 +24,15 @@ def query_presence_from_outcome(outcome, item_id):
     return None
 
 
+def require_query_operation_source(*, kind, target, item_id, responsibility,
+                                   action_type, dependency, owner_id, source):
+    """原调用必须属于显式取回项及其关联的真实来源动作。"""
+    if (kind != 5 or target != item_id or responsibility != f'obtain-exists/{item_id}'
+            or action_type != 4 or dependency is None or dependency[0] != owner_id
+            or source is None):
+        raise ConsistencyError('QUERY v2 责任不属于原分段来源取回')
+
+
 def require_query_target(*, item, selection, owner, output, source_id):
     """只有执行中的显式未解析项及其原产物可以进行查询结算。"""
     if (item['status'] != 1 or item['basis'] != 5 or item['output_id'] is not None

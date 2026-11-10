@@ -7,7 +7,7 @@ from camctl.contracts.workflow_errors import item_error_id
 from camctl.outputs.segment_query_rules import (
     queried_item_values, queried_output_values, require_query_output_projection,
     require_query_resolution, query_presence_from_outcome, require_query_target,
-    require_query_observable_output, require_query_observed_file,
+    require_query_observable_output, require_query_observed_file, require_query_operation_source,
 )
 from camctl.devices.evidence import DeviceObservation
 from camctl.operations.models import CallOutcome
@@ -106,3 +106,15 @@ def test_observation_requires_unknown_unrestricted_output_and_saved_file():
         require_query_observable_output(output | {'cleanup_status': 2})
     with pytest.raises(ConsistencyError):
         require_query_observed_file({'presence_state': 3}, True)
+
+
+@pytest.mark.parametrize('changes', [
+    {'kind': 1}, {'target': 18}, {'responsibility': 'obtain-exists/18'},
+    {'action_type': 1}, {'dependency': None}, {'dependency': (6, 4)}, {'source': None},
+])
+def test_query_operation_must_keep_original_item_owner_and_source(changes):
+    facts = dict(kind=5, target=17, item_id=17, responsibility='obtain-exists/17',
+                 action_type=4, dependency=(5, 4), owner_id=5, source={'id': 4})
+    require_query_operation_source(**facts)
+    with pytest.raises(ConsistencyError, match='原分段来源取回'):
+        require_query_operation_source(**(facts | changes))
