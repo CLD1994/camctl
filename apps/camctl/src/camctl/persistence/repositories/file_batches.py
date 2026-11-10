@@ -81,11 +81,13 @@ def _batch_guard(event, context):
     if not row.before.exists:
         value = row.after.values
         action_id, device_id = value["action_id"], value["device_id"]
-        if (value["acquired_event_id"] != event.event_id or value["released_event_id"] is not None
-                or reads.holder(device_id) is not None
-                or not reads.ready(action_id, device_id, event.occurred_at)
-                or reads.busy(action_id, device_id, event.occurred_at)
-                or reads.first(device_id, event.occurred_at) != action_id):
+        if (value["acquired_event_id"] != event.event_id or value["released_event_id"] is not None):
+            raise EventValidationError("文件批次取得违反完整资格、优先级或设备互斥")
+        holder = reads.holder(device_id)
+        ready = holder is None and reads.ready(action_id, device_id, event.occurred_at) and not reads.busy(action_id, device_id, event.occurred_at)
+        first = reads.first(device_id, event.occurred_at) if holder is None and ready else None
+        if (holder is not None or decide_batch_grant(action_id=action_id, holder_action_id=None,
+                ready=ready, first_action_id=first) is not BatchOutcome.GRANTED):
             raise EventValidationError("文件批次取得违反完整资格、优先级或设备互斥")
     else:
         original = row_facts(reads.connection, "device_file_batches", row.row_id)

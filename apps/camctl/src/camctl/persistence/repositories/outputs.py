@@ -7110,13 +7110,12 @@ def _require_publishable_copy(context, delivery_id: int) -> None:
     if len(copies) != 1:
         raise EventValidationError("准备或发布必须对应唯一交付拷贝")
     copy = copies[0]
-    if copy.get("verification_state") not in (
-        int(_VERIFICATION.MATCHED),
-        int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
-    ):
-        raise EventValidationError("副本未完成字节校验不能准备或发布")
-    if copy.get("committed_bytes") != copy.get("source_size"):
-        raise EventValidationError("副本字节未完整保存不能准备或发布")
+    from camctl.outputs.handoff import publishable_copy_error
+    error = publishable_copy_error(verification_state=copy.get("verification_state"),
+                                   committed_bytes=copy.get("committed_bytes"),
+                                   source_size=copy.get("source_size"))
+    if error is not None:
+        raise EventValidationError(error)
 
 
 def _photo_cache_recopy_proof(connection, copy, attempt, *, require_reset=False):
@@ -7311,7 +7310,8 @@ def _copy_round_chain_proven(
 def _copy_guard(event, context) -> None:
     """拷贝建档、进度段、目标重置、校验与重拷守卫。"""
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _PHOTO_READ_START_REASON:
-        from camctl.outputs.photo_read import parse_photo_read_start, decide_photo_read_start
+        from camctl.outputs.photo_read import (parse_photo_read_start, decide_photo_read_start,
+                                                photo_read_attempt_matches)
 
         try:
             if len(event.rows) != 1 or event.rows[0].table != "file_copies":
@@ -7333,19 +7333,9 @@ def _copy_guard(event, context) -> None:
                     or copy.get("source_intermediate_file_id") is not None
                     or copy.get("processing_id") is not None or copy.get("inspection_id") is not None
                     or read_action_spec(origin).get("photo_source_policy") != "deferred"
-                    or source.get("size_bytes") is not None or source.get("sha256") is not None
-                    or run.get("kind") != int(_RUN_KIND.READ_FILE) or run.get("status") != int(_RUN_STATUS.ACTIVE)
-                    or run.get("copy_id") != row.row_id or run.get("delivery_id") != delivery.get("id")
-                    or run.get("action_id") != delivery.get("action_id")
-                    or run.get("attempts_used") != request.ticket.attempt_id
-                    or run.get("responsibility_key") != request.ticket.responsibility_key
-                    or attempts[0].get("status") != int(_ATTEMPT_STATUS.RUNNING)
-                    or attempts[0].get("intent_event_id") is None or attempts[0].get("result_event_id") is not None
-                    or attempts[0].get("copy_round") != copy.get("round")
-                    or copy.get("slot_device_id") != origin.get("device_id")
-                    or copy.get("read_end_event_id") is not None
-                    or copy.get("verification_state") != int(_VERIFICATION.NOT_PERFORMED)
-                    or copy.get("source_sha256") is not None or copy.get("target_sha256") is not None):
+                    or not photo_read_attempt_matches(copy_id=row.row_id, copy=copy, source=source,
+                        origin=origin, run=run, attempt=attempts[0], delivery=delivery,
+                        ticket=request.ticket)):
                 raise ValueError("照片读取长度缺少持槽的原读取尝试及按需来源")
             completion = source.get("completion_evidence_json")
             observation = completion.get("observation") if isinstance(completion, Mapping) else None
@@ -7771,34 +7761,14 @@ def _obtain_member_guard(event, context) -> None:
     dependency = _required_current_facts(context, "action_dependencies", selection.get("dependency_id"))
     owner = _required_current_facts(context, "actions", dependency.get("action_id"))
     source = _required_current_facts(context, "actions", dependency.get("depends_on_action_id"))
-    if (
-        selection.get("status") != int(_SELECTION_STATUS.FIXED)
-        or selection.get("error_code") is not None
-        or selection.get("error_details_json") is not None
-        or owner.get("type") != _OBTAIN_TYPE
-        or owner.get("status") != int(_ACTION_STATUS.RUNNING)
-        or owner.get("cancel_requested") != 0
-        or owner.get("source_resolution_state") != int(_RESOLUTION_STATE.FIXED)
-        or owner.get("resolved_source_plan_id") is None
-        or owner.get("resolved_source_plan_id") != source.get("plan_id")
-        or source.get("type") not in _CAPTURE_TYPES
-        or source.get("status") not in _ACTION_TERMINAL
-    ):
+    from camctl.outputs.sources import obtain_member_verification_error, obtain_source_ready
+    if not obtain_source_ready(selection=selection, owner=owner, source=source):
         raise EventValidationError("取回成员要求来源拍摄已终态、选择已固定且无来源级错误，取回仍在执行中并未取消")
-    if (
-        item.get("status") not in (int(_ITEM_STATUS.UNRESOLVED), int(_ITEM_STATUS.SELECTED))
-        or item.get("source_dependency") != 0
-        or item.get("delivery_id") is not None
-        or item.get("error_code") is not None
-        or item.get("error_details_json") is not None
-    ):
-        raise EventValidationError("只有尚未建档或结束的取回项能核实或拒绝")
+    error = obtain_member_verification_error(item)
+    if error is not None:
+        raise EventValidationError(error)
     unresolved = item["status"] == int(_ITEM_STATUS.UNRESOLVED)
     explicit = item.get("basis") == int(_ITEM_BASIS.EXPLICIT)
-    if unresolved and (not explicit or item.get("output_id") is not None):
-        raise EventValidationError("未核实成员必须是尚未关联产物的显式请求")
-    if explicit and item.get("requested_output_id") is None:
-        raise EventValidationError("显式成员必须保留原请求产物 ID")
     if event.reason == _REJECT_REASON:
         _validate_obtain_error({**item, **row.after.values}, dependency["depends_on_action_id"])
         code = row.after.values.get("error_code")
@@ -11136,11 +11106,8 @@ class _AdvanceWithdrawalCommand:
                 return ()
             return (_update("deliveries", delivery["id"], {"withdrawal_state": state},
                             {"withdrawal_state": int(_WITHDRAWAL.PENDING)}),)
-        choice_states = {WithdrawalChoice.WITHDRAWN: _WITHDRAWAL.WITHDRAWN,
-                         WithdrawalChoice.NOT_RETRACTABLE: _WITHDRAWAL.NOT_RETRACTABLE,
-                         WithdrawalChoice.FAILED: _WITHDRAWAL.FAILED,
-                         WithdrawalChoice.UNKNOWN: _WITHDRAWAL.UNKNOWN}
-        result_state = int(choice_states[command.choice])
+        from camctl.outputs.handoff import withdrawal_item_result, withdrawal_result_state
+        result_state = withdrawal_result_state(command.choice)
         failed = command.choice in (WithdrawalChoice.FAILED, WithdrawalChoice.UNKNOWN)
         rows = []
         if state == int(_WITHDRAWAL.PENDING):
@@ -11157,16 +11124,7 @@ class _AdvanceWithdrawalCommand:
                 raise TransactionError("后到撤回请求采用的原错误依据不同")
         else:
             return ()
-        if command.choice is WithdrawalChoice.WITHDRAWN:
-            item_status, code, details = 2, None, None
-        elif command.choice is WithdrawalChoice.NOT_RETRACTABLE:
-            item_status, code, details = 3, None, None
-        else:
-            name = ("delivery_withdrawal_failed" if command.choice is WithdrawalChoice.FAILED
-                    else "delivery_position_unconfirmed")
-            item_status, code = 4, item_error_id("cancel_delivery_items", name)
-            details = {"delivery_id": str(delivery["id"])}
-            validate_error_details(name, details)
+        item_status, code, details = withdrawal_item_result(command.choice, delivery["id"])
         for item in self._items:
             rows.append(_update("cancel_delivery_items", item["id"],
                 {"status": item["status"], "error_code": item["error_code"],

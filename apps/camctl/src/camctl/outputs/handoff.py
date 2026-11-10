@@ -53,6 +53,16 @@ def _require_digest(name: str, value) -> None:
         raise ValueError(f"{name} 必须是 64 位小写十六进制摘要: {value!r}")
 
 
+def publishable_copy_error(*, verification_state, committed_bytes, source_size) -> str | None:
+    """返回阻止准备或发布的副本事实，按校验、字节顺序检查。"""
+    verification = enum_for("file_copies.verification_state")
+    if verification_state not in (int(verification.MATCHED), int(verification.SOURCE_CHECKSUM_UNAVAILABLE)):
+        return "副本未完成字节校验不能准备或发布"
+    if committed_bytes != source_size:
+        return "副本字节未完整保存不能准备或发布"
+    return None
+
+
 class HandoffPlace(Enum):
     """交接决策涉及的位置：工作目录与两个主程序接管目录。"""
 
@@ -787,6 +797,32 @@ class WithdrawalChoice(Enum):
     FAILED = "failed"
     #: 位置或结果未知：责任保持待核实并保存错误依据。
     UNKNOWN = "unknown"
+
+
+def withdrawal_result_state(choice: WithdrawalChoice) -> int:
+    """把可靠撤回结果映射到交付自身的撤回状态。"""
+    states = enum_for("deliveries.withdrawal_state")
+    return int({WithdrawalChoice.WITHDRAWN: states.WITHDRAWN,
+                WithdrawalChoice.NOT_RETRACTABLE: states.NOT_RETRACTABLE,
+                WithdrawalChoice.FAILED: states.FAILED,
+                WithdrawalChoice.UNKNOWN: states.UNKNOWN}[choice])
+
+
+def withdrawal_item_result(choice: WithdrawalChoice, delivery_id: int) -> tuple:
+    """把交付撤回结果交给等待此交付的取消明细。"""
+    from camctl.contracts.workflow_errors import item_error_id
+
+    status = enum_for("cancel_delivery_items.status")
+    if choice is WithdrawalChoice.WITHDRAWN:
+        return int(status.WITHDRAWN), None, None
+    if choice is WithdrawalChoice.NOT_RETRACTABLE:
+        return int(status.NOT_RETRACTABLE), None, None
+    name = {WithdrawalChoice.FAILED: "delivery_withdrawal_failed",
+            WithdrawalChoice.UNKNOWN: "delivery_position_unconfirmed"}[choice]
+    code = item_error_id("cancel_delivery_items", name)
+    details = {"delivery_id": str(delivery_id)}
+    validate_error_details(name, details)
+    return int(status.FAILED), code, details
 
 
 @dataclass(frozen=True)

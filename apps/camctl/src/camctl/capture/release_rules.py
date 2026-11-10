@@ -2,7 +2,7 @@
 
 from typing import Any, Mapping
 
-from camctl.contracts.enums import enum_for
+from camctl.capture.recovery_types import RecoveryPhase
 
 
 def release_basis_holds(facts: Mapping[str, Any]) -> bool:
@@ -22,7 +22,7 @@ def output_scope_resolved(facts: Mapping[str, Any], recovery=None) -> bool:
     if not isinstance(recovery, Mapping):
         return False
     return (facts.get("baseline_state") == 3 and facts.get("activity_state") == 3
-        and recovery.get("phase") == enum_for("software_recoveries.phase").READY.name.lower()
+        and recovery.get("phase") == RecoveryPhase.READY.value
         and recovery.get("prepared") is True and recovery.get("scope_finalized") is True
         and recovery.get("cursor") is None
         and recovery.get("scope_pages", 0) > 0
@@ -39,4 +39,3 @@ def occupancy_release_allowed(facts: Mapping[str, Any], *, unstarted: bool = Fal
     return (preparation_calls_resolved and facts["occupancy_state"] == 1 and release_basis_holds(facts)
             and (facts["ownership_mode"] != 2 or (unstarted and preparation_resolved)
                  or output_scope_resolved(facts)))
-

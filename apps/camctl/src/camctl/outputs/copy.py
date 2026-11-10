@@ -55,6 +55,25 @@ _VERIFICATION = enum_for("file_copies.verification_state")
 _HEX = frozenset("0123456789abcdef")
 
 
+def validate_read_end_facts(copy: Mapping, document: Mapping) -> None:
+    """核对本轮来源、目标及可靠字节进度。"""
+    if (document.get("copy_round") != copy["round"]
+            or document.get("source_device_file_id") != copy["source_device_file_id"]
+            or document.get("source_intermediate_file_id") != copy["source_intermediate_file_id"]
+            or document.get("target_file_id") != copy["target_file_id"]
+            or document.get("source_size") != copy["source_size"]
+            or document.get("committed_bytes") != copy["committed_bytes"]
+            or document.get("reset_state") != copy["reset_state"]
+            or copy["committed_bytes"] != copy["source_size"] or copy["reset_state"] != 1):
+        raise ConsistencyError("读取结束与当前轮次、来源或可靠进度不一致")
+
+
+def read_end_completed(*, stopped, bytes_read, error, source_size) -> bool:
+    """可靠收场必须实际停止且读取字节数属于当前源长度。"""
+    return (stopped is True and error is None and type(bytes_read) is int
+            and 0 <= bytes_read <= source_size)
+
+
 class SourceChecksumSupport(Enum):
     """源端摘要能力的可靠判定；未知不能折叠为不支持。"""
 

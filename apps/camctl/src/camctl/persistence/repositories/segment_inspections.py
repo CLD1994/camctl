@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from camctl.capture.inspection_rules import (
     inspection_member_is_eligible, inspection_read_is_complete,
-    inspection_result_requires_read as _result_requires_read,
+    inspection_result_requires_read,
 )
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
@@ -324,7 +324,7 @@ class _SaveInspectionResultCommand:
         if _binding_read_result(connection, inspection, self.request.result_json):
             if action["cancel_requested"] or action["status"] != 2:
                 return self._decision(_inspection_ref(inspection), read_only=True)
-        if (_result_requires_read(self.request.state, self.request.result_json)
+        if (inspection_result_requires_read(self.request.state, self.request.result_json)
                 and not inspection_input_read_succeeded(connection, inspection)):
             raise ConsistencyError("媒体检查结果要求原读取流程可靠成功")
         allocation = scope.allocate(1)
@@ -535,7 +535,7 @@ def _segment_inspection_guard(event, context) -> None:
                 _binding_read_result(reads.connection, current, values["result_json"])
                 if action["cancel_requested"] or action["status"] != 2:
                     raise EventValidationError("已取消或终态动作不能新增检查绑定失败结果")
-            if _result_requires_read(values.get("state"), values["result_json"]):
+            if inspection_result_requires_read(values.get("state"), values["result_json"]):
                 if (type(reads) is not RetryWaitReads
                         or not inspection_input_read_succeeded(reads.connection, current)):
                     raise EventValidationError("媒体检查结果要求原读取流程可靠成功")
