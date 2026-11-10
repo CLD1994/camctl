@@ -178,14 +178,14 @@ class RecordingCase:
             lambda owned: method(request, key, owned), key=key, description='录像消费者公开保存')
 
     @timed('start')
-    async def start(self, *, started_at=NOW):
+    async def start(self, *, started_at=NOW, extra_actions=()):
         self.wall[0] = started_at
         await self.build()
         instant = datetime.fromtimestamp(started_at // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         await self.accept({'request_id': '1', 'created_at': instant, 'name': '录像消费者',
             'actions': [{'name': '拍摄', 'type': self.handler, 'device_id': 'cam-1',
                 'scheduled_at': instant, 'params': {'type': 'video' if self.consumer == 'record' else 'timelapse'},
-                'policy': {'max_delay_ms': 5000}}]})
+                'policy': {'max_delay_ms': 5000}}] + list(extra_actions)})
         for method, request in (
             (SchedulingRepository().observe_window, ObserveWindowRequest(1, started_at, started_at)),
             (SchedulingRepository().start_action, StartActionRequest(1, started_at, started_at)),
@@ -281,9 +281,10 @@ def with_capture(request, capture):
     return replace(request, capture=capture) if isinstance(request, FinishRecordingResults) else capture
 
 
-async def finish_case(directory, *, consumer='record', complete_files=True, canceled=False, second_file=False):
+async def finish_case(directory, *, consumer='record', complete_files=True, canceled=False, second_file=False,
+                      extra_actions=()):
     from ..capture.test_capture_contract import _entry
-    case = await RecordingCase(directory, consumer=consumer).start()
+    case = await RecordingCase(directory, consumer=consumer).start(extra_actions=extra_actions)
     case.preparing = True
     if complete_files:
         entries = (_entry('complete-file', size=4096),)

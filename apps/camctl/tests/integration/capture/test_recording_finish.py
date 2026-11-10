@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -193,20 +194,41 @@ def _image(case):
     return tuple(case.owned.connection.iterdump())
 
 
-async def test_finish_registers_outputs_action_and_plan_together(tmp_path: Path) -> None:
-    case = await finish_case(tmp_path)
+@pytest.mark.parametrize('has_pending_sibling,expected_plan_status', [(False, 3), (True, 2)])
+async def test_finish_registers_outputs_action_and_plan_together(
+    tmp_path: Path, has_pending_sibling: bool, expected_plan_status: int,
+) -> None:
+    report_at = datetime.fromtimestamp(NOW // 1_000_000 + 3600, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    extra_actions = ({'name': '未来报告', 'type': 'report_status',
+        'scheduled_at': report_at, 'params': {'scope': 'full'}},) if has_pending_sibling else ()
+    case = await finish_case(tmp_path, extra_actions=extra_actions)
     try:
         method, request, key = await case.finish_input()
+        action_id = capture_request(request).action_id
+        plan_id = case.row('SELECT plan_id FROM actions WHERE id=?', action_id)[0]
+        members_before = case.owned.connection.execute(
+            'SELECT id,name,status,error_code,execution_started FROM actions WHERE plan_id=? ORDER BY input_index',
+            (plan_id,)).fetchall()
+        assert members_before[0] == (action_id, '拍摄', 2, None, 1)
+        assert len(members_before) == 1 + has_pending_sibling
+        if has_pending_sibling:
+            sibling_id = members_before[1][0]
+            assert members_before[1] == (sibling_id, '未来报告', 1, None, 0)
+            assert case.row('SELECT scheduled_at FROM actions WHERE id=?', sibling_id)[0] > case.wall[0]
+        assert case.row('SELECT status FROM plans WHERE id=?', plan_id) == (2,)
         boundary = case.row('SELECT MAX(id) FROM history_events')[0]
         outcome = await _save_finish(case, method, request, key)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         result = outcome.value
-        assert (result.action_status, result.plan_status) == (3, 3)
+        assert (result.action_status, result.plan_status) == (3, expected_plan_status)
         file_id = capture_request(request).drafts[0].file.device_file_id
         assert case.row('SELECT kind,device_file_id,availability,cleanup_status,source_action_id'
-            ' FROM outputs WHERE id=?', result.output_ids[0]) == (1, file_id, 1, 1, 1)
-        assert case.row('SELECT status FROM actions WHERE id=1') == (3,)
-        assert case.row('SELECT status FROM plans WHERE id=1') == (3,)
+            ' FROM outputs WHERE id=?', result.output_ids[0]) == (1, file_id, 1, 1, action_id)
+        members_after = case.owned.connection.execute(
+            'SELECT id,name,status,error_code,execution_started FROM actions WHERE plan_id=? ORDER BY input_index',
+            (plan_id,)).fetchall()
+        assert members_after == [(action_id, '拍摄', 3, None, 1), *members_before[1:]]
+        assert case.row('SELECT status FROM plans WHERE id=?', plan_id) == (expected_plan_status,)
         txns = case.owned.connection.execute(
             'SELECT DISTINCT transaction_id FROM history_events WHERE id>?', (boundary,)).fetchall()
         assert len(txns) == 1
