@@ -2,10 +2,11 @@
 
 import pytest
 
-from camctl.capture.result_pairing import ScanFamilyAssessment
+from camctl.capture.result_pairing import ScanFamilyAssessment, result_file_family
 from camctl.capture.segment_models import FileCompletionState, OwnershipState
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
+from camctl.devices.tasks import CaptureResultPolicy
 
 
 def observe(assessment, **changes):
@@ -65,3 +66,25 @@ def test_unknown_member_does_not_hide_later_reliable_contradiction():
     observe(assessment, ownership=OwnershipState.UNKNOWN)
     with pytest.raises(ConsistencyError):
         observe(assessment, saved_file={'size_bytes': 11, 'locator_json': {'path': '/a'}})
+
+
+@pytest.mark.parametrize(('identity', 'policy', 'expected'), [
+    ('/DCIM/abc.OSV', None, ('/DCIM', 'abc', 'ORIGINAL')),
+    ('/DCIM/abc.LrF', None, ('/DCIM', 'abc', 'PREVIEW')),
+    ('/abc.OSV', None, ('/', 'abc', 'ORIGINAL')),
+    ('abc.OSV', None, None),
+    ('/DCIM/.OSV', None, None),
+    ('/DCIM/abc.mp4', None, None),
+    ('/DCIM/abc.MP4', CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
+     ('/DCIM', 'abc', 'ORIGINAL')),
+    ('/DCIM/abc.LRF', CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
+     ('/DCIM', 'abc', 'PREVIEW')),
+    ('/DCIM/abc.JPG', CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value, None),
+])
+def test_family_classification_uses_frozen_result_policy(identity, policy, expected):
+    if expected is None:
+        assert result_file_family(identity, result_policy=policy) == (None, None, None)
+    else:
+        directory, stem, role = expected
+        role_id = enum_for('result_page_files.family_role')[role]
+        assert result_file_family(identity, result_policy=policy) == (directory, stem, int(role_id))

@@ -9,6 +9,7 @@ from camctl.contracts.values import ConsistencyError
 
 
 _REASON = enum_for("device_file_pairing_facts.reason")
+_FAMILY_ROLE = enum_for("result_page_files.family_role")
 
 
 @dataclass
@@ -41,3 +42,38 @@ class ScanFamilyAssessment:
         if reason == _REASON.UNIQUE and preview_file['original_device_file_id'] not in (None, original_id):
             return _REASON.CONFLICT
         return reason
+
+
+def result_file_family(identity, *, result_policy=None):
+    """按冻结结果策略保留原路径主干，并标记配对原片和预览。"""
+    directory, separator, name = identity.rpartition("/")
+    if separator and not directory:
+        directory = "/"
+    stem, dot, suffix = name.rpartition(".")
+    if not separator or not directory or not dot or not stem:
+        return None, None, None
+    suffix = suffix.lower()
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if result_policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
+        from camctl.devices.drivers.adb_cameras.action6_results import ACTION6_RESULT_PROFILE
+
+        profile = ACTION6_RESULT_PROFILE
+        original_suffixes = frozenset(
+            item.suffix.lstrip(".").casefold()
+            for item in profile.formats
+            if item.format_id == profile.paired_original_format_id
+        )
+        if suffix in original_suffixes:
+            role = int(_FAMILY_ROLE.ORIGINAL)
+        elif suffix == profile.preview_format.suffix.lstrip(".").casefold():
+            role = int(_FAMILY_ROLE.PREVIEW)
+        else:
+            return None, None, None
+    elif suffix == "osv":
+        role = int(_FAMILY_ROLE.ORIGINAL)
+    elif suffix == "lrf":
+        role = int(_FAMILY_ROLE.PREVIEW)
+    else:
+        return None, None, None
+    return directory, stem, role
