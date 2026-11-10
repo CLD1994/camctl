@@ -21,7 +21,6 @@ from camctl.persistence.recovery import (
     resolve_commit,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.repositories.transactions import commit_operation
 
 from ..persistence.test_runtime import _create_valid_database
 from .test_transactions import PlanCreateCommand, plan_guards
@@ -76,7 +75,7 @@ class TestRealVerification:
         owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         key = new_operation_key()
         try:
-            receipt = commit_operation(PlanCreateCommand((1,)), key, owned)
+            receipt = plan_guards.commit_operation(PlanCreateCommand((1,)), key, owned)
             assert receipt.kind == "completed"
         finally:
             owned.connection.close()
@@ -95,7 +94,7 @@ class TestRealVerification:
         owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         key = new_operation_key()
         try:
-            assert commit_operation(PlanCreateCommand((1,)), key, owned).kind == "completed"
+            assert plan_guards.commit_operation(PlanCreateCommand((1,)), key, owned).kind == "completed"
         finally:
             owned.connection.close()
         lookup = SqliteCommitLookup(tmp_path / "state.db", late_commit_possible=False)
@@ -107,7 +106,7 @@ class TestRealVerification:
         assert decision.kind is RecoveryKind.ERROR
 
     def test_absent_after_connection_stopped_allows_eligibility_check(
-        self, tmp_path, plan_guards
+        self, tmp_path
     ) -> None:
         _create_valid_database(tmp_path / "state.db")
         owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
@@ -122,7 +121,7 @@ class TestRealVerification:
         assert decision.kind is RecoveryKind.RETRY
         assert decision.can_retry is True
 
-    def test_original_connection_still_alive_blocks_retry(self, tmp_path, plan_guards) -> None:
+    def test_original_connection_still_alive_blocks_retry(self, tmp_path) -> None:
         _create_valid_database(tmp_path / "state.db")
         owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         try:

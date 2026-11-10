@@ -82,12 +82,11 @@ def test_upgrade_publish_race_preserves_explicit_flag(tmp_path, monkeypatch):
     assert Path(str(path) + ".before-software-recovery-v3.sqlite").exists()
 
 
-def _record_history(path):
+def _record_history(path, plan_guards):
     from camctl.contracts.values import new_operation_key
-    from camctl.persistence.repositories.transactions import commit_operation
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        assert commit_operation(PlanCreateCommand((7,)), new_operation_key(), opened).kind == "completed"
+        assert plan_guards.commit_operation(PlanCreateCommand((7,)), new_operation_key(), opened).kind == "completed"
         return opened.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
     finally:
         opened.connection.close()
@@ -114,7 +113,7 @@ def _intercept_upgrade_connection(monkeypatch, change):
 
 def test_upgrade_commit_ack_unknown_reopens_and_verifies_actual_v3(tmp_path, monkeypatch, plan_guards):
     cfg, path = legacy(tmp_path)
-    original_history = _record_history(path)
+    original_history = _record_history(path, plan_guards)
     def fail_ack(stage, connection, statement):
         if stage == "commit":
             raise sqlite3.OperationalError("真实COMMIT完成，回执丢失")
@@ -131,7 +130,7 @@ def test_upgrade_commit_ack_unknown_reopens_and_verifies_actual_v3(tmp_path, mon
 
 def test_upgrade_before_commit_rolls_back_and_reuses_original_backup(tmp_path, monkeypatch, plan_guards):
     cfg, path = legacy(tmp_path)
-    original_history = _record_history(path)
+    original_history = _record_history(path, plan_guards)
     def fail_create(stage, connection, statement):
         if stage == "execute" and statement.startswith("CREATE TABLE software_recoveries"):
             raise sqlite3.OperationalError("独立表创建失败")
