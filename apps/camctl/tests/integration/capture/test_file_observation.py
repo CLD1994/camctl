@@ -22,14 +22,11 @@ from camctl.capture.files import (
     file_identity_key,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.contracts.history_values import TransactionRange
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import register_operation_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import (
     RowChange,
@@ -40,9 +37,6 @@ from camctl.persistence.repositories.transactions import (
 )
 
 from ..persistence.test_runtime import _create_valid_database
-
-register_operation_guards()
-register_capture_guards()
 
 _NOW = 1_750_000_000_000_000
 
@@ -577,19 +571,19 @@ class TestDeviceFileGuardBranches:
             context = self._context(owned, file_id, facts)
             # 文件尚未完成：摘要与支持声明共同保存被拒绝。
             with pytest.raises(EventValidationError):
-                validate_event(event_envelope(2, 2, _DEVICE_FILE_EVENT, 4, (
+                BusinessStorage().validate_event(event_envelope(2, 2, _DEVICE_FILE_EVENT, 4, (
                     update_change("device_files", file_id,
                         {"checksum_support": 1, "sha256": None},
                         {"checksum_support": 2, "sha256": "a" * 64}),), _NOW), context)
             # 只声明支持（无摘要）在未完成文件上合法。
-            validate_event(event_envelope(3, 3, _DEVICE_FILE_EVENT, 4, (
+            BusinessStorage().validate_event(event_envelope(3, 3, _DEVICE_FILE_EVENT, 4, (
                 update_change("device_files", file_id,
                     {"checksum_support": 1}, {"checksum_support": 2}),), _NOW),
                 self._context(owned, file_id, facts, event_id=3))
             facts["checksum_support"] = 2
             # 摘要查询失败不能改成不支持。
             with pytest.raises(EventValidationError):
-                validate_event(event_envelope(4, 4, _DEVICE_FILE_EVENT, 4, (
+                BusinessStorage().validate_event(event_envelope(4, 4, _DEVICE_FILE_EVENT, 4, (
                     update_change("device_files", file_id,
                         {"checksum_support": 2}, {"checksum_support": 3}),), _NOW),
                     self._context(owned, file_id, facts, event_id=4))
@@ -603,11 +597,11 @@ class TestDeviceFileGuardBranches:
             file_id = _created_file(owned, repository)
             facts = row_facts(owned.connection, "device_files", file_id)
             context = self._context(owned, file_id, facts)
-            validate_event(event_envelope(2, 2, _DEVICE_FILE_EVENT, 5, (
+            BusinessStorage().validate_event(event_envelope(2, 2, _DEVICE_FILE_EVENT, 5, (
                 update_change("device_files", file_id,
                     {"presence_state": 1}, {"presence_state": 3}),), _NOW), context)
             facts["presence_state"] = 3
-            validate_event(event_envelope(3, 3, _DEVICE_FILE_EVENT, 5, (
+            BusinessStorage().validate_event(event_envelope(3, 3, _DEVICE_FILE_EVENT, 5, (
                 update_change("device_files", file_id,
                     {"presence_state": 3}, {"presence_state": 2}),), _NOW),
                 self._context(owned, file_id, facts, event_id=3))
@@ -618,7 +612,7 @@ class TestDeviceFileGuardBranches:
                 after=RowImage(exists=True, values={"presence_state": 2}),
             )
             with pytest.raises(EventValidationError):
-                validate_event(event_envelope(
+                BusinessStorage().validate_event(event_envelope(
                     4, 4, _DEVICE_FILE_EVENT, 5, (same,), _NOW),
                     self._context(owned, file_id, facts, event_id=4))
         finally:

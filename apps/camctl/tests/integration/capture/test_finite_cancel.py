@@ -301,7 +301,8 @@ async def test_confirmed_stop_uses_independent_wait_without_waiting_original_tar
 
 
 async def test_finite_cancel_event_guard_independently_rejects_empty_completed_scan(tmp_path, capture_resources):
-    from camctl.history.validators import EventValidationError, validate_event
+    from camctl.history.validators import EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from ..support.capture_cancellation_cases import finite_end_proposal
     from .test_result_page_history import _actual
     world = await cancellation_world(tmp_path, capture_resources)
@@ -317,7 +318,7 @@ async def test_finite_cancel_event_guard_independently_rejects_empty_completed_s
         world.owned.connection.execute('BEGIN')
         try:
             with pytest.raises(EventValidationError, match='文件|产物|扫描'):
-                validate_event(event, context)
+                BusinessStorage().validate_event(event, context)
         finally:
             world.owned.connection.execute('ROLLBACK')
         assert tuple(world.owned.connection.iterdump()) == before
@@ -421,7 +422,8 @@ async def test_new_finite_cancel_waits_original_startup_then_preserves_dual_term
 
 @pytest.mark.parametrize('startup', [0, 1000, 2000, None])
 async def test_finite_cancel_guard_requires_same_frozen_startup_margin(tmp_path, capture_resources, startup):
-    from camctl.history.validators import EventValidationError, validate_event
+    from camctl.history.validators import EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from ..support.capture_cancellation_cases import finite_end_proposal
     world = await cancellation_world(tmp_path, capture_resources, startup=1000)
     try:
@@ -440,10 +442,10 @@ async def test_finite_cancel_guard_requires_same_frozen_startup_margin(tmp_path,
         world.owned.connection.execute('BEGIN')
         try:
             if startup == 1000:
-                validate_event(event, context)
+                BusinessStorage().validate_event(event, context)
             else:
                 with pytest.raises(EventValidationError):
-                    validate_event(event, context)
+                    BusinessStorage().validate_event(event, context)
         finally:
             world.owned.connection.execute('ROLLBACK')
         assert tuple(world.owned.connection.iterdump()) == before

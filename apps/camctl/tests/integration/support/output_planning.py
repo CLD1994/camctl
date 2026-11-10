@@ -141,7 +141,8 @@ def validate_static_event(event, proposal):
     真实 SQL 原子性、顺序和回滚另由 EventSequence/commit_operation 验证。
     """
     from camctl.contracts.history_values import TransactionRange
-    from camctl.history.validators import EventContext, validate_event
+    from camctl.history.validators import EventContext
+    from camctl.persistence.repositories.validation import BusinessStorage
 
     events = proposal.events or (event,)
     context = EventContext(
@@ -150,7 +151,7 @@ def validate_static_event(event, proposal):
                          max(item.event_id for item in events)),
         proposal.owners, proposal.state_rows, proposal.transaction_rows,
         proposal.read_coverage)
-    return validate_event(event, context)
+    return BusinessStorage().validate_event(event, context)
 
 
 def storage_fault(connection, target):
