@@ -197,7 +197,13 @@ def load_repository():
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/persistence/repositories/outputs.py')
     module = importlib.util.module_from_spec(spec)
     modules[name] = module
+    rules_name = 'camctl.outputs.processing_rules'
+    rules_spec = importlib.util.spec_from_file_location(
+        rules_name, Path(__file__).parents[3] / 'src/camctl/outputs/processing_rules.py')
+    rules = importlib.util.module_from_spec(rules_spec)
+    modules[rules_name] = rules
     with patch.dict(sys.modules, modules):
+        rules_spec.loader.exec_module(rules)
         spec.loader.exec_module(module)
     return module
 

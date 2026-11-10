@@ -10,6 +10,8 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from camctl.operations.validation import ResultErrorIssue, run_finish_error_issue
+
 sys.dont_write_bytecode = True
 SOURCE = Path(__file__).parents[3] / "src" / "camctl"
 
@@ -638,6 +640,7 @@ class ExhaustGuardTests(unittest.TestCase):
         namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
             "_OPERATION_CONFIGURED_EVENT": 10, "_RUN_KIND": SimpleNamespace(READ_FILE=3, PREPARE_CAPTURE=10, CHECK_DEVICE_AVAILABILITY=12),
             "_RUN_STATUS": SimpleNamespace(PENDING=1, FAILED=4, CANCELED=5, UNCONFIRMED=6, SUCCEEDED=3),
+            "ResultErrorIssue": ResultErrorIssue, "run_finish_error_issue": run_finish_error_issue,
             "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3, UNKNOWN=4), "Mapping": dict,
             "_fail": fail, "_row_after_facts": lambda context, row: facts}
         exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
@@ -651,6 +654,9 @@ class ExhaustGuardTests(unittest.TestCase):
         context = SimpleNamespace(retry_wait_reads=reads, validated_events=(), state_rows={"file_copies": {9: copy},
             "recording_processing": {8: processing}})
         modules = {m.__name__: m for m in (reads_module, outputs, discovery)}
+        enums = ModuleType("camctl.contracts.enums")
+        enums.enum_for = lambda name: namespace["_RUN_STATUS"]
+        modules[enums.__name__] = enums
         guard = namespace["_operation_finish_guard"]
         with patch.dict(sys.modules, modules):
             guard(event, context)
@@ -693,6 +699,7 @@ class ExhaustGuardTests(unittest.TestCase):
         namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
             "_OPERATION_CONFIGURED_EVENT": 10, "_RUN_KIND": SimpleNamespace(READ_FILE=3, PREPARE_CAPTURE=10, CHECK_DEVICE_AVAILABILITY=12),
             "_RUN_STATUS": SimpleNamespace(PENDING=1, FAILED=4, CANCELED=5, UNCONFIRMED=6, SUCCEEDED=3),
+            "ResultErrorIssue": ResultErrorIssue, "run_finish_error_issue": run_finish_error_issue,
             "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3, UNKNOWN=4), "Mapping": dict,
             "_fail": fail, "_row_after_facts": lambda context, row: facts}
         exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
@@ -701,7 +708,9 @@ class ExhaustGuardTests(unittest.TestCase):
         event = SimpleNamespace(rows=(row,), event_type=10, reason=3, evidence={}, occurred_at=20)
         context = SimpleNamespace(retry_wait_reads=Reads(), state_rows={"file_copies": {9: {
             "source_device_file_id": 15, "delivery_id": 8}}})
-        with patch.dict(sys.modules, {module.__name__: module}):
+        enums = ModuleType("camctl.contracts.enums")
+        enums.enum_for = lambda name: namespace["_RUN_STATUS"]
+        with patch.dict(sys.modules, {module.__name__: module, enums.__name__: enums}):
             with self.assertRaises(ValueError):
                 namespace["_operation_finish_guard"](event, context)
             event.evidence = {"attempt_id": 12}

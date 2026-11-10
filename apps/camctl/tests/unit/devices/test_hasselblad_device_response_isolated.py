@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from camctl.capture.recovery_types import RecoveryPhase
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 
 
 @pytest.fixture
@@ -344,7 +345,9 @@ def photo_driver_api(responses, monkeypatch):
     preparation = EvidenceContract("preparation_test", 1, "control", frozenset())
     modules = {
         "camctl.devices.bindings": None,
-        "camctl.devices.capture_preparation": {"CAPTURE_PREPARATION_COMPLETED": preparation, "DEFAULT_PREPARE_LEAD_S": Decimal(10), "PreparedCaptureCache": object},
+        "camctl.devices.capture_preparation": {"CAPTURE_PREPARATION_COMPLETED": preparation,
+            "CAPTURE_ACTION_TYPES": CAPTURE_ACTION_TYPES, "DEFAULT_PREPARE_LEAD_S": Decimal(10),
+            "PreparedCaptureCache": object},
         "camctl.devices.ports": {"ControlRequest": object, "DeviceCallResult": Result},
         "camctl.devices.start_entry": {"ENTERED": entered, "PREVENTED": prevented, "entered_observation": lambda ticket: None},
         "camctl.host_files.downloads": {"DownloadWorkspace": object, "ResultDownloadWorkspace": SourceWorkspace},

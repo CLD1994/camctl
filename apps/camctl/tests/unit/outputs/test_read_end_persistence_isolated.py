@@ -12,6 +12,8 @@ import unittest
 from unittest.mock import patch
 
 from camctl.outputs.copy import read_end_completed, validate_read_end_facts
+from camctl.operations.ownership_rules import binding_read_finish_matches
+from camctl.operations.validation import ResultErrorIssue, run_finish_error_issue
 
 
 SOURCE = Path(__file__).parents[3] / "src/camctl/persistence/repositories/read_end.py"
@@ -487,6 +489,8 @@ class MissingConfigGuardTests(unittest.TestCase):
         def fail(message): raise ValueError(message)
         namespace = {"__name__": "camctl.persistence.repositories._isolated_guard",
             "__package__": "camctl.persistence.repositories", "_row_after_facts": lambda *args: run,
+            "binding_read_finish_matches": binding_read_finish_matches,
+            "ResultErrorIssue": ResultErrorIssue, "run_finish_error_issue": run_finish_error_issue,
             "_fail": fail, "row_facts": facts, "SimpleNamespace": SimpleNamespace,
             "Mapping": dict, "json_equal": lambda a, b: a == b,
             "enum_for": lambda name: SimpleNamespace(MISMATCHED=4),
