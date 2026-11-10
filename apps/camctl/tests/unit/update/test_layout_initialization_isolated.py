@@ -14,6 +14,8 @@ def module(name, **values):
 
 history = module('camctl.history.initial_state', runtime_state_values=Mock())
 paths = module('camctl.host_files.paths', PURPOSE_DIRECTORIES={})
+cleanup_turn = module('camctl.host_files.cleanup_turn', TURN_NAME='.download-cleanup-turn',
+                      retire_cleanup_turn=Mock())
 resources = module('camctl.resources', resource_bytes=Mock())
 switch_names = ('SwitchCommitError', 'SwitchCommitObservation', 'canonical_to_path',
                 'check_atomic_move_support', 'check_distinct_roots', 'classify_switch_eligibility',
@@ -31,7 +33,7 @@ layout = module('camctl.update_engine.layout', check_initialization=Mock())
 source = Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/persistence/initialization.py'
 spec = importlib.util.spec_from_file_location('layout_initialization_under_test', source)
 initialization = importlib.util.module_from_spec(spec)
-modules = {m.__name__: m for m in (history, paths, resources, switch, runtime, locks, layout)}
+modules = {m.__name__: m for m in (history, paths, cleanup_turn, resources, switch, runtime, locks, layout)}
 for name in ('camctl', 'camctl.history', 'camctl.host_files', 'camctl.persistence',
              'camctl.session', 'camctl.update_engine'):
     package = module(name)

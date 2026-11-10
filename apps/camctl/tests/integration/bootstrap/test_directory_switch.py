@@ -36,6 +36,63 @@ from .test_initialization import _expected_staging_subdirs, _config, _dump
 _SHA256 = "a" * 64
 
 
+def test_switch_retires_only_valid_download_cleanup_turn(tmp_path):
+    cfg = _config(tmp_path)
+    state_db = Path(cfg.paths.state_db)
+    assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+    hint = Path(cfg.paths.staging) / '.download-cleanup-turn'
+    hint.write_bytes(b'2\n')
+    result = initialize_state(_config(tmp_path, prefix='new-'), state_db)
+    assert result.outcome is InitOutcome.SWITCHED, result.detail
+    assert not hint.exists()
+    assert not (tmp_path / 'new-staging' / hint.name).exists()
+
+
+@pytest.mark.parametrize('obstacle', ['invalid', 'symlink', 'other_file', 'delete_error'])
+def test_switch_keeps_binding_when_hint_or_other_contents_are_not_reliably_retired(
+        tmp_path, monkeypatch, obstacle):
+    cfg = _config(tmp_path)
+    state_db = Path(cfg.paths.state_db)
+    assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+    before = _dump(state_db)
+    hint = Path(cfg.paths.staging) / '.download-cleanup-turn'
+    if obstacle == 'symlink':
+        target = tmp_path / 'outside'
+        target.write_bytes(b'1\n')
+        hint.symlink_to(target)
+    else:
+        hint.write_bytes(b'invalid\n' if obstacle == 'invalid' else b'1\n')
+    if obstacle == 'other_file':
+        (Path(cfg.paths.staging) / 'deliveries' / 'business').write_bytes(b'keep')
+    if obstacle == 'delete_error':
+        actual_unlink = os.unlink
+        def fail_hint(path, *args, **kwargs):
+            if Path(path) == hint:
+                raise OSError('injected hint deletion failure')
+            return actual_unlink(path, *args, **kwargs)
+        monkeypatch.setattr(os, 'unlink', fail_hint)
+    result = initialize_state(_config(tmp_path, prefix='new-'), state_db)
+    assert result.outcome is InitOutcome.FAILED
+    assert _dump(state_db) == before
+    assert hint.is_symlink() if obstacle == 'symlink' else hint.exists()
+
+
+def test_switch_keeps_old_binding_if_commit_fails_after_retiring_turn(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    state_db = Path(cfg.paths.state_db)
+    assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+    before = _dump(state_db)
+    hint = Path(cfg.paths.staging) / '.download-cleanup-turn'
+    hint.write_bytes(b'1\n')
+    def fail_commit(*_args):
+        raise SwitchCommitError('injected commit failure', observation=SwitchCommitObservation.NOT_COMPLETED)
+    monkeypatch.setattr('camctl.persistence.initialization.switch_directory_binding', fail_commit)
+    result = initialize_state(_config(tmp_path, prefix='new-'), state_db)
+    assert result.outcome is InitOutcome.FAILED
+    assert not hint.exists()
+    assert _dump(state_db) == before
+
+
 class _CommitThenError:
     """真实提交已完成，但调用者未取得成功返回；可另使重读失效。"""
 

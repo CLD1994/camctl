@@ -2,7 +2,6 @@
 import asyncio
 import errno
 import os
-import re
 import stat
 from contextlib import closing
 from pathlib import Path
@@ -16,6 +15,7 @@ from camctl.host_files.downloads import (
     CaptureCleanupWorkspace, ResultDownloadWorkspace, recover_result_download, result_role_owned, settled_file_io,
 )
 from camctl.host_files.models import BoundDirectories
+from camctl.host_files.cleanup_turn import TURN_NAME as _TURN, TURN_TEMP as _TURN_TEMP, read_cleanup_cursor
 from camctl.history.photo_cache_request import parse_photo_cache_request
 from camctl.logging_runtime.diagnostics import record_error
 from camctl.operations.error_diagnostics import attach_diagnostic_facts
@@ -29,23 +29,10 @@ _CURSOR = ".photo-work-cleanup-cursor"
 _TEMP = ".photo-work-cleanup-cursor.tmp"
 _HOST_CURSOR = ".photo-host-work-cleanup-cursor"
 _HOST_TEMP = ".photo-host-work-cleanup-cursor.tmp"
-_TURN = ".download-cleanup-turn"
-_TURN_TEMP = ".download-cleanup-turn.tmp"
 
 
 def _load_cursor(staging, name=_CURSOR):
-    try:
-        fd = os.open(staging / name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                     | getattr(os, "O_NONBLOCK", 0))
-    except FileNotFoundError:
-        return 0
-    with os.fdopen(fd, "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            raise ValueError("照片工作目录维护游标不是普通文件")
-        raw = stream.read(33)
-    if re.fullmatch(rb"[0-9]{1,19}\n", raw) is None:
-        raise ValueError("照片工作目录维护游标格式无效")
-    return int(raw)
+    return read_cleanup_cursor(staging, name)[0]
 
 
 def _save_cursor(staging, identity, name=_CURSOR, temporary=_TEMP):

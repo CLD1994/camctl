@@ -89,7 +89,7 @@ def classify_switch_eligibility(facts: SwitchFacts) -> str | None:
     return None
 
 
-def scan_directory_tree(root: Path, *, required: bool) -> str | None:
+def scan_directory_tree(root: Path, *, required: bool, allowed_file: Path | None = None) -> str | None:
     """核对目录树内没有文件、符号链接或无法识别的对象。
 
     required 为真时目录必须存在且可检查；为假时允许不存在（新目
@@ -118,6 +118,8 @@ def scan_directory_tree(root: Path, *, required: bool) -> str | None:
                     elif entry.is_dir(follow_symlinks=False):
                         active.append((Path(entry.path), os.scandir(entry.path)))
                     elif entry.is_file(follow_symlinks=False):
+                        if allowed_file is not None and Path(entry.path) == allowed_file:
+                            continue
                         return f"仍存在文件: {entry.path}"
                     else:
                         return f"存在无法识别的对象: {entry.path}"
@@ -131,19 +133,19 @@ def scan_directory_tree(root: Path, *, required: bool) -> str | None:
         return f"目录不能可靠检查: {root}: {error}"
 
 
-def scan_original_directories(roots: Iterable[Path]) -> str | None:
+def scan_original_directories(roots: Iterable[Path], *, allowed_file: Path | None = None) -> str | None:
     """原三目录必须存在且只剩空目录树；首个阻止项即返回诊断。"""
     for root in roots:
-        blocked = scan_directory_tree(root, required=True)
+        blocked = scan_directory_tree(root, required=True, allowed_file=allowed_file)
         if blocked is not None:
             return blocked
     return None
 
 
-def scan_new_directories(roots: Iterable[Path]) -> str | None:
+def scan_new_directories(roots: Iterable[Path], *, allowed_file: Path | None = None) -> str | None:
     """新三目录须不存在或只剩空目录树，不能接管已有文件。"""
     for root in roots:
-        blocked = scan_directory_tree(root, required=False)
+        blocked = scan_directory_tree(root, required=False, allowed_file=allowed_file)
         if blocked is not None:
             return blocked
     return None

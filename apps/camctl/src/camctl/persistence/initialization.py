@@ -19,6 +19,7 @@ from pathlib import Path
 
 from camctl.history.initial_state import runtime_state_values
 from camctl.host_files.paths import PURPOSE_DIRECTORIES
+from camctl.host_files.cleanup_turn import TURN_NAME, retire_cleanup_turn
 from camctl.resources import resource_bytes
 from camctl.persistence.directory_switch import (
     SwitchCommitError,
@@ -492,7 +493,7 @@ def _attempt_directory_switch(
     先检查数据库责任资格，再在事务外核对原三目录只剩空目录树、
     新三目录条件与部署组合，准备新目录后经一次元信息事务三路径共
     同保存；数据库身份、历史与对象 ID 保持。切换不生成业务事件，
-    不复制、移动或清理任何业务文件。
+    不复制、移动或清理任何业务文件；维护轮次提示按其契约退役。
     """
     old_binding = (
         owned.metadata.staging_path,
@@ -516,11 +517,12 @@ def _attempt_directory_switch(
             InitOutcome.FAILED,
             f"目录绑定与配置不一致，存在未结束责任，保留原绑定: {blocked}",
         )
-    blocked = scan_original_directories(old_roots)
+    turn = old_roots[0] / TURN_NAME
+    blocked = scan_original_directories(old_roots, allowed_file=turn)
     if blocked is not None:
         return InitResult(
             InitOutcome.FAILED, f"原目录未清空，保留原绑定: {blocked}")
-    blocked = scan_new_directories(roots)
+    blocked = scan_new_directories(roots, allowed_file=turn)
     if blocked is not None:
         return InitResult(
             InitOutcome.FAILED, f"新目录条件不满足，保留原绑定: {blocked}")
@@ -537,6 +539,16 @@ def _attempt_directory_switch(
     except (OSError, StateDatabaseError) as error:
         return InitResult(
             InitOutcome.FAILED, f"新目录准备失败，原绑定仍有效: {error}", error)
+    try:
+        retire_cleanup_turn(old_roots[0])
+    except (OSError, ValueError) as error:
+        return InitResult(InitOutcome.FAILED, f"下载维护轮次提示退役失败，原绑定仍有效: {error}", error)
+    blocked = scan_original_directories(old_roots)
+    if blocked is not None:
+        return InitResult(InitOutcome.FAILED, f"原目录未清空，保留原绑定: {blocked}")
+    blocked = scan_new_directories(roots)
+    if blocked is not None:
+        return InitResult(InitOutcome.FAILED, f"新目录条件不满足，保留原绑定: {blocked}")
     try:
         switch_directory_binding(owned, old_binding, binding)
     except SwitchCommitError as error:
