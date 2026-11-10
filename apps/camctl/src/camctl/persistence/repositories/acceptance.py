@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 from camctl.acceptance.input import InputDiagnostic, InputStage, ParsedInput
 from camctl.acceptance.links import PlanIdentities, prepare_plan
-from camctl.acceptance.definitions import read_action_spec
+from camctl.acceptance.storage_rules import validate_admitted_action, validate_initial_plan_status
 from camctl.acceptance.rules import extract_request_identity, validate_new_body
 from camctl.acceptance.service import (
     AcceptanceResult,
@@ -26,7 +26,7 @@ from camctl.acceptance.service import (
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.json_values import MISSING, json_field
 from camctl.contracts.values import OperationKey, parse_object_id, ValueTypeError, ValueFormatError, ValueRangeError
-from camctl.contracts.workflow_errors import action_error_id, action_error_ids, registered_error_spec, validate_error_details
+from camctl.contracts.workflow_errors import action_error_id, action_error_ids, registered_error_spec
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.reads import AdmissionSourceReadScope
 from camctl.history.validators import EventValidationError, register_guard
@@ -630,29 +630,10 @@ def _admission_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "actions" or row.before.exists:
             continue
-        values = row.after.values
         try:
-            read_action_spec(values)
+            validate_admitted_action(row.after.values)
         except ValueError as error:
             raise EventValidationError(str(error)) from error
-        status = values.get("status")
-        if status == 4:
-            if values.get("execution_started") != 0 or values.get("error_code") is None:
-                raise EventValidationError(
-                    "受理失败动作必须 execution_started=0 且携带 admission 错误"
-                )
-            if values.get("execution_spec_json") is not None:
-                raise EventValidationError("受理失败动作不携带执行定义")
-            try:
-                code, spec = registered_error_spec("action_error_id", values["error_code"])
-                if spec["stage"] != "admission":
-                    raise ValueError("首次受理失败必须使用受理阶段错误")
-                validate_error_details(code, values["error_details_json"])
-            except (TypeError, ValueError, KeyError) as error:
-                raise EventValidationError(str(error)) from error
-        elif status == 1:
-            if values.get("execution_spec_json") is None:
-                raise EventValidationError("可受理动作必须携带执行定义")
 
 
 def _plan_aggregate_guard(event, context) -> None:
@@ -660,17 +641,15 @@ def _plan_aggregate_guard(event, context) -> None:
         if row.table != "plans" or row.before.exists:
             continue
         plan_id = row.row_id
-        actions = [
-            values
+        statuses = tuple(
+            values.get("status")
             for values in context.state_rows.get("actions", {}).values()
             if values.get("plan_id") == plan_id
-        ]
-        statuses = {values.get("status") for values in actions}
-        expected = 3 if (actions and statuses == {4}) else 1
-        if row.after.values.get("status") != expected:
-            raise EventValidationError(
-                f"计划状态与动作聚合不符: 期望 {expected}"
-            )
+        )
+        try:
+            validate_initial_plan_status(row.after.values.get("status"), statuses)
+        except ValueError as error:
+            raise EventValidationError(str(error)) from error
 
 
 def _source_members_guard(event, context) -> None:
