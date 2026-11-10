@@ -23,9 +23,9 @@ from camctl.cancellation.models import (
     CancellationEffect,
     SelectionBasis,
 )
+from camctl.persistence.repositories.cancellation import load_eligibility_facts
 from camctl.cancellation.rules import (
     decide_cancel_eligibility,
-    load_eligibility_facts,
 )
 from camctl.cancellation.service import ApplyCancel, apply_cancel
 from camctl.cancellation.settlement import TargetSettlement

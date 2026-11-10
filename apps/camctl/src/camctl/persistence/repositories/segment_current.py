@@ -313,7 +313,8 @@ def current_decision(db, setrow):
             ),
         )
     if assessment.reason is SegmentAssessmentReason.GAP:
-        from .segments import _eligible_original, read_segment_members
+        from camctl.capture.segment_candidates import eligible_original
+        from .segments import read_segment_members
         from camctl.capture.segment_storage import SegmentResultRef
 
         ref = SegmentResultRef(setrow["action_id"], setrow["id"], setrow["version"])
@@ -323,7 +324,7 @@ def current_decision(db, setrow):
             page = read_segment_members(
                 ref, cursor, 128, SimpleNamespace(connection=db)
             )
-            count += sum(_eligible_original(stored.member) for stored in page.items)
+            count += sum(eligible_original(stored.member) for stored in page.items)
             if page.next_cursor is None:
                 break
             cursor = page.next_cursor

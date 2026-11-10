@@ -47,3 +47,25 @@ class CaptureSelectionInput:
                        Decimal(lead), value["trusted_wall_now"])
         except (KeyError, TypeError, ValueError) as error:
             raise ConsistencyError("拍摄选择的原申请无效") from error
+
+
+def may_prepare_availability_check(action):
+    """仅尚未启动、未取消的待处理哈苏拍摄可触发检查。"""
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.start_entry import is_hasselblad_photo
+    return (is_hasselblad_photo(action)
+            and action["status"] == int(enum_for("actions.status").PENDING)
+            and action["execution_started"] == 0 and action["cancel_requested"] == 0)
+
+
+def within_prepare_window(action, lead_s, now):
+    """检查时刻必须位于固定拍摄时间及提前量允许的范围内。"""
+    return (Decimal(action["scheduled_at"]) - lead_s * 1_000_000
+            <= now <= action["scheduled_at"] + action["max_delay_ms"] * 1000)
+
+
+def earlier_capture_preempts(selected, action, *, for_read):
+    """较早的合格拍摄优先；读取检查让位于任一其他拍摄。"""
+    return (selected is not None and selected.action_id != action["id"]
+            and (for_read or (selected.scheduled_at, selected.plan_id, selected.input_index)
+                 < (action["scheduled_at"], action["plan_id"], action["input_index"])))

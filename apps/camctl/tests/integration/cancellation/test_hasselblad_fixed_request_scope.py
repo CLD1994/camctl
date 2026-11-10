@@ -132,7 +132,8 @@ async def test_original_sql_and_complete_rows_keep_same_start_partition(tmp_path
             assert rows==sql,camera
             assert sql.not_started==(state in ('ready','blocked') or (camera=='other' and state in ('no_effect','zero_tools'))),camera
             if camera=='hb':
-                from camctl.cancellation.rules import capture_eligibility_facts,load_eligibility_facts
+                from camctl.cancellation.rules import capture_eligibility_facts
+                from camctl.persistence.repositories.cancellation import load_eligibility_facts
                 assert capture_eligibility_facts(candidate,rows.activity,not_started=rows.not_started)==load_eligibility_facts(owned.connection,1)
     finally:
         await close(owned,transport,task)

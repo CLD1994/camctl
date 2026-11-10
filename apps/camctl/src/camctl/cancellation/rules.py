@@ -8,21 +8,19 @@
 
 from __future__ import annotations
 
-from contextlib import closing
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from camctl.cancellation.models import (
     CancelOriginFacts,
+    CancelApplyMode,
     CancelProgress,
     CancellationResult,
     CancellationStatus,
     OriginCancelDecision,
 )
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.repositories.transactions import row_facts
-from camctl.persistence.repositories.capture_facts import load_start_facts
 
 __all__ = [
     "CancelEligibility",
@@ -31,9 +29,7 @@ __all__ = [
     "decide_origin_cancel",
     "EligibilityFacts",
     "decide_cancel_eligibility",
-    "load_eligibility_facts",
     "LoadedEligibility",
-    "load_eligibility_inputs",
     "current_eligibility_facts",
     "may_apply_cancel",
     "may_link_auto_preview",
@@ -223,64 +219,46 @@ def current_eligibility_facts(loaded: LoadedEligibility, entry_phase) -> Eligibi
         facts_reliable=facts.facts_reliable)
 
 
-def load_eligibility_facts(connection, action_id: int, *, motor_permit=None) -> EligibilityFacts:
-    """读取目标的持久取消资格事实，不读取会话入口许可。"""
-    return load_eligibility_inputs(
-        connection, action_id, motor_permit=motor_permit).facts
-
-
-def load_eligibility_inputs(connection, action_id: int, *, motor_permit=None) -> LoadedEligibility:
-    """从已保存事实装配目标设备任务的取消资格输入。
-
-    停止能力优先取首次建立活动时保存的 `device_activities.stop_
-    supported`；尚未建立活动的延时摄影按受理时固定的执行定义读取，
-    定义缺失或非法按状态库错误处理，不用新默认值补齐。
-    """
-    action = _action_row(connection, action_id)
-    if action is None:
-        raise ConsistencyError(f"取消目标动作不存在: {action_id}")
-    def loaded(facts, entered_dispatch=None):
-        return LoadedEligibility(action, facts, entered_dispatch)
-
+def action_eligibility_facts(action, *, motor_facts=None, motor_permit=None):
+    """按动作种类和已读取的事实装配非拍摄动作资格。"""
     kind = action["type"]
     if kind == 8:
         from camctl.motor.rules import owns_send_permit
-        from camctl.persistence.repositories.motor import read_motor_facts
-        facts = read_motor_facts(connection, action_id)
-        local = owns_send_permit(facts, motor_permit)
-        return loaded(EligibilityFacts(
+        local = owns_send_permit(motor_facts, motor_permit)
+        return EligibilityFacts(
             terminal=action['status'] in _ACTION_TERMINAL,
             cancel_applied=bool(action['cancel_requested']),
-            dispatch=DispatchPhase.NOT_STARTED if facts.notification is None or local else DispatchPhase.START_PENDING,
-            stop_supported=False))
-    if (kind not in _CAPTURE_TYPES and kind not in
-            (_OBTAIN_TASK_TYPE, _CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE,
-             _REPORT_TASK_TYPE)):
+            dispatch=DispatchPhase.NOT_STARTED if motor_facts.notification is None or local else DispatchPhase.START_PENDING,
+            stop_supported=False)
+    if kind not in (_OBTAIN_TASK_TYPE, _CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE, _REPORT_TASK_TYPE):
         raise ConsistencyError(
-            f"取消资格判断只适用已定义的目标类型: {action_id} type={kind!r}")
-    if kind in (_OBTAIN_TASK_TYPE, _CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE,
-                _REPORT_TASK_TYPE):
-        # 取回/取消/清理/报告动作的收场按各自模块规则（停止等待、
-        # 读取结束、解除限制或同步责任分类）：终态保持、取消已生效
-        # 则复用原责任；未开始的目标没有在途工作，按未启动分区直接
-        # 终态取消，已开始的允许标记后由各自流程收场。
-        return loaded(EligibilityFacts(
-            terminal=action["status"] in _ACTION_TERMINAL,
-            cancel_applied=bool(action["cancel_requested"]),
-            dispatch=(DispatchPhase.STARTED if action["execution_started"] == 1
-                      else DispatchPhase.NOT_STARTED),
-            stop_supported=True))
-    activity = _activity_row(connection, action_id)
-    not_started = None
-    entered_dispatch = None
-    if action["status"] not in _ACTION_TERMINAL and not action["cancel_requested"]:
-        start = load_start_facts(connection, action)
-        from camctl.devices.start_entry import is_hasselblad_photo
-        not_started = start.not_started
-        if is_hasselblad_photo(action):
-            entered_dispatch = _dispatch_phase(activity)
-    return loaded(capture_eligibility_facts(
-        action, activity, not_started=not_started), entered_dispatch)
+            f"取消资格判断只适用已定义的目标类型: {action['id']} type={kind!r}")
+    return EligibilityFacts(
+        terminal=action["status"] in _ACTION_TERMINAL,
+        cancel_applied=bool(action["cancel_requested"]),
+        dispatch=(DispatchPhase.STARTED if action["execution_started"] == 1
+                  else DispatchPhase.NOT_STARTED),
+        stop_supported=True)
+
+
+def cancel_status_after_apply(target, mode):
+    """首次取消按原派发分区确定目标是否立即进入取消终态。"""
+    if mode is CancelApplyMode.PRE_START:
+        if target["status"] == 1:
+            return 6
+        if target["status"] != 2 or target["type"] not in _CAPTURE_TYPES:
+            raise ValueError("未启动取消要求待执行或可靠未启动的拍摄目标")
+    elif mode is CancelApplyMode.WITH_STOP:
+        if target["status"] != 2:
+            raise ValueError("停止收场取消要求目标运行中")
+    else:
+        raise ValueError("只有首次取消确定目标状态")
+    return None
+
+
+def needs_capture_start_facts(action):
+    """终态或已取消时优先保留原责任，不必再次读取 START。"""
+    return action["status"] not in _ACTION_TERMINAL and not action["cancel_requested"]
 
 
 def capture_eligibility_facts(action, activity, *, not_started=None):
@@ -295,26 +273,12 @@ def capture_eligibility_facts(action, activity, *, not_started=None):
     else:
         if type(not_started) is not bool:
             raise ConsistencyError("拍摄取消缺少原 START 判定")
-        dispatch = DispatchPhase.NOT_STARTED if not_started else _dispatch_phase(activity)
+        dispatch = DispatchPhase.NOT_STARTED if not_started else dispatch_phase(activity)
     return EligibilityFacts(terminal=terminal, cancel_applied=applied,
         dispatch=dispatch, stop_supported=_stop_supported(action, kind, activity))
 
 
-def _action_row(connection, action_id: int) -> dict[str, Any] | None:
-    return row_facts(connection, "actions", action_id)
-
-
-def _activity_row(connection, action_id: int) -> dict[str, Any] | None:
-    with closing(connection.execute(
-        "SELECT id FROM device_activities WHERE action_id = ?", (action_id,),
-    )) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        return None
-    return row_facts(connection, "device_activities", int(row[0]))
-
-
-def _dispatch_phase(activity) -> DispatchPhase:
+def dispatch_phase(activity) -> DispatchPhase:
     if activity is None:
         return DispatchPhase.UNVERIFIED
     state = activity["dispatch_state"]

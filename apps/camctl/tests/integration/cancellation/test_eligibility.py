@@ -11,10 +11,10 @@ import json
 
 import pytest
 
+from camctl.persistence.repositories.cancellation import load_eligibility_facts
 from camctl.cancellation.rules import (
     CancelEligibility,
     decide_cancel_eligibility,
-    load_eligibility_facts,
 )
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind

@@ -402,22 +402,9 @@ def _check_return_page(view, request, connection):
     intent = view.request
     activity, action = _activity(connection,intent.activity_id)
     _check_entries(page.items,activity,action)
-    index = 0 if intent.cursor is None else intent.cursor.directory_index
-    previous = None if intent.cursor is None else intent.cursor.after_path
-    if (any(not item.path.startswith(intent.directories[index]+'/') for item in page.items)
-            or any(a.sort_key >= b.sort_key for a,b in zip(page.items,page.items[1:]))
-            or page.items and previous is not None and page.items[0].path <= previous):
-        raise ConsistencyError('基准返回没有沿原输入目录及游标有序推进')
-    cursor = page.next_cursor
-    if cursor is not None:
-        if cursor.binding != intent.binding or cursor.directories != intent.directories:
-            raise ConsistencyError('基准返回游标改变原绑定或完整目录')
-        same = cursor.directory_index == index and page.items and cursor.after_path == page.items[-1].path
-        following = cursor.directory_index == index+1 and cursor.after_path is None
-        if not (same or following):
-            raise ConsistencyError('基准返回游标不是本目录进度或下一目录')
-    elif index+1 != len(intent.directories):
-        raise ConsistencyError('基准返回尚有目录但提前结束')
+    from camctl.capture.baseline_page_rules import validate_baseline_page_progress
+    validate_baseline_page_progress(binding=intent.binding, directories=intent.directories,
+                                    cursor=intent.cursor, page=page)
 
 
 def _pending_prefix(view,connection):

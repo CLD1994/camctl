@@ -1102,6 +1102,10 @@ def _verify_motor_cancel_rows(connection, saved, item):
 class CancellationRepository:
     """取消目标固定与解析失败事务的 SQLite 仓储。"""
 
+    def read_eligibility_inputs(self, owned, action_id, *, motor_permit=None):
+        """在当前数据库读取内取得原资格事实，交由业务继续决策。"""
+        return load_eligibility_inputs(owned.connection, action_id, motor_permit=motor_permit)
+
 
     def verify_motor_operation(self, command, key, owned):
         """使用新连接只读核实电机目标的原生效或原结果事务。"""
@@ -1951,14 +1955,14 @@ def _guard_cancel_apply(event, context, items) -> None:
             change = target_changes[0]
             if change.row_id != target_id or effect != CancellationEffect.APPLIED.value:
                 raise EventValidationError("首次取消的目标身份与成员效果不符")
+            from camctl.cancellation.rules import cancel_status_after_apply
+            try:
+                status = cancel_status_after_apply(target, mode)
+            except ValueError as error:
+                raise EventValidationError(str(error)) from error
             expected = {"cancel_requested": 1}
-            if mode is CancelApplyMode.PRE_START:
-                if target["status"] == 1:
-                    expected["status"] = 6
-                elif target["status"] != 2 or target["type"] not in (1, 2, 3):
-                    raise EventValidationError("未启动取消要求待执行或可靠未启动的拍摄目标")
-            elif target["status"] != 2:
-                raise EventValidationError("停止收场取消要求目标运行中")
+            if status is not None:
+                expected["status"] = status
             if change.after.values != expected:
                 raise EventValidationError("原取消模式与目标状态转换不符")
         elif mode is CancelApplyMode.TERMINAL:
@@ -2435,3 +2439,40 @@ def _validate_photo_preview_scope(origin, members, context, reserved_sources=fro
     actual = [(target.action_id, target.basis.value, target.cancellation_effect.value) for target in expected.targets]
     if len(set(submitted)) != len(submitted) or sorted(submitted) != sorted(actual):
         raise EventValidationError('固定成员、依据或初始效果与原完整申请不符')
+
+
+def load_eligibility_facts(connection, action_id: int, *, motor_permit=None):
+    """读取目标持久资格事实，不读取会话入口许可。"""
+    return load_eligibility_inputs(connection, action_id, motor_permit=motor_permit).facts
+
+
+def load_eligibility_inputs(connection, action_id: int, *, motor_permit=None):
+    """读取目标动作及其直接事实，交给业务规则装配取消资格。"""
+    from camctl.cancellation.rules import (LoadedEligibility, action_eligibility_facts,
+        capture_eligibility_facts, dispatch_phase, needs_capture_start_facts)
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+    from camctl.persistence.repositories.transactions import row_facts
+    action = row_facts(connection, "actions", action_id)
+    if action is None:
+        raise ConsistencyError(f"取消目标动作不存在: {action_id}")
+    kind = action["type"]
+    if kind == 8:
+        from camctl.persistence.repositories.motor import read_motor_facts
+        facts = read_motor_facts(connection, action_id)
+        return LoadedEligibility(action, action_eligibility_facts(
+            action, motor_facts=facts, motor_permit=motor_permit))
+    if kind not in (1, 2, 3):
+        return LoadedEligibility(action, action_eligibility_facts(action))
+    with closing(connection.execute("SELECT id FROM device_activities WHERE action_id = ?", (action_id,))) as cursor:
+        found = cursor.fetchone()
+    activity = None if found is None else row_facts(connection, "device_activities", int(found[0]))
+    not_started = None
+    entered_dispatch = None
+    if needs_capture_start_facts(action):
+        start = load_start_facts(connection, action)
+        from camctl.devices.start_entry import is_hasselblad_photo
+        not_started = start.not_started
+        if is_hasselblad_photo(action):
+            entered_dispatch = dispatch_phase(activity)
+    return LoadedEligibility(action, capture_eligibility_facts(
+        action, activity, not_started=not_started), entered_dispatch)

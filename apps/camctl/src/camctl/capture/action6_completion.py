@@ -35,7 +35,8 @@ from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
 from camctl.devices.drivers.adb_cameras.action6_formats import format_for_suffix
-from camctl.persistence.repositories.segments import SegmentRepository, _eligible_original
+from camctl.capture.segment_candidates import eligible_original
+from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.transactions import row_facts
 
 
@@ -130,7 +131,7 @@ def classify_action6_members(
                 parsed.kind is SegmentFileKind.PHOTO
                 and member.role is SegmentMemberRole.OTHER
             )
-            if is_video and _eligible_original(member):
+            if is_video and eligible_original(member):
                 scope_facts["count"] += 1
                 if member.cursor is None:
                     scope_facts["ordered"] = False
@@ -283,7 +284,7 @@ async def iter_action6_video_members(repository, ref, database):
             member = stored.member
             if (
                 profile.classify_file(member.identity).kind is SegmentFileKind.VIDEO
-                and _eligible_original(member)
+                and eligible_original(member)
                 and member.cursor is not None
             ):
                 yield stored
@@ -614,7 +615,7 @@ async def publish_action6_segment_result(runtime, action, ref, decision, *, fail
                 member = stored.member
                 if (
                     profile.classify_file(member.identity).kind is not SegmentFileKind.VIDEO
-                    or not _eligible_original(member)
+                    or not eligible_original(member)
                     or member.cursor is None
                     or not decision.default_scope.first_cursor
                     <= member.cursor
