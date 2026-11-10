@@ -254,21 +254,20 @@ def cleanup_result_source_guard(event, context):
         raise EventValidationError("缺席来源必须是本事件之前的可靠结果")
     values = dict(output)
     values.update(row.after.values)
-    if (
-        values.get("availability"),
-        values.get("cleanup_status"),
-        values.get("cleanup_error_json"),
-    ) != (3, 4, None):
+    from camctl.outputs.cleanup_absence import (
+        cleanup_absence_file_complete, cleanup_absence_projection_complete,
+    )
+    if not cleanup_absence_projection_complete(
+            availability=values.get("availability"), cleanup_status=values.get("cleanup_status"),
+            cleanup_error=values.get("cleanup_error_json")):
         raise EventValidationError("缺席来源观察必须保存产物清理完成")
-    file = context.state_rows.get("device_files", {}).get(output.get("device_file_id"))
-    if file is not None:
-        complete = file.get("presence_state") == 3
-    else:
-        file = context.state_rows.get("intermediate_files", {}).get(
+    device_file = context.state_rows.get("device_files", {}).get(output.get("device_file_id"))
+    intermediate_file = None
+    if device_file is None:
+        intermediate_file = context.state_rows.get("intermediate_files", {}).get(
             output.get("intermediate_file_id")
         )
-        complete = file is not None and file.get("cleanup_state") == 4
-    if not complete:
+    if not cleanup_absence_file_complete(device_file=device_file, intermediate_file=intermediate_file):
         raise EventValidationError("缺席来源观察要求先行文件完成事实")
     matches = []
     for attempt in context.state_rows.get("operation_attempts", {}).values():

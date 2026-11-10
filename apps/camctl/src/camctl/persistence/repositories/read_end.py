@@ -124,19 +124,12 @@ class ReadEndReads:
             (run["id"], attempt["id"]))) as cursor:
             if cursor.fetchone() is not None:
                 raise ConsistencyError("读取结束时其他尝试结果尚未交付")
-        if (document.get("copy_round") != copy["round"]
-                or document.get("source_device_file_id") != copy["source_device_file_id"]
-                or document.get("source_intermediate_file_id") != copy["source_intermediate_file_id"]
-                or document.get("target_file_id") != copy["target_file_id"]
-                or document.get("source_size") != copy["source_size"]
-                or document.get("committed_bytes") != copy["committed_bytes"]
-                or document.get("reset_state") != copy["reset_state"]
-                or copy["committed_bytes"] != copy["source_size"] or copy["reset_state"] != 1):
-            raise ConsistencyError("读取结束与当前轮次、来源或可靠进度不一致")
+        from camctl.outputs.copy import read_end_completed, validate_read_end_facts
+        validate_read_end_facts(copy, document)
         end = document.get("end")
         if (not isinstance(end, dict) or set(end) != {"stopped", "bytes_read", "error"}
-                or end["stopped"] is not True or end["error"] is not None
-                or type(end["bytes_read"]) is not int or not 0 <= end["bytes_read"] <= copy["source_size"]):
+                or not read_end_completed(stopped=end["stopped"], bytes_read=end["bytes_read"],
+                                          error=end["error"], source_size=copy["source_size"])):
             raise ConsistencyError("读取结束缺少真实完整停止结果")
         if verify_chain and attempt["copy_round"] != copy["round"] and not _copy_round_chain_proven(
                 self.connection, copy["id"], attempt["copy_round"], copy["round"],
