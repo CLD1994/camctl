@@ -24,18 +24,9 @@ from camctl.cancellation.targets import (
     resolve_cancel_target,
 )
 from camctl.contracts.values import new_operation_key
-from camctl.persistence.repositories.cancellation import (
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
-
-register_capture_guards()
-register_outputs_guards()
-register_cancellation_guards()
 
 _NOW = 1_750_000_000_000_000
 
@@ -342,10 +333,11 @@ class TestCancelTargetsGuard:
 
     def _validate(self, owned, event, state, owners):
         from camctl.contracts.history_values import TransactionRange
-        from camctl.history.validators import EventContext, validate_event
+        from camctl.history.validators import EventContext
+        from camctl.persistence.repositories.validation import BusinessStorage
         from camctl.history.reads import ReadCoverage
 
-        validate_event(event, EventContext(
+        BusinessStorage().validate_event(event, EventContext(
             TransactionRange(2, 2, 2), owners, state,
             read_coverage=ReadCoverage({
                 ("actions", "id"): frozenset(state["actions"]),

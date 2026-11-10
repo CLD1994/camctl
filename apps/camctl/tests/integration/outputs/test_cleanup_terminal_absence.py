@@ -638,7 +638,8 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
     (_, _), (owned, _, _, _, item_id) = await _terminal(environment)
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.decoding import decode_event_row
-    from camctl.history.validators import EventContext, EventValidationError, validate_event
+    from camctl.history.validators import EventContext, EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.repositories.transactions import row_facts
     from ..support.output_planning import complete_reads
 
@@ -663,7 +664,7 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
     context = EventContext(TransactionRange(event.transaction_id, first, last),
         {("outputs", output_id): ("output", output_id)}, state,
         read_coverage=complete_reads(owned.connection, state, probe_ids=(item_id + 1,)))
-    assert validate_event(event, context).envelope == event
+    assert BusinessStorage().validate_event(event, context).envelope == event
     if fault == "source_item":
         event = replace(event, evidence={"cleanup_result_source": {
             "item_id": item_id + 1, "result_event_id": request.result_event_id}})
@@ -678,7 +679,7 @@ async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal
             before=replace(row.before, values=dict(row.before.values, original_name="photo-1.jpg")),
             after=replace(row.after, values=dict(row.after.values, original_name="other.jpg"))),))
     with pytest.raises(EventValidationError, match="缺席来源"):
-        validate_event(event, context)
+        BusinessStorage().validate_event(event, context)
 
 
 async def test_inconsistent_pending_companion_prevents_repeated_terminal_handoff(

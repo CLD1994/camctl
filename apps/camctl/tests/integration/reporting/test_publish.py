@@ -513,7 +513,8 @@ def test_management_history_replays_success_failure_and_recovery(connection, tmp
     from camctl.contracts.enums import load_registry
     from camctl.contracts.history_values import HistoryBoundary, TransactionRange, ReadOrder, ReadScope
     from camctl.history.replay import EntityImage, apply_forward, apply_reverse
-    from camctl.history.validators import EventContext, validate_event
+    from camctl.history.validators import EventContext
+    from camctl.persistence.repositories.validation import BusinessStorage
     from camctl.persistence.repositories.history import HistoryRepository
     from camctl.contracts.json_values import parse_exact_json
 
@@ -539,7 +540,7 @@ def test_management_history_replays_success_failure_and_recovery(connection, tmp
     states = {"reports": {report_id: deepcopy(business)}}
     validated = []
     for event in page.items:
-        value = validate_event(event, EventContext(TransactionRange(event.transaction_id, event.event_id, event.event_id),
+        value = BusinessStorage().validate_event(event, EventContext(TransactionRange(event.transaction_id, event.event_id, event.event_id),
                                                    {("reports", report_id): ("report", report_id)}, states))
         validated.append(value)
         image = apply_forward(image, value)

@@ -21,20 +21,15 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.outputs.catalog import FileReference, OutputDraft, OutputKind
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository, FinishCapture, register_capture_guards,
-)
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture
 from camctl.persistence.repositories.transactions import TransactionScope
 from camctl.history.changes import event_report_targets
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.validation import BusinessStorage
 
 from .test_recording_finish import (
     _environment, _finish, _original_draft, _seed_device_file,
 )
-
-register_capture_guards()
-register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
 
@@ -244,7 +239,7 @@ def _validate_without_registration(owned, plan):
                 filtered[0].transaction_id, filtered[0].event_id,
                 filtered[-1].event_id),
             dict(plan.owners), working, read_coverage=plan.read_coverage)
-        validate_event(event, context)
+        BusinessStorage().validate_event(event, context)
         for row in event.rows:
             if row.after.exists:
                 working.setdefault(row.table, {}).setdefault(

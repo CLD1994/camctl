@@ -78,7 +78,8 @@ def test_host_spec_with_unreadable_saved_spec_is_not_treated_as_legacy(tmp_path)
 def test_action_finish_event_guard_rejects_host_spec_without_source_responsibilities(
     tmp_path,
 ):
-    from camctl.history.validators import EventValidationError, validate_event
+    from camctl.history.validators import EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
     from ..support.capture_guard_cases import host_success_event_context
 
     owned = _photo_environment(tmp_path)
@@ -87,10 +88,10 @@ def test_action_finish_event_guard_rejects_host_spec_without_source_responsibili
         event, context = host_success_event_context(action, _NOW)
         # 相同规范事件和完整空范围，在非host照片上可通过，拒绝来自host配对约束。
         legacy = {**action, "execution_spec_json": {}}
-        assert validate_event(event, replace(context, state_rows={"actions": {1: legacy},
+        assert BusinessStorage().validate_event(event, replace(context, state_rows={"actions": {1: legacy},
             "intermediate_files": {}})).envelope == event
         with pytest.raises(EventValidationError, match="主机|源责任|原片"):
-            validate_event(event, context)
+            BusinessStorage().validate_event(event, context)
     finally:
         owned.connection.close()
 
@@ -466,12 +467,7 @@ async def test_same_and_new_key_recovery_preserve_explicit_source_cleanup(
 ):
     from ..support.capture_guard_cases import host_cleanup
     from camctl.outputs.cleanup_flow import delete_source_file
-    from camctl.persistence.repositories.acceptance import register_acceptance_guards
-    from camctl.persistence.repositories.scheduling import register_window_guard
     from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
-
-    register_acceptance_guards()
-    register_window_guard()
     owned = _photo_environment(tmp_path)
     try:
         files = _prepare(owned)
@@ -529,7 +525,8 @@ def test_terminal_host_spec_without_source_pair_is_consistency_error_on_recovery
         history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
         transactions = owned.connection.execute("SELECT * FROM history_transactions ORDER BY id").fetchall()
         # 无源的0/1设备产物分区由H1显式上下文校验，不制造非法host成功历史。
-        from camctl.history.validators import EventValidationError, validate_event
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.validation import BusinessStorage
         from ..support.capture_guard_cases import host_success_event_context
         outputs = {}
         if output_count:
@@ -538,7 +535,7 @@ def test_terminal_host_spec_without_source_pair_is_consistency_error_on_recovery
             outputs[original_id] = {**output, "intermediate_file_id": None, "device_file_id": 11}
         event, context = host_success_event_context({**original_action, "status": 2}, _NOW, outputs=outputs)
         with pytest.raises(EventValidationError, match="主机|源责任|原片"):
-            validate_event(event, context)
+            BusinessStorage().validate_event(event, context)
         # 恢复专项仅损坏当前源角色；原输出、配对、host规格、完整申请及全部历史不改。
         for file in (files.original, files.preview):
             owned.connection.execute("UPDATE intermediate_files SET purpose=?,relative_path=? WHERE id=?",

@@ -21,9 +21,6 @@ from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverS
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    register_acceptance_guards,
-)
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..capture.test_capture_contract import ResultsDouble
@@ -90,32 +87,8 @@ def _registry(driver):
     ))
 
 
-def _register_guards():
-    from camctl.persistence.repositories.capture import register_capture_guards
-    from camctl.persistence.repositories.cancellation import register_cancellation_guards
-    from camctl.persistence.repositories.operations import register_operation_guards
-    from camctl.persistence.repositories.motor import register_motor_guards
-    from camctl.persistence.repositories.outputs import register_outputs_guards
-    from camctl.persistence.repositories.scheduling import register_window_guard
-    from camctl.persistence.repositories.timelapse import register_timelapse_guards
-    from camctl.reporting.policy import register_report_guards
-    from camctl.session.clock import register_clock_guard
-
-    register_acceptance_guards()
-    register_clock_guard()
-    register_capture_guards()
-    register_cancellation_guards()
-    register_operation_guards()
-    register_outputs_guards()
-    register_window_guard()
-    register_timelapse_guards()
-    register_report_guards()
-    register_motor_guards()
-
-
 @pytest.fixture
 def environment(tmp_path):
-    _register_guards()
     path = tmp_path / "state.db"
     _create_valid_database(path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -131,7 +104,6 @@ def environment(tmp_path):
 
 @pytest_asyncio.fixture
 async def functional_environment(tmp_path):
-    _register_guards()
     config = session_config(tmp_path, devices={device: {
         "kind": "camera", "driver": "camctl-adb"} for device in ("cam-a", "cam-b")})
     path = tmp_path / "state.db"
