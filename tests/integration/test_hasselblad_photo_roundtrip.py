@@ -596,7 +596,7 @@ class PhotoWorld:
         history_script = (
             "import json,sys; from pathlib import Path; "
             "from camctl.persistence.repositories.history import HistoryRepository; "
-            "from camctl.persistence.transaction import encode_json_value; "
+            "from camctl.persistence.transaction_data import encode_json_value; "
             "h=HistoryRepository(Path(sys.argv[1])); f=h.frozen_registration(int(sys.argv[2])); "
             "rows=h.restore_entity('action',int(sys.argv[3]),f.boundary); "
             "row=rows[('actions',int(sys.argv[3]))]; "

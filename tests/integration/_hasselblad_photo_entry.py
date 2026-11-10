@@ -322,7 +322,7 @@ def _history_facts(database, request, expected, original=None):
 
 def _history_command(arguments):
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.transaction_data import encode_json_value
     database, request, expected_path, output, *previous = arguments
     expected = parse_exact_json(Path(expected_path).read_text())
     old = parse_exact_json(Path(previous[0]).read_text())["facts"] if previous else None
@@ -358,7 +358,7 @@ def _plain(value):
 def _write(root: Path, name: str, value: dict):
     temporary = root / f".{name}.{os.getpid()}.tmp"
     with temporary.open("x") as stream:
-        from camctl.persistence.transaction import encode_json_value
+        from camctl.persistence.transaction_data import encode_json_value
         stream.write(encode_json_value(_plain({"pid": os.getpid(), "pgid": os.getpgrp(), "utc": datetime.now(timezone.utc).isoformat(), **value})))
         stream.flush()
         os.fsync(stream.fileno())
