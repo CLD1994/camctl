@@ -56,17 +56,12 @@ def result_file_family(identity, *, result_policy=None):
     from camctl.devices.tasks import CaptureResultPolicy
 
     if result_policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
-        from camctl.devices.drivers.adb_cameras.action6_results import ACTION6_RESULT_PROFILE
+        from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
 
-        profile = ACTION6_RESULT_PROFILE
-        original_suffixes = frozenset(
-            item.suffix.lstrip(".").casefold()
-            for item in profile.formats
-            if item.format_id == profile.paired_original_format_id
-        )
-        if suffix in original_suffixes:
+        kind = profile_for_policy(result_policy).classify_file(identity).kind
+        if kind is SegmentFileKind.VIDEO:
             role = int(_FAMILY_ROLE.ORIGINAL)
-        elif suffix == profile.preview_format.suffix.lstrip(".").casefold():
+        elif kind is SegmentFileKind.PREVIEW:
             role = int(_FAMILY_ROLE.PREVIEW)
         else:
             return None, None, None
