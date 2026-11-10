@@ -286,7 +286,7 @@ def _identity(request,db):
         from .segment_check_conclusions import read_fixed_result_check_conclusion
         conclusion = read_fixed_result_check_conclusion(db, setrow)
         assessment = saved_result_disposition(setrow, conclusion)
-        _verify_saved_gap_count(db, setrow, assessment)
+        _verify_saved_gap_count(db, setrow, assessment, conclusion=conclusion)
         return action, run, setrow, assessment, conclusion
     storage._check_write_kind(db, setrow, "ACTIVATE")
     if setrow["assessment_json"] is None:
@@ -302,11 +302,28 @@ def _identity(request,db):
     return action, run, setrow, assessment, conclusion
 
 
-def _verify_saved_gap_count(db, setrow, assessment):
+def _verify_saved_gap_count(db, setrow, assessment, *, conclusion=None):
     """固定决定消费时核实际缺口数量，不重算已保存的缺口分类。"""
     from camctl.capture.segment_models import SegmentDecision
+    from .segment_dispositions import RetainedResultDisposition
+
+    if isinstance(assessment, RetainedResultDisposition):
+        # 跨轮保留结论只有明确缺口分区保存数量；未知不是零。
+        # DECIDE_RESULT 已按原冻结来源逐项核实全部缺口。
+        reasons = enum_for("segment_check_conclusions.reason")
+        if conclusion is None:
+            raise ConsistencyError("跨轮保留缺少原固定结论")
+        if conclusion["reason"] != int(reasons.GAP_CONFIRMED):
+            return
+        failure = conclusion["current_failure_json"]
+        details = failure.get("details") if isinstance(failure, dict) else None
+        expected = details.get("gap_count") if isinstance(details, dict) else None
+        if (not isinstance(failure, dict) or failure.get("code") != "capture_segment_gap" or type(expected) is not int
+                or expected < 1):
+            raise ConsistencyError("原缺口结论缺少可靠的缺口数量")
+    else:
+        expected = 0 if isinstance(assessment, SegmentDecision) else (assessment.gap_count or 0)
     count = _one(db, "SELECT COUNT(*) FROM segment_gaps WHERE set_id=?", (setrow["id"],))[0]
-    expected = 0 if isinstance(assessment, SegmentDecision) else (assessment.gap_count or 0)
     if count != expected:
         raise ConsistencyError("固定集合缺口数量与已保存决定不同")
 
