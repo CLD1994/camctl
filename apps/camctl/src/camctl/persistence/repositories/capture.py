@@ -1141,7 +1141,8 @@ class FinishCaptureCommand:
             state_rows=self._state,
             read_coverage=ReadCoverage(self._ranges),
             plan_read_scope=(PlanReadScope(action["plan_id"], 128)
-                if action["type"] == _ACTION_TYPE.CAMERA_RECORD and not self._canceled else None),
+                if (action["type"] == _ACTION_TYPE.CAMERA_RECORD and not self._canceled)
+                or requires_segment_finish(action) else None),
             result=CaptureResult(
                 action_status=action_status,
                 plan_status=plan_status,
@@ -5219,7 +5220,10 @@ class _FinishCanceledCaptureCommand:
             events=events,
             owners={row: owner for plan in plans for row, owner in plan.owners.items()},
             state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
-            read_coverage=ReadCoverage(ranges), result=plans[0].result)
+            read_coverage=ReadCoverage(ranges),
+            plan_read_scope=next((plan.plan_read_scope for plan in plans
+                                  if plan.plan_read_scope is not None), None),
+            result=plans[0].result)
 
     def _reuse(self, scope, saved, capture, action, run) -> CommandPlan:
         flow_events = [event for event in saved if event["type"] == _RUN_END_EVENT]
