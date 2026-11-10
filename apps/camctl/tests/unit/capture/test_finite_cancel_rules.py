@@ -44,3 +44,26 @@ def test_file_uses_current_page_and_fixed_size_and_ownership():
     assert file.complete and file.ownership_confirmed
     assert not finite_cancel_file(entry, {**facts, 'size_bytes': 101}, 7, ()).complete
     assert not finite_cancel_file(entry, {**facts, 'ownership_evidence_json': None}, 7, ()).ownership_confirmed
+
+
+def test_finite_cancel_requires_successful_complete_natural_results():
+    from types import SimpleNamespace
+    from camctl.capture.finite_cancel import finite_cancel_page_complete, finite_cancel_results_succeeded
+    run = {'status': int(enum_for('operation_runs.status').SUCCEEDED)}
+    attempt = {'status': int(enum_for('operation_attempts.status').SUCCEEDED), 'error_json': None}
+    assert finite_cancel_results_succeeded(run, attempt)
+    assert not finite_cancel_results_succeeded({**run, 'status': int(enum_for('operation_runs.status').FAILED)}, {})
+    assert not finite_cancel_results_succeeded(run, {**attempt, 'error_json': {'code': 'x'}})
+    page = SimpleNamespace(scan_complete=True, set_finalized=True, outcome=SimpleNamespace(error=None))
+    assert finite_cancel_page_complete(page)
+    assert not finite_cancel_page_complete(SimpleNamespace(scan_complete=False))
+
+
+def test_finite_cancel_preserves_sent_time_and_frozen_wait_rule():
+    from camctl.capture.finite_cancel import finite_cancel_timing_matches
+    activity = {'sent_at': 100, 'expected_check_at': 200, 'result_wait_margin_ms': 5}
+    spec = {'result_wait_margin_ms': 5}
+    assert finite_cancel_timing_matches(activity, spec, 100, 200)
+    assert not finite_cancel_timing_matches(activity, spec, 101, 200)
+    assert not finite_cancel_timing_matches(activity, spec, 100, 201)
+    assert not finite_cancel_timing_matches(activity, {'result_wait_margin_ms': 6}, 100, 200)

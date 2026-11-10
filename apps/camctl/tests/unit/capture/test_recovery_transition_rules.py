@@ -94,3 +94,27 @@ def test_runtime_and_rules_share_the_same_phase_type():
     encoded = pickle.dumps(RecoveryPhase.READY)
     assert b'camctl.capture.software_recovery' in encoded
     assert pickle.loads(encoded) is RecoveryPhase.READY
+
+
+def test_recovery_scope_difference_uses_each_baseline_page_and_keeps_only_current_members():
+    from types import SimpleNamespace
+    from camctl.capture.recovery_rules import RecoveryScopeDifference
+    identity = lambda value: SimpleNamespace(sort_key=value)
+    current = [identity(value) for value in (2, 129, 250, 500)]
+    difference = RecoveryScopeDifference(current)
+    difference.observe_baseline([identity(value) for value in range(128)])
+    difference.observe_baseline([identity(value) for value in range(128, 256)])
+    assert [value.sort_key for value in current if difference.is_new(value)] == [500]
+    assert difference.matched == {2, 129, 250}
+
+
+def test_recovery_trigger_and_original_identity_are_both_required():
+    from camctl.capture.recovery_types import recovery_trigger_active
+    from camctl.capture.recovery_rules import recovery_intent_matches_identity
+    assert recovery_trigger_active({'status': 1, 'cancel_requested': 0})
+    assert not recovery_trigger_active({'status': 4, 'cancel_requested': 0})
+    assert not recovery_trigger_active({'status': 2, 'cancel_requested': 1})
+    state = {'boot_before': 'boot', 'fingerprint': 'firmware', 'reported_serial': 'serial'}
+    assert recovery_intent_matches_identity(state, ['boot', 'firmware', 'serial'])
+    assert not recovery_intent_matches_identity(state, ['other', 'firmware', 'serial'])
+    assert not recovery_intent_matches_identity(state, None)

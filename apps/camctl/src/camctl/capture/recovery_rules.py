@@ -91,3 +91,24 @@ def validate_recovery_owner(state, activity, action, *, ended):
         raise ValueError("恢复绑定与原活动不一致")
     if ended and activity["dispatch_state"] not in (2, 3):
         raise ValueError("可靠未启动活动不需要重启结束依据")
+
+
+def recovery_intent_matches_identity(state, identity):
+    """重启意图必须沿用先前核实的同一启动代次、固件和机身。"""
+    return (isinstance(identity, list) and len(identity) == 3
+            and identity[:2] == [state['boot_before'], state['fingerprint']]
+            and state['reported_serial'] == identity[2])
+
+
+class RecoveryScopeDifference:
+    """逐页对比原基准，只保留当前目录页对应的匹配身份。"""
+
+    def __init__(self, page_identities):
+        self.page_keys = {identity.sort_key for identity in page_identities}
+        self.matched = set()
+
+    def observe_baseline(self, entries):
+        self.matched.update(entry.sort_key for entry in entries if entry.sort_key in self.page_keys)
+
+    def is_new(self, identity):
+        return identity.sort_key not in self.matched
