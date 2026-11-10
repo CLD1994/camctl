@@ -63,7 +63,7 @@ def test_scope_finish_checks_kind_from_the_unchanged_context(registration, kind,
         {("operation_runs", 88): ("action", 43)},
         {"operation_runs": {88: {"kind": kind, "status": 2}}})
     if accepted:
-        assert validators.validate_event(event, context).branch_name == "FINISH"
+        assert validators.validate_event_facts(event, context)[1] == "FINISH"
     else:
         with pytest.raises(validators.EventValidationError):
-            validators.validate_event(event, context)
+            validators.validate_event_facts(event, context)

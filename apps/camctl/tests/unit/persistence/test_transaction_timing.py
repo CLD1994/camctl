@@ -16,6 +16,7 @@ from camctl.history.validators import EventContext, ValidatedEvent
 from camctl.logging_runtime.performance import performance_logging
 from camctl.logging_runtime.service import LogChannel
 from camctl.persistence.repositories import transactions as tx
+from camctl.persistence.repositories import validation
 from camctl.persistence import atomic
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 
@@ -130,7 +131,9 @@ def transaction_ports(monkeypatch):
     monkeypatch.setattr(tx, "_bind_event_reads", create_autospec(tx._bind_event_reads, side_effect=bind))
     monkeypatch.setattr(tx, "_seal_event_reads", create_autospec(tx._seal_event_reads,
         side_effect=lambda *args: observed.append(("seal", active[-1]))))
-    monkeypatch.setattr(tx, "validate_event", create_autospec(tx.validate_event, side_effect=validate))
+    storage = create_autospec(validation.BusinessStorage, instance=True, spec_set=True)
+    storage.validate_event.side_effect = validate
+    monkeypatch.setattr(validation, "default_business_storage", lambda: storage)
     monkeypatch.setattr(tx, "event_report_targets", create_autospec(tx.event_report_targets,
         side_effect=targets))
     monkeypatch.setattr(tx, "derive_changes", create_autospec(tx.derive_changes,
@@ -328,7 +331,9 @@ def test_validation_boundary_error_keeps_phase_and_rollback(transaction_ports, b
         assert active == [phase]
         raise error
 
-    getattr(tx, port).side_effect = rejected
+    target = (validation.default_business_storage().validate_event if port == "validate_event"
+              else getattr(tx, port))
+    target.side_effect = rejected
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
     with performance_logging(channel):
         result = tx.commit_operation(_one_event_command(active=active, bounded=bounded), new_operation_key(), owned)
