@@ -12,13 +12,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from camctl.capture.models import WaitCompletedSave, validate_capture_spec
+from camctl.capture.models import WaitCompletedSave
+from camctl.capture.wait_rules import (
+    validate_natural_wait_confirmation, validate_natural_wait_definition,
+    validate_natural_wait_run, validate_natural_wait_timing,
+)
 from camctl.contracts.enums import enum_for
-from camctl.devices.tasks import CompletionMode, EndControl, StartReturn
 from camctl.capture.timelapse import WaitPlan
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import MAX_OBJECT_ID, ConsistencyError, OperationKey
-from camctl.devices.capture_timing import CaptureTiming
 from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import load_activity_of_action
@@ -339,25 +341,14 @@ def _load_wait_start(connection, activity, state):
 def _verify_wait_basis(activity, action, state, *, occurred_at, complete, event_id=None):
     """新旧自然定义统一核对真实 START、完整公式和完成真实时刻。"""
     from .capture import _ATTEMPT_RESULT_EVENT, _history_source_event
-    from camctl.devices.capture_completion import validate_control_confirmation
 
     try:
         _validate_wait_values(activity)
-        if action is None or action["type"] != int(enum_for("actions.type").CAMERA_TIMELAPSE):
-            raise ValueError("自然等待不是延时任务")
-        spec = validate_capture_spec("camera_timelapse", action["execution_spec_json"])
-        if (not spec["duration_based"] or not spec["wait_after_send"]
-                or spec["end_control"] != int(EndControl.DEVICE)
-                or spec["start_return_meaning"] != int(StartReturn.SENT)
-                or spec["completion_mode"] != int(CompletionMode.TIME_AND_OUTPUTS)
-                or activity["action_id"] != action["id"]):
-            raise ValueError("自然等待缺少原有限自然任务合同")
+        spec = validate_natural_wait_definition(activity, action)
         runs = [run for run in state.get("operation_runs", {}).values()
                 if run["responsibility_key"] == f"start/{action['id']}"
                 and run["action_id"] == action["id"] and run["activity_id"] == activity["id"]]
-        if len(runs) != 1 or runs[0]["kind"] != int(enum_for("operation_runs.kind").START):
-            raise ValueError("自然等待 START 与原活动不符")
-        run = runs[0]
+        run = validate_natural_wait_run(runs)
         attempts = [attempt for attempt in state.get("operation_attempts", {}).values()
                     if attempt["run_id"] == run["id"]]
         attempt = max(attempts, key=lambda value: value["attempt_no"])
@@ -371,16 +362,8 @@ def _verify_wait_basis(activity, action, state, *, occurred_at, complete, event_
                 or any(not json_equal(rows[0].after.values.get(name), attempt[name])
                        for name in ("status", "effect_state", "result_json", "error_json"))):
             raise ValueError("自然等待不匹配原可靠发送")
-        validate_control_confirmation({"status": attempt["status"], "effect_state": attempt["effect_state"],
-            "result": attempt["result_json"], "error": attempt["error_json"]},
-            "timelapse_sent", str(activity["id"]))
-        expected = CaptureTiming(spec["target_duration_ms"], spec.get("startup_margin_ms", 0),
-            spec["result_wait_margin_ms"], activity["extra_wait_ms_used"]).deadline_us(activity["sent_at"])
-        if (activity["result_wait_margin_ms"] != spec["result_wait_margin_ms"]
-                or activity["expected_check_at"] != expected):
-            raise ValueError("自然等待改变原启动余量、目标或发送锚点")
-        if complete and occurred_at < expected:
-            raise ValueError("自然等待实际完成时刻早于原预计时点")
+        validate_natural_wait_confirmation(activity, attempt)
+        validate_natural_wait_timing(activity, spec, occurred_at=occurred_at, complete=complete)
     except (KeyError, TypeError, ValueError, ConsistencyError) as error:
         raise EventValidationError(str(error)) from error
 

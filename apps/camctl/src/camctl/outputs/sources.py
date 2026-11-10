@@ -92,6 +92,39 @@ ItemBasis = enum_for("obtain_items.basis")
 Availability = enum_for("outputs.availability")
 
 
+def obtain_source_ready(*, selection: Mapping, owner: Mapping, source: Mapping) -> bool:
+    """来源已终态、选择已固定，且取回动作仍可执行时才能核实成员。"""
+    action_status = enum_for("actions.status")
+    return (
+        selection.get("status") == int(enum_for("obtain_source_selections.status").FIXED)
+        and selection.get("error_code") is None and selection.get("error_details_json") is None
+        and owner.get("type") == int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)
+        and owner.get("status") == int(action_status.RUNNING)
+        and owner.get("cancel_requested") == 0
+        and owner.get("source_resolution_state") == int(ResolutionState.FIXED)
+        and owner.get("resolved_source_plan_id") is not None
+        and owner.get("resolved_source_plan_id") == source.get("plan_id")
+        and source.get("type") in _CAPTURE_TYPES
+        and source.get("status") in tuple(int(getattr(action_status, name)) for name in
+            ("SUCCEEDED", "FAILED", "EXPIRED", "CANCELED"))
+    )
+
+
+def obtain_member_verification_error(item: Mapping) -> str | None:
+    """检查取回项是否仍可核实以及显式请求身份是否完整。"""
+    if (item.get("status") not in (int(ItemStatus.UNRESOLVED), int(ItemStatus.SELECTED))
+            or item.get("source_dependency") != 0 or item.get("delivery_id") is not None
+            or item.get("error_code") is not None or item.get("error_details_json") is not None):
+        return "只有尚未建档或结束的取回项能核实或拒绝"
+    unresolved = item["status"] == int(ItemStatus.UNRESOLVED)
+    explicit = item.get("basis") == int(ItemBasis.EXPLICIT)
+    if unresolved and (not explicit or item.get("output_id") is not None):
+        return "未核实成员必须是尚未关联产物的显式请求"
+    if explicit and item.get("requested_output_id") is None:
+        return "显式成员必须保留原请求产物 ID"
+    return None
+
+
 @dataclass(frozen=True)
 class SourceSpec:
     """六种来源引用形式之一；恰好一种字段组合合法。

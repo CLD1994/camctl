@@ -69,3 +69,25 @@ def decide_photo_read_start(*, previous_size: int | None, committed_bytes: int,
     if type(reset_pending) is not bool or type(current_size) is not int or not 0 < current_size <= MAX_OBJECT_ID:
         raise ValueError("照片读取长度或重置状态无效")
     return PhotoReadDecision(current_size, 0, reset_pending or previous_size is not None)
+
+
+def photo_read_attempt_matches(*, copy_id, copy, source, origin, run, attempt, delivery, ticket) -> bool:
+    """判断按需照片读取是否仍属于持槽的原尝试。"""
+    from camctl.contracts.enums import enum_for
+
+    return (
+        source.get("size_bytes") is None and source.get("sha256") is None
+        and run.get("kind") == int(enum_for("operation_runs.kind").READ_FILE)
+        and run.get("status") == int(enum_for("operation_runs.status").ACTIVE)
+        and run.get("copy_id") == copy_id and run.get("delivery_id") == delivery.get("id")
+        and run.get("action_id") == delivery.get("action_id")
+        and run.get("attempts_used") == ticket.attempt_id
+        and run.get("responsibility_key") == ticket.responsibility_key
+        and attempt.get("status") == int(enum_for("operation_attempts.status").RUNNING)
+        and attempt.get("intent_event_id") is not None and attempt.get("result_event_id") is None
+        and attempt.get("copy_round") == copy.get("round")
+        and copy.get("slot_device_id") == origin.get("device_id")
+        and copy.get("read_end_event_id") is None
+        and copy.get("verification_state") == int(enum_for("file_copies.verification_state").NOT_PERFORMED)
+        and copy.get("source_sha256") is None and copy.get("target_sha256") is None
+    )

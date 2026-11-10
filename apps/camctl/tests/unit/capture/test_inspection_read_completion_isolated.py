@@ -6,6 +6,10 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
+
+from camctl.capture.inspection_rules import (
+    inspection_read_is_complete, inspection_result_requires_read,
+)
 from unittest.mock import patch
 
 
@@ -32,7 +36,8 @@ class ReadCompletionTests(unittest.TestCase):
                  "operation_runs.status": SimpleNamespace(SUCCEEDED=3),
                  "operation_attempts.status": SimpleNamespace(SUCCEEDED=2),
                  "file_copies.verification_state": SimpleNamespace(MATCHED=3, SOURCE_CHECKSUM_UNAVAILABLE=5)}
-        self.ns = {"closing": closing, "enum_for": enums.__getitem__}
+        self.ns = {"closing": closing, "enum_for": enums.__getitem__,
+                   "inspection_read_is_complete": inspection_read_is_complete}
         self.check = extract(ROOT / "persistence/repositories/segment_inspections.py", "inspection_input_read_succeeded", self.ns)
         self.rows = [(15, 10, 10, 3, "hash", 7, 6, 3, 1, 0, 2, "{}", 21)]
         self.connection = SimpleNamespace(execute=lambda sql, params: Cursor(self.rows))
@@ -66,8 +71,7 @@ class ReadCompletionTests(unittest.TestCase):
         self.assertFalse(self.check_current())
 
     def test_read_failure_outcomes_do_not_require_probe_input(self):
-        ns = {"_STATE": SimpleNamespace(COMPLETED=2), "Mapping": dict}
-        requires = extract(ROOT / "persistence/repositories/segment_inspections.py", "_result_requires_read", ns)
+        requires = inspection_result_requires_read
         self.assertTrue(requires(2, {"tool": {"ran": False}}))
         self.assertTrue(requires(4, {"tool": {"ran": True}}))
         self.assertTrue(requires(3, {"failure": {"code": "probe_failed"}}))
@@ -129,7 +133,7 @@ class ReadCompletionTests(unittest.TestCase):
             "_STATE": SimpleNamespace(PENDING=1), "EventValidationError": ValueError,
             "_binding_read_error": lambda doc: {"code": "device_binding_unavailable"},
             "_binding_read_result": lambda connection, inspection, doc: checks.append(inspection["id"]),
-            "_result_requires_read": lambda state, doc: False}
+            "inspection_result_requires_read": lambda state, doc: False}
         guard = extract(ROOT / "persistence/repositories/segment_inspections.py", "_segment_inspection_guard", namespace)
         row = SimpleNamespace(table="segment_inspections", row_id=8, after=SimpleNamespace(values={
             "state": 3, "result_event_id": 20, "result_json": {"failure": "binding"}}))
@@ -169,7 +173,8 @@ class ReadCompletionTests(unittest.TestCase):
         tasks = ModuleType("camctl.devices.tasks")
         tasks.CaptureResultPolicy = SimpleNamespace(ACTION6_VIDEO_SEGMENTS_V1=SimpleNamespace(value="action6"))
         inspections = ModuleType("camctl.persistence.repositories.segment_inspections")
-        inspections._result_requires_read = lambda state, result: result["requires_read"]
+        rules = ModuleType("camctl.capture.inspection_rules")
+        rules.inspection_result_requires_read = lambda state, result: result["requires_read"]
         inspections.inspection_input_read_succeeded = lambda connection, inspection: inspection["read_finished"]
         row = {"state": 1, "result_json": {"requires_read": True}, "read_finished": False}
         ns = {"closing": closing, "row_facts": lambda db, table, identity: row,
@@ -178,7 +183,7 @@ class ReadCompletionTests(unittest.TestCase):
         db = SimpleNamespace(execute=lambda sql, params: Cursor([(8,)] if params[2] == 0 else []))
         action = {"id": 6, "execution_spec_json": {"result_policy": "action6"}}
         assessment = SimpleNamespace(coverage_status=object())
-        with patch.dict(sys.modules, {models.__name__: models, tasks.__name__: tasks, inspections.__name__: inspections}):
+        with patch.dict(sys.modules, {models.__name__: models, tasks.__name__: tasks, inspections.__name__: inspections, rules.__name__: rules}):
             with self.assertRaises(ValueError): verify(db, action, {"id": 7}, assessment)
             row["state"] = 2
             with self.assertRaises(ValueError): verify(db, action, {"id": 7}, assessment)
