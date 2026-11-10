@@ -11,6 +11,12 @@ from camctl.contracts.values import ConsistencyError
 from camctl.contracts.history_values import TransactionRange
 from camctl.history import events, validators
 from camctl.history.decoding import decode_event_row
+from camctl.persistence.repositories.validation import BusinessStorage
+
+
+@pytest.fixture(scope="module")
+def business_storage():
+    return BusinessStorage()
 
 
 @pytest.fixture(autouse=True)
@@ -646,7 +652,7 @@ def test_unchanged_state_column_does_not_require_a_transition():
     assert event.rows[0].after.values == {"note": 2}
 
 
-def test_save_validation_also_rejects_later_illegal_transition(monkeypatch):
+def test_save_validation_also_rejects_later_illegal_transition(monkeypatch, business_storage):
     from camctl.history.events import EventEnvelope, RowChange, RowImage
     _transition_registration(("status", "note"))
     event = EventEnvelope(7, 3, 1, 1, 0, 1, None, 1, {}, (
@@ -655,7 +661,7 @@ def test_save_validation_also_rejects_later_illegal_transition(monkeypatch):
     context = validators.EventContext(TransactionRange(3, 7, 7), {("plans", 1): ("plan", 1)}, {})
     monkeypatch.setattr(validators, "_history_objects", lambda: {"plan": {"id": 4}})
     with pytest.raises(validators.EventValidationError):
-        validators.validate_event(event, context)
+        business_storage.validate_event(event, context)
 
 
 def test_required_column_must_change_even_if_another_column_changes():
@@ -696,7 +702,7 @@ def test_boolean_and_numeric_values_are_distinct_changes():
 
 
 @pytest.mark.parametrize("state", [2, None])
-def test_save_checks_unchanged_branch_conditions_in_reliable_context(monkeypatch, state):
+def test_save_checks_unchanged_branch_conditions_in_reliable_context(monkeypatch, state, business_storage):
     from camctl.history.events import EventEnvelope, RowChange, RowImage
     _update_registration(None)
     events.load_event_registry()["events"]["PLAN_ACCEPTED"]["branches"]["CREATE"]["rows"][0]["after"] = {"status": [1]}
@@ -709,7 +715,7 @@ def test_save_checks_unchanged_branch_conditions_in_reliable_context(monkeypatch
                                       {"plans": {1: values}})
     monkeypatch.setattr(validators, "_history_objects", lambda: {"plan": {"id": 4}})
     with pytest.raises(validators.EventValidationError):
-        validators.validate_event(event, context)
+        business_storage.validate_event(event, context)
 
 
 @pytest.mark.parametrize("field,bad", [
