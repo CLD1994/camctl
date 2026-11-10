@@ -33,3 +33,18 @@ def test_each_mismatched_source_fact_is_ineligible(index, key, value):
     facts = _valid()
     facts[index][key] = value
     assert not inspection_member_is_eligible(*facts)
+
+
+def test_binding_failure_keeps_original_read_error_and_rejects_other_stage():
+    from camctl.capture.inspection_rules import binding_read_error, binding_result_blocked
+    from camctl.contracts.values import ConsistencyError
+
+    error = {"code": "device_binding_unavailable", "details": {"reason": "original"}}
+    document = {"failure": {"code": "read_failed", "read_error": error}}
+    assert binding_read_error(document) is error
+    assert binding_read_error({"failure": {"code": "read_failed"}}) is None
+    with pytest.raises(ConsistencyError):
+        binding_read_error({"failure": {"code": "probe_failed", "read_error": error}})
+    assert not binding_result_blocked({"status": 2, "cancel_requested": 0})
+    assert binding_result_blocked({"status": 2, "cancel_requested": 1})
+    assert binding_result_blocked({"status": 3, "cancel_requested": 0})

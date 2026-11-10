@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 
 from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ConsistencyError
 
 
 def inspection_member_is_eligible(action_id, set_id, file_id, set_row, member, file_row):
@@ -52,3 +53,19 @@ def inspection_result_requires_read(state, document):
     return (state == int(enum_for("segment_inspections.state").COMPLETED)
             or isinstance(tool, Mapping) and tool.get("ran") is True
             or isinstance(failure, Mapping) and failure.get("code") == "probe_failed")
+
+
+def binding_read_error(document):
+    """绑定失败只能来自原检查读取，保留原错误对象。"""
+    failure = document.get("failure")
+    error = failure.get("read_error") if isinstance(failure, Mapping) else None
+    if not isinstance(error, Mapping) or error.get("code") != "device_binding_unavailable":
+        return None
+    if failure.get("code") != "read_failed":
+        raise ConsistencyError("绑定读取失败必须归属于原检查读取")
+    return error
+
+
+def binding_result_blocked(action):
+    """已取消或终态的动作不能继续新增绑定失败结果。"""
+    return bool(action["cancel_requested"] or action["status"] != 2)

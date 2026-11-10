@@ -8,6 +8,7 @@ from types import ModuleType, SimpleNamespace
 import unittest
 
 from camctl.capture.inspection_rules import (
+    binding_read_error, binding_result_blocked,
     inspection_read_is_complete, inspection_result_requires_read,
 )
 from unittest.mock import patch
@@ -93,7 +94,7 @@ class ReadCompletionTests(unittest.TestCase):
         binding = ModuleType("camctl.persistence.repositories.binding_read_cancel")
         binding.load_saved_binding_read_failure = lambda connection, action, copy, error: calls.append((action, copy, error))
         ns = {"closing": closing, "Mapping": dict, "ConsistencyError": ValueError}
-        ns["_binding_read_error"] = extract(ROOT / "persistence/repositories/segment_inspections.py", "_binding_read_error", ns)
+        ns["binding_read_error"] = binding_read_error
         check = extract(ROOT / "persistence/repositories/segment_inspections.py", "_binding_read_result", ns)
         rows = [(9,)]
         connection = SimpleNamespace(execute=lambda sql, params: Cursor(rows))
@@ -114,6 +115,7 @@ class ReadCompletionTests(unittest.TestCase):
         namespace = {"saved_transaction_events": lambda connection, key: None,
             "row_facts": lambda connection, table, identity: inspection if table == "segment_inspections" else action,
             "_STATE": SimpleNamespace(PENDING=1), "_binding_read_result": lambda *args: True,
+            "binding_result_blocked": binding_result_blocked,
             "_inspection_ref": lambda row: SimpleNamespace(state=row["state"]),
             "CommandPlan": Plan, "ConsistencyError": ValueError}
         command = extract(ROOT / "persistence/repositories/segment_inspections.py", "_SaveInspectionResultCommand", namespace)
@@ -131,9 +133,10 @@ class ReadCompletionTests(unittest.TestCase):
         checks = []
         namespace = {"_EVENT": {"id": 38}, "_RESULT": 2, "_CREATE": 1,
             "_STATE": SimpleNamespace(PENDING=1), "EventValidationError": ValueError,
-            "_binding_read_error": lambda doc: {"code": "device_binding_unavailable"},
+            "binding_read_error": lambda doc: {"code": "device_binding_unavailable"},
             "_binding_read_result": lambda connection, inspection, doc: checks.append(inspection["id"]),
-            "inspection_result_requires_read": lambda state, doc: False}
+            "inspection_result_requires_read": lambda state, doc: False,
+            "binding_result_blocked": binding_result_blocked}
         guard = extract(ROOT / "persistence/repositories/segment_inspections.py", "_segment_inspection_guard", namespace)
         row = SimpleNamespace(table="segment_inspections", row_id=8, after=SimpleNamespace(values={
             "state": 3, "result_event_id": 20, "result_json": {"failure": "binding"}}))
