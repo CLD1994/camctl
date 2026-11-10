@@ -3089,6 +3089,8 @@ async def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
     """取消终态：放弃内容，不登记正式产物。"""
     from camctl.devices.tasks import CaptureResultPolicy
 
+    if not await _resume_discontinued_listings(runtime, action_id):
+        return
     pending = runtime.pending_baselines.get(action_id)
     if pending is not None and pending.read_owner is not None:
         if pending.in_call:
@@ -4160,6 +4162,8 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> HandlerOut
     start_progress = (await context.resume_start_results(action_id)) is True
     action = (await context.action(action_id))
     if action["status"] in _ACTION_TERMINAL:
+        if action["cancel_requested"]:
+            await _resume_discontinued_listings(context, action_id)
         if context.on_recording_deadline is not None:
             context.on_recording_deadline(action_id, None)
         return
@@ -5966,6 +5970,21 @@ async def _settle_discontinued_listing(runtime: CaptureRuntime, action_id: int,
     await _finish_listing_result(runtime, listing,
         end_run=RunOutcome.CANCELED if cancel_run else None,
         finalize_output_set=_listing_finalized(listing))
+    return True
+
+
+async def _resume_discontinued_listings(runtime: CaptureRuntime, action_id: int) -> bool:
+    """取消前后都交接同会话持有的原 RESULTS 结果。"""
+    for identity, pending in tuple(runtime.pending_start_results.items()):
+        if pending.result_listing is None:
+            continue
+        ticket = pending.finish.ticket
+        if await runtime.action_id_of_ticket(ticket) != action_id:
+            continue
+        if pending.result_disposition_ready:
+            await runtime._save_call_result(identity, pending, retry=True)
+        elif not await _settle_discontinued_listing(runtime, action_id, ticket, cancel_run=True):
+            return False
     return True
 
 
