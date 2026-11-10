@@ -24,7 +24,6 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.events import load_event_registry
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.runtime import expected_table_names
-from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_repositories import _seed_transactions
 from .test_transactions import _open, plan_guards
@@ -42,7 +41,7 @@ _SEED_TRANSACTION_COUNT = 30
 class TestQueryPlanUnderRepresentativeLoad:
     def test_history_reads_locate_rows_through_indexes(
             self, tmp_path, plan_guards, monkeypatch) -> None:
-        _seed_transactions(tmp_path, _SEED_TRANSACTION_COUNT)
+        _seed_transactions(tmp_path, _SEED_TRANSACTION_COUNT, plan_guards)
         with _open(tmp_path).connection as connection:
             connection.execute("ANALYZE")
 
