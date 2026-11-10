@@ -29,27 +29,14 @@ from camctl.operations.models import (
     AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
 )
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
-from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository,
-    register_timelapse_guards,
-)
+from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity
-
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
 
 _NOW = 1_750_000_000_000_000
 

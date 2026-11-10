@@ -22,14 +22,13 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.session import SessionRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, DirectoryBindingError, open_existing
-from camctl.session.clock import ClockCheckInput, register_clock_guard
+from camctl.session.clock import ClockCheckInput
 from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
 from camctl.session.service import StateDbFailure, SessionContext, SessionPaths, run_session
 from camctl.session.work import WorkDecisionKind, WorkFacts
 
 from ..persistence.test_runtime import _create_valid_database
 
-register_clock_guard()
 
 _MIN = 1_735_689_600_000_000
 

@@ -14,10 +14,8 @@ from camctl.outputs.cleanup_flow import (
     advance_cleanup, delete_source_file,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
-from camctl.persistence.repositories.outputs import OutputsRepository, register_outputs_guards
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.outputs import OutputsRepository
 
 from .test_cleanup_query_local_consumption import (
     _assert_history_prefix, _first_rejected, _fresh_runtime, _history,
@@ -29,10 +27,6 @@ from ..bootstrap.test_output_binding_changes import _NOW, environment
 
 pytestmark = pytest.mark.asyncio
 
-register_operation_guards()
-register_outputs_guards()
-register_capture_guards()
-register_cancellation_guards()
 
 
 class _BlockedQueryResults(OperationRepository):

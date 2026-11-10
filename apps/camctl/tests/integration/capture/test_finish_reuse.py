@@ -15,13 +15,7 @@ import pytest
 from camctl.capture.media import RecordingFailure
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    FinishCapture,
-    FinishDisposition,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import register_operation_guards
+from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture, FinishDisposition
 from camctl.persistence.repositories.transactions import TransactionError
 
 from camctl.outputs.catalog import (
@@ -32,8 +26,6 @@ from camctl.outputs.catalog import (
 )
 from .test_recording_finish import _environment, _finish, _original_draft, _NOW
 
-register_operation_guards()
-register_capture_guards()
 
 
 def _repository() -> CaptureRepository:

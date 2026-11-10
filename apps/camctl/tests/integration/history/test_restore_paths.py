@@ -637,7 +637,7 @@ async def test_snapshot_delivery_rejects_published_state_without_publication_fac
     )
     from camctl.outputs.slots import SlotOutcome, SlotRequest
     from camctl.outputs.batches import BatchOutcome, BatchRequest
-    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+    from camctl.persistence.repositories.file_batches import FileBatchRepository
     from camctl.persistence.repositories.operations import OperationRepository
     from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -652,7 +652,6 @@ async def test_snapshot_delivery_rejects_published_state_without_publication_fac
     copy = row_facts(world.owned.connection, "file_copies", copy_id)
     from .test_file_history import _finish_repair
     _finish_repair(complete_world.capture, world.owned, complete_world.repair_file)
-    register_file_batch_guards()
     batch = FileBatchRepository().acquire(
         BatchRequest(delivery["action_id"], "cam-1", NOW), new_operation_key(), world.owned)
     assert batch.kind is DbOutcomeKind.COMPLETED, batch.error

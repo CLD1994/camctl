@@ -28,9 +28,13 @@ from camctl.operations.models import (
 )
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput, register_acceptance_guards
-from camctl.persistence.repositories.cancellation import CancellationRepository, register_cancellation_guards
-from camctl.persistence.repositories.scheduling import ObserveWindowRequest, SchedulingRepository, StartActionRequest, register_window_guard
+from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+from camctl.persistence.repositories.cancellation import CancellationRepository
+from camctl.persistence.repositories.scheduling import (
+    ObserveWindowRequest,
+    SchedulingRepository,
+    StartActionRequest,
+)
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..bootstrap.test_media_assembly import _config
@@ -40,9 +44,6 @@ from .test_capture_contract import _NOW, _runtime
 from ..support.capture import capture_database, restart_capture_database
 from support.repository_ports import repository_port
 
-register_acceptance_guards()
-register_cancellation_guards()
-register_window_guard()
 
 RESULT_EVIDENCE = EvidenceRegistry((
     EvidenceContract("operation_returned", 1, "control", frozenset()),

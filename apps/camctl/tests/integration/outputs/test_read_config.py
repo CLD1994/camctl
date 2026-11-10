@@ -11,7 +11,6 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import new_operation_key
 from camctl.outputs.qualification import FileCandidate, OperationConfig, QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..operations.test_result_reuse import _FaultConnection
@@ -36,7 +35,6 @@ def internal_read(tmp_path):
             "UPDATE recording_processing SET check_decision=3, check_basis_json='{}' WHERE id=5"
         )
         connection.commit()
-        register_operation_guards()
         command = FileCandidate(
             action_id=11, item_id=None, processing_id=5, output_id=None,
             source_device_file_id=501, target_extension="part",

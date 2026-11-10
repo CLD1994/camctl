@@ -40,16 +40,12 @@ from camctl.devices.ports import (
     DriverDeclaration,
     StopDriver,
 )
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.database import business_database
 
-register_acceptance_guards()
 
 pytestmark = pytest.mark.asyncio
 

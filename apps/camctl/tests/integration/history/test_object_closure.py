@@ -24,20 +24,14 @@ from camctl.history.queries import PlanSubtree
 from camctl.motor.models import FinishSendRequest, MotorFinalKind, PrepareSendRequest
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.cancellation import (
-    CancellationRepository, register_cancellation_guards,
-)
+from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
-from camctl.persistence.repositories.motor import MotorRepository, register_motor_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
+from camctl.persistence.repositories.motor import MotorRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import row_facts
 
 from ..persistence.test_motor_transactions import NOW, _admit, _body, owned
 
-register_cancellation_guards()
-register_motor_guards()
-register_outputs_guards()
 
 
 def _history(owned):

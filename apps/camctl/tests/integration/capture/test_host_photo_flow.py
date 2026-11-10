@@ -74,25 +74,9 @@ from camctl.operations.models import (
 )
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    ProcessInput,
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.cancellation import (
-    CancellationRepository,
-    register_cancellation_guards,
-)
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.scheduling import (
-    ObserveWindowRequest,
-    SchedulingRepository,
-    StartActionRequest,
-    register_window_guard,
-)
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
+from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+from camctl.persistence.repositories.cancellation import CancellationRepository
+from camctl.persistence.repositories.scheduling import ObserveWindowRequest, SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import (
     DatabaseUnsupportedFormatError,
     DbConfig,
@@ -101,12 +85,7 @@ from camctl.persistence.runtime import (
 )
 from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.reporting.generation import GenerationSpec, generate_report_file
-from camctl.reporting.policy import (
-    ReportDecisionKind,
-    ReportingRepository,
-    register_report_guards,
-    register_sync_guard,
-)
+from camctl.reporting.policy import ReportDecisionKind, ReportingRepository
 
 
 pytestmark = pytest.mark.asyncio
@@ -134,15 +113,6 @@ _LEGACY_RESULTS = _RETURNED.with_contract(
     identity_field="activity_id",
 ))
 
-register_acceptance_guards()
-register_window_guard()
-register_operation_guards()
-register_capture_guards()
-register_outputs_guards()
-register_timelapse_guards()
-register_cancellation_guards()
-register_report_guards()
-register_sync_guard()
 
 
 class _LegacyPhotoCatalog:

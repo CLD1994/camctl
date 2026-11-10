@@ -42,12 +42,8 @@ from camctl.history.snapshots import (
 from camctl.history.validators import ValidatedEvent
 from camctl.operations.attempts import QueryPurpose
 from camctl.persistence.executor import DbExecutor
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    register_capture_guards,
-)
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import row_facts
 
@@ -64,8 +60,6 @@ from .test_file_history import (
 from .test_object_closure import NOW, cancellation_world, owned, _fix_members
 from .test_operation_ownership import _create_flow, _expected, _remember_run, operation_world
 
-register_capture_guards()
-register_outputs_guards()
 
 pytestmark = pytest.mark.asyncio
 

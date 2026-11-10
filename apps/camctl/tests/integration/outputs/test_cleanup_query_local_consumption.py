@@ -24,10 +24,8 @@ from camctl.outputs.cleanup_flow import (
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
-from camctl.persistence.repositories.outputs import OutputsRepository, register_outputs_guards
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.outputs import OutputsRepository
 
 from .test_cleanup_query_save_recovery import (
     _MatrixDriver, _apply_cleanup_cancel, _member_facts, _new_runtime,
@@ -40,10 +38,6 @@ from ..support.database import database_path
 
 pytestmark = pytest.mark.asyncio
 
-register_operation_guards()
-register_outputs_guards()
-register_capture_guards()
-register_cancellation_guards()
 
 
 class _CommitFault:

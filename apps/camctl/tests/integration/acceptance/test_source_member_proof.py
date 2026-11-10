@@ -7,9 +7,6 @@ from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import CommandPlan, commit_operation, event_envelope, row_change, row_facts
 from camctl.history.reads import AdmissionSourceReadScope
@@ -19,9 +16,6 @@ from ..support.acceptance import accept_source
 from ..support.database import database_path
 from ..persistence.test_runtime import _create_valid_database
 
-register_acceptance_guards()
-register_capture_guards()
-register_outputs_guards()
 
 
 def _body():

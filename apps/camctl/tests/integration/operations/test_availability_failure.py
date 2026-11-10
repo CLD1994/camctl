@@ -14,21 +14,13 @@ from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import action_error_id
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
 from camctl.persistence.repositories.availability_failure import (
     FailureDisposition,
     fail_photo_availability,
 )
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.reporting.policy import register_report_guards
 
 from ..support.database import business_database, create_test_database
 
-register_acceptance_guards()
-register_report_guards()
-register_outputs_guards()
-register_capture_guards()
 
 _NOW = 1_750_000_000_000_000
 _DETAILS = {"device_id": "cam-1", "operation_run_id": "1", "attempts_used": 1, "max_attempts": 1}

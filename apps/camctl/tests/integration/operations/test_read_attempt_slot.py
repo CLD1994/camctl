@@ -15,7 +15,7 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.transactions import TransactionError, commit_operation
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.outputs.batches import BatchOutcome, BatchRequest
-from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+from camctl.persistence.repositories.file_batches import FileBatchRepository
 
 from ..outputs.test_grant_reuse import granted, read_request, read_targets, local_read, _grant_read_access
 from ..support.output_storage_cases import QueryProbe
@@ -136,7 +136,6 @@ def test_later_slot_grant_cannot_authorize_earlier_read_attempt(granted):
     owned, command, _, prepared = granted
     request = SlotRequest(prepared.copy_id, command.occurred_at)
     if command.item_id is not None:
-        register_file_batch_guards()
         batch = FileBatchRepository().acquire(
             BatchRequest(command.action_id, "cam-1", command.occurred_at), new_operation_key(), owned)
         assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch

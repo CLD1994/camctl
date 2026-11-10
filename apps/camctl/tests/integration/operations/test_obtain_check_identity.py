@@ -14,7 +14,7 @@ from camctl.operations.models import AttemptStatus, EffectState, ErrorValue, Set
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.outputs.batches import BatchOutcome, BatchRequest
-from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+from camctl.persistence.repositories.file_batches import FileBatchRepository
 
 from .test_attempts import _NOW, _outcome, _validated
 from ..outputs.test_sources import _seed_environment, _seed_plan, _seed_action, _seed_output
@@ -40,7 +40,6 @@ def _environment(tmp_path, *, host=True):
         "status,source_dependency) VALUES (1,1,1,NULL,5,1,0)")
     connection.commit()
     if not host:
-        register_file_batch_guards()
         batch = FileBatchRepository().acquire(BatchRequest(2, "cam-1", _NOW), new_operation_key(), owned)
         assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.GRANTED, batch
     return path, owned

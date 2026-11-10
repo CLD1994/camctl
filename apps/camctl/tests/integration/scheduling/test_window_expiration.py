@@ -20,24 +20,9 @@ from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.contracts.values import new_operation_key, to_utc_micros
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.scheduling import (
-    ExpireActionRequest,
-    ExpireOutcome,
-    ObserveOutcome,
-    ObserveWindowRequest,
-    SchedulingRepository,
-    StartActionRequest,
-    StartOutcome,
-    register_window_guard,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
+from camctl.persistence.repositories.scheduling import ExpireActionRequest, ExpireOutcome, ObserveOutcome, ObserveWindowRequest, SchedulingRepository, StartActionRequest, StartOutcome
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-from camctl.reporting.policy import register_report_guards, register_sync_guard
 
 from ..acceptance.test_acceptance import (
     Catalog,
@@ -45,12 +30,6 @@ from ..acceptance.test_acceptance import (
     _create_valid_database,
 )
 
-register_acceptance_guards()
-register_report_guards()
-register_sync_guard()
-register_outputs_guards()
-register_capture_guards()
-register_window_guard()
 
 _NOW = 1_750_000_000_000_000
 _SCHEDULED = to_utc_micros("2026-01-15 09:00:00")
@@ -461,11 +440,9 @@ class TestPendingExpiration:
     async def test_granted_intent_is_not_expired_by_window(self, owned, tmp_path):
         from decimal import Decimal
         from camctl.operations.attempts import AttemptConfig
-        from camctl.persistence.repositories.operations import register_operation_guards
         from camctl.persistence.repositories.scheduling import GrantRequest, GrantOutcome
         from camctl.scheduling.rules import LaunchWindow
 
-        register_operation_guards()
         await _accept_plan(owned, tmp_path, _photo_body())
         _observe(owned, 1, now=_SCHEDULED)
         started = SchedulingRepository().start_action(
