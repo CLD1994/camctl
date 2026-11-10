@@ -4,6 +4,7 @@ import pytest
 
 from camctl.capture.segment_candidates import (
     eligible_original, eligible_paired_preview, eligible_photo_original, is_paired_preview,
+    is_segmented_result_policy,
 )
 from camctl.capture.segment_models import (
     FileCompletionState, OwnershipState, PreviewPairingState, SegmentMember, SegmentMemberRole,
@@ -12,6 +13,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.segment_profiles import SegmentFileFacts, SegmentFileKind
 from camctl.devices.segments import SegmentKey
+from camctl.devices.tasks import CaptureResultPolicy
 
 
 @pytest.mark.parametrize(('role', 'ownership', 'completion', 'size', 'expected'), [
@@ -31,6 +33,16 @@ def test_only_complete_nonempty_owned_original_is_eligible(role, ownership, comp
     member = SegmentMember('/DCIM/file', None, role, ownership, completion, size,
                            pairing_state=pairing)
     assert eligible_original(member) is expected
+
+
+@pytest.mark.parametrize(('policy', 'expected'), [
+    (CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value, True),
+    (CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value, True),
+    (CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value, False),
+    (None, False), ('unknown', False),
+])
+def test_segmented_source_requires_an_applicable_frozen_policy(policy, expected):
+    assert is_segmented_result_policy(policy) is expected
 
 
 def test_photo_candidate_requires_own_fixed_file_to_be_complete_and_nonempty():

@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from itertools import islice, zip_longest
 
 from camctl.capture.segment_errors import SegmentErrorHeader
+from camctl.capture.segment_candidates import is_segmented_result_policy
 from camctl.capture.segment_models import DefaultScopeState
 from camctl.capture.segment_storage import assessment_from_document
 from camctl.contracts.enums import enum_for
@@ -112,14 +113,6 @@ class _SelectionProof:
     transaction: object
     scope: object
     event: object
-
-
-def is_segmented_result_policy(policy):
-    """按同一组已登记分段策略解释批次事实及仓储来源。"""
-    return policy in (
-        CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
-        CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
-    )
 
 
 def is_segmented_source(db, action_id):
