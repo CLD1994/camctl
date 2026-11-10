@@ -4,12 +4,17 @@ from dataclasses import dataclass
 
 from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey, ObjectId, UtcMicros
-from camctl.contracts.workflow_errors import item_error_id, validate_error_details
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
 from camctl.history.reads import PlanReadScope
 from camctl.history.validators import EventValidationError
 from camctl.operations.result_format import read_result_document
+from camctl.outputs.segment_query_rules import (
+    queried_output_values, queried_item_values, require_query_output_projection,
+    require_query_resolution, query_presence_from_outcome, require_query_target,
+    require_query_operation_source,
+    require_query_observable_output, require_query_observed_file,
+)
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.transactions import (
     CommandPlan,
@@ -28,9 +33,6 @@ _READ_EVENT = _EVENTS["READ_PERMISSION_CHANGED"]["id"]
 _READ_BRANCHES = _EVENTS["READ_PERMISSION_CHANGED"]["branches"]
 _RESOLVE_REASON = _READ_BRANCHES["RESOLVE"]["reason"]
 _REJECT_REASON = _READ_BRANCHES["REJECT"]["reason"]
-_OUTPUT_UNAVAILABLE = item_error_id("obtain_items", "output_unavailable")
-_SOURCE_UNCONFIRMED = item_error_id("obtain_items", "source_file_unconfirmed")
-_DEVICE_BINDING = item_error_id("obtain_items", "device_binding_unavailable")
 
 
 @dataclass(frozen=True)
@@ -105,16 +107,10 @@ def _query_presence(connection, item_id, result_event_id):
     source = (
         None if dependency is None else row_facts(connection, "actions", dependency[1])
     )
-    if (
-        kind != 5
-        or target != item_id
-        or responsibility != f"obtain-exists/{item_id}"
-        or action_type != 4
-        or dependency is None
-        or dependency[0] != owner_id
-        or source is None
-        or not is_segmented_source(connection, source["id"])
-    ):
+    require_query_operation_source(kind=kind, target=target, item_id=item_id,
+        responsibility=responsibility, action_type=action_type, dependency=dependency,
+        owner_id=owner_id, source=source)
+    if not is_segmented_source(connection, source["id"]):
         raise ConsistencyError("QUERY v2 责任不属于原分段来源取回")
     attempt = _one(
         connection,
@@ -176,19 +172,8 @@ def _query_presence(connection, item_id, result_event_id):
         parse_exact_json(attempt[4]),
         None if attempt[5] is None else parse_exact_json(attempt[5]),
     )
-    observations = [
-        value
-        for value in outcome.observations
-        if value.type == "file_presence" and value.version == 2
-    ]
-    if len(observations) > 1:
-        raise ConsistencyError("QUERY v2 结果重复报告在场事实")
-    if observations:
-        observation = observations[0]
-        if observation.data.get("obtain_item_id") != str(item_id):
-            raise ConsistencyError("QUERY v2 观察改变原取回项身份")
-        return observation.data["present"], run_id, owner_id, outcome, attempt
-    return None, run_id, owner_id, outcome, attempt
+    present = query_presence_from_outcome(outcome, item_id)
+    return present, run_id, owner_id, outcome, attempt
 
 
 def _segment_observation_guard(event, context):
@@ -213,27 +198,12 @@ def _segment_observation_guard(event, context):
         or row.row_id != item["requested_output_id"]
     ):
         raise EventValidationError("QUERY v2 产物观察缺少原产物或取回项")
-    expected = 1 if present else 4
-    expected_error = (
-        None
-        if present
-        else {
-            "code": "output_unavailable",
-            "stage": "output_selection",
-            "details": {"output_id": str(output["id"]), "availability": "missing"},
-        }
-    )
     file = context.state_rows.get("device_files", {}).get(output["device_file_id"])
-    if (
-        output["device_file_id"] is None
-        or file is None
-        or file["presence_state"] != (2 if present else 3)
-        or set(row.after.values) != {"availability", "error_json"}
-        or row.after.values.get("availability") != expected
-        or not json_equal(row.after.values.get("error_json"), expected_error)
-        or row.before.values.get("availability") != 5
-    ):
-        raise EventValidationError("QUERY v2 产物投影与原文件结果不符")
+    try:
+        require_query_output_projection(present=present, output=output, file=file,
+                                        before=row.before.values, after=row.after.values)
+    except ConsistencyError as error:
+        raise EventValidationError(str(error)) from error
 
 
 def _segment_resolution_guard(event, context):
@@ -248,10 +218,10 @@ def _segment_resolution_guard(event, context):
     present, _, _, _, _ = _query_presence(
         context.current_reads.connection, source["item_id"], source["result_event_id"]
     )
-    if event.reason == _RESOLVE_REASON and present is not True:
-        raise EventValidationError("显式取回解析必须由可靠在场结果证明")
-    if event.reason == _REJECT_REASON and present is not False:
-        raise EventValidationError("缺席拒绝必须由可靠缺席结果证明")
+    try:
+        require_query_resolution(present=present, resolve=event.reason == _RESOLVE_REASON)
+    except ConsistencyError as error:
+        raise EventValidationError(str(error)) from error
     if len(event.rows) != 1 or event.rows[0].row_id != source["item_id"]:
         raise EventValidationError("QUERY v2 结算必须只更新原取回项")
 
@@ -277,18 +247,9 @@ def _facts(connection, item_id, saved):
     output_id = item["requested_output_id"]
     output = _at(connection, "outputs", output_id, saved, ("output", output_id))
     source = row_facts(connection, "actions", source_id)
-    if (
-        item["status"] != 1
-        or item["basis"] != 5
-        or item["output_id"] is not None
-        or selection["status"] != 2
-        or selection["error_code"] is not None
-        or owner["status"] != 2
-        or owner["cancel_requested"]
-        or output is None
-        or output["source_action_id"] != source_id
-        or not is_segmented_source(connection, source["id"])
-    ):
+    require_query_target(item=item, selection=selection, owner=owner,
+                         output=output, source_id=source_id)
+    if not is_segmented_source(connection, source["id"]):
         raise ConsistencyError("QUERY 结算要求执行中显式未解析项和原分段产物")
     state = {
         "actions": {owner_id: owner, source_id: source},
@@ -348,25 +309,10 @@ class _ObserveCommand:
             raise ConsistencyError("产物观察申请与 QUERY v2 原结果不同")
         item, output, owner, state = _facts(c, r.item_id, transaction)
         output_id = output["id"]
-        if (
-            output["device_file_id"] is None
-            or output["availability"] != 5
-            or output["cleanup_status"] not in (1, 6)
-        ):
-            raise ConsistencyError("只有未知且无清理限制的显式设备产物可应用 QUERY v2")
+        require_query_observable_output(output)
         file = state["device_files"][output["device_file_id"]]
-        if file is None or file["presence_state"] != (2 if present else 3):
-            raise ConsistencyError("文件存在性事实尚未先行保存")
-        after = {
-            "availability": 1 if present else 4,
-            "error_json": None
-            if present
-            else {
-                "code": "output_unavailable",
-                "stage": "output_selection",
-                "details": {"output_id": str(output_id), "availability": "missing"},
-            },
-        }
+        require_query_observed_file(file, present)
+        after = queried_output_values(present, output_id)
         row = update_change(
             "outputs",
             output_id,
@@ -420,50 +366,12 @@ class _SettleCommand:
         saved = saved_transaction_events(c, self.key)
         transaction = None if saved is None else saved[0]["transaction"]
         item, output, owner, state = _facts(c, r.item_id, transaction)
+        present = None
         if r.error_code is None:
             present, _, _, _, _ = _query_presence(c, r.item_id, r.result_event_id)
-            if present is None:
-                raise ConsistencyError("有实际 QUERY 的结算必须引用可靠观察")
-            if present and output["availability"] != 1:
-                raise ConsistencyError("在场解析要求产物已更新为可用")
-            if not present and output["availability"] != 4:
-                raise ConsistencyError("缺席拒绝要求产物已更新为缺失")
-            error_code = None if present else _OUTPUT_UNAVAILABLE
-            details = (
-                None
-                if present
-                else {"output_id": str(output["id"]), "availability": "missing"}
-            )
-        else:
-            error_code = r.error_code
-            details = dict(r.error_details)
-        name = {
-            _OUTPUT_UNAVAILABLE: "output_unavailable",
-            _SOURCE_UNCONFIRMED: "source_file_unconfirmed",
-            _DEVICE_BINDING: "device_binding_unavailable",
-        }.get(error_code)
-        if error_code is not None and name is None:
-            raise ConsistencyError("QUERY 结算错误未登记")
-        if name is not None:
-            validate_error_details(name, details)
-        if error_code == _OUTPUT_UNAVAILABLE and r.result_event_id is None:
-            availability = {2: "restricted", 3: "cleaned", 4: "missing"}.get(
-                output["availability"]
-            )
-            if availability is None or not json_equal(
-                details, {"output_id": str(output["id"]), "availability": availability}
-            ):
-                raise ConsistencyError("产物不可用必须保留当前可靠状态")
-        row_values = (
-            {"output_id": output["id"], "status": 2}
-            if error_code is None
-            else {
-                "output_id": output["id"],
-                "status": 4,
-                "error_code": error_code,
-                "error_details_json": details,
-            }
-        )
+        row_values = queried_item_values(output=output, present=present, error_code=r.error_code,
+            error_details=r.error_details, result_event_id=r.result_event_id)
+        error_code = row_values.get("error_code")
         row = update_change(
             "obtain_items",
             item["id"],

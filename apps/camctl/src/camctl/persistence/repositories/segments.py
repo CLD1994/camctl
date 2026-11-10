@@ -557,40 +557,19 @@ def _verify_assessment(db,setrow,facts,assessment):
 
 
 def _verify_action6_checked_prefix(db, setrow, decision, target):
-    """从已保存的检查事实重算异常前缀指标，不信任调用侧累计量。"""
-    from camctl.capture.segment_models import (
-        CoverageMetric, CoverageStatus, DefaultScopeState, FileCompletionState,
-        OwnershipState, SegmentDecisionStatus, SegmentMemberRole,
-    )
-    from camctl.contracts.video_coverage import (
-        CoverageAccumulator, CoverageTarget, VideoMetric, advance_coverage,
-    )
-    from camctl.contracts.enums import enum_for
-    from camctl.contracts.values import ConsistencyError
+    """逐页取得已保存事实，交由纯规则复核异常检查前缀。"""
+    from camctl.capture.action6_scope_rules import Action6CheckedPrefix, is_checked_prefix_original
+    from camctl.capture.segment_models import CoverageStatus, SegmentDecisionStatus
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
     from .segment_starts import segment_start_from_set
 
-    status = decision.coverage_status
-    if (status is CoverageStatus.NOT_PERFORMED
+    if (decision.coverage_status is CoverageStatus.NOT_PERFORMED
             or decision.status is SegmentDecisionStatus.CANCELED):
         return
-
-    coverage_target = CoverageTarget(CoverageMetric(target.metric.value), target.value)
-    accumulated = CoverageAccumulator(coverage_target)
     start = segment_start_from_set(db, setrow).key
-    expected = start
-    interruption = "start_unknown" if expected is None else None
-    checked = 0
-    first_cursor = last_cursor = None
-    reached = False
-    stopped = False
+    assessment = Action6CheckedPrefix(decision, target, start)
     cursor = None
     Reader = type("Reader", (), {"connection": db})
-    inspections = enum_for("segment_inspections.state")
-    verification = enum_for("file_copies.verification_state")
-    trusted_copy_states = {
-        int(verification.MATCHED), int(verification.SOURCE_CHECKSUM_UNAVAILABLE),
-    }
 
     def candidates():
         nonlocal cursor
@@ -603,161 +582,26 @@ def _verify_action6_checked_prefix(db, setrow, decision, target):
 
     def next_original(iterator):
         for candidate in iterator:
-            candidate_member = candidate.member
-            if (candidate_member.role is SegmentMemberRole.ORIGINAL
-                    and candidate_member.ownership is not OwnershipState.NOT_OWNED):
+            if is_checked_prefix_original(candidate.member):
                 return candidate
         return None
 
     iterator = iter(candidates())
     stored = next_original(iterator)
-    previous_key = None
-    while stored is not None and not stopped:
-        member = stored.member
+    while stored is not None:
         following = next_original(iterator)
-        if expected is None:
-            interruption = interruption or "start_unknown"
-            stopped = True
+        if not assessment.accept_member(stored.member, None if following is None else following.member):
             break
-        if member.key is None:
-            interruption = "order_unknown"
-            stopped = True
+        facts = read_inspection_for_member(setrow['action_id'], stored.member_id, Reader)
+        if not assessment.accept_inspection(stored.member, facts.inspection, facts.copy):
             break
-        if member.key != expected:
-            interruption = (
-                "order_unknown" if member.key == previous_key else "segment_gap"
-            )
-            stopped = True
-            break
-        if (following is not None and following.member.key == member.key):
-            # 同一设备键的原片没有唯一顺序。停止在冲突组之前，不任意
-            # 选择组内第一份；next_original 可跨越底层成员分页。
-            interruption = "order_unknown"
-            stopped = True
-            break
-        if (member.ownership is not OwnershipState.OWNED
-                or member.completion is not FileCompletionState.COMPLETE
-                or member.size_bytes is None):
-            interruption = "file_unconfirmed"
-            stopped = True
-            break
-        if member.size_bytes == 0:
-            interruption = "empty_original"
-            stopped = True
-            break
-
-        facts = read_inspection_for_member(setrow["action_id"], stored.member_id, Reader)
-        if checked < decision.checked_count:
-            inspection = facts.inspection
-            copy = facts.copy
-            if (inspection is None
-                    or inspection.state != int(inspections.COMPLETED)
-                    or inspection.target_json != {
-                        "metric": coverage_target.metric.value,
-                        "value": coverage_target.value,
-                    }
-                    or copy is None
-                    or copy.inspection_state != int(inspections.COMPLETED)
-                    or copy.verification_state not in trusted_copy_states
-                    or copy.committed_bytes != copy.source_size
-                    or copy.target_sha256 is None):
-                raise ConsistencyError(
-                    "Action6 已确认前缀必须引用同目标、完整校验的检查副本"
-                )
-            document = inspection.result_json
-            metric_doc = None if document is None else document.get("metric")
-            if not isinstance(metric_doc, dict):
-                raise ConsistencyError("Action6 已确认检查缺少保存的主视频指标")
-            metric = VideoMetric(
-                CoverageMetric(metric_doc.get("metric")),
-                metric_doc.get("value"),
-                metric_doc.get("reason"),
-            )
-            if metric.metric is not coverage_target.metric or metric.value is None:
-                raise ConsistencyError("Action6 已确认前缀包含可靠值之外的检查记录")
-            if accumulated.reached:
-                raise ConsistencyError("Action6 检查前缀在目标达成后仍包含后续成员")
-            accumulated = advance_coverage(accumulated, metric)
-            checked += 1
-            if first_cursor is None:
-                first_cursor = member.cursor
-            last_cursor = member.cursor
-            previous_key = member.key
-            expected = member.key.successor()
-            if accumulated.reached:
-                if checked != decision.checked_count or status is not CoverageStatus.REACHED:
-                    raise ConsistencyError("Action6 目标达成位置与保存的检查计数不一致")
-                reached = True
-                stopped = True
-                break
-            stored = following
-            continue
-
-        if status is CoverageStatus.UNCONFIRMED:
-            if interruption is not None:
-                stopped = True
-                break
-            inspection = facts.inspection
-            if inspection is None or inspection.state == int(inspections.PENDING):
-                raise ConsistencyError("Action6 未确认前缀缺少已收场的下一成员检查")
-            document = inspection.result_json
-            metric_doc = None if document is None else document.get("metric")
-            if not isinstance(metric_doc, dict):
-                raise ConsistencyError("Action6 未确认检查缺少保存的主视频指标")
-            metric = VideoMetric(
-                CoverageMetric(metric_doc.get("metric")),
-                metric_doc.get("value"),
-                metric_doc.get("reason"),
-            )
-            if metric.metric is not coverage_target.metric or metric.value is not None:
-                raise ConsistencyError("Action6 未确认中断必须落在未知指标处")
-            interruption = metric.reason or "metric_unknown"
-            stopped = True
-            break
-
-        if status is CoverageStatus.CONFIRMED_SHORT:
-            raise ConsistencyError("Action6 确认不足遗漏了连续范围内的实际原片")
-        if status is CoverageStatus.REACHED and accumulated.reached:
-            reached = True
-            stopped = True
-            break
-        raise ConsistencyError("Action6 决策在可靠检查前缀后停止但未说明中断")
-
-    if checked != decision.checked_count or accumulated.confirmed != decision.confirmed:
-        raise ConsistencyError("Action6 保存指标或检查计数与可靠逐段事实不一致")
-    if status is CoverageStatus.REACHED:
-        if not reached or not accumulated.reached:
-            raise ConsistencyError("Action6 达标决策未由已保存前缀实际达成")
-    elif status is CoverageStatus.CONFIRMED_SHORT:
-        complete_scan = (
-            setrow["source_kind"] == int(enum_for("segment_sets.source_kind").COMPLETE_SCAN)
-            and setrow["publication_kind"]
-            == int(enum_for("segment_sets.publication_kind").RESULT)
-        )
-        if accumulated.reached or not complete_scan or interruption is not None:
-            raise ConsistencyError("Action6 确认不足决策缺少完整且连续的全量检查")
-    elif status is CoverageStatus.UNCONFIRMED and accumulated.reached:
-        raise ConsistencyError("Action6 未确认决策的可靠指标已达到目标")
-
-    if decision.checked_count == 0:
-        unknown_scope = interruption in ("start_unknown", "order_unknown")
-        expected_scope = (
-            DefaultScopeState.UNKNOWN if unknown_scope else DefaultScopeState.EMPTY
-        )
-        if decision.default_scope.state is not expected_scope:
-            raise ConsistencyError("Action6 零成员异常范围必须区分顺序未知与已知空范围")
-    elif (decision.default_scope.state is not DefaultScopeState.NONEMPTY
-            or decision.default_scope.member_count != checked
-            or decision.default_scope.first_cursor != first_cursor
-            or decision.default_scope.last_cursor != last_cursor):
-        raise ConsistencyError("Action6 异常默认范围必须等于可靠检查前缀")
+        stored = following
+    assessment.require_decision(source_kind=setrow['source_kind'],
+                                publication_kind=setrow['publication_kind'])
 
 
 def _verify_action6_decision(db, setrow, decision):
     """独立复核 Action6 公共正常判断、冻结目标和非照片视频范围。"""
-    from camctl.capture.segment_models import (
-        CoverageMetric, CoverageStatus, DefaultScopeState, SegmentDecisionStatus,
-    )
     from camctl.devices.segment_profiles import profile_for_policy
     from camctl.devices.tasks import CaptureResultPolicy
 
@@ -776,125 +620,23 @@ def _verify_action6_decision(db, setrow, decision):
         params, spec, action_type)
     if target is None:
         raise ConsistencyError('Action6 冻结特化没有提供覆盖目标')
-    if (decision.metric, decision.target) != (target.metric, target.value):
-        raise ConsistencyError('Action6 覆盖目标与受理时冻结参数不同')
-    native_cancel_all_qualified = (
-        decision.status is SegmentDecisionStatus.CANCELED
-        and action_type == 'camera_timelapse'
-    )
-    if decision.coverage_status is CoverageStatus.NOT_PERFORMED:
-        if decision.confirmed is not None or decision.checked_count != 0:
-            raise ConsistencyError('未执行 Action6 媒体检查不得携带实测值或检查计数')
-    elif decision.coverage_status is CoverageStatus.REACHED:
-        if decision.confirmed is None or decision.confirmed < decision.target:
-            raise ConsistencyError('Action6 达标结论低于冻结目标')
-    elif decision.coverage_status is CoverageStatus.CONFIRMED_SHORT:
-        if decision.confirmed is None or decision.confirmed >= decision.target:
-            raise ConsistencyError('Action6 不足结论未低于冻结目标')
+    from camctl.capture.action6_scope_rules import require_action6_coverage_header
+    require_action6_coverage_header(decision, target)
     _verify_action6_checked_prefix(db, setrow, decision, target)
 
-    eligible_count = 0
-    original_count = 0
-    first_cursor = None
-    last_cursor = None
-    cursor_at_checked_count = None
-    prefix_count = 0
-    prefix_first_cursor = None
-    prefix_last_cursor = None
-    prefix_open = True
-    ordered = True
-    cursor_missing = False
-    known_gap = False
-    previous_key = None
+    from camctl.capture.action6_scope_rules import Action6ScopeAssessment
+    assessment = Action6ScopeAssessment(decision)
     cursor = None
     Reader = type('Reader', (), {'connection': db})
     while True:
         page = read_segment_members(_ref(setrow), cursor, 128, Reader)
         for stored in page.items:
-            member = stored.member
-            if not eligible_original(member):
-                continue
-            eligible_count += 1
-            if member.cursor is None:
-                ordered = False
-                cursor_missing = True
-                continue
-            original_count += 1
-            first_cursor = member.cursor if first_cursor is None else min(first_cursor, member.cursor)
-            last_cursor = member.cursor if last_cursor is None else max(last_cursor, member.cursor)
-            if previous_key is not None:
-                if member.key <= previous_key:
-                    ordered = False
-                else:
-                    try:
-                        if previous_key.successor() != member.key:
-                            known_gap = True
-                            prefix_open = False
-                    except ValueError:
-                        known_gap = True
-                        prefix_open = False
-            previous_key = member.key
-            if prefix_open:
-                prefix_count += 1
-                if prefix_first_cursor is None:
-                    prefix_first_cursor = member.cursor
-                prefix_last_cursor = member.cursor
-            if original_count == decision.checked_count:
-                cursor_at_checked_count = member.cursor
+            assessment.observe(stored.member)
         if page.next_cursor is None:
             break
         cursor = page.next_cursor
-    selected = decision.default_scope
-    full_scope = (
-        decision.coverage_status is CoverageStatus.NOT_PERFORMED
-        or decision.status is SegmentDecisionStatus.CANCELED
-    )
-    if selected.state is DefaultScopeState.EMPTY:
-        if native_cancel_all_qualified:
-            expected_empty = eligible_count == 0
-        elif (decision.coverage_status is CoverageStatus.NOT_PERFORMED
-                or decision.status is SegmentDecisionStatus.CANCELED):
-            expected_empty = prefix_count == 0
-        else:
-            expected_empty = decision.checked_count == 0
-        if not expected_empty:
-            raise ConsistencyError('Action6 空视频范围仍存在应纳入的合格原片')
-    elif selected.state is DefaultScopeState.NONEMPTY:
-        if full_scope and native_cancel_all_qualified:
-            expected_count = original_count
-            expected_first = first_cursor
-            expected_last = last_cursor
-        elif full_scope:
-            expected_count = prefix_count if known_gap else original_count
-            expected_first = prefix_first_cursor if known_gap else first_cursor
-            expected_last = prefix_last_cursor if known_gap else last_cursor
-        else:
-            expected_count = decision.checked_count
-            expected_first = first_cursor
-            expected_last = cursor_at_checked_count
-        if (native_cancel_all_qualified and cursor_missing):
-            raise ConsistencyError('Action6 原生取消全量视频范围缺少可排序游标')
-        if ((full_scope and not ordered and not native_cancel_all_qualified)
-                or expected_count != selected.member_count
-                or expected_first != selected.first_cursor
-                or expected_last != selected.last_cursor):
-            raise ConsistencyError('Action6 默认范围必须是有序合格视频的完整范围或已检查前缀')
-    elif selected.state is not DefaultScopeState.UNKNOWN:
-        raise ConsistencyError('Action6 默认范围状态无效')
-    if decision.status is SegmentDecisionStatus.SUCCEEDED:
-        checked_scope_unconfirmed = (
-            decision.coverage_status is CoverageStatus.UNCONFIRMED
-        )
-        if (setrow['source_kind'] != int(enum_for('segment_sets.source_kind').COMPLETE_SCAN)
-                or (selected.state is not DefaultScopeState.NONEMPTY
-                    and not checked_scope_unconfirmed)
-                or decision.coverage_status is CoverageStatus.NOT_PERFORMED and known_gap):
-            raise ConsistencyError('Action6 正常成功缺少完整扫描或符合检查状态的默认视频范围')
-    if decision.status is SegmentDecisionStatus.CANCELED:
-        if setrow['publication_kind'] != int(enum_for('segment_sets.publication_kind').CANCELED):
-            raise ConsistencyError('Action6 取消必须使用原取消发布类型')
-    elif setrow['publication_kind'] == int(enum_for('segment_sets.publication_kind').CANCELED):
-        raise ConsistencyError('Action6 取消发布必须保存取消决策')
+    assessment.require_decision(action_type=action_type, source_kind=setrow['source_kind'],
+                                publication_kind=setrow['publication_kind'])
 
 
 def _input_member(db,item, *, current_boundary=None):
