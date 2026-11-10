@@ -383,6 +383,8 @@ class TestFinishCancelAction:
     @pytest.mark.parametrize('pending_sibling', [False, True], ids=['last-action', 'pending-sibling'])
     def test_all_succeeded_completes_action_and_plan(self, pipeline, pending_sibling):
         owned = pipeline
+        # 本专项的取消动作已执行，父计划相应处于运行中。
+        owned.connection.execute('UPDATE plans SET status=2 WHERE id=2')
         if pending_sibling:
             # 仓储专项的合法待执行同计划成员；完成判断使用真实存储行。
             owned.connection.execute(
@@ -398,7 +400,7 @@ class TestFinishCancelAction:
                 "first_window_observed_at,expiration_reason,source_resolution_state,"
                 "resolved_source_plan_id,target_selection_state,created_event_id,last_event_id,change_count"
                 " FROM actions WHERE id=12")
-            owned.connection.commit()
+        owned.connection.commit()
         repository = CancellationRepository()
         for item_id, mode in ((91, CancelApplyMode.WITH_STOP),
                               (92, CancelApplyMode.PRE_START),
@@ -410,6 +412,7 @@ class TestFinishCancelAction:
             RecordCancelResult(91, _NOW, outcome=CancelOutcomeChoice.CANCELED),
             new_operation_key(), owned)
         plan_before = _value(owned, 'SELECT status,last_event_id FROM plans WHERE id=2')
+        assert plan_before[0] == 2
         key = new_operation_key()
         outcome = self._finish(owned, key=key)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
@@ -417,7 +420,7 @@ class TestFinishCancelAction:
             owned, "SELECT status, error_code FROM actions WHERE id = 50"
         ) == (3, None)
         plan_after = _value(owned, 'SELECT status,last_event_id FROM plans WHERE id=2')
-        assert plan_after[0] == (plan_before[0] if pending_sibling else 3)
+        assert plan_after[0] == (2 if pending_sibling else 3)
         if pending_sibling:
             assert plan_after == plan_before
             assert _value(owned, 'SELECT status,execution_started FROM actions WHERE id=51') == (1, 0)
