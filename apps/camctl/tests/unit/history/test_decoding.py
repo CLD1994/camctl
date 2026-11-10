@@ -190,6 +190,58 @@ def test_preparation_failure_evidence_accepts_exact_failure_reasons(reason):
     assert event.evidence["preparation_failure_request"] == request
 
 
+@pytest.mark.parametrize("member,payload", [
+    ("capture_selection", {"device_id": "camera", "driver_id": "hasselblad_cfv100c",
+        "identity": {"serial": "serial", "product_id": 10},
+        "prepare_lead_s": 2, "trusted_wall_now": 10}),
+    ("availability_wait_finish_request", {"check_id": 3, "trusted_wall_now": 10,
+        "occurred_at": 11, "max_attempts": 2}),
+    ("preparation_binding_request", {"action_id": 3, "trusted_wall_now": 10,
+        "occurred_at": 11, "details": {"device_id": "camera",
+            "expected_driver_id": "hasselblad_cfv100c", "reason": "missing"},
+        "prepare_lead_s": 2, "current_identity": None}),
+])
+def test_business_evidence_decode_does_not_import_repositories(monkeypatch, member, payload):
+    import builtins
+
+    body = _preparation_body(member, payload)
+    original_import = builtins.__import__
+
+    def import_without_repositories(name, *args, **kwargs):
+        assert not name.startswith("camctl.persistence.repositories"), name
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_repositories)
+    assert decode_event_row(_row(body)).evidence[member] == payload
+
+
+@pytest.mark.parametrize("member,payload,reason", [
+    ("capture_selection", {}, "拍摄选择申请无效"),
+    ("capture_selection", {"device_id": "camera", "driver_id": "hasselblad_cfv100c",
+        "identity": {"serial": "serial", "product_id": 10},
+        "prepare_lead_s": True, "trusted_wall_now": 10}, "拍摄选择申请无效"),
+    ("availability_wait_finish_request", {}, "检查等待终结申请无效"),
+    ("availability_wait_finish_request", {"check_id": 3, "trusted_wall_now": 10,
+        "occurred_at": 11, "max_attempts": True}, "检查等待终结申请无效"),
+    ("preparation_binding_request", {}, "准备绑定失败申请成员无效"),
+    ("preparation_binding_request", {"action_id": 3, "trusted_wall_now": 10,
+        "occurred_at": 11, "details": {"device_id": "camera",
+            "expected_driver_id": "hasselblad_cfv100c", "reason": "missing"},
+        "prepare_lead_s": True, "current_identity": None}, "准备绑定失败申请无效"),
+])
+@pytest.mark.parametrize("entry", ["structure", "decode"])
+def test_business_evidence_original_request_rejects_bad_format(member, payload, reason, entry):
+    body = _preparation_body(member, payload)
+    if entry == "decode":
+        with pytest.raises(ConsistencyError, match=reason):
+            decode_event_row(_row(body))
+    else:
+        event = decode_event_row(_row())
+        object.__setattr__(event, "evidence", body["evidence"])
+        with pytest.raises(validators.EventValidationError, match=reason):
+            validators.validate_event_structure(event)
+
+
 def test_boolean_is_not_a_numeric_column_enum():
     body = _body()
     body["rows"][0]["after"]["values"]["status"] = True
