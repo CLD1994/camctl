@@ -164,6 +164,8 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
         ("camctl.operations.availability_owner", "camctl.persistence.business"): "SharedSave",
         ("camctl.operations.availability", "camctl.scheduling.notifications"): "WakeReason",
         ("camctl.outputs.withdrawal", "camctl.persistence.runtime"): "canonical_directory_binding",
+        ("camctl.history.bounded", "camctl.persistence.transaction_data"): "encode_json_value",
+        ("camctl.operations.availability_rules", "camctl.devices.drivers.hasselblad.definitions"): "DRIVER_ID",
     }
     for (source, module), symbol in named_ports.items():
         if name == source and (
@@ -389,11 +391,15 @@ class TestCheckerDetectsViolations:
             ("camctl.operations.availability_owner", "camctl.persistence.business", "SharedSave"),
             ("camctl.operations.availability", "camctl.scheduling.notifications", "WakeReason"),
             ("camctl.outputs.withdrawal", "camctl.persistence.runtime", "canonical_directory_binding"),
+            ("camctl.history.bounded", "camctl.persistence.transaction_data", "encode_json_value"),
+            ("camctl.operations.availability_rules", "camctl.devices.drivers.hasselblad.definitions", "DRIVER_ID"),
         ):
-            imports = _imported_modules(source, f"from {module} import {symbol} as port\n")
-            assert imports[module] == {symbol}
-            assert f"{module}.{symbol}" in imports
-            assert _forbidden_edges({source: imports}) == []
+            for statement in (f"from {module} import {symbol}\n",
+                              f"from {module} import {symbol} as port\n"):
+                imports = _imported_modules(source, statement)
+                assert imports[module] == {symbol}
+                assert f"{module}.{symbol}" in imports
+                assert _forbidden_edges({source: imports}) == []
         source = "camctl.outputs.withdrawal"
         imports = _imported_modules(source, "from camctl.persistence.runtime import canonical_directory_binding as path, OwnedConnection as connection\n")
         assert _forbidden_edges({source: imports}) == []
@@ -404,6 +410,8 @@ class TestCheckerDetectsViolations:
             ("camctl.operations.availability_owner", "camctl.persistence.business", "SharedSave", "BusinessDatabase"),
             ("camctl.operations.availability", "camctl.scheduling.notifications", "WakeReason", "WorkNotifier"),
             ("camctl.outputs.withdrawal", "camctl.persistence.runtime", "canonical_directory_binding", "open_existing"),
+            ("camctl.history.bounded", "camctl.persistence.transaction_data", "encode_json_value", "decode_json_value"),
+            ("camctl.operations.availability_rules", "camctl.devices.drivers.hasselblad.definitions", "DRIVER_ID", "other"),
         ):
             imports = _imported_modules(source, f"from {module} import {allowed} as port, {forbidden} as other\n")
             violations = _forbidden_edges({source: imports})
@@ -414,6 +422,12 @@ class TestCheckerDetectsViolations:
             ("camctl.operations.availability_owner", "from camctl.persistence.repositories.operations import OperationRepository\n"),
             ("camctl.operations.fake", "from camctl.persistence.business import SharedSave\n"),
             ("camctl.outputs.withdrawal", "import camctl.persistence.runtime.open_existing as connect\n"),
+            ("camctl.history.bounded", "import camctl.persistence.transaction_data as storage\n"),
+            ("camctl.history.fake", "from camctl.persistence.transaction_data import encode_json_value\n"),
+            ("camctl.operations.availability_rules", "import camctl.devices.drivers.hasselblad.definitions as definitions\n"),
+            ("camctl.operations.fake", "from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID\n"),
+            ("camctl.operations.availability_rules", "from camctl.devices.drivers.hasselblad.driver import HasselbladDriver\n"),
+            ("camctl.operations.availability_rules", "from camctl.persistence.repositories.transactions import commit_operation\n"),
         ):
             assert _forbidden_edges({source: _imported_modules(source, dependency)})
 
