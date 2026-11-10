@@ -4317,6 +4317,38 @@ async def _local_recording_listing(runtime: CaptureRuntime, action):
     return listing
 
 
+async def _saved_recording_media_listing(runtime: CaptureRuntime, action, processing):
+    """预算用尽时，先用原可靠结果推进已固定原片的媒体责任。"""
+    if (action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+            or action["cancel_requested"] or action["status"] in _ACTION_TERMINAL
+            or processing[6] is None or not _media_responsibility_open(processing)):
+        return None
+    activity_id = await _activity_id_of(runtime, action["id"])
+    def read(owned):
+        with closing(owned.connection.execute(
+            "SELECT r.status,r.attempts_used,r.max_attempts_used,t.status,t.result_event_id,"
+            "f.source_action_id,f.completion_state,f.identity_key"
+            " FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
+            " JOIN device_files f ON f.id=?"
+            " WHERE r.responsibility_key=? ORDER BY t.attempt_no DESC LIMIT 1",
+            (processing[6], f"results/{activity_id}"))) as cursor:
+            return cursor.fetchone()
+    facts = await runtime.database.read(read, description="读取已保存的录像媒体来源")
+    if (facts is None or facts[0] != int(_RUN_STATUS.ACTIVE) or facts[1] < facts[2]
+            or facts[3] != int(_ATTEMPT_STATUS.SUCCEEDED) or facts[4] is None
+            or facts[5] != action["id"]
+            or facts[6] != int(enum_for("device_files.completion_state").COMPLETE)):
+        return None
+    listing = await _saved_result_listing(runtime, action["id"])
+    from camctl.capture.files import file_identity_key
+    if not await any_result(entry.complete and entry.kind is FileKind.VIDEO
+            and entry.paired_identity is None
+            and file_identity_key(action["device_id"], action["driver_id"], entry.identity) == facts[7]
+            async for entry in iter_result_entries(listing.entries)):
+        return None
+    return listing
+
+
 async def _save_source_file(
     runtime: CaptureRuntime, processing_id: int, source_file_id: int) -> None:
     """首次把可靠原片归属到处理行；媒体链读取资格以此对齐。"""
@@ -4847,6 +4879,8 @@ async def _advance_recording_outcome(
             listing = (await _saved_result_listing(context, action_id))
     else:
         listing = (await _local_recording_listing(context, action))
+        if listing is None:
+            listing = await _saved_recording_media_listing(context, action, row)
         if listing is None:
             listing = await _listing_round(context, action_id)
         action = (await context.action(action_id))
