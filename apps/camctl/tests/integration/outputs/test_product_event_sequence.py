@@ -14,7 +14,7 @@ from camctl.history.reads import PlanReadScope, ProductReadScope
 from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     commit_operation, event_envelope, row_change, row_facts, update_change,
 )
 

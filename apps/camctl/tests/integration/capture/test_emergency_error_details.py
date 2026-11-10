@@ -18,7 +18,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
     ActivityReleaseSave, CaptureRepository, ReleaseOutcome,
 )
-from camctl.persistence.transaction import TransactionError, saved_transaction_events
+from camctl.persistence.repositories.transactions import TransactionError, saved_transaction_events
 
 from .result_consumer_fixtures import consumer_world
 from .test_emergency import _NOW, _SESSION, _attempt, _stop_observation

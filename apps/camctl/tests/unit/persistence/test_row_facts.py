@@ -7,7 +7,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence import transaction
+from camctl.persistence import transaction_data as transaction
 
 
 @pytest.fixture

@@ -40,7 +40,7 @@ from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.operations.models import ErrorValue
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcomeKind, db_failure
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 __all__ = [
     "ApplyCancel",

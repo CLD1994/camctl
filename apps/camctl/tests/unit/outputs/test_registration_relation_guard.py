@@ -7,7 +7,7 @@ import pytest
 
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
-from camctl.persistence.transaction import row_change
+from camctl.persistence.repositories.transactions import row_change
 
 from .test_registration_source_guard import _registration, _repair_reader, output_guard
 

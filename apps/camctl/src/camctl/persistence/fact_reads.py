@@ -170,7 +170,7 @@ def read_transaction(connection, transaction_id):
     cached = _cached(state, key)
     if cached is not None:
         return cached
-    from camctl.persistence.transaction import _load_transaction_range
+    from camctl.persistence.history_transactions import _load_transaction_range
     value = _load_transaction_range(connection, transaction_id, None)
     if state is not None and value.last_event_id > state.boundary.last_event_id:
         raise ConsistencyError('历史事务末位越过操作开始时的C0')

@@ -15,7 +15,7 @@ from camctl.operations.models import ErrorValue
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import event_envelope, row_facts, update_change
+from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
 
 from .test_record_file_completion_wait import (
     _completed_result, _completion, _stop_context,

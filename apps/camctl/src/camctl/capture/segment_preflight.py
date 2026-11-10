@@ -4,7 +4,7 @@ from camctl.capture.segment_models import CompletionFacts, EvidenceState, Segmen
 from camctl.capture.segment_storage import SegmentSourceKind
 from camctl.capture.segments import advance_segment_assessment, finish_segment_assessment
 from camctl.persistence.repositories.segment_listing import ordered_listing_members
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 async def assess_current_listing(runtime, action, listing, control, overrun):

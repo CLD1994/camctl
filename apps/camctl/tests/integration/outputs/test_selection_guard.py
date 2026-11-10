@@ -11,7 +11,7 @@ from camctl.history.validators import EventValidationError
 from ..support.output_planning import EventSequence, capture_operation, validate_static_event as validate_event
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import commit_operation, row_facts
+from camctl.persistence.repositories.transactions import commit_operation, row_facts
 
 from .test_catalog_integrity import selection_database
 from .test_output_family import family_database

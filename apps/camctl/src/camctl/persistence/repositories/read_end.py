@@ -9,7 +9,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, Ut
 from camctl.devices.read_session import ReadEnd
 from camctl.history.events import reason_for_branch
 from camctl.history.validators import EventValidationError
-from camctl.persistence.transaction import (CommandPlan, commit_operation, event_envelope,
+from camctl.persistence.repositories.transactions import (CommandPlan, commit_operation, event_envelope,
     row_facts, saved_transaction_events, update_change)
 
 

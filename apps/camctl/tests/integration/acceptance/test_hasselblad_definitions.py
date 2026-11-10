@@ -29,7 +29,7 @@ from camctl.devices.drivers.hasselblad.definitions import (
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import encode_json_value, row_facts
+from camctl.persistence.repositories.transactions import encode_json_value, row_facts
 from .test_acceptance import RealFileReader, _NOW, _plan_body
 from .test_fields import _action_facts
 from ..persistence.test_runtime import _create_valid_database

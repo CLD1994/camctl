@@ -10,7 +10,7 @@ from camctl.history import bounded, validators
 from camctl.history.bounded import SegmentHistoryHandle
 from camctl.persistence import row_validation
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 
 @pytest.fixture

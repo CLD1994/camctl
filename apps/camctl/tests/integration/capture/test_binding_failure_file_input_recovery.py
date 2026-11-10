@@ -20,7 +20,7 @@ from camctl.persistence.repositories.acceptance import AcceptanceRepository, Pro
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.capture import CaptureRepository, FinishDisposition
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from .result_consumer_fixtures import ResultCatalog
 from .test_binding_failure_keeps_timelapse_files import (

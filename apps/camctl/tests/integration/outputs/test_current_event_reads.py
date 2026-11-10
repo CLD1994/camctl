@@ -14,7 +14,7 @@ from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.repositories.outputs import OutputsRepository
 from ..support.output_planning import capture_operation, EventSequence
 from ..support.output_storage_cases import QueryProbe, grant_candidate
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     event_envelope,
     row_change,
     row_facts,

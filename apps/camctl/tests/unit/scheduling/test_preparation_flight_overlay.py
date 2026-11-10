@@ -30,7 +30,7 @@ def reader_module(monkeypatch):
     capture_facts.preparation_calls_resolved = lambda *args, **kwargs: True
     hasselblad = ModuleType("camctl.devices.drivers.hasselblad.definitions")
     hasselblad.DRIVER_ID = "hasselblad_cfv100c"
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, identity: connection.rows.get((table, identity))
     path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/preparation.py"
     spec = importlib.util.spec_from_file_location("camctl.persistence.repositories._flight_test", path)

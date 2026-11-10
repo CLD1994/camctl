@@ -127,7 +127,7 @@ from camctl.persistence.repositories.scheduling import (
 from camctl.operations.models import AttemptStatus, AttemptTicket, EffectState, ErrorValue
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     TransactionAllocations,
     TransactionError,

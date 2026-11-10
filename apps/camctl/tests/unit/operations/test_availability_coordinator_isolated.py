@@ -430,7 +430,7 @@ def test_open_check_compares_product_as_well_as_resource_key(coordinator_module,
         @property
         def resource_key(self): return self.serial
     identity_api.CameraIdentity = Identity
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, ident: {
         "expected_identity_json": {"serial": fixed[0], "product_id": fixed[1]}, "resource_key": fixed[0]}
     monkeypatch.setitem(sys.modules, identity_api.__name__, identity_api)
@@ -468,7 +468,7 @@ def test_read_check_discovery_uses_complete_source_identity(coordinator_module, 
         @property
         def resource_key(self): return self.serial
     identity_api.CameraIdentity = Identity
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, ident: {
         "expected_identity_json": {"serial": "s", "product_id": 10}, "resource_key": "s"}
     monkeypatch.setitem(sys.modules, identity_api.__name__, identity_api)
@@ -512,7 +512,7 @@ def test_released_old_failed_check_does_not_block_new_read(coordinator_module, m
         @property
         def resource_key(self): return self.serial
     identity_api.CameraIdentity = Identity
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, ident: (
         {"expected_identity_json": {"serial": "s", "product_id": 10}, "resource_key": "s"}
         if table == "device_availability_checks" else {"error_json": {"code": "source_device_unavailable"}})
@@ -666,7 +666,7 @@ def test_binding_check_discovery_returns_bounded_pages_without_a_total_limit(coo
         @property
         def resource_key(self): return self.serial
     identity_api.CameraIdentity = Identity
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda connection, table, ident: (
         {"expected_identity_json": {"serial": "s", "product_id": 10}, "resource_key": "s"}
         if table == "device_availability_checks" else {"error_json": {"code": "device_binding_unavailable"}})

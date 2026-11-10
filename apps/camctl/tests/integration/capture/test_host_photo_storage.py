@@ -12,7 +12,7 @@ from camctl.history.host_photo_request import HostPhotoRequestError
 from camctl.outputs.catalog import FileReference, OutputDraft, OutputKind
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
 from camctl.persistence.repositories.outputs import load_output_family, register_outputs_guards
 

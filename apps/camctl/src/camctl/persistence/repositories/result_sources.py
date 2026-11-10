@@ -8,7 +8,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.devices.capture_completion import validate_completion_context, validate_control_confirmation
 from camctl.history.events import load_event_registry
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 class ResultSourceKind(StrEnum):

@@ -18,7 +18,7 @@ def history_stubs(monkeypatch):
     decoding.decode_event_row = lambda row: SimpleNamespace(event_id=row[0], transaction_id=row[1], occurred_at=row[2])
     events = ModuleType("camctl.history.events")
     events.load_event_registry = lambda: {"events": {"CANCEL_CHANGED": {"id": 25}}}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.read_transaction_range = lambda connection, identity: SimpleNamespace(first_event_id=10, last_event_id=12)
     for module in (decoding, events, transaction):
         monkeypatch.setitem(sys.modules, module.__name__, module)
@@ -68,7 +68,7 @@ def test_retirement_requires_exact_saved_read_result(monkeypatch, damage):
         evidence["cancel_event"] = {"event_id": 20}
     elif damage == "unknown_result":
         events[0]["reason"] = 3
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.saved_transaction_events = lambda connection, key: events
     transaction.row_facts = lambda connection, table, identity: attempt if table == "operation_attempts" else run
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
@@ -90,7 +90,7 @@ def test_recovery_loads_original_transaction_identity_and_rejects_different_iden
         {"type": 10, "reason": 3, "body": {"evidence": {"binding_read_finish": {
             "error": error, "cancel_event": None, "current_identity": identity}}, "rows": [{
             "table": "operation_runs", "id": 3, "after": {"values": {"status": 4, "error_json": error}}}]}}]
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.saved_transaction_events = lambda connection, key: events
     transaction.row_facts = lambda connection, table, identity: attempt if table == "operation_attempts" else run
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)

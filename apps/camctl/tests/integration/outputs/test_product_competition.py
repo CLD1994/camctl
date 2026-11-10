@@ -21,7 +21,7 @@ from ..support.output_storage_cases import (
 from ..support.outputs import observed_query
 from ..support.output_planning import capture_operation, EventSequence
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_qualification import (
     qualification_environment, _NOW, _Seedling, _candidate, _seed_action,

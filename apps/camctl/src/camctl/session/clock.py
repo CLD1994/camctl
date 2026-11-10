@@ -15,7 +15,7 @@ from camctl.contracts.clock import ClockPort
 from camctl.contracts.values import OperationKey
 from camctl.history.events import RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
-from camctl.persistence.transaction import CommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
 
 __all__ = [
     "ClockCheck",

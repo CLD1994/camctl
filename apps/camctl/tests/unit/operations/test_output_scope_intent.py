@@ -9,7 +9,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import TransactionRange
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.persistence.repositories.operations import _attempt_intent_guard, _query_configuration_guard
-from camctl.persistence.transaction import event_envelope, row_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change
 
 
 def _intent(**activity_changes):

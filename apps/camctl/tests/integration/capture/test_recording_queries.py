@@ -22,7 +22,7 @@ from camctl.operations.models import (
     Settlement, SettlementBasis,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_recording_start_runtime import (
     _ANCHOR, _NOW, StartDriver, _result,

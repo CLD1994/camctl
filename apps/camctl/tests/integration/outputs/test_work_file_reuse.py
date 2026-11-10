@@ -11,7 +11,7 @@ from camctl.outputs.work_files import (
 )
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 from camctl.persistence.repositories import outputs
 
 from .test_work_files import (

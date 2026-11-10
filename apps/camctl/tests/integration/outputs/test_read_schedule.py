@@ -16,7 +16,7 @@ from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionScope
+from camctl.persistence.repositories.transactions import TransactionScope
 
 from .test_grant_reuse import read_request, _save_grant
 from .test_local_read import local_read

@@ -24,7 +24,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, op
 from camctl.reporting.policy import (
     ReportDecisionKind, ReportingRepository, register_report_guards,
 )
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 from camctl.history.validators import EventValidationError
 
 from ..acceptance.test_acceptance import Catalog

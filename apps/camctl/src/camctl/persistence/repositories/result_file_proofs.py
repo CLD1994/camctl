@@ -14,7 +14,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.events import business_columns
 from camctl.persistence.fact_reads import read_event, read_transaction, _reuse_fixed_file
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from . import result_pages
 
 

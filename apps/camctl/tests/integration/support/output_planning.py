@@ -11,7 +11,7 @@ from camctl.history.events import business_tables_for_format, foreign_key_target
 from camctl.history.reads import ReadCoverage
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
-from camctl.persistence.transaction import CommandPlan, commit_operation, row_facts
+from camctl.persistence.repositories.transactions import CommandPlan, commit_operation, row_facts
 
 
 @dataclass(frozen=True)
@@ -207,7 +207,7 @@ class ScopedEventSequence(EventSequence):
     def plan(self, scope):
         from camctl.history.validators import EventContext
         from camctl.persistence.event_reads import SqlEventReads
-        from camctl.persistence.transaction import BoundedCommandPlan
+        from camctl.persistence.repositories.transactions import BoundedCommandPlan
 
         allocation = scope.allocate(len(self.events))
         events = tuple(replace(event, event_id=allocation.first_event_id + index,

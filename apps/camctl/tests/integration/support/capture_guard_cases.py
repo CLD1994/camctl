@@ -183,7 +183,7 @@ def host_success_event_context(action, occurred_at, *, outputs=None):
     from camctl.history.events import load_event_registry
     from camctl.history.reads import ReadCoverage
     from camctl.history.validators import EventContext
-    from camctl.persistence.transaction import event_envelope, update_change
+    from camctl.persistence.repositories.transactions import event_envelope, update_change
 
     spec = load_event_registry()["events"]["ACTION_FINISHED"]
     event = event_envelope(2, 2, spec["id"], spec["branches"]["SUCCEED"]["reason"],

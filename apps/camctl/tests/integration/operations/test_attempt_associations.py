@@ -11,7 +11,7 @@ from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.transaction import CommandPlan, commit_operation, event_envelope, row_change, row_facts
+from camctl.persistence.repositories.transactions import CommandPlan, commit_operation, event_envelope, row_change, row_facts
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind, QueryPurpose
 from camctl.outputs.batches import BatchOutcome, BatchRequest
 from camctl.outputs.slots import SlotOutcome, SlotRequest
@@ -262,7 +262,7 @@ def test_cleanup_owner_is_checked_before_existing_run_disposition(tmp_path, stag
 
 
 def _add_foreign_activity(connection):
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
 
     _seed_action(connection, 9, 1, action_type=2)
     facts = row_facts(connection, "device_activities", 1)

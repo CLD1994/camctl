@@ -345,7 +345,7 @@ class DbExecutor:
         提交或回滚结果未知时在所属线程关闭连接并返回 None，下一
         项操作重新打开。
         """
-        from camctl.persistence.transaction import write_receipt_for
+        from camctl.persistence.atomic import write_receipt_for
         if job.kind is DbJobKind.READ:
             keep = owned
             try:

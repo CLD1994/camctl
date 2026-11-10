@@ -578,7 +578,7 @@ async def test_published_marker_scope_and_independent_files_remain_at_same_h(tmp
 async def test_snapshot_validation_detects_missing_owned_rows_at_responsible_boundary(tmp_path,removed_table):
     from camctl.history.snapshots import prepare_snapshot
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     owned,runtime,repo,ref,history=await _fixture(tmp_path)
     try:
         boundary=history.current_boundary()
@@ -648,7 +648,7 @@ async def test_disk_failure_closes_partial_handle_and_does_not_change_business(t
 async def test_snapshot_rejects_summary_inconsistent_with_required_members(tmp_path,damage):
     from camctl.history.snapshots import prepare_snapshot
     from camctl.contracts.json_values import parse_exact_json
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     owned,runtime,repo,ref,history=await _fixture(tmp_path)
     try:
         boundary=history.current_boundary()
@@ -822,7 +822,7 @@ async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
     from camctl.capture.segment_models import SegmentSetRef
     from camctl.contracts.history_values import HistoryBoundary
     from camctl.history.snapshots import prepare_snapshot
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     from ..support.segment_history_corpus import generate, verify_output
 
     directory=tmp_path/'world'

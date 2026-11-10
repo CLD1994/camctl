@@ -155,7 +155,7 @@ def load_repository():
         'camctl.outputs.copy', 'camctl.outputs.handoff', 'camctl.outputs.work_files',
         'camctl.outputs.definitions', 'camctl.outputs.obtain_summary', 'camctl.outputs.sources',
         'camctl.persistence.models', 'camctl.persistence.runtime', 'camctl.persistence.row_history',
-        'camctl.persistence.transaction', 'camctl.contracts.workflow_errors',
+        'camctl.persistence.repositories.transactions', 'camctl.contracts.workflow_errors',
         'camctl.outputs.qualification', 'camctl.outputs.slots', 'camctl.scheduling.order')
     modules = {}
     for name in names:
@@ -181,8 +181,8 @@ def load_repository():
     modules['camctl.outputs.read_discovery'].DEFAULT_BATCH_SIZE = 32
     modules['camctl.outputs.read_discovery'].positive_limit = lambda value: value
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
-    modules['camctl.persistence.transaction'].TransactionError = type('TransactionError', (Exception,), {})
-    modules['camctl.persistence.transaction'].update_change = lambda table, identity, before, after: (table, identity, before, after)
+    modules['camctl.persistence.repositories.transactions'].TransactionError = type('TransactionError', (Exception,), {})
+    modules['camctl.persistence.repositories.transactions'].update_change = lambda table, identity, before, after: (table, identity, before, after)
     name = 'camctl.persistence.repositories._isolated_cancel_outputs'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/persistence/repositories/outputs.py')
     module = importlib.util.module_from_spec(spec)
@@ -463,7 +463,7 @@ class CancelSettlementTests(unittest.TestCase):
 def load_settlement():
     names = ('camctl.persistence.models', 'camctl.cancellation.service', 'camctl.cancellation.ports',
         'camctl.contracts.enums', 'camctl.contracts.values', 'camctl.persistence.business',
-        'camctl.persistence.repositories.capture_facts', 'camctl.persistence.transaction',
+        'camctl.persistence.repositories.capture_facts', 'camctl.persistence.repositories.transactions',
         'camctl.outputs.withdrawal')
     modules = {}
     for name in names:

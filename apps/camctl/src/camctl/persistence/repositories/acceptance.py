@@ -39,7 +39,7 @@ from camctl.reporting.ack import (
     AckFacts, AckInput, AckReport, SyncResponsibility,
     AckDisposition as ReportAckDisposition, decide_ack, qualifies_sync,
 )
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     TransactionError,
     commit_operation,
@@ -79,7 +79,7 @@ def _row(table: str, row_id: int, values: dict) -> RowChange:
 
 
 def _update(table: str, row_id: int, before: dict, after: dict) -> RowChange:
-    from camctl.persistence.transaction import update_change
+    from camctl.persistence.repositories.transactions import update_change
 
     return update_change(table, row_id, before, after)
 

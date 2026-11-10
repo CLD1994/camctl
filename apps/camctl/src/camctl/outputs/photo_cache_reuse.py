@@ -9,7 +9,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.history.photo_cache_request import parse_photo_cache_request
 from camctl.history.validators import validate_event_structure
 from camctl.persistence.fact_reads import iter_transaction_events, read_event
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.outputs.segment_copy_reuse import _read_scope, _selection_is_bound_at_boundary
 
 

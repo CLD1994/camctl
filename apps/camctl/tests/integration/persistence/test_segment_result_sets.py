@@ -8,7 +8,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository,register_segment_guards
 from camctl.persistence.repositories import segments as segment_storage
 from .transaction_fixtures import capture_operation_command
-from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
+from camctl.persistence.repositories.transactions import BoundedCommandPlan,commit_operation
 from camctl.history.validators import EventContext
 
 from .test_segment_file_proofs import _boundary
@@ -681,7 +681,7 @@ def _strict_scan_proposal(owned,runtime,repository,ref,strict,kind,payload,input
     from camctl.capture.segment_storage import document
     from camctl.history.decoding import decode_event_row
     from camctl.history.events import load_event_registry
-    from camctl.persistence.transaction import update_change
+    from camctl.persistence.repositories.transactions import update_change
     if kind=='ASSESS':
         # 已由公开FIX_RESULT_MEMBERS保存的真实单事件提供格式与所属对象。
         raw=owned.connection.execute('SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events ORDER BY id DESC LIMIT 1').fetchone()

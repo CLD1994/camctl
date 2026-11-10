@@ -36,7 +36,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_local_read import local_read  # noqa: F401  主机源建档夹具
 from .test_qualification import _NOW

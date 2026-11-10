@@ -16,7 +16,7 @@ from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.fact_reads import (
     opened_operation_fact_scope, read_event, read_operation_transaction, read_transaction,
 )
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, TransactionError, event_envelope, next_row_id, read_transaction_range,
     row_change, row_facts, update_change,
 )

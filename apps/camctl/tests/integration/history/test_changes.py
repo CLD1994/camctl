@@ -15,7 +15,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-from camctl.persistence.transaction import CommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
 
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import PlanCreateCommand, PlanStartCommand, plan_guards
@@ -189,7 +189,7 @@ class TestReplayMatchesStoredProjection:
         connection = owned.connection
         try:
             from camctl.contracts.values import new_operation_key
-            from camctl.persistence.transaction import commit_operation
+            from camctl.persistence.repositories.transactions import commit_operation
 
             assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
             assert commit_operation(
@@ -273,7 +273,7 @@ class TestReplayMatchesStoredProjection:
 @pytest.mark.parametrize("bounded", [False, True])
 @pytest.mark.parametrize("rollback", [False, True])
 def test_status_directory_is_atomic_in_both_transaction_paths(tmp_path, plan_guards, bounded, rollback):
-    from camctl.persistence.transaction import BoundedCommandPlan
+    from camctl.persistence.repositories.transactions import BoundedCommandPlan
     from camctl.history.validators import EventContext
     from ..persistence.test_transactions import FailingConnection
     _create_valid_database(tmp_path / "state.db")

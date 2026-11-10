@@ -13,7 +13,7 @@ from camctl.persistence.repositories import capture as capture_repository
 from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.history.validators import EventContext
-from camctl.persistence.transaction import BoundedCommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import BoundedCommandPlan, commit_operation
 
 from .transaction_fixtures import capture_operation_command
 from ..capture.test_baseline_history import _activity, _fix, _ref
@@ -271,7 +271,7 @@ async def test_return_group_is_complete_in_both_entrypoints(owned,tmp_path,bound
                 events=events[1:]
             elif mutation=='replace_return':
                 from camctl.persistence.repositories.baseline import append_event
-                from camctl.persistence.transaction import row_facts
+                from camctl.persistence.repositories.transactions import row_facts
                 activity=row_facts(scope.connection,'device_activities',intent.activity_id)
                 activity={**activity,**events[0].rows[0].after.values}
                 replacement=append_event(models.BaselineChunkSave(intent.activity_id,2,
@@ -508,7 +508,7 @@ async def test_unknown_cannot_replace_an_actual_return(owned,tmp_path):
 async def test_unknown_guard_checks_original_call_and_unique_group(owned,tmp_path,bounded,mutation):
     from camctl.capture import baseline_models as models
     from camctl.history.validators import validate_event_structure
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     intent=await _intent(owned,tmp_path)
     capture=CaptureRepository()
     first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
@@ -568,7 +568,7 @@ async def test_unknown_cannot_include_an_actual_baseline_chunk(owned,tmp_path,bo
     from camctl.capture import baseline_models as models
     from camctl.persistence.repositories.baseline import append_event
     from ..support.output_planning import capture_operation
-    from camctl.persistence.transaction import CommandPlan,row_facts
+    from camctl.persistence.repositories.transactions import CommandPlan,row_facts
     from camctl.history.reads import BaselineReadWriteScope
     from ..capture.test_baseline_history import _entries
     intent=await _intent(owned,tmp_path)

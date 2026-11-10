@@ -36,7 +36,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
 from camctl.devices.drivers.adb_cameras.action6_formats import format_for_suffix
 from camctl.persistence.repositories.segments import SegmentRepository, _eligible_original
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 @dataclass(frozen=True, slots=True)

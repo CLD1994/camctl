@@ -11,7 +11,7 @@ from camctl.history.events import load_event_registry
 from camctl.history.validators import EventContext
 from camctl.operations.attempts import RunFinish, RunOutcome
 from camctl.operations.models import ErrorValue
-from camctl.persistence.transaction import (BoundedCommandPlan, CommandPlan, commit_operation,
+from camctl.persistence.repositories.transactions import (BoundedCommandPlan, CommandPlan, commit_operation,
     event_envelope, row_facts, update_change, read_saved_transaction_page, read_transaction_range)
 from .availability_target import AvailabilityTargetBlocked, iter_fixed_targets, iter_release_targets
 from .availability_observation import require_saved_availability

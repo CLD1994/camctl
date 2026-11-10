@@ -8,7 +8,7 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.outputs.read_attempts import run_owned_read, save_read_business, settle_canceled_read
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.repositories.outputs import OutputsRepository, _canceled_binding_processing_settled
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 def _candidate(owned, action_id):

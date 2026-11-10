@@ -18,7 +18,7 @@ from camctl.history.validators import EventContext
 from camctl.persistence.repositories import result_pages
 from camctl.persistence.repositories import capture as capture_storage
 from .transaction_fixtures import capture_operation_command
-from camctl.persistence.transaction import BoundedCommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import BoundedCommandPlan, commit_operation
 
 from .test_segment_storage import SegmentedCatalog
 from .test_segment_file_pairing import _entry, _ok

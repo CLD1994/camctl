@@ -13,7 +13,7 @@ from camctl.devices.drivers.adb_cameras.action6_record import action6_record_con
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.process import LocalExit, RawToolOutcome
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards

@@ -20,7 +20,7 @@ from camctl.devices.file_identity import FileIdentity
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.operations.models import AttemptTicket
-from camctl.persistence.transaction import (CommandPlan, TransactionError,
+from camctl.persistence.repositories.transactions import (CommandPlan, TransactionError,
     event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
     saved_transaction_events, update_change)
 from camctl.persistence.row_history import read_row_values_at_boundary

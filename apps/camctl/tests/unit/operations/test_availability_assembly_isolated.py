@@ -62,7 +62,7 @@ def assembly(monkeypatch):
     stub("camctl.operations.availability", AvailabilityProgress=Progress)
     stub("camctl.persistence.repositories.availability_create", CreateAvailabilityCheck=Request)
     stub("camctl.persistence.repositories.retry_wait_reads", held_read_ready_for_availability=lambda *args: False)
-    stub("camctl.persistence.transaction", row_facts=lambda connection, table, identity: connection.source)
+    stub("camctl.persistence.repositories.transactions", row_facts=lambda connection, table, identity: connection.source)
     stub("camctl.capture.preparation", effective_preparation_lead_s=lambda runtime, action: Decimal("4"))
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)

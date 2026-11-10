@@ -23,7 +23,7 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture_facts import load_start_facts
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 __all__ = ["TargetSettlement"]
 

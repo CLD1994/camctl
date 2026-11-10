@@ -25,7 +25,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.reporting.encoding import ReportDocument, encode_report, iter_report_chunks
 from camctl.reporting.policy import ReportingRepository, register_report_guards
 

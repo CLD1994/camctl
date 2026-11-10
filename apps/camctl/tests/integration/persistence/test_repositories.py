@@ -19,7 +19,7 @@ from camctl.contracts.history_values import HistoryBoundary, ReadOrder, ReadScop
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_transactions import PlanCreateCommand, _open, plan_guards
 from .test_runtime import _create_valid_database

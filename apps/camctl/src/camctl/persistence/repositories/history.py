@@ -73,7 +73,7 @@ from camctl.persistence.runtime import (
     verify_directory_binding,
 )
 from camctl.persistence.row_validation import ProjectionRowValidator
-from camctl.persistence.transaction import read_transaction_range as _transaction_range
+from camctl.persistence.repositories.transactions import read_transaction_range as _transaction_range
 
 __all__ = ["HistoryRepository", "SqliteSnapshotStore"]
 

@@ -354,7 +354,7 @@ async def test_new_result_attempt_keeps_previous_interrupted_scan_separate(tmp_p
 
 
 async def test_page_range_forward_reverse_and_snapshot_restore_same_state(tmp_path):
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
 
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
@@ -458,7 +458,7 @@ def _entity_events(connection, entity_type: int, entity_id: int):
 async def test_page_created_files_and_catalog_restore_from_three_paths(tmp_path):
     """真实结果页生产者建立的新文件、设备文件及页目录三路径恢复一致。"""
     from camctl.contracts.enums import load_registry
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
 
     file_type = load_registry()["history_objects"]["device_file"]["id"]
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")

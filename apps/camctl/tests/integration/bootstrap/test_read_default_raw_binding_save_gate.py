@@ -14,7 +14,7 @@ from camctl.devices.bindings import check_binding
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 from ..capture.test_input_copy import _CONTENT

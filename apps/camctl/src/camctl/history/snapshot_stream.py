@@ -10,7 +10,7 @@ from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.events import load_event_registry
 from camctl.history.snapshots import CHUNK_BYTES, FORMAT_VERSION, SnapshotMaintenanceError
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 
 @dataclass(frozen=True)

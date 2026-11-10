@@ -28,7 +28,7 @@ def api(monkeypatch):
     tasks.AsyncFileTask = tasks.FileTaskError = tasks.FileTaskExecutor = tasks.FileTaskId = object
     row_history = ModuleType("camctl.persistence.row_history")
     row_history.read_row_values_at_boundary = lambda *args, **kwargs: {"status": kwargs["current_values"]["at_h"]}
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     states = {"actions": {"type": 5, "created_event_id": 3, "at_h": 2},
               "obtain_source_selections": {"dependency_id": 4, "at_h": 1}}
     transaction.row_facts = lambda connection, table, identity: states[table]

@@ -9,7 +9,7 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.snapshots import prepare_snapshot
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 from .test_record_segment_history import (
     _fixture,
     _save,

@@ -17,7 +17,7 @@ from camctl.outputs.copy import SourceDigest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.segment_inspections import SegmentInspectionRepository
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..support.segment_inspection_cases import CONTENT as _CONTENT, inspection_source
 from ..support.bootstrap_consumers import TransactionFault

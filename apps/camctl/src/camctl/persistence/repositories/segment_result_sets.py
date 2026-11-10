@@ -14,7 +14,7 @@ from camctl.history.events import load_event_registry
 from camctl.history.events import business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,event_envelope,next_row_id,read_transaction_range,row_change,row_facts,
     saved_transaction_events)
 

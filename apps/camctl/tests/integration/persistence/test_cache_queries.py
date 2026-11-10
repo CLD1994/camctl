@@ -24,7 +24,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.events import load_event_registry
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.runtime import expected_table_names
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_repositories import _seed_transactions
 from .test_transactions import _open, plan_guards

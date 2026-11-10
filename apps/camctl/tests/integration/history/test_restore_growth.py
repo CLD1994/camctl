@@ -37,7 +37,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from ..persistence.test_motor_transactions import NOW, owned
 from .test_restore_paths import file_world

@@ -28,7 +28,7 @@ from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.capture import CaptureRepository, ActivityObservationSave
 from camctl.persistence.repositories.scheduling import SchedulingRepository, GrantRequest, GrantOutcome
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.scheduling.rules import LaunchWindow
 
 from ..capture.test_host_photo_flow import _world, _input_time, _ManagedCaptureTransport, _configured_identity

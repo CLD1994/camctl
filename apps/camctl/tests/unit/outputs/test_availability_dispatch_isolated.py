@@ -45,7 +45,7 @@ def read_module(monkeypatch):
     discovery.read_copy_dispatch_eligible = lambda *args: True
     definitions = stub("camctl.devices.drivers.hasselblad.definitions", ("DRIVER_ID",))
     definitions.DRIVER_ID = "hasselblad_cfv100c"
-    facts = stub("camctl.persistence.transaction", ("row_facts",))
+    facts = stub("camctl.persistence.repositories.transactions", ("row_facts",))
     facts.row_facts = lambda connection, table, identity: connection.rows[(table, identity)]
     preparation = stub("camctl.persistence.repositories.preparation", ("PreparationReads",))
     preparation.PreparationReads = lambda connection: SimpleNamespace(

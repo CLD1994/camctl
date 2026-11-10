@@ -15,7 +15,7 @@ from camctl.acceptance.input import InputDiagnostic, InputStage, ParsedInput
 from camctl.acceptance.service import AckDisposition, CommandMode, PlanDisposition, ProcessInput
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary, ReadOrder, ReadScope, TransactionRange
 from camctl.history.events import business_columns
@@ -23,7 +23,7 @@ from camctl.history.replay import EntityImage, apply_forward, apply_reverse
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 from camctl.persistence.repositories.acceptance import ProcessInputCommand
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import register_acceptance_guards

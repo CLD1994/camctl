@@ -16,7 +16,7 @@ from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.outputs.qualification import QualificationOutcome
-from camctl.persistence.transaction import TransactionError, commit_operation
+from camctl.persistence.repositories.transactions import TransactionError, commit_operation
 
 from .test_selection_reuse import _save, _reuse, _Advance, selection_database, family_database
 from .test_selection_authority import _request, _snapshot, _NOW

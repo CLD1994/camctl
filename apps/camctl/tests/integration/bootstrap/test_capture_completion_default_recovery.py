@@ -8,7 +8,7 @@ from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..capture.test_capture_completion_save_recovery import completion_method, completion_world
 from ..support.bootstrap_recovery import DefaultRecoveryWorld, StorageGate, TransactionFault

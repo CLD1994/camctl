@@ -12,7 +12,7 @@ from camctl.history.validators import EventValidationError
 from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
 from camctl.history.reads import ReadCoverage
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change,
 )
 

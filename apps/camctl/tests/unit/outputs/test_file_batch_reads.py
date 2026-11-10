@@ -163,7 +163,7 @@ def test_unresolved_cleanup_target_prevents_batch_acquisition():
 def test_query_and_availability_keep_batch_until_original_responsibility_ends(monkeypatch, run):
     import sys
     from types import ModuleType
-    transaction = ModuleType("camctl.persistence.transaction")
+    transaction = ModuleType("camctl.persistence.repositories.transactions")
     transaction.row_facts = lambda _connection, table, identity: {"id": identity, **run}
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     connection = Mock()

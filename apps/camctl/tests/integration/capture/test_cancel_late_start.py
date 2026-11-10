@@ -24,7 +24,7 @@ pytestmark = pytest.mark.asyncio
 
 
 def _cancel(owned, action_id, *, origin_id=50, mode=CancelApplyMode.WITH_STOP, occurred_at=_NOW):
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
 
     origin = row_facts(owned.connection, "actions", action_id)
     origin.update(id=origin_id, name=f"cancel-{origin_id}", input_index=origin_id, type=6, device_id=None,

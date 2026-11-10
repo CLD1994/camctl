@@ -82,7 +82,7 @@ def modules():
     dependencies["camctl.persistence.models"].DbOutcomeKind = SimpleNamespace(
         NOT_EXECUTED=object(), ROLLED_BACK=object(), UNKNOWN=object(), COMPLETED=object())
     dependencies["camctl.operations.error_diagnostics"].exception_diagnostic = _snapshot
-    dependencies["camctl.persistence.transaction"].write_receipt_for = lambda error: None
+    dependencies["camctl.persistence.repositories.transactions"].write_receipt_for = lambda error: None
     dependencies["camctl.session.locks"].lock_error_facts = lambda error: None
     dependencies["camctl.logging_runtime.diagnostics"] = ModuleType("camctl.logging_runtime.diagnostics")
     dependencies["camctl.logging_runtime.diagnostics"].diagnostic_scope = _scope

@@ -11,7 +11,7 @@ from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.acceptance import register_acceptance_guards
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.transaction import BoundedCommandPlan
+from camctl.persistence.repositories.transactions import BoundedCommandPlan
 from camctl.outputs.sources import SourceSpec
 
 from .test_sources import _NOW, _seed_action, _six_form_environment
@@ -303,7 +303,7 @@ async def test_bound_port_from_another_connection_is_rejected(tmp_path,monkeypat
     try:
         request=_request(owned,SourceSpec(plan_instance_id=2))
         before=tuple(owned.connection.iterdump())
-        from camctl.persistence.transaction import commit_operation
+        from camctl.persistence.repositories.transactions import commit_operation
         proposal,key,result=captured_source(owned,request)
         def foreign(context,*_):
             return replace(context,current_reads=SqlEventReads(other.connection,context.current_reads.scope))
@@ -356,7 +356,7 @@ async def test_unknown_commit_recovers_same_source_request_and_ids_after_reopen(
 
 async def test_non_obtain_start_cannot_smuggle_obtain_rows(tmp_path,monkeypatch):
     from camctl.outputs.cleanup_flow import StartCleanupAction
-    from camctl.persistence.transaction import row_change
+    from camctl.persistence.repositories.transactions import row_change
     _,owned=_six_form_environment(tmp_path)
     try:
         _request(owned,SourceSpec(plan_instance_id=2))
@@ -365,7 +365,7 @@ async def test_non_obtain_start_cannot_smuggle_obtain_rows(tmp_path,monkeypatch)
         owned.connection.commit()
         before=tuple(owned.connection.iterdump())
         from ..support.output_planning import capture_operation,EventSequence
-        from camctl.persistence.transaction import commit_operation
+        from camctl.persistence.repositories.transactions import commit_operation
         key=new_operation_key()
         proposal=capture_operation(owned,lambda copy:outputs.OutputsRepository().start_cleanup_action(
             StartCleanupAction(30,_NOW),key,copy))
@@ -617,7 +617,7 @@ async def test_source_write_and_original_key_keep_bounded_pages(tmp_path):
 
 
 async def test_bounded_context_cannot_carry_the_whole_source_plan(tmp_path,monkeypatch):
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     _,owned=_six_form_environment(tmp_path)
     try:
         request=_request(owned,SourceSpec(plan_instance_id=2),count=20)

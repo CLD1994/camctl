@@ -303,7 +303,7 @@ class SqlEventReads:
     def verify_segment_event(self, event, context):
         from camctl.persistence.repositories.segments import verify_segment_event
         from camctl.capture.segment_models import SegmentSetRef
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         if not self.connection.in_transaction:
             raise ConsistencyError('分段守卫只能复核原写事务集合')
         if (self._segment_guard_transaction is None
@@ -325,7 +325,7 @@ class SqlEventReads:
 
     def verify_result_run_open(self,run_id,action_id):
         from camctl.persistence.repositories.segment_result_sets import result_run_has_set
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         action=row_facts(self.connection,'actions',action_id)
         if (not isinstance(self.scope,PlanReadScope) or action is None
                 or action['plan_id']!=self.scope.plan_id or result_run_has_set(self.connection,run_id)):
@@ -350,7 +350,7 @@ class SqlEventReads:
     def prepare_segment_finish(self,event,transaction,header,qualification,facts):
         if self._segment_guard_state is None or self._segment_guard_transaction!=transaction:
             raise ConsistencyError('分段F没有唯一事务内核绑定的原组进度')
-        from camctl.persistence.transaction import encode_json_value
+        from camctl.persistence.repositories.transactions import encode_json_value
         self._segment_guard_state.pop('accepted',None)
         self._segment_guard_state['pending']=(self.scope,transaction,event,
             encode_json_value(header),MappingProxyType(dict(qualification)),facts)
@@ -495,7 +495,7 @@ class SqlEventReads:
         return found
 
     def validated_segment_finish(self,transaction,header):
-        from camctl.persistence.transaction import encode_json_value
+        from camctl.persistence.repositories.transactions import encode_json_value
         proof=None if self._segment_guard_state is None else self._segment_guard_state.get('accepted')
         if (not isinstance(proof,_ValidatedSegmentFinish) or proof.scope!=self.scope or proof.transaction!=transaction
                 or proof.first_event_id!=transaction.first_event_id or proof.header!=encode_json_value(header)):
@@ -504,7 +504,7 @@ class SqlEventReads:
 
     def admitted_source_owner(self, owner_id, transaction):
         """原 F 前不存在，且已由内核实际接受的 ACTION_ADMITTED 创建。"""
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         from camctl.history.events import load_event_registry
         from camctl.history.decoding import decode_event_row
         if (type(self.scope) is not AdmissionSourceReadScope or not self.connection.in_transaction
@@ -541,7 +541,7 @@ class SqlEventReads:
     def admitted_source_members(self, owner, transaction):
         """只从实际受理前序按原 source 逐项解释预期成员。"""
         from camctl.outputs.sources import read_source_spec, _CAPTURE_TYPES
-        from camctl.persistence.transaction import encode_json_value, row_facts
+        from camctl.persistence.repositories.transactions import encode_json_value, row_facts
         spec = read_source_spec(encode_json_value(owner['input_fields_json']))
         if spec.action_instance_id is not None or spec.plan_instance_id is not None:
             raise ConsistencyError('实例来源不属于受理时的本计划成员分区')
@@ -597,7 +597,7 @@ class SqlEventReads:
 
     def optional(self, table, identity, columns=None):
         self._check(table, identity=identity)
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
 
         if columns is None:
             facts = row_facts(self.connection, table, identity)
@@ -625,7 +625,7 @@ class SqlEventReads:
     def result_pages(self, ticket, cursor, batch):
         """只读取原单次扫描的已保存页及本批文件，不扩大历史上界。"""
         from camctl.persistence.repositories.result_pages import read_pages, result_responsibility
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
 
         scope = self.scope
         if (not isinstance(scope, CaptureResultReadScope) or not self.connection.in_transaction

@@ -9,7 +9,7 @@ from camctl.devices.drivers.hasselblad.files import camera_file_identity_from_so
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.operations.availability import AvailabilityProgress
 from camctl.persistence.repositories.availability_create import CreateAvailabilityCheck
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 class AvailabilityAssembly:

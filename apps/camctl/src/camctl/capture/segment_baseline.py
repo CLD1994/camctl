@@ -81,7 +81,7 @@ async def _prepare_segment_baseline(action_id, activity_id, runtime):
         PreparationPhase,
         resume_baseline_save,
     )
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     from camctl.persistence.repositories.segment_result_sets import _boundary
     from camctl.devices.bindings import DeviceBinding
     from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase

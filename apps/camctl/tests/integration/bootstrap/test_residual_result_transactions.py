@@ -6,7 +6,7 @@ import json
 import pytest
 
 from camctl.devices.bindings import DeviceBinding
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from ..support.bootstrap_residual_recovery import residual_case
 

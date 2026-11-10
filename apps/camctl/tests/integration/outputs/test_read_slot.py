@@ -21,7 +21,7 @@ from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from .test_local_read import local_read  # noqa: F401  主机源建档夹具
 from .test_qualification import _NOW, _seed_selection_and_item

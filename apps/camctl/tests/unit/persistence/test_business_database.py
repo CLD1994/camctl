@@ -142,7 +142,7 @@ async def test_required_phase_inner_cancellation_ends_wait():
 async def test_required_actual_control_error_preserves_original_receipts(error_type, cancel_count):
     from camctl.persistence.business import settle_required
     from camctl.persistence.models import _attach_db_outcome, db_outcome_for
-    from camctl.persistence.transaction import WriteReceipt, _attach_write_receipt, write_receipt_for
+    from camctl.persistence.repositories.transactions import WriteReceipt, _attach_write_receipt, write_receipt_for
 
     entered, release = asyncio.Event(), asyncio.Event()
     actual = error_type("实际保存控制错误")
@@ -234,7 +234,7 @@ async def test_write_cancel_withdraws_unstarted_job_and_attaches_not_executed(po
 async def test_write_delivery_race_retains_original_future_and_typed_receipt(ports):
     from camctl.persistence.business import BusinessDatabase
     from camctl.persistence.models import DbExecutorError, db_outcome_for
-    from camctl.persistence.transaction import WriteReceipt, _attach_write_receipt, write_receipt_for
+    from camctl.persistence.repositories.transactions import WriteReceipt, _attach_write_receipt, write_receipt_for
     executor, owned = ports
     future = asyncio.get_running_loop().create_future()
     executor.submit_write.return_value = future

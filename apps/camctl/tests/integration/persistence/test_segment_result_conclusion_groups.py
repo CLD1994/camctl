@@ -16,7 +16,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories import segments as segment_storage
 from .transaction_fixtures import capture_operation_command
-from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
+from camctl.persistence.repositories.transactions import BoundedCommandPlan,commit_operation
 
 from .test_segment_check_conclusions import _ok
 from .test_segment_file_proofs import _boundary

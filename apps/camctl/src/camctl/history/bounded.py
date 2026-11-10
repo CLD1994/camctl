@@ -18,7 +18,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.history.events import business_columns, foreign_key_targets, load_event_registry
 from camctl.history.replay import reverse_row_values
 from camctl.history.snapshots import SnapshotRow
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.transaction_data import encode_json_value
 from camctl.persistence.derived_storage import configure_derived_connection
 
 

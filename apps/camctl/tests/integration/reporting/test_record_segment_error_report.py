@@ -9,7 +9,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import validate_public_json
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.history import HistoryRepository

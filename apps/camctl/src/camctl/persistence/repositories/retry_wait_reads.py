@@ -162,7 +162,7 @@ class RetryWaitReads:
         last = self.last_attempt(run_id, attempts_used)
         if last is None or last[1] != int(enum_for("operation_attempts.status").UNKNOWN):
             return None
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         from camctl.operations.result_format import read_result_document
         from camctl.operations.models import AttemptStatus, EffectState, SettlementBasis
         attempt = row_facts(self.connection, "operation_attempts", last[0])

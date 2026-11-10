@@ -55,7 +55,7 @@ def preparation_module(monkeypatch):
     stub("camctl.persistence.repositories.operations", OperationRepository=object)
     stub("camctl.persistence.repositories.capture", CaptureRepository=object)
     stub("camctl.persistence.repositories.scheduling", SchedulingRepository=object)
-    stub("camctl.persistence.transaction", row_facts=object())
+    stub("camctl.persistence.repositories.transactions", row_facts=object())
     source = find_spec("camctl.capture.preparation")
     spec = spec_from_file_location("camctl.capture._isolated_binding_diagnostic", source.origin)
     module = module_from_spec(spec)

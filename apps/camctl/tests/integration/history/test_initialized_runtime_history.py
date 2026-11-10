@@ -15,7 +15,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.session import SessionRepository
 from camctl.persistence.runtime import DatabaseInvalidError
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.session.clock import ClockCheck, ClockTrustStatus, register_clock_guard
 
 from ..persistence.test_motor_transactions import NOW, _admit, owned

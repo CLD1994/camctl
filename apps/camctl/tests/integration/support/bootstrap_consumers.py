@@ -437,7 +437,7 @@ def save_legacy_capture_cancel(world, *, occurred_at):
     守卫和实际事务。此输入不表示当前复合完成入口会留下这种状态。
     """
     from camctl.persistence.repositories.capture import CaptureRepository, FinishCanceledCapture
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from .output_planning import capture_operation, EventSequence
 
     key = new_operation_key()
@@ -457,7 +457,7 @@ async def held_default_read(pipeline, resources, monkeypatch, stage, after_commi
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories.operations import OperationRepository
     from camctl.persistence.repositories import read_end
-    from camctl.persistence.transaction import saved_transaction_events
+    from camctl.persistence.repositories.transactions import saved_transaction_events
 
     world = ConsumerWorld(pipeline, resources)
     if stage == "end":

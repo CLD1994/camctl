@@ -105,7 +105,7 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source,
     if not device_source and slot is not None:
         raise ConsistencyError("主机源读取不能持有相机机会")
     if device_source:
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         source = row_facts(owned.connection, "device_files", source_id)
         if source is None:

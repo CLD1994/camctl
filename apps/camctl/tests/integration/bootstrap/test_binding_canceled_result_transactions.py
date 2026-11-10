@@ -14,7 +14,7 @@ from camctl.persistence.repositories.capture import (
     CaptureRepository, FinishBindingFailure, FinishCanceledCapture,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 from ..capture.test_capture_contract import _NOW
 from ..operations.test_result_reuse import _FaultConnection

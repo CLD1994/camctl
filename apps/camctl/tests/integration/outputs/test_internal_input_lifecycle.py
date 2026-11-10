@@ -15,7 +15,7 @@ from ..support.output_planning import capture_operation, event_case, validate_st
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_read_config import internal_read
 

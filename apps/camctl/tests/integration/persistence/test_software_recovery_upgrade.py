@@ -84,7 +84,7 @@ def test_upgrade_publish_race_preserves_explicit_flag(tmp_path, monkeypatch):
 
 def _record_history(path):
     from camctl.contracts.values import new_operation_key
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert commit_operation(PlanCreateCommand((7,)), new_operation_key(), opened).kind == "completed"

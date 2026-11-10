@@ -37,7 +37,7 @@ def api(monkeypatch):
         "camctl.persistence.models": {"DbOutcome": object, "DbOutcomeKind": object},
         "camctl.persistence.runtime": {"require_host_photo_format": lambda *args: None},
         "camctl.persistence.row_history": {"read_row_values_at_boundary": lambda *args, **kwargs: None},
-        "camctl.persistence.transaction": {name: object for name in ("CommandPlan", "TransactionError", "TransactionScope",
+        "camctl.persistence.repositories.transactions": {name: object for name in ("CommandPlan", "TransactionError", "TransactionScope",
             "commit_operation", "event_envelope", "next_row_id", "row_change", "row_facts", "saved_transaction_events", "update_change")},
     }
     for name, attributes in modules.items():

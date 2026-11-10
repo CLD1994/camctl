@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.contracts.json_values import parse_exact_json
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 __all__ = [
     "EntityImage",

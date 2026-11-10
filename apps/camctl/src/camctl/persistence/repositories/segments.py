@@ -36,7 +36,7 @@ from camctl.history.events import load_event_registry, business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.history.validators import register_guard, EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, commit_operation, event_envelope, next_row_id, row_change, row_facts,
     saved_transaction_events, update_change, TransactionError, read_transaction_range,
 )

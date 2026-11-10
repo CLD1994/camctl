@@ -12,7 +12,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     commit_operation,
     event_envelope,

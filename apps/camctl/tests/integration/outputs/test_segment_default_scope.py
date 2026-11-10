@@ -27,7 +27,7 @@ from camctl.persistence.repositories.segment_selections import (
     fix_segment_selection,
 )
 from camctl.outputs.sources import read_source_spec
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from ..capture.test_record_segment_scope_recovery import (
     _stopped_world,

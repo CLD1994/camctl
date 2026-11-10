@@ -6,7 +6,7 @@ import pytest
 
 from camctl.persistence import business
 from camctl.persistence.models import DbExecutorError, DbOutcome, DbOutcomeKind, _attach_db_outcome, db_outcome_for
-from camctl.persistence.transaction import WriteReceipt, _attach_write_receipt, write_receipt_for
+from camctl.persistence.repositories.transactions import WriteReceipt, _attach_write_receipt, write_receipt_for
 
 pytestmark = pytest.mark.asyncio
 

@@ -24,7 +24,7 @@ from camctl.capture.segments import (
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.devices.capture_timing import CaptureTiming
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .segment_result_sets import _one
 

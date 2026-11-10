@@ -15,7 +15,7 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, commit_operation, event_envelope, row_facts, update_change,
 )
 from camctl.history.validators import EventValidationError
@@ -480,7 +480,7 @@ def test_old_publish_key_returns_original_success_after_later_republication(conn
 def test_management_key_with_invalid_original_group_is_not_reused(connection, tmp_path, operation, invalid):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.contracts.values import ConsistencyError
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
 
     report_id = _freeze_report(tmp_path, connection)
     _before_operation(connection, report_id, operation)

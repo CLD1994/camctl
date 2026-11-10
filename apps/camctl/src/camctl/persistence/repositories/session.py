@@ -16,7 +16,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import OperationKey
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
-from camctl.persistence.transaction import CommandPlan, commit_operation
+from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
 from camctl.session.work import WorkDecision, WorkDecisionKind, WorkFacts, classify_work
 
 __all__ = [
@@ -129,7 +129,7 @@ class _LowerBoundCommand:
 
     def plan(self, scope) -> CommandPlan:
         from camctl.history.events import EventEnvelope, RowChange, RowImage
-        from camctl.persistence.transaction import TransactionError
+        from camctl.persistence.repositories.transactions import TransactionError
 
         check = self._check
         if not check.trusted or not check.needs_bound_update:

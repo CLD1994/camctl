@@ -7,7 +7,7 @@ from camctl.capture.segment_models import CurrentSegmentResult, SegmentAssessmen
 from camctl.contracts.values import ConsistencyError
 from camctl.capture.segment_storage import SegmentResultRef
 from camctl.contracts.enums import enum_for
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 def native_classification(db, setrow):

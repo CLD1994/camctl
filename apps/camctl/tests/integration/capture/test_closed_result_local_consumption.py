@@ -31,7 +31,7 @@ from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.timelapse import register_timelapse_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from .result_consumer_fixtures import RESULT_EVIDENCE, consumer_world, returned, _prepare_through_handler
 from ..support.capture import capture_factory, capture_test_session

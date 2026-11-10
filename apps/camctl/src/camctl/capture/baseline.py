@@ -16,7 +16,7 @@ from camctl.operations.owned_calls import check_call_interruption
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import DbOutcomeKind, db_outcome_for, db_failure
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 class PreparationPhase(Enum):

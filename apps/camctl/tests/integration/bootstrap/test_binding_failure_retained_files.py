@@ -9,7 +9,7 @@ import pytest
 from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
 from camctl.bootstrap.flows import capture_flow
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..capture.result_consumer_fixtures import ResultCatalog
 from ..support.capture import capture_database

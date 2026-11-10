@@ -2377,7 +2377,7 @@ def _cleanup_dispatch_allowed(connection, item_id, ticket):
     if row is None or row[1] in _MEMBER_TERMINAL:
         return False
     from camctl.persistence.repositories.file_batch_reads import FileBatchReads
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     run = row_facts(connection, "operation_runs", ticket.run_id)
     action = row_facts(connection, "actions", row[0])
     if run is None or action is None or not FileBatchReads(connection).operation_permitted(action, run):

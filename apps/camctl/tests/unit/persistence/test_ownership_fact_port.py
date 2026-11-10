@@ -8,7 +8,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.history.events import EventEnvelope
 from camctl.persistence import fact_reads
 from camctl.persistence.repositories import result_file_ownership as ownership
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.repositories.transactions import TransactionError
 
 
 def test_ownership_verification_reads_original_event_from_common_port(monkeypatch):

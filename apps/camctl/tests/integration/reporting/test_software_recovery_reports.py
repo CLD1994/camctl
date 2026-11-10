@@ -13,7 +13,7 @@ from camctl.reporting.policy import record_report_failure
 from camctl.capture.residual import pass_residual_gate
 from ..support.capture import capture_runtime
 from ..support.baseline_cases import baseline_case
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from ..capture.test_software_recovery import failed_world
 from ..scheduling.test_start_action import owned
 from .test_generation import _freeze, _spec

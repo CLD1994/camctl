@@ -13,7 +13,7 @@ from camctl.capture.segment_models import ResultCheckEndReason, CurrentSegmentRe
 from camctl.capture.native_segments import classify_native_members
 from camctl.persistence.repositories.segment_native import read_saved_native_classification
 from camctl.persistence.repositories.segments import SegmentRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 async def advance_native_result(runtime, action_id, *, canceled=False):

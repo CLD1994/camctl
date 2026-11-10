@@ -7,7 +7,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
 from camctl.history.validators import validate_event_structure
-from camctl.persistence.transaction import read_transaction_range, row_facts
+from camctl.persistence.repositories.transactions import read_transaction_range, row_facts
 
 
 def previous_result(connection, run, before_event_id):

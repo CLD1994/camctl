@@ -16,7 +16,7 @@ from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind, QueryPurpose,
 )
 from camctl.persistence import row_history, transaction
-from camctl.persistence.transaction import TransactionError, TransactionScope
+from camctl.persistence.repositories.transactions import TransactionError, TransactionScope
 
 
 @pytest.fixture

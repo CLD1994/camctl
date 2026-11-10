@@ -11,7 +11,7 @@ from camctl.contracts.values import OperationKey
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.models import DbJob, DbJobKind, DbOutcome, DbOutcomeKind, DbPriority, ReadReceipt
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
-from camctl.persistence.transaction import WriteReceipt, _attach_write_receipt
+from camctl.persistence.repositories.transactions import WriteReceipt, _attach_write_receipt
 
 pytestmark = pytest.mark.asyncio
 

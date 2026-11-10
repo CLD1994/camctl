@@ -9,7 +9,7 @@ from camctl.persistence.repositories.scheduling import (
     _window_guard,
     register_window_guard,
 )
-from camctl.persistence.transaction import event_envelope, update_change
+from camctl.persistence.repositories.transactions import event_envelope, update_change
 
 _SCHEDULED = 10_000_000
 _MAX_DELAY_MS = 2

@@ -32,7 +32,7 @@ def binding_entry(monkeypatch):
     stub("camctl.operations.owned_calls", owned_tool_call=lambda f: f)
     stub("camctl.persistence.repositories.scheduling", ExpireActionRequest=object, ExpireOutcome=object)
     stub("camctl.persistence.repositories.capture", FinishResidualBindingFailure=object, RecordingFailure=object)
-    transaction = stub("camctl.persistence.transaction", row_facts=lambda *args: None)
+    transaction = stub("camctl.persistence.repositories.transactions", row_facts=lambda *args: None)
     stub("camctl.scheduling.rules", WindowPhase=object, window_phase=object())
     stub("camctl.outputs.read_discovery", DEFAULT_BATCH_SIZE=128, ReadDiscoveryOwner=object)
     stub("camctl.persistence.repositories.operations", _ATTEMPT_STATUS=object(), _EFFECT_STATE=object())

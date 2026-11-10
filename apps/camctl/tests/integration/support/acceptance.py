@@ -5,7 +5,7 @@ from pathlib import Path
 from camctl.acceptance.input import FileInputReader, parse_input, read_input
 from camctl.acceptance.service import AcceptanceContext, accept_input
 from camctl.contracts.values import new_operation_key
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 from .database import business_database
 

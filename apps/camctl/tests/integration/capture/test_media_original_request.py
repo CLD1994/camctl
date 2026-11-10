@@ -15,7 +15,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture, register_capture_guards
 from camctl.outputs.catalog import FileReference, OutputCatalogFacts, OutputDraft, OutputKind
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.transaction import TransactionError, saved_transaction_events
+from camctl.persistence.repositories.transactions import TransactionError, saved_transaction_events
 
 from .test_media_execution import _NOW, _seed_pending_repair
 from .media_retry_fixtures import media_pipeline as pipeline  # noqa: F401

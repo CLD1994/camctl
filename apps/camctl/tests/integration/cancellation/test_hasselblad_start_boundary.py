@@ -388,7 +388,7 @@ async def test_independent_fixed_event_guard_rejects_false_entry_request(tmp_pat
     from camctl.contracts.values import ConsistencyError,new_operation_key
     from camctl.persistence.models import DbOutcome,DbOutcomeKind
     from camctl.persistence.repositories.cancellation import CancellationRepository
-    from camctl.persistence.transaction import commit_operation
+    from camctl.persistence.repositories.transactions import commit_operation
     from camctl.history.reads import PlanReadScope
     from camctl.session.service import StateDbFailure
     from ..support.output_planning import capture_operation,EventSequence

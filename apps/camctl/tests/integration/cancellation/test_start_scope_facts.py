@@ -8,7 +8,7 @@ from camctl.operations.attempts import AttemptIntent,AttemptTarget,AttemptConfig
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.capture_facts import load_start_facts,start_facts_from_rows
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from ..scheduling.test_resources import _seed_environment,_seed_plan,_seed_record_action,_seed_activity,_NOW
 
 

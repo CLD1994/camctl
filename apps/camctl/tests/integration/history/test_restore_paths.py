@@ -18,7 +18,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.history import SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import encode_json_value, row_facts
+from camctl.persistence.repositories.transactions import encode_json_value, row_facts
 
 from ..support.history_rows import observe_readonly_rows
 from ..persistence.test_motor_transactions import NOW, owned

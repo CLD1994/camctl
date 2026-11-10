@@ -18,7 +18,7 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.history.reads import PlanReadScope
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan,
     TransactionError,
     commit_operation,
@@ -43,7 +43,7 @@ from camctl.history.events import load_event_registry
 from camctl.host_files.handoff import PublishResult, PublishStage
 from camctl.host_files.io import DirectorySyncStage
 from camctl.contracts.json_values import json_equal, parse_exact_json
-from camctl.persistence.transaction import encode_json_value, event_envelope, read_transaction_range, saved_transaction_events, update_change
+from camctl.persistence.repositories.transactions import encode_json_value, event_envelope, read_transaction_range, saved_transaction_events, update_change
 
 _REPORT_EVENT = load_event_registry()["events"]["REPORT_CHANGED"]
 _REPORT_ACTION_TYPE = 7

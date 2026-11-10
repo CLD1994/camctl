@@ -288,7 +288,7 @@ def test_report_constructor_preserves_configured_event_batch_across_base_initial
 def test_selected_row_replay_does_not_restore_unselected_internal_projection(monkeypatch, forward):
     from camctl.history import bounded, report_action
     from camctl.history.events import EventEnvelope, RowChange, RowImage
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     handle = report_action.ReportHistoryHandle.__new__(report_action.ReportHistoryHandle)
     candidate = {'id': 9, 'status': 2 if not forward else 1, 'fixed': 7 if not forward else None}
     rows = {('actions', 9): dict(candidate)}
@@ -313,7 +313,7 @@ def test_selected_row_replay_does_not_restore_unselected_internal_projection(mon
 def test_reverse_creation_removes_future_required_row(monkeypatch):
     from camctl.history import bounded, report_action
     from camctl.history.events import EventEnvelope, RowChange, RowImage
-    from camctl.persistence.transaction import encode_json_value
+    from camctl.persistence.repositories.transactions import encode_json_value
     handle = report_action.ReportHistoryHandle.__new__(report_action.ReportHistoryHandle)
     rows = {('actions', 9): {'id': 9, 'status': 1}}
     handle._one = create_autospec(handle._one, return_value=(encode_json_value(rows[('actions', 9)]), 100))

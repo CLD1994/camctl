@@ -8,7 +8,7 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, OperationKey
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 from unit.history.test_decoding import registration  # noqa: F401
 
 

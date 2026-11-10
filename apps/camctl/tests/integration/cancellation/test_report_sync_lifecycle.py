@@ -33,7 +33,7 @@ from camctl.history.replay import EntityImage, RestoreSeed, restore
 from camctl.history.validators import ValidatedEvent
 from camctl.host_files.handoff import HandoffDirectories
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.transaction import commit_operation, row_facts
+from camctl.persistence.repositories.transactions import commit_operation, row_facts
 from camctl.persistence.repositories.acceptance import (
     AcceptanceRepository,
     register_acceptance_guards,

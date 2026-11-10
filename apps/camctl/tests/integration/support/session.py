@@ -17,7 +17,7 @@ from camctl.devices.definitions_runtime import reset_driver_definitions
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.drivers.runtime import register_drivers, reset_drivers
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 
 def session_config(home, *, devices=None, **sections):

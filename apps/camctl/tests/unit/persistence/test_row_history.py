@@ -12,7 +12,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.history.events import EventEnvelope, RowChange, RowImage, business_columns, load_event_registry
 from camctl.history.decoding import decode_event_row
 from camctl.contracts.enums import load_registry
-from camctl.persistence.transaction import read_transaction_range
+from camctl.persistence.repositories.transactions import read_transaction_range
 
 
 def _event(event_id, row_id, before, after):

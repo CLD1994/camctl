@@ -15,7 +15,7 @@ from camctl.history import validators
 from camctl.history.reads import ReadCoverage, CurrentEventReads
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.transaction import event_envelope, row_change, update_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change, update_change
 
 _LIFECYCLE_EVENT = 26
 _LIFECYCLE_REASON = 2

@@ -14,7 +14,7 @@ from camctl.history.validators import EventContext
 from camctl.capture.models import activity_capabilities
 from camctl.persistence.repositories import capture, scheduling
 from camctl.persistence.repositories.preparation import PreparationReads
-from camctl.persistence.transaction import event_envelope, row_change, update_change
+from camctl.persistence.repositories.transactions import event_envelope, row_change, update_change
 
 
 def _failure(*, reason="device_failed", before_status=1, error_code=13):

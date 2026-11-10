@@ -21,7 +21,7 @@ from ..support.output_planning import capture_operation
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.transaction import commit_operation, row_facts
+from camctl.persistence.repositories.transactions import commit_operation, row_facts
 
 from .test_selection_guard import _proposal, _request, _snapshot, _NOW, selection_database, family_database
 from .test_selection_event_sequence import _Sequence

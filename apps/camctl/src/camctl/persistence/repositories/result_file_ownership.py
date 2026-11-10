@@ -23,7 +23,7 @@ from camctl.persistence.fact_reads import (
 )
 from camctl.history.reads import CaptureResultReadScope
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, TransactionError, event_envelope, read_transaction_range,
     row_facts, update_change,
 )

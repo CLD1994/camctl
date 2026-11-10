@@ -11,7 +11,7 @@ from camctl.history.events import branch_of, load_event_registry
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import commit_operation, event_envelope, row_facts, update_change
+from camctl.persistence.repositories.transactions import commit_operation, event_envelope, row_facts, update_change
 from camctl.persistence.models import DbOutcomeKind
 from camctl.outputs.sources import SelectionMode
 

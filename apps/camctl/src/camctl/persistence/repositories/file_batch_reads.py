@@ -87,7 +87,7 @@ class FileBatchReads:
         return None if row is None else row[0]
 
     def calls_pending(self, action_id, device_id):
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         action = self.action(action_id)
         with closing(self.connection.execute(
             "SELECT r.id FROM operation_runs r WHERE r.action_id=? AND r.kind IN (3,4,5,12)"
@@ -105,7 +105,7 @@ class FileBatchReads:
         return False
 
     def action(self, action_id):
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         row = row_facts(self.connection, "actions", action_id)
         if row is None:
             raise ConsistencyError("文件批次所属动作缺失")

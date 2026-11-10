@@ -18,8 +18,8 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
-import camctl.persistence.transaction as transaction_module
-from camctl.persistence.transaction import commit_operation
+import camctl.persistence.repositories.transactions as transaction_module
+from camctl.persistence.repositories.transactions import commit_operation
 from camctl.session.locks import LockError
 
 from .test_runtime import _create_valid_database
@@ -107,7 +107,7 @@ class PlanCreateCommand:
         self.plan_ids = plan_ids
 
     def plan(self, scope):
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         allocation = scope.allocate(len(self.plan_ids))
         events = tuple(
@@ -138,7 +138,7 @@ class PlanStartCommand:
         self.current_rows = current_rows
 
     def plan(self, scope):
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         allocation = scope.allocate(1)
         event = _plan_start_envelope(
@@ -156,7 +156,7 @@ class PlanStartCommand:
 def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path, plan_guards, monkeypatch):
     """后续创建和变化可证明固定关联，不倒推当前事件的状态。"""
     from camctl.history import validators
-    from camctl.persistence.transaction import CommandPlan
+    from camctl.persistence.repositories.transactions import CommandPlan
 
     _create_valid_database(tmp_path / "state.db")
     observed = []
@@ -194,7 +194,7 @@ def test_complete_query_tracks_prior_events_without_using_future_rows(tmp_path, 
     from contextlib import closing
 
     from camctl.history import validators
-    from camctl.persistence.transaction import CommandPlan
+    from camctl.persistence.repositories.transactions import CommandPlan
 
     _create_valid_database(tmp_path / "state.db")
     observed = []
@@ -432,7 +432,7 @@ class TestCurrentStateRecheck:
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            from camctl.persistence.transaction import CommandPlan
+            from camctl.persistence.repositories.transactions import CommandPlan
 
             class CreateThenStart:
                 def plan(self, scope):
@@ -462,7 +462,7 @@ class TestCurrentStateRecheck:
 
 class TestAllocationContract:
     def test_event_count_mismatch_rejected(self, tmp_path, plan_guards) -> None:
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
@@ -486,7 +486,7 @@ class TestAllocationContract:
             connection.close()
 
     def test_non_adjacent_event_ids_rejected(self, tmp_path, plan_guards) -> None:
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
@@ -507,7 +507,7 @@ class TestAllocationContract:
             connection.close()
 
     def test_missing_allocation_rejected(self, tmp_path, plan_guards) -> None:
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
@@ -532,7 +532,7 @@ class TestAtomicRollback:
     @pytest.mark.parametrize("read_only", [False, True], ids=["write-result", "read-only-result"])
     def test_complete_result_rule_failure_rolls_back(self, tmp_path, plan_guards, read_only):
         from camctl.contracts.schemas import SchemaRuleError, create_validator
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
@@ -669,7 +669,7 @@ class TestAtomicRollback:
 
     def test_registry_violation_rejected_even_if_sql_would_accept(self, tmp_path, plan_guards) -> None:
         # 状态模型不允许 1→3 的“首次开始”；内核拒绝提交。
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
@@ -716,7 +716,7 @@ class TestAtomicRollback:
         # 受理守卫已随 A4 正式注册；文件守卫已随采集观察登记注册。用
         # 窗口观察事件展示未接入守卫（调度接线）的明确拒绝：即使行内
         # SQL 可以接受也不能提交。
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
@@ -788,7 +788,7 @@ class TestTransactionControlReceipt:
     def test_precommit_control_rolls_back_once_and_keeps_same_object(
         self, tmp_path, location
     ) -> None:
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         real = sqlite3.connect(tmp_path / "state.db")
@@ -833,7 +833,7 @@ class TestTransactionControlReceipt:
     def test_precommit_control_and_rollback_error_keep_control_and_secondary(
         self, tmp_path, location
     ) -> None:
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         real = sqlite3.connect(tmp_path / "state.db")
@@ -926,7 +926,7 @@ class TestTransactionControlReceipt:
     def test_read_only_end_failure_is_unknown_and_not_retried(
         self, tmp_path, control
     ) -> None:
-        from camctl.persistence.transaction import CommandPlan
+        from camctl.persistence.repositories.transactions import CommandPlan
 
         database = tmp_path / "state.db"
         _create_valid_database(database)

@@ -65,7 +65,7 @@ async def test_production_capture_factories_share_actual_pending_result_responsi
     from camctl.persistence.repositories.acceptance import AcceptanceRepository
     from camctl.persistence.repositories.capture import CaptureRepository
     from camctl.persistence.repositories.scheduling import ObserveWindowRequest, SchedulingRepository, StartActionRequest
-    from camctl.persistence.transaction import saved_transaction_events
+    from camctl.persistence.repositories.transactions import saved_transaction_events
     from ..capture.result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog
     from ..capture.test_capture_contract import _NOW
     from ..support.acceptance import accept_document

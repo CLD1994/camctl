@@ -94,7 +94,7 @@ async def test_original_direct_query_cannot_use_a_later_natural_wait(tmp_path):
 async def test_natural_result_boundary_rejects_original_intent_before_wait(tmp_path, boundary):
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext, EventValidationError, validate_event
-    from camctl.persistence.transaction import event_envelope, row_facts, update_change
+    from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
     owned, runtime, aid, page, wait_id, command, finish = await _original_direct_history(tmp_path)
     try:
         before = tuple(owned.connection.iterdump())

@@ -487,7 +487,7 @@ async def test_original_recovery_requires_boundary_horizon_and_authorization(
 async def test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit(
         owned, tmp_path, monkeypatch):
     from camctl.contracts.values import ConsistencyError
-    from camctl.persistence.transaction import saved_transaction_events
+    from camctl.persistence.repositories.transactions import saved_transaction_events
     from ..cancellation.test_report_sync_lifecycle import _fault_owned
     world = await _world(owned, tmp_path)
     ticket, source_id, target = await _pending_read(world, tmp_path, monkeypatch, internal=False)

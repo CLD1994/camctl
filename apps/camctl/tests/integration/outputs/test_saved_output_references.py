@@ -14,7 +14,7 @@ from camctl.outputs.sources import SelectionMode
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.transaction import commit_operation, event_envelope, row_facts, update_change
+from camctl.persistence.repositories.transactions import commit_operation, event_envelope, row_facts, update_change
 
 from .test_selection_reuse import _save, selection_database, family_database
 from .test_read_associations import _command as _read_command

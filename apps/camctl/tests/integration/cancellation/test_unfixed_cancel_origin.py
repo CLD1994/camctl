@@ -22,7 +22,7 @@ from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from ..acceptance.test_acceptance import Catalog, _plan_body
 from camctl.persistence.repositories.capture import register_capture_guards
@@ -212,7 +212,7 @@ async def test_finish_itself_rechecks_complete_pending_empty_members(environment
 @pytest.mark.parametrize("committed", [False, True])
 async def test_empty_finish_reuses_original_key_and_time_after_unknown(environment, monkeypatch, committed):
     from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.transaction import WriteReceipt
+    from camctl.persistence.repositories.transactions import WriteReceipt
     owned, _, _, repository, _ = environment
     await _mark_c1(environment)
     command = FinishCancelAction(3, _NOW)

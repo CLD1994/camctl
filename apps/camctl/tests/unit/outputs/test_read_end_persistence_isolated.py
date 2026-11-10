@@ -92,7 +92,7 @@ def isolated():
     def update(table, identity, before, after):
         return SimpleNamespace(table=table, row_id=identity,
             before=SimpleNamespace(values=before), after=SimpleNamespace(values=after))
-    stub("camctl.persistence.transaction", CommandPlan=Plan, commit_operation=None,
+    stub("camctl.persistence.repositories.transactions", CommandPlan=Plan, commit_operation=None,
          event_envelope=lambda event_id, txn, kind, reason, rows, now, evidence:
             SimpleNamespace(event_id=event_id, rows=rows, evidence=evidence),
          row_facts=lambda connection, table, identity: connection.rows.get((table, identity)),

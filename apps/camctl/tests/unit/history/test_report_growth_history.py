@@ -10,7 +10,7 @@ from camctl.contracts import public_projection
 from camctl.contracts.values import ConsistencyError
 from camctl.history import report_action
 from camctl.history.bounded import _OwnerBranch
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 
 def registration():

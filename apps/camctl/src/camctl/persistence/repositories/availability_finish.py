@@ -49,7 +49,7 @@ class AvailabilityFinishReads:
                 return
 
     def has_result_in_group(self, run_id):
-        from camctl.persistence.transaction import row_facts
+        from camctl.persistence.repositories.transactions import row_facts
         event_type = load_event_registry()["events"]["ATTEMPT_RESULT"]["id"]
         for accepted in self.validated:
             event = accepted.envelope

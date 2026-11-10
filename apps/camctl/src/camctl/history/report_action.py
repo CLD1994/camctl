@@ -10,7 +10,7 @@ from camctl.history.bounded import SegmentHistoryHandle, _event_limit, _limit, _
 from camctl.history.events import business_tables_for_format, foreign_key_targets
 from camctl.history.replay import ReplayError
 from camctl.history.validators import EventValidationError
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 
 
 def report_restore_strategy(seed):

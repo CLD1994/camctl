@@ -5,7 +5,7 @@ from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.outputs.batches import BatchOutcome, decide_batch_grant
 from camctl.persistence.repositories.file_batch_reads import FileBatchReads
-from camctl.persistence.transaction import (
+from camctl.persistence.repositories.transactions import (
     CommandPlan, commit_operation, event_envelope, next_row_id,
     row_change, row_facts, saved_transaction_events, update_change,
 )

@@ -11,7 +11,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from ..capture.result_consumer_fixtures import consumer_world
 from .test_operation_ownership import operation_world, owned, _create_flow

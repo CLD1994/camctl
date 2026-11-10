@@ -22,7 +22,7 @@ from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories import outputs
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import commit_operation
+from camctl.persistence.repositories.transactions import commit_operation
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.output_planning import EventSequence, proposal_state

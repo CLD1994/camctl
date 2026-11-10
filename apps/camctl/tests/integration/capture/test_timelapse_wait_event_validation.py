@@ -9,7 +9,7 @@ from camctl.history import validators
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 from camctl.persistence.repositories.timelapse import register_timelapse_guards
-from camctl.persistence.transaction import event_envelope, update_change
+from camctl.persistence.repositories.transactions import event_envelope, update_change
 
 from ..support.capture_guard_cases import history_body
 

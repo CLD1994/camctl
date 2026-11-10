@@ -41,7 +41,7 @@ from camctl.operations.owned_calls import owned_tool_call
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import ExpireActionRequest, ExpireOutcome
 from camctl.persistence.repositories.capture import FinishResidualBindingFailure, RecordingFailure
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.scheduling.rules import WindowPhase, window_phase
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 from camctl.persistence.repositories.operations import (
@@ -237,7 +237,7 @@ async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
     if action.get("driver_id") != DRIVER_ID or action.get("type") != 1:
         return None
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-    from camctl.persistence.transaction import row_facts
+    from camctl.persistence.repositories.transactions import row_facts
     from camctl.persistence.repositories.physical_alias import physical_alias_conflict
     from camctl.persistence.repositories.availability_target import (logical_held_identity_mismatch,
         photo_check_identity_mismatch)

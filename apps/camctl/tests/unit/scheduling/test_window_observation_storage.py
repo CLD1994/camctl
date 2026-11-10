@@ -7,7 +7,7 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.repositories import scheduling
-from camctl.persistence.transaction import TransactionScope
+from camctl.persistence.repositories.transactions import TransactionScope
 
 
 @pytest.mark.parametrize("status,cancel_requested,observed,expected", [

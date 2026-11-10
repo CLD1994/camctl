@@ -14,7 +14,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.capture_facts import load_start_facts, start_facts_from_rows
-from camctl.persistence.transaction import row_facts, commit_operation
+from camctl.persistence.repositories.transactions import row_facts, commit_operation
 from ..support.output_planning import capture_operation, event_case, validate_static_event, EventSequence
 from camctl.persistence.repositories.cancellation import register_cancellation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards

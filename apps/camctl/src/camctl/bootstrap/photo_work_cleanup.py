@@ -22,7 +22,7 @@ from camctl.operations.error_diagnostics import attach_diagnostic_facts
 from camctl.persistence.fact_reads import read_event
 from camctl.persistence.repositories.capture_facts import PhotoResultReads
 from camctl.persistence.repositories.result_pages import _at
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 
 _CURSOR = ".photo-work-cleanup-cursor"

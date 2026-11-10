@@ -16,7 +16,7 @@ from camctl.history.events import business_columns
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.transaction import row_facts, saved_transaction_events
+from camctl.persistence.repositories.transactions import row_facts, saved_transaction_events
 
 from ..capture.result_consumer_fixtures import ResultCatalog, consumer_world
 from .test_media_assembly import _config

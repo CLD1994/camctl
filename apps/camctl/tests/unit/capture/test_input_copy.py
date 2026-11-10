@@ -374,7 +374,7 @@ async def test_deferred_photo_records_download_size_before_preparing_target(monk
     from types import SimpleNamespace
     from camctl.operations.models import AttemptTicket
     from camctl.outputs import obtain_flow, read_attempts
-    from camctl.persistence import transaction
+    from camctl.persistence.repositories import transactions as transaction
     from camctl.persistence.repositories import outputs
 
     calls = []

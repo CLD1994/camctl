@@ -14,7 +14,7 @@ from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import TransactionError, saved_transaction_events
+from camctl.persistence.repositories.transactions import TransactionError, saved_transaction_events
 
 from .test_binding_transactions import _CommitFailure
 from .test_cancel_ready_runtime import _published

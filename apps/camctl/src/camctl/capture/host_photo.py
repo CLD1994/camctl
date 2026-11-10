@@ -29,7 +29,7 @@ from camctl.persistence.repositories.host_capture import (
     PrepareHostPhoto,
 )
 from camctl.persistence.repositories.scheduling import ExpireActionRequest
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.outputs.catalog import (
     FileReference,
     OutputCatalogFacts,

@@ -6,7 +6,7 @@ from pathlib import Path
 from camctl.capture.segment_models import SegmentSetRef
 from camctl.history.snapshots import prepare_snapshot
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.repositories.transactions import encode_json_value
 from camctl.contracts.history_values import HistoryBoundary
 
 

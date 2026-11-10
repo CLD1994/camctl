@@ -49,7 +49,7 @@ from camctl.persistence.repositories.capture import (
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 
 from .test_file_history import (
     _environment,

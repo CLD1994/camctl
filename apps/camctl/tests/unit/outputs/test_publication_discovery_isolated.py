@@ -186,7 +186,7 @@ class PublicationFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((action, copy, value), (4, 9, error))
             return ("original-key", None, 17)
         binding.load_saved_binding_read_failure = load_failure
-        transaction = ModuleType('camctl.persistence.transaction')
+        transaction = ModuleType('camctl.persistence.repositories.transactions')
         transaction.row_facts = lambda connection, table, identity: {"id": identity, "source_intermediate_file_id": 23}
         def saved_events(connection, key):
             self.assertEqual(key, "original-key")

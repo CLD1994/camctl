@@ -55,7 +55,7 @@ from camctl.persistence.repositories.scheduling import (
     register_window_guard,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.transactions import row_facts
 from camctl.persistence.executor import DbExecutor
 from camctl.outputs.cleanup_flow import (
     FixCleanupTargets,

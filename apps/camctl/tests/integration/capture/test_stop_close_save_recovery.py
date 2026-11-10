@@ -14,7 +14,7 @@ from camctl.operations.attempts import RunOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.transaction import saved_transaction_events
+from camctl.persistence.repositories.transactions import saved_transaction_events
 
 from ..support.close_cases import CloseFault, stop_case
 
