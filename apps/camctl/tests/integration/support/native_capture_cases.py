@@ -24,7 +24,7 @@ from ..capture.test_record_file_completion_wait import _REGISTRY
 from .capture import capture_factory
 
 
-async def native_world(tmp_path, catalog):
+async def native_world(tmp_path, catalog, *, pending_capture_group=None):
     wall, mono = [_NOW], [5_000_000_000]
     result = create_autospec(ResultDriver, instance=True)
     stopper = create_autospec(StopDriver, instance=True)
@@ -48,7 +48,8 @@ async def native_world(tmp_path, catalog):
     from ..capture.test_baseline_prepare import Directory
     directory = Directory([lambda request: DirectoryRead(None, None, Page((), None))])
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, 'timelapse', catalog=catalog, start=False, runtime_factory=assemble)
+        tmp_path, 'timelapse', catalog=catalog, start=False, runtime_factory=assemble,
+        pending_capture_group=pending_capture_group)
     advance = capture_handler(handler)
     await advance(action_id, runtime)
     return owned, runtime, action_id, advance, wall, mono, result, stopper

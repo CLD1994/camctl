@@ -288,7 +288,8 @@ async def test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_requ
         owned.connection.close()
 
 
-async def test_atomic_cancel_of_all_pending_photo_sources_completes_original_plan(tmp_path):
+@pytest.mark.parametrize('all_targets', [False, True], ids=['one-target', 'all-targets'])
+async def test_atomic_cancel_of_all_pending_photo_sources_completes_original_plan(tmp_path, all_targets):
     from ..capture.test_host_photo_flow import _input_time
     second = {'name':'第二张','type':'camera_take_photo','device_id':'cam-1',
         'scheduled_at':'2025-06-15 15:10:00','params':{'type':'hasselblad_photo',
@@ -296,9 +297,29 @@ async def test_atomic_cancel_of_all_pending_photo_sources_completes_original_pla
             'white_balance':{'mode':'auto'},'focus':{'mode':'MF'}},'policy':{'max_delay_ms':5000}}
     cfg, owned, driver, runtime, clock = await _world(tmp_path, extra_actions=[second], start_first=False)
     try:
-        await submit_cancel(cfg,owned,runtime,{'plan_instance_id':'1'})
-        assert owned.connection.execute('SELECT status FROM actions WHERE plan_id=1 ORDER BY id').fetchall() == [(6,),(6,)]
-        assert owned.connection.execute('SELECT status FROM plans WHERE id=1').fetchone() == (3,)
+        plan_before = owned.connection.execute(
+            'SELECT status,last_event_id FROM plans WHERE id=1').fetchone()
+        assert plan_before[0] == 1
+        target = {'plan_instance_id': '1'} if all_targets else {'action_instance_id': '1'}
+        await submit_cancel(cfg,owned,runtime,target)
+        assert owned.connection.execute('SELECT status FROM actions WHERE plan_id=1 ORDER BY id').fetchall() == [
+            (6,), (6 if all_targets else 1,)]
+        plan_after = owned.connection.execute(
+            'SELECT status,last_event_id FROM plans WHERE id=1').fetchone()
+        assert plan_after[0] == (3 if all_targets else plan_before[0])
+        if all_targets:
+            events = owned.connection.execute(
+                'SELECT e.event_type,e.transaction_id FROM actions a'
+                ' JOIN history_events e ON e.id=a.last_event_id'
+                ' WHERE a.plan_id=1 ORDER BY a.id').fetchall()
+            plan_event = owned.connection.execute(
+                'SELECT event_type,transaction_id FROM history_events WHERE id=?',
+                (plan_after[1],)).fetchone()
+            assert [event[0] for event in events] == [25, 25]
+            assert plan_event[0] == 9
+            assert {event[1] for event in events} == {plan_event[1]}
+        else:
+            assert plan_after == plan_before
         assert owned.connection.execute('SELECT COUNT(*) FROM operation_attempts').fetchone() == (0,)
     finally:
         owned.connection.close()

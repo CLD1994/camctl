@@ -107,6 +107,77 @@ async def test_real_c2_cancels_running_unfixed_c1_without_touching_its_targets(e
     assert tuple(owned.connection.iterdump()) == before
 
 
+@pytest.mark.parametrize('pending_sibling', [False, True], ids=['last-action', 'pending-sibling'])
+async def test_canceled_origin_finishes_parent_only_when_last_action(tmp_path, pending_sibling):
+    path = tmp_path / 'state.db'
+    create_test_database(path)
+    owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    clock = SimpleNamespace(utc_micros=lambda: _NOW)
+    context = AcceptanceContext(CommandMode.RUN, Catalog(), AcceptanceRepository(), clock)
+    repository = CancellationRepository()
+    try:
+        assert (await accept_document(_plan_body(request_id='1'), context, path)).plan_id == 1
+        actions = [{
+            'name': 'C1', 'type': 'cancel_task',
+            'params': {'target': {'action_instance_id': '1'}},
+        }]
+        if pending_sibling:
+            actions.append({'name': '未来报告', 'type': 'report_status',
+                'scheduled_at': '2026-01-15 10:00:00', 'params': {'scope': 'full'}})
+        assert (await accept_document(_plan_body(request_id='2', actions=actions), context, path)).plan_id == 2
+        origin, = owned.connection.execute("SELECT id FROM actions WHERE plan_id=2 AND type=6").fetchone()
+        started = repository.start_cancel_action(StartCancelAction(origin, _NOW), new_operation_key(), owned)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        plan_before = owned.connection.execute('SELECT status,last_event_id FROM plans WHERE id=2').fetchone()
+
+        c2_body = _plan_body(request_id='3', actions=[{
+            'name': 'C2', 'type': 'cancel_task',
+            'params': {'target': {'action_instance_id': str(origin)}},
+        }])
+        assert (await accept_document(c2_body, context, path)).plan_id == 3
+        c2, = owned.connection.execute('SELECT id FROM actions WHERE plan_id=3').fetchone()
+        assert repository.start_cancel_action(StartCancelAction(c2, _NOW), new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
+        fixed = repository.fix_cancel_targets(FixCancelTargets(c2, FixedCancelSet((
+            FixedTarget(origin, SelectionBasis.DIRECT, CancellationEffect.NOT_APPLIED),)), _NOW),
+            new_operation_key(), owned)
+        assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+        applied = repository.apply_cancel_target(
+            ApplyCancelTarget(fixed.value.item_ids[0], CancelApplyMode.WITH_STOP, _NOW),
+            new_operation_key(), owned)
+        assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+        assert owned.connection.execute(
+            'SELECT status,cancel_requested,target_selection_state FROM actions WHERE id=?',
+            (origin,)).fetchone() == (2, 1, 1)
+        assert owned.connection.execute('SELECT COUNT(*) FROM cancel_items WHERE action_id=?',
+                                        (origin,)).fetchone() == (0,)
+        key = new_operation_key()
+        request = FinishCancelAction(origin, _NOW)
+        result = repository.finish_origin_canceled(request, key, owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.action_status == 6
+        after = owned.connection.execute('SELECT status,last_event_id FROM plans WHERE id=2').fetchone()
+        assert after[0] == (plan_before[0] if pending_sibling else 3)
+        if pending_sibling:
+            assert after == plan_before
+            assert owned.connection.execute(
+                "SELECT status,execution_started FROM actions WHERE plan_id=2 AND name='未来报告'"
+            ).fetchone() == (1, 0)
+        else:
+            events = owned.connection.execute(
+                'SELECT event_type,transaction_id FROM history_events WHERE id IN ('
+                'SELECT last_event_id FROM actions WHERE id=? UNION ALL SELECT last_event_id FROM plans WHERE id=2)',
+                (origin,)).fetchall()
+            assert {event[0] for event in events} == {8, 9}
+            assert len({event[1] for event in events}) == 1
+        # 其他计划仍有待执行动作，不能阻止当前计划的末项结束。
+        assert owned.connection.execute('SELECT status FROM actions WHERE plan_id=1').fetchone() == (1,)
+        before_replay = tuple(owned.connection.iterdump())
+        assert repository.finish_origin_canceled(request, key, owned).kind is DbOutcomeKind.COMPLETED
+        assert tuple(owned.connection.iterdump()) == before_replay
+    finally:
+        owned.connection.close()
+
+
 @pytest.mark.parametrize("fault", ["pending_members", "fixed_empty", "failed_empty", "read_failure"])
 async def test_finish_itself_rechecks_complete_pending_empty_members(environment, monkeypatch, fault):
     import sqlite3
