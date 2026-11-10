@@ -72,3 +72,9 @@ def finite_cancel_timing_matches(activity, spec, sent_at, expected):
     """原发送锚点和冻结等待规则必须与当前活动一致。"""
     return (sent_at == activity['sent_at'] and activity['expected_check_at'] == expected
             and activity['result_wait_margin_ms'] == spec['result_wait_margin_ms'])
+
+
+def finite_cancel_source_is_natural(kind):
+    """有限取消只能以原自然结果来源作为设备结束依据。"""
+    from camctl.capture.result_source_types import ResultSourceKind
+    return kind is ResultSourceKind.NATURAL

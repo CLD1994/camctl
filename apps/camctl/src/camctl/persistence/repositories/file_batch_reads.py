@@ -3,7 +3,8 @@
 from contextlib import closing
 
 from camctl.contracts.values import ConsistencyError
-from camctl.outputs.batches import (BatchActionMode, classify_batch_action, batch_source_selected,
+from camctl.outputs.batches import (BatchReadinessFact, ObtainDeviceFact, classify_batch_action,
+    batch_ready_requirements, obtain_device_requirements, batch_source_selected,
     obtain_batch_member_finished, internal_read_precedes_batch)
 
 
@@ -176,18 +177,24 @@ class FileBatchReads:
             " LEFT JOIN file_copies c ON c.delivery_id=i.delivery_id"
             " WHERE x.action_id=? AND ob.device_id=?"
         )
-        pending_local = self.connection.execute(
-            "SELECT 1" + base + " AND (i.status=2 OR (i.source_dependency=1"
-            " AND c.source_intermediate_file_id IS NOT NULL AND c.verification_state NOT IN (3,5))) LIMIT 1",
-            (action_id, device_id),
-        ).fetchone()
-        if pending_local is not None:
-            return False
-        return self.connection.execute(
-            "SELECT 1" + base + " AND (i.status=1 OR (i.source_dependency=1"
-            " AND c.source_device_file_id IS NOT NULL AND c.verification_state NOT IN (3,5))) LIMIT 1",
-            (action_id, device_id),
-        ).fetchone() is not None
+        for fact, required in obtain_device_requirements():
+            if fact is ObtainDeviceFact.LOCAL_WAIT_EXISTS:
+                found = self.connection.execute(
+                    "SELECT 1" + base + " AND (i.status=2 OR (i.source_dependency=1"
+                    " AND c.source_intermediate_file_id IS NOT NULL AND c.verification_state NOT IN (3,5))) LIMIT 1",
+                    (action_id, device_id),
+                ).fetchone()
+            elif fact is ObtainDeviceFact.DEVICE_CANDIDATE_EXISTS:
+                found = self.connection.execute(
+                    "SELECT 1" + base + " AND (i.status=1 OR (i.source_dependency=1"
+                    " AND c.source_device_file_id IS NOT NULL AND c.verification_state NOT IN (3,5))) LIMIT 1",
+                    (action_id, device_id),
+                ).fetchone()
+            else:
+                raise ValueError(f"未知取回设备事实: {fact!r}")
+            if (found is not None) != required:
+                return False
+        return True
 
     def cleanup_finished(self, action_id, device_id):
         return self.connection.execute(
@@ -225,20 +232,29 @@ class FileBatchReads:
 
     def ready(self, action_id, device_id, now):
         action = self.action(action_id)
-        mode = classify_batch_action(action, now)
-        if mode is BatchActionMode.CLEANUP_RESIDUAL:
-            return (self.cleanup_residual(action_id, device_id)
-                and not self.cleanup_blocked(action_id, device_id)
-                and not self.cleanup_finished(action_id, device_id))
-        if mode is BatchActionMode.OBTAIN:
-            return (self.source_ready(action_id, device_id)
-                and self.obtain_device_ready(action_id, device_id)
-                and not self.obtain_finished(action_id, device_id))
-        if mode is BatchActionMode.CLEANUP:
-            return (self.cleanup_device_ready(action_id, device_id)
-                and not self.cleanup_blocked(action_id, device_id)
-                and not self.cleanup_finished(action_id, device_id))
-        return False
+        requirements = batch_ready_requirements(classify_batch_action(action, now))
+        if requirements is None:
+            return False
+        for fact, required in requirements:
+            if fact is BatchReadinessFact.SOURCE_CHECKS_PASSED:
+                actual = self.source_ready(action_id, device_id)
+            elif fact is BatchReadinessFact.DEVICE_OBTAIN_CHECKS_PASSED:
+                actual = self.obtain_device_ready(action_id, device_id)
+            elif fact is BatchReadinessFact.OBTAIN_MEMBERS_FINISHED:
+                actual = self.obtain_finished(action_id, device_id)
+            elif fact is BatchReadinessFact.CLEANUP_NO_PENDING_TARGETS:
+                actual = self.cleanup_device_ready(action_id, device_id)
+            elif fact is BatchReadinessFact.CLEANUP_DEPENDENCY_EXISTS:
+                actual = self.cleanup_blocked(action_id, device_id)
+            elif fact is BatchReadinessFact.CLEANUP_MEMBERS_FINISHED:
+                actual = self.cleanup_finished(action_id, device_id)
+            elif fact is BatchReadinessFact.CLEANUP_RESIDUAL_EXISTS:
+                actual = self.cleanup_residual(action_id, device_id)
+            else:
+                raise ValueError(f"未知批次资格事实: {fact!r}")
+            if bool(actual) != required:
+                return False
+        return True
 
     def cleanup_device_ready(self, action_id, device_id):
         return self.connection.execute(

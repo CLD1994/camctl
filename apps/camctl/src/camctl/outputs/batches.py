@@ -136,3 +136,50 @@ def obtain_batch_member_finished(status, dependency, copy_id, verification, ende
 
 def internal_read_precedes_batch(other, action):
     return tuple(other) < (action['scheduled_at'], action['plan_id'], action['input_index'])
+
+
+class BatchReadinessFact(StrEnum):
+    """原批次资格需要逐项读取或经业务子规则判断的事实。"""
+    SOURCE_CHECKS_PASSED = 'source_checks_passed'
+    DEVICE_OBTAIN_CHECKS_PASSED = 'device_obtain_checks_passed'
+    OBTAIN_MEMBERS_FINISHED = 'obtain_members_finished'
+    CLEANUP_NO_PENDING_TARGETS = 'cleanup_no_pending_targets'
+    CLEANUP_DEPENDENCY_EXISTS = 'cleanup_dependency_exists'
+    CLEANUP_MEMBERS_FINISHED = 'cleanup_members_finished'
+    CLEANUP_RESIDUAL_EXISTS = 'cleanup_residual_exists'
+
+
+_BATCH_READY_REQUIREMENTS = {
+    BatchActionMode.NOT_READY: None,
+    BatchActionMode.OBTAIN: (
+        (BatchReadinessFact.SOURCE_CHECKS_PASSED, True),
+        (BatchReadinessFact.DEVICE_OBTAIN_CHECKS_PASSED, True),
+        (BatchReadinessFact.OBTAIN_MEMBERS_FINISHED, False),
+    ),
+    BatchActionMode.CLEANUP: (
+        (BatchReadinessFact.CLEANUP_NO_PENDING_TARGETS, True),
+        (BatchReadinessFact.CLEANUP_DEPENDENCY_EXISTS, False),
+        (BatchReadinessFact.CLEANUP_MEMBERS_FINISHED, False),
+    ),
+    BatchActionMode.CLEANUP_RESIDUAL: (
+        (BatchReadinessFact.CLEANUP_RESIDUAL_EXISTS, True),
+        (BatchReadinessFact.CLEANUP_DEPENDENCY_EXISTS, False),
+        (BatchReadinessFact.CLEANUP_MEMBERS_FINISHED, False),
+    ),
+}
+
+
+def batch_ready_requirements(mode):
+    """返回依次满足的原事实；None 表示动作不能申请批次。"""
+    return _BATCH_READY_REQUIREMENTS[mode]
+
+
+class ObtainDeviceFact(StrEnum):
+    LOCAL_WAIT_EXISTS = 'local_wait_exists'
+    DEVICE_CANDIDATE_EXISTS = 'device_candidate_exists'
+
+
+def obtain_device_requirements():
+    """先确认没有本地等待，再确认存在设备读取候选。"""
+    return ((ObtainDeviceFact.LOCAL_WAIT_EXISTS, False),
+            (ObtainDeviceFact.DEVICE_CANDIDATE_EXISTS, True))

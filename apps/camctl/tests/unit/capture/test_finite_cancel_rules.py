@@ -67,3 +67,12 @@ def test_finite_cancel_preserves_sent_time_and_frozen_wait_rule():
     assert not finite_cancel_timing_matches(activity, spec, 101, 200)
     assert not finite_cancel_timing_matches(activity, spec, 100, 201)
     assert not finite_cancel_timing_matches(activity, {'result_wait_margin_ms': 6}, 100, 200)
+
+
+def test_finite_cancel_accepts_only_the_original_natural_source_type():
+    from camctl.capture.finite_cancel import finite_cancel_source_is_natural
+    from camctl.capture.result_source_types import ResultSourceKind
+    assert finite_cancel_source_is_natural(ResultSourceKind.NATURAL)
+    for kind in (ResultSourceKind.STOP, ResultSourceKind.DIRECT,
+                 ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED, 'natural'):
+        assert not finite_cancel_source_is_natural(kind)
