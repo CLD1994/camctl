@@ -2,9 +2,8 @@
 
 真实状态库与替身命令组合：全局事件批返回后读连接已归还——新读
 事务可见新提交、固定 H 批次不被后续写入污染；读取错误按一致性
-错误传播而不是空批；仓储目录静态审计没有自提交函数——写提交统
-一经事务内核，事务控制语句只属于明确登记的一致读视图核实函数
-与快照维护窄仓储的执行函数。
+错误传播而不是空批；仓储目录静态审计禁止 sqlite3 直连，并限制
+事务控制语句的责任者。提交与回滚的实际行为由事务测试验证。
 """
 
 from __future__ import annotations
@@ -127,15 +126,15 @@ class TestDetachedBatch:
 
 
 class TestCommitPathAudit:
-    def test_repositories_commit_only_through_the_transaction_kernel(self) -> None:
-        """静态审计：仓储目录没有自提交函数或直连数据库。
+    def test_repositories_restrict_direct_connections_and_transaction_sql(self) -> None:
+        """静态检查 sqlite3 直连、显式连接提交及事务控制语句。
 
-        写提交统一经事务内核；``.commit()`` 方法调用与
-        ``sqlite3.connect`` 直连都不得出现。只读核实事务按函数级
-        白名单登记，写事务不得绕过事务内核。
+        只读核实事务按函数级白名单登记；其余仓储不得使用这些
+        字面量事务控制语句。本检查不推断连接别名与动态调用；
+        事务测试验证实际提交与回滚行为。
         """
-        commit_calls: list[str] = []
         direct_connections: list[str] = []
+        connection_commits: list[str] = []
         transaction_owners: set[str] = set()
 
         for path in sorted(_REPOSITORIES.glob("*.py")):
@@ -144,8 +143,10 @@ class TestCommitPathAudit:
                 if not (isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Attribute)):
                     continue
-                if node.func.attr == "commit":
-                    commit_calls.append(f"{path.name}:{node.lineno}")
+                if (node.func.attr == "commit"
+                        and isinstance(node.func.value, ast.Attribute)
+                        and node.func.value.attr == "connection"):
+                    connection_commits.append(f"{path.name}:{node.lineno}")
                 if (node.func.attr == "connect"
                         and isinstance(node.func.value, ast.Name)
                         and node.func.value.id == "sqlite3"):
@@ -162,8 +163,8 @@ class TestCommitPathAudit:
                     else:
                         transaction_owners.add(owner.split(".")[0])
 
-        assert commit_calls == [], f"仓储绕过事务内核自提交: {commit_calls}"
         assert direct_connections == [], f"仓储直连数据库: {direct_connections}"
+        assert connection_commits == [], f"仓储直接提交连接: {connection_commits}"
         assert transaction_owners <= _ALLOWED_TRANSACTION_OWNERS, (
             "仓储目录出现白名单外的事务控制: "
             f"{sorted(transaction_owners - _ALLOWED_TRANSACTION_OWNERS)}"
@@ -199,9 +200,37 @@ def test_read_transaction_allowance_rejects_write_lock(tmp_path, monkeypatch, ow
         source = f'class {cls}:\n    def {function}(self):\n        connection.execute({statement!r})\n'
     (tmp_path / 'repository.py').write_text(source, encoding='utf-8')
     monkeypatch.setattr(sys.modules[__name__], '_REPOSITORIES', tmp_path)
-    audit = TestCommitPathAudit().test_repositories_commit_only_through_the_transaction_kernel
+    audit = TestCommitPathAudit().test_repositories_restrict_direct_connections_and_transaction_sql
     if statement in ('BEGIN', 'ROLLBACK', 'COMMIT'):
         audit()
     else:
         with pytest.raises(AssertionError):
+            audit()
+
+
+def test_repository_connection_commit_is_rejected_as_direct_connection(tmp_path, monkeypatch):
+    import sys
+
+    source = "import sqlite3\ndef bypass():\n    sqlite3.connect('state.db').commit()\n"
+    (tmp_path / "repository.py").write_text(source, encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "_REPOSITORIES", tmp_path)
+    audit = TestCommitPathAudit().test_repositories_restrict_direct_connections_and_transaction_sql
+    with pytest.raises(AssertionError, match="仓储直连数据库"):
+        audit()
+
+
+@pytest.mark.parametrize("source,accepted", [
+    ("def save(owned):\n    owned.connection.commit()\n", False),
+    ("def save(atomic_transaction):\n    atomic_transaction.commit()\n", True),
+])
+def test_repository_commit_audit_checks_explicit_connection(tmp_path, monkeypatch, source, accepted):
+    import sys
+
+    (tmp_path / "repository.py").write_text(source, encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "_REPOSITORIES", tmp_path)
+    audit = TestCommitPathAudit().test_repositories_restrict_direct_connections_and_transaction_sql
+    if accepted:
+        audit()
+    else:
+        with pytest.raises(AssertionError, match="仓储直接提交连接"):
             audit()
