@@ -265,3 +265,33 @@ class TestStatusEffectCombinations:
         )
         with pytest.raises(OutcomeValidationError):
             validate_outcome(_TICKET, outcome, REGISTRY)
+
+
+def test_stored_result_checks_keep_wider_raw_status_partition():
+    from camctl.contracts.enums import enum_for
+    from camctl.operations.validation import (ResultErrorIssue, result_error_issue, confirmed_effect_has_observation,
+        not_dispatched_has_no_effect)
+    status = enum_for('operation_attempts.status')
+    effect = enum_for('operation_attempts.effect_state')
+    assert result_error_issue(int(status.SUCCEEDED), None, stored=True) is None
+    assert result_error_issue(int(status.SUCCEEDED), {}, stored=True) is ResultErrorIssue.SUCCESS_ERROR
+    assert result_error_issue(int(status.UNKNOWN), None, stored=True) is ResultErrorIssue.MISSING_ERROR
+    assert result_error_issue(999, None, stored=True) is None
+    assert not confirmed_effect_has_observation(int(effect.CONFIRMED), [], stored=True)
+    assert confirmed_effect_has_observation(int(effect.UNKNOWN), [], stored=True)
+    assert not not_dispatched_has_no_effect('not_dispatched', int(effect.CONFIRMED), stored=True)
+    assert not_dispatched_has_no_effect('not_dispatched', int(effect.NO_EFFECT), stored=True)
+
+
+def test_operation_finish_error_and_preparation_observation_are_independent():
+    from camctl.contracts.enums import enum_for
+    from camctl.operations.validation import ResultErrorIssue, run_finish_error_issue, preparation_result_is_confirmed
+    statuses = enum_for('operation_runs.status')
+    effects = enum_for('operation_attempts.effect_state')
+    assert run_finish_error_issue(int(statuses.FAILED), None) is ResultErrorIssue.MISSING_ERROR
+    assert run_finish_error_issue(int(statuses.UNCONFIRMED), {'code': 'x'}) is None
+    assert run_finish_error_issue(int(statuses.SUCCEEDED), {'code': 'x'}) is ResultErrorIssue.UNEXPECTED_ERROR
+    expected = {'type': 'capture_preparation_completed', 'version': 1, 'data': {'activity_id': '9'}}
+    assert preparation_result_is_confirmed(int(effects.CONFIRMED), [expected], 9)
+    assert not preparation_result_is_confirmed(int(effects.CONFIRMED), [expected, expected], 9)
+    assert not preparation_result_is_confirmed(int(effects.UNKNOWN), [expected], 9)

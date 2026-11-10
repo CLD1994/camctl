@@ -59,7 +59,13 @@ from camctl.operations.models import (
     SettlementBasis,
     ValidatedOutcome,
 )
+from camctl.operations.ownership_rules import (require_obtain_check_action, require_obtain_check_output,
+    require_obtain_check_carrier, require_obtain_check_config, require_host_read_slot,
+    require_device_read_slot, read_round_matches, require_run_activity_owner,
+    require_copy_read_owner, start_camera_matches)
 from camctl.operations.result_format import result_document, read_result_document, error_document as _error_json
+from camctl.operations.validation import (ResultErrorIssue, result_error_issue, confirmed_effect_has_observation,
+    not_dispatched_has_no_effect, run_finish_error_issue, preparation_result_is_confirmed)
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
@@ -281,22 +287,12 @@ def _obtain_check_is_host(state, item_id: int, action_id: int) -> bool:
     selection = _fixed_reference(state, "obtain_source_selections", item.get("selection_id"))
     dependency = _fixed_reference(state, "action_dependencies", selection.get("dependency_id"))
     action = _fixed_reference(state, "actions", dependency.get("action_id"))
-    if (not json_equal(dependency.get("action_id"), action_id)
-            or action.get("type") != int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)):
-        raise ConsistencyError("obtain CHECK 不属于原获取动作")
+    require_obtain_check_action(dependency, action, action_id)
     output = _fixed_reference(state, "outputs", item.get("requested_output_id"))
-    if not json_equal(output.get("source_action_id"), dependency.get("depends_on_action_id")):
-        raise ConsistencyError("obtain CHECK 的请求产物不属于原来源依赖")
-    if item.get("output_id") is not None and not json_equal(item["output_id"], item["requested_output_id"]):
-        raise ConsistencyError("obtain CHECK 的已选产物与原请求身份不符")
-    device, local = output.get("device_file_id"), output.get("intermediate_file_id")
-    if (device is None) == (local is None):
-        raise ConsistencyError("obtain CHECK 产物必须恰有一种实际文件载体")
+    device, local = require_obtain_check_output(item, dependency, output)
     carrier = _fixed_reference(state, "device_files" if device is not None else "intermediate_files",
                                device if device is not None else local)
-    source_column = "source_action_id" if device is not None else "owner_action_id"
-    if not json_equal(carrier.get(source_column), output.get("source_action_id")):
-        raise ConsistencyError("obtain CHECK 的实际载体与原产物来源不符")
+    require_obtain_check_carrier(output, carrier, device=device is not None)
     return local is not None
 
 
@@ -305,9 +301,7 @@ def _verify_obtain_config(run, state) -> None:
         return
     host = _obtain_check_is_host(state, run["obtain_item_id"], run["action_id"])
     timeout, interval = run.get("timeout_s_json"), run.get("retry_interval_s_json")
-    if (host and (timeout is not None or interval is not None)
-            or not host and (timeout is None or interval is None)):
-        raise ConsistencyError("obtain CHECK 的配置必须符合真实主机或设备载体分区")
+    require_obtain_check_config(host_source=host, timeout=timeout, interval=interval)
 
 
 def _verify_complete_obtain_result(attempt) -> None:
@@ -362,23 +356,15 @@ def _read_attempt_has_slot(state, copy_id: int, copy_round: int) -> bool:
     try:
         slot = copy["slot_device_id"]
         if table == "intermediate_files":
-            if slot is not None:
-                raise ConsistencyError("主机源拷贝不能持有相机读取机会")
+            require_host_read_slot(slot)
         else:
             observer = _fixed_reference(state, "actions", source["observer_action_id"])
             origin = _fixed_reference(state, "actions", source["source_action_id"])
-            binding = (observer["device_id"], observer["driver_id"])
-            if (not all(isinstance(value, str) and value for value in binding)
-                    or binding != (origin["device_id"], origin["driver_id"])):
-                raise ConsistencyError("读取源观察者与可靠来源的原设备绑定不一致")
-            if slot is not None and slot != binding[0]:
-                raise ConsistencyError("拷贝的读取机会不属于原来源设备")
+            require_device_read_slot(slot, observer, origin)
         current_round = copy["round"]
     except KeyError as error:
         raise ConsistencyError("当前读取源、绑定或拷贝缺少必要字段") from error
-    if not is_json_integer(current_round) or current_round < 1:
-        raise ConsistencyError("当前拷贝轮次无效")
-    if not json_equal(copy_round, current_round):
+    if not read_round_matches(current_round, copy_round):
         raise TransactionError("读取意图的轮次与当前拷贝不符")
     return table == "intermediate_files" or slot is not None
 
@@ -417,9 +403,7 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
             ObjectId(activity["action_id"])
         except (KeyError, ValueError) as error:
             raise ConsistencyError("原活动缺少有效所属动作") from error
-        residual = kind is OperationKind.STOP_RESIDUAL or purpose is QueryPurpose.RESIDUAL_STOP_CONFIRMATION
-        if not residual and not json_equal(activity["action_id"], action_id):
-            raise ConsistencyError("流程与目标活动所属动作不符")
+        require_run_activity_owner(kind, purpose, action_id, activity["action_id"])
         if purpose in _PURPOSE_FLOW_KIND:
             original_kind = int(_PURPOSE_FLOW_KIND[purpose])
             matches = [(identity, facts) for identity, facts in state.get("operation_runs", {}).items()
@@ -448,8 +432,7 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
                   _fixed_reference(state, "recording_processing", copy_processing)
                   if copy_processing is not None else
                   _fixed_reference(state, "segment_inspections", copy_inspection))
-        if not json_equal(parent.get("action_id"), action_id):
-            raise ConsistencyError("读取流程与拷贝所属动作不符")
+        require_copy_read_owner(action_id, parent)
         matches = [identity for identity, facts in state.get("operation_runs", {}).items()
                    if facts.get("kind") == run["kind"] and json_equal(facts.get("copy_id"), target.copy_id)]
         if len(matches) != 1 or not json_equal(matches[0], run.get("id")):
@@ -2068,7 +2051,7 @@ def _attempt_intent_guard(event, context) -> None:
                 current = CameraIdentity(**identity)
             except (TypeError, ValueError, KeyError) as error:
                 raise EventValidationError("启动意图缺少可靠机身身份") from error
-            if current != original or activity.get("resource_key") != original.resource_key:
+            if not start_camera_matches(original, current, activity.get("resource_key")):
                 _fail("启动意图与原固定机身身份不符")
             fixed_identity = original
             from .physical_alias import physical_alias_conflict
@@ -2158,11 +2141,11 @@ def _attempt_result_guard(event, context) -> None:
         status = after.get("status")
         error = after.get("error_json")
         result = after.get("result_json")
-        if status == int(_ATTEMPT_STATUS.SUCCEEDED) and error is not None:
+        error_issue = result_error_issue(status, error, stored=True)
+        if error_issue is ResultErrorIssue.SUCCESS_ERROR:
             _fail("成功尝试不得携带调用错误")
-        if status in (int(_ATTEMPT_STATUS.FAILED), int(_ATTEMPT_STATUS.UNKNOWN)):
-            if error is None:
-                _fail("失败或未知尝试必须携带调用错误")
+        if error_issue is ResultErrorIssue.MISSING_ERROR:
+            _fail("失败或未知尝试必须携带调用错误")
         if not isinstance(result, Mapping):
             _fail("结束尝试必须保存统一结构的结果正文")
         assert result is not None
@@ -2205,17 +2188,12 @@ def _attempt_result_guard(event, context) -> None:
             except (KeyError, TypeError, ValueError) as error:
                 raise EventValidationError(f"设备可用性结果无效: {error}") from error
         if run.get("kind") == int(_RUN_KIND.PREPARE_CAPTURE) and status == int(_ATTEMPT_STATUS.SUCCEEDED):
-            expected = {"type": "capture_preparation_completed", "version": 1,
-                        "data": {"activity_id": str(run["activity_id"])}}
-            if (after.get("effect_state") != int(_EFFECT_STATE.CONFIRMED)
-                    or observations.count(expected) != 1):
+            if not preparation_result_is_confirmed(after.get("effect_state"), observations, run["activity_id"]):
                 _fail("设置准备成功必须保存原组合完成观察")
         effect = after.get("effect_state")
-        if settlement["basis"] == "not_dispatched" and effect != int(
-            _EFFECT_STATE.NO_EFFECT
-        ):
+        if not not_dispatched_has_no_effect(settlement["basis"], effect, stored=True):
             _fail("未派发依据只支持无效果")
-        if effect == int(_EFFECT_STATE.CONFIRMED) and not observations:
+        if not confirmed_effect_has_observation(effect, observations, stored=True):
             _fail("已确认效果必须有承载观察")
         if "diagnostics" in result:
             from camctl.operations.tool_diagnostics import decode_diagnostics
@@ -2354,10 +2332,10 @@ def _operation_finish_guard(event, context) -> None:
             if not isinstance(context.availability_reads, (ReleaseGroup, ResolvedGroup)):
                 _fail("设备检查成功必须与目标解除事务共同核验")
         error = after.get("error_json")
-        if status in (int(_RUN_STATUS.FAILED), int(_RUN_STATUS.UNCONFIRMED)):
-            if error is None:
-                _fail("失败或未确认结束必须携带流程错误")
-        elif error is not None:
+        error_issue = run_finish_error_issue(status, error)
+        if error_issue is ResultErrorIssue.MISSING_ERROR:
+            _fail("失败或未确认结束必须携带流程错误")
+        if error_issue is ResultErrorIssue.UNEXPECTED_ERROR:
             _fail("该结束结果不携带流程错误")
         if after.get("retry_wait_required") != 0:
             _fail("结束流程必须清除重试等待责任")
