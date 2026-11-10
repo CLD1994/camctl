@@ -61,6 +61,7 @@ from camctl.outputs.cleanup_flow import (
     ProgressCleanupItem,
     RestrictCleanupItem,
     StartCleanupAction,
+    decide_cleanup_progress, validate_cleanup_success,
 )
 from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, device_holder, first_eligible_read, positive_limit
@@ -9242,18 +9243,14 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
             item = self._load_item(connection, command.item_id)
             return self._verify_and_reuse(scope, saved, item)
         item = self._load_item(connection, command.item_id)
+        disposition = decide_cleanup_progress(item=item, irreversible=command.irreversible)
+        if disposition is CleanupItemDisposition.ALREADY:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CleanupItemSaved(CleanupItemDisposition.ALREADY, command.item_id))
         if command.irreversible:
             # 删除中成员取得可靠派发事实：限制从可撤销升级为不可撤销。
-            if item["status"] != int(_CLEANUP_ITEM_STATUS.DELETING):
-                raise ConsistencyError("不可撤销事实要求成员处于删除中")
-            if item["restriction_state"] == int(_CLEANUP_RESTRICTION.IRREVERSIBLE):
-                return CommandPlan(
-                    events=(), owners=self._owners, state_rows=self._state,
-                    read_only=True,
-                    result=CleanupItemSaved(
-                        CleanupItemDisposition.ALREADY, command.item_id))
-            if item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE):
-                raise ConsistencyError("不可撤销事实要求本项限制仍可撤销")
             upgrade = _update(
                 "cleanup_items", command.item_id,
                 {"restriction_state": int(_CLEANUP_RESTRICTION.ACTIVE)},
@@ -9269,15 +9266,6 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
                 owners=self._owners, state_rows=self._state,
                 result=CleanupItemSaved(
                     CleanupItemDisposition.SAVED, command.item_id))
-        if item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING):
-            return CommandPlan(
-                events=(), owners=self._owners, state_rows=self._state,
-                read_only=True,
-                result=CleanupItemSaved(
-                    CleanupItemDisposition.ALREADY, command.item_id))
-        if (item["status"] != int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)
-                or item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE)):
-            raise ConsistencyError("删除推进要求成员处于限制中")
         output_id = item["output_id"]
         output = self._state["outputs"].get(output_id)
         if output is None or output["cleanup_status"] != int(
@@ -9694,23 +9682,7 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
         output = self._state["outputs"].get(output_id)
         if output is None:
             raise ConsistencyError(f"清理成功要求确认产物身份: {command.item_id}")
-        from_wait = item["status"] == int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)
-        if from_wait:
-            # 待删除成员没有本项删除调用：只复用可靠完成或缺席事实。
-            if item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE):
-                raise ConsistencyError("待删除成员的成功要求可撤销限制")
-            if command.outcome is CleanupOutcomeChoice.DELETED:
-                raise ConsistencyError("没有本项删除调用不能保存实际删除依据")
-            if (command.outcome is CleanupOutcomeChoice.ALREADY_CLEANED
-                    and output["availability"] != int(_AVAILABILITY.CLEANED)):
-                raise ConsistencyError("已有完成依据要求产物已可靠清理")
-        elif (item["status"] != int(_CLEANUP_ITEM_STATUS.DELETING)
-                or item["restriction_state"] not in (
-                    int(_CLEANUP_RESTRICTION.ACTIVE),
-                    int(_CLEANUP_RESTRICTION.IRREVERSIBLE))):
-            # 删除中成员在派发事实保存前仍为可撤销限制；成功终态本身
-            # 保存不可撤销完成事实（查询确认或缺席依据同样适用）。
-            raise ConsistencyError("清理成功要求成员处于删除中")
+        from_wait = validate_cleanup_success(item=item, outcome=command.outcome, output=output)
         device_file_id = output.get("device_file_id")
         intermediate_file_id = output.get("intermediate_file_id")
         templates = []

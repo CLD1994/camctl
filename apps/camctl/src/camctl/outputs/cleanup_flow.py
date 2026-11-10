@@ -282,6 +282,46 @@ _ITEM_UNRESOLVED, _ITEM_PENDING_DELETE, _ITEM_DELETING = 1, 2, 3
 _ITEM_SUCCEEDED, _ITEM_FAILED, _ITEM_CANCELED = 4, 5, 6
 
 
+
+def decide_cleanup_progress(*, item: Mapping, irreversible: bool) -> CleanupItemDisposition:
+    """依据成员阶段判断进入删除或确认不可撤销派发。"""
+    from camctl.contracts.enums import enum_for
+    restriction = enum_for("cleanup_items.restriction_state")
+    if irreversible:
+        if item["status"] != _ITEM_DELETING:
+            raise ConsistencyError("不可撤销事实要求成员处于删除中")
+        if item["restriction_state"] == int(restriction.IRREVERSIBLE):
+            return CleanupItemDisposition.ALREADY
+        if item["restriction_state"] != int(restriction.ACTIVE):
+            raise ConsistencyError("不可撤销事实要求本项限制仍可撤销")
+    else:
+        if item["status"] == _ITEM_DELETING:
+            return CleanupItemDisposition.ALREADY
+        if item["status"] != _ITEM_PENDING_DELETE or item["restriction_state"] != int(restriction.ACTIVE):
+            raise ConsistencyError("删除推进要求成员处于限制中")
+    return CleanupItemDisposition.SAVED
+
+
+def validate_cleanup_success(*, item: Mapping, outcome: CleanupOutcomeChoice,
+                             output: Mapping) -> bool:
+    """判断成员能否按申请结果完成，返回是否从待删除阶段复用事实。"""
+    from camctl.contracts.enums import enum_for
+    restriction = enum_for("cleanup_items.restriction_state")
+    from_wait = item["status"] == _ITEM_PENDING_DELETE
+    if from_wait:
+        if item["restriction_state"] != int(restriction.ACTIVE):
+            raise ConsistencyError("待删除成员的成功要求可撤销限制")
+        if outcome is CleanupOutcomeChoice.DELETED:
+            raise ConsistencyError("没有本项删除调用不能保存实际删除依据")
+        if (outcome is CleanupOutcomeChoice.ALREADY_CLEANED
+                and output["availability"] != int(enum_for("outputs.availability").CLEANED)):
+            raise ConsistencyError("已有完成依据要求产物已可靠清理")
+    elif (item["status"] != _ITEM_DELETING or item["restriction_state"] not in
+          (int(restriction.ACTIVE), int(restriction.IRREVERSIBLE))):
+        raise ConsistencyError("清理成功要求成员处于删除中")
+    return from_wait
+
+
 class CleanupCancelChoice(Enum):
     """清理项在动作取消下的处理分支（按取消收场规则分类）。"""
 
