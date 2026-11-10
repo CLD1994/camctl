@@ -10,6 +10,7 @@ def plan_before(connection, plan_id):
 
 def assert_action_plan(connection, action_id, plan_id, key, *,
                        action_status, previous_plan, completed):
+    assert previous_plan[0] == 2
     action = connection.execute(
         "SELECT status,last_event_id FROM actions WHERE id=? AND plan_id=?",
         (action_id, plan_id)).fetchone()

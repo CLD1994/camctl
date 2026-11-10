@@ -614,6 +614,7 @@ class TestFixCleanupTargetsCommand:
         try:
             connection.execute("DELETE FROM outputs WHERE id=701")
             self._processing_completed(owned)
+            connection.execute("UPDATE plans SET status=2 WHERE id=1")
             if unfinished_sibling:
                 _seed_action(connection, 12, 1, action_type=7, status=1)
             connection.commit()
@@ -769,6 +770,8 @@ class TestFinishCleanupAction:
             (92, 702, 702, 5, 4, None, 1, 3,
              '{"output_id":"702","max_attempts":1,"attempts_used":1}'),
         ])
+        owned.connection.execute("UPDATE plans SET status=2 WHERE id=1")
+        owned.connection.commit()
         before_plan = plan_before(owned.connection, 1)
         key = new_operation_key()
         outcome = self._finish(self._repository(), owned, key=key)
@@ -791,9 +794,10 @@ class TestFinishCleanupAction:
         ])
         connection = owned.connection
         try:
+            connection.execute("UPDATE plans SET status=2 WHERE id=1")
             if unfinished_sibling:
                 _seed_action(connection, 12, 1, action_type=7, status=1)
-                connection.commit()
+            connection.commit()
             before_plan = plan_before(connection, 1)
             key = new_operation_key()
             outcome = self._finish(self._repository(), owned, key=key)
@@ -818,9 +822,10 @@ class TestFinishCleanupAction:
         ])
         connection = owned.connection
         try:
+            connection.execute("UPDATE plans SET status=2 WHERE id=1")
             if unfinished_sibling:
                 _seed_action(connection, 12, 1, action_type=7, status=1)
-                connection.commit()
+            connection.commit()
             before_plan = plan_before(connection, 1)
             key = new_operation_key()
             result = self._repository().finish_canceled_cleanup(

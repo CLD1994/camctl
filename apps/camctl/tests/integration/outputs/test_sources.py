@@ -367,6 +367,7 @@ def test_resolve_sources_failure_completes_last_action_plan(
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(
         "UPDATE actions SET status = 3 WHERE id IN (11, 12, 13, 14)")
+    connection.execute("UPDATE plans SET status=2 WHERE id IN (1,2)")
     connection.commit()
     repository = OutputsRepository()
     owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
@@ -410,6 +411,7 @@ def test_canceled_obtain_settlement_observes_own_plan_siblings(tmp_path, unfinis
     connection = owned.connection
     try:
         connection.execute("UPDATE actions SET status=3 WHERE id IN (11,12,13,14)")
+        connection.execute("UPDATE plans SET status=2 WHERE id IN (1,2)")
         if unfinished_sibling:
             connection.execute("UPDATE actions SET status=2 WHERE id=11")
         connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=30")
