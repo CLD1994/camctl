@@ -278,3 +278,49 @@ def _host_photo_registered_pair(
                      if values.get("output_id") == preview_id]
     if original_links or len(preview_links) != 1 or preview_links[0].get("original_output_id") != original_id:
         raise _HostPhotoPairError("正式预览必须唯一关联同动作正式原图")
+
+
+def host_photo_promotion_failure(facts, source, kind):
+    """返回资格错误及原路径异常，调用者保留原异常链。"""
+    action_type = enum_for("actions.type")
+    if (source.get("type") != action_type.CAMERA_TAKE_PHOTO
+            or kind not in (_OUTPUT_KIND.ORIGINAL, _OUTPUT_KIND.PREVIEW)
+            or facts.get("purpose") != int(_HOST_PURPOSE_FOR_KIND[kind])
+            or facts.get("retention_state") != int(_RETENTION.REQUIRED)
+            or facts.get("cleanup_state") != int(_FILE_CLEANUP.NOT_NEEDED)
+            or facts.get("size_bytes") is None or facts.get("sha256") is None):
+        return "主机拍摄源必须是本次单张拍摄的完整未释放原图或预览", None
+    purpose = FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name]
+    size, digest = facts.get("size_bytes"), facts.get("sha256")
+    if (type(size) is not int or not 0 < size <= MAX_OBJECT_ID
+            or not isinstance(digest, str) or _HOST_PHOTO_SHA256.fullmatch(digest) is None):
+        return "主机拍摄源缺少精确正大小或完整小写 SHA-256", None
+    try:
+        validate_relative_file_path(purpose, facts["id"], facts["relative_path"])
+        if facts["relative_path"] != relative_file_path(purpose, facts["id"],
+                photo_file_extension(purpose, saved_photo_format(source))):
+            raise ValueError("提升路径与原保存格式不一致")
+    except ValueError as error:
+        return "主机拍摄源路径与稳定身份不一致", error
+    return None, None
+
+
+def host_photo_metadata_error(values, source, kind):
+    purpose = FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name]
+    if values.get("media_type") != photo_media_type(purpose, saved_photo_format(source)):
+        return "主机照片媒体类型与保存格式及用途不一致"
+    if any(not isinstance(values.get(name), str) or not values[name] for name in ("original_name", "media_type")):
+        return "主机拍摄源登记缺少可靠可读元信息"
+    return None
+
+
+def host_photo_sources_promoted(source_rows, action_id):
+    """本动作存在照片责任且全部已提升时按终态资格核对。"""
+    found, promoted = False, True
+    for facts in source_rows.values():
+        if (facts.get("owner_action_id") == action_id
+                and facts.get("purpose") in _HOST_PHOTO_PURPOSE_CODES):
+            found = True
+            if promoted:
+                promoted = facts.get("retention_state") == int(_RETENTION.PROMOTED)
+    return found and promoted

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from camctl.capture.inspection_rules import (
+    binding_read_error, binding_result_blocked,
     inspection_member_is_eligible, inspection_read_is_complete,
     inspection_result_requires_read,
 )
@@ -163,19 +164,9 @@ def inspection_input_read_succeeded(connection, inspection) -> bool:
     return RetryWaitReads(connection).no_unsettled_attempts(run_id)
 
 
-def _binding_read_error(document):
-    failure = document.get("failure")
-    error = failure.get("read_error") if isinstance(failure, Mapping) else None
-    if not isinstance(error, Mapping) or error.get("code") != "device_binding_unavailable":
-        return None
-    if failure.get("code") != "read_failed":
-        raise ConsistencyError("绑定读取失败必须归属于原检查读取")
-    return error
-
-
 def _binding_read_result(connection, inspection, document):
     """检查失败若源于绑定，核验同一副本的原真实读取结果。"""
-    error = _binding_read_error(document)
+    error = binding_read_error(document)
     if error is None:
         return False
     with closing(connection.execute(
@@ -322,7 +313,7 @@ class _SaveInspectionResultCommand:
                 return self._decision(_inspection_ref(inspection), read_only=True)
             raise ConsistencyError("已结束的分段检查不能替换其结果")
         if _binding_read_result(connection, inspection, self.request.result_json):
-            if action["cancel_requested"] or action["status"] != 2:
+            if binding_result_blocked(action):
                 return self._decision(_inspection_ref(inspection), read_only=True)
         if (inspection_result_requires_read(self.request.state, self.request.result_json)
                 and not inspection_input_read_succeeded(connection, inspection)):
@@ -529,11 +520,11 @@ def _segment_inspection_guard(event, context) -> None:
                 raise EventValidationError("分段检查结果必须引用自身可靠保存事件")
             reads = context.retry_wait_reads
             from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
-            if _binding_read_error(values["result_json"]) is not None:
+            if binding_read_error(values["result_json"]) is not None:
                 if type(reads) is not RetryWaitReads:
                     raise EventValidationError("检查绑定失败缺少原读取核验")
                 _binding_read_result(reads.connection, current, values["result_json"])
-                if action["cancel_requested"] or action["status"] != 2:
+                if binding_result_blocked(action):
                     raise EventValidationError("已取消或终态动作不能新增检查绑定失败结果")
             if inspection_result_requires_read(values.get("state"), values["result_json"]):
                 if (type(reads) is not RetryWaitReads
