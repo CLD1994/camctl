@@ -9,7 +9,8 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
-from camctl.persistence import runtime, transaction
+from camctl.persistence import runtime
+from camctl.persistence.repositories import transactions as transaction
 from camctl.persistence.repositories import operations, scheduling
 
 
