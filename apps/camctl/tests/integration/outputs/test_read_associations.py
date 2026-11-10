@@ -12,7 +12,6 @@ from camctl.capture.files import file_identity_key
 from camctl.contracts.json_values import parse_exact_json
 from camctl.outputs.qualification import FileCandidate, OperationConfig, QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..operations.test_result_reuse import _FaultConnection
@@ -49,7 +48,6 @@ def read_targets(tmp_path):
             "UPDATE recording_processing SET check_decision=3, check_basis_json='{}'"
         )
         connection.commit()
-        register_operation_guards()
         yield owned
     finally:
         owned.connection.close()

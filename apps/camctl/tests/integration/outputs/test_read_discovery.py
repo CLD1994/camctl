@@ -238,14 +238,13 @@ def test_host_missing_owner_is_not_filtered_away(local_read):
 
 def test_internal_and_delivery_reads_share_device_order(mixed_purposes):
     from camctl.outputs.batches import BatchOutcome, BatchRequest
-    from camctl.persistence.repositories.file_batches import FileBatchRepository, register_file_batch_guards
+    from camctl.persistence.repositories.file_batches import FileBatchRepository
 
     owned, internal, external = mixed_purposes
     repository = OutputsRepository(read_batch_size=1)
     # 内部责任虽后建档，但录像动作的计划内顺序先于取回动作。
     page = read_candidates(owned.connection, _scope(owned.connection), limit=1)
     assert [candidate.copy_id for candidate in page.items] == [internal.copy_id]
-    register_file_batch_guards()
     batch = FileBatchRepository().acquire(
         BatchRequest(32, "cam-1", _NOW), new_operation_key(), owned)
     assert batch.kind is DbOutcomeKind.COMPLETED and batch.value is BatchOutcome.WAIT, batch

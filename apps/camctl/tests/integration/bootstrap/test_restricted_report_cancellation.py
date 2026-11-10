@@ -19,19 +19,14 @@ from camctl.bootstrap.background_flow import CombinedLocalWork
 from camctl.logging_runtime.ownership import LoggingOwner
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.executor import DbExecutorError
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
 from camctl.reporting.communication import WorkerCommunicator
 from camctl.reporting.messages import JobMessage
 from camctl.reporting.models import ReportStatus
-from camctl.reporting.policy import register_report_guards, register_sync_guard
 from camctl.reporting.publication import parse_report_file_name
 from camctl.reporting.supervisor import WorkerSupervisor
 from camctl.session.locks import SessionLockConflictError, acquire_session
 
 
-register_acceptance_guards()
-register_report_guards()
-register_sync_guard()
 
 pytestmark = pytest.mark.asyncio
 

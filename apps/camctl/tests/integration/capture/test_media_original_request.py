@@ -12,9 +12,8 @@ from camctl.capture.processing import (
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture, register_capture_guards
+from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture
 from camctl.outputs.catalog import FileReference, OutputCatalogFacts, OutputDraft, OutputKind
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.transactions import TransactionError, saved_transaction_events
 
 from .test_media_execution import _NOW, _seed_pending_repair
@@ -87,8 +86,6 @@ def _changed(command, change):
     ("complete", "processing"), ("complete", "output"), ("complete", "size"), ("complete", "digest"), ("complete", "time"),
 ])
 async def test_media_original_key_rejects_changed_full_request(pipeline, branch, change):
-    register_capture_guards()
-    register_outputs_guards()
     owned = pipeline[0]
     save, command = await _original_request(owned, branch)
     key = new_operation_key()
@@ -105,7 +102,6 @@ async def test_media_original_key_rejects_changed_full_request(pipeline, branch,
 
 
 async def test_check_running_key_cannot_be_reused_as_actual_observation(pipeline):
-    register_capture_guards()
     owned = pipeline[0]
     repository, key = CaptureRepository(), new_operation_key()
     started = repository.save_check_result(
@@ -121,8 +117,6 @@ async def test_check_running_key_cannot_be_reused_as_actual_observation(pipeline
 
 @pytest.mark.parametrize("branch", ["check", "complete"])
 async def test_media_original_key_rejects_missing_original_owner_link(pipeline, branch):
-    register_capture_guards()
-    register_outputs_guards()
     owned = pipeline[0]
     save, command = await _original_request(owned, branch)
     key = new_operation_key()

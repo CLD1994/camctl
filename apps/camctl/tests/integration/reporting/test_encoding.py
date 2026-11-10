@@ -23,18 +23,16 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import row_facts
 from camctl.reporting.encoding import ReportDocument, encode_report, iter_report_chunks
-from camctl.reporting.policy import ReportingRepository, register_report_guards
+from camctl.reporting.policy import ReportingRepository
 
 from ..acceptance.test_acceptance import Catalog, _NOW
 from ..persistence.test_runtime import _create_valid_database
 from unit.reporting.test_encoding import _action, _diagnostic, _obtain, _output, _plan
 
-register_acceptance_guards()
-register_report_guards()
 
 _EXPECTED = (
     '{"from_wm":0,"report_id":"1","to_wm":2,"plans":[{"created_at":"2026-01-15 08:00:00",'

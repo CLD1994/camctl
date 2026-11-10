@@ -39,13 +39,9 @@ async def _seed_plans(repository: HistoryRepository, count: int) -> HistoryBound
     from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
     from unit.acceptance.helpers import StubCatalog
     from camctl.contracts.values import new_operation_key
-    from camctl.persistence.repositories.acceptance import (
-        AcceptanceRepository,
-        register_acceptance_guards,
-    )
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-    register_acceptance_guards()
     catalog = StubCatalog()
 
     class _Reader:

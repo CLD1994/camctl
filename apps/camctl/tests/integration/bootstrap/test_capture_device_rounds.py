@@ -20,8 +20,6 @@ from camctl.devices.tasks import StartReturn, CompletionMode
 from camctl.operations.models import CallOutcome, AttemptStatus, EffectState, Settlement, SettlementBasis, EvidenceValue
 from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
 from camctl.session.clock import ClockCheckInput
 from camctl.session.service import StateDbFailure, run_session
@@ -36,8 +34,6 @@ from ..support.database import business_database
 from ..support.session import accept_plan, query_database, session_config, session_context
 
 pytestmark = pytest.mark.asyncio
-register_cancellation_guards()
-register_outputs_guards()
 
 
 class CompletedCatalog:

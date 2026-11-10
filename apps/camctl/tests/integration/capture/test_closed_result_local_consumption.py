@@ -26,10 +26,7 @@ from camctl.operations.models import (
     AttemptStatus, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import saved_transaction_events
 
@@ -40,10 +37,6 @@ from .test_result_consumer_saves import _actual
 
 
 pytestmark = pytest.mark.asyncio
-register_capture_guards()
-register_operation_guards()
-register_outputs_guards()
-register_timelapse_guards()
 
 _CONSUMERS = ("photo", "timelapse", "canceled_timelapse")
 _BINDINGS = ("matched", "missing", "mismatch")

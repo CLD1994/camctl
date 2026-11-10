@@ -639,9 +639,7 @@ async def _real_recording_media_flow(tmp_path, *, reader_factory=None,
     from ..support.session import accept_plan, session_config
     from .test_media_assembly import _SessionDriver, _EVIDENCE, _tool
     from .test_recording_stop import _RecordCatalog, _record_plan
-    from camctl.persistence.repositories.scheduling import register_window_guard
 
-    register_window_guard()
     settings = dict(_SETTINGS if copy_settings is None else copy_settings)
     configuration = session_config(tmp_path, devices={"cam-1": {
         "kind": "camera", "driver": "camctl-adb", "copy": settings}})

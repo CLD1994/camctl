@@ -16,12 +16,8 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.capture_facts import load_start_facts, start_facts_from_rows
 from camctl.persistence.repositories.transactions import row_facts, commit_operation
 from ..support.output_planning import capture_operation, event_case, validate_static_event, EventSequence
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from .test_start_scope_facts import save_generic_no_effect_start
 
-register_cancellation_guards()
-register_outputs_guards()
 from ..scheduling.test_resources import _seed_environment,_seed_plan,_seed_record_action,_seed_activity,_NOW
 
 
@@ -368,8 +364,7 @@ def test_copy_and_cleanup_fixed_combinations_do_not_require_parent_reads(tmp_pat
 
 def emergency_environment(tmp_path,with_attempt):
     from camctl.capture.recovery import EmergencyOutcome,EmergencyRecord
-    from camctl.persistence.repositories.capture import CaptureRepository,register_capture_guards
-    register_capture_guards()
+    from camctl.persistence.repositories.capture import CaptureRepository
     owned=_seed_environment(tmp_path)
     _seed_plan(owned.connection,1)
     _seed_plan(owned.connection,2)

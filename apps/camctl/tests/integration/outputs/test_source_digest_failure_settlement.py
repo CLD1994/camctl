@@ -16,11 +16,7 @@ from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
 from camctl.devices.read_session import ReadSession
 from camctl.outputs.obtain_flow import advance_obtain
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
@@ -29,11 +25,6 @@ from ..support.capture import capture_database
 from ..support.digest_read_recovery_cases import Driver, factory, prepare_request
 from .test_cleanup_query_commit_recovery import _CommitFaultConnection
 
-register_acceptance_guards()
-register_cancellation_guards()
-register_capture_guards()
-register_operation_guards()
-register_file_batch_guards()
 
 pytestmark = pytest.mark.asyncio
 

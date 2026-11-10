@@ -7,10 +7,10 @@ import pytest_asyncio
 from camctl.bootstrap import motor_assembly
 from camctl.contracts.values import new_operation_key
 from camctl.motor.notification import NotificationWriter, NotificationWriteResult, WriteKind
-from camctl.persistence.repositories.motor import MotorRepository, register_motor_guards
+from camctl.persistence.repositories.motor import MotorRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.session.clock import ClockCheckInput
-from camctl.persistence.repositories.scheduling import register_window_guard, SchedulingRepository, ObserveWindowRequest
+from camctl.persistence.repositories.scheduling import SchedulingRepository, ObserveWindowRequest
 from ..support.database import business_database, create_test_database
 from ..persistence.test_motor_transactions import _admit, _body, NOW
 
@@ -22,8 +22,6 @@ async def motor_database(tmp_path):
     body = _body()
     body["actions"][0]["policy"] = {"max_delay_ms": 1}
     _admit(owned, body)
-    register_motor_guards()
-    register_window_guard()
     observed = SchedulingRepository().observe_window(
         ObserveWindowRequest(1, NOW, NOW), new_operation_key(), owned)
     assert observed.kind.value == "completed", observed.error

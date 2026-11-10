@@ -34,26 +34,13 @@ from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    register_capture_guards,
-)
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
-from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository,
-    register_timelapse_guards,
-)
+from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file
-from camctl.reporting.policy import (
-    ReportingRepository,
-    register_report_guards,
-    register_sync_guard,
-)
+from camctl.reporting.policy import ReportingRepository
 
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from .test_recording_stop import (
@@ -77,11 +64,6 @@ from camctl.persistence.repositories.transactions import row_facts
 from .test_timelapse_finish import _TimelapseCatalog, _timelapse_plan
 from ..support.bootstrap_runtime_cases import configured_session
 
-register_operation_guards()
-register_capture_guards()
-register_timelapse_guards()
-register_report_guards()
-register_sync_guard()
 
 pytestmark = pytest.mark.asyncio
 

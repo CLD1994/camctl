@@ -15,11 +15,10 @@ from camctl.operations.models import (
     Settlement, SettlementBasis,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.cancellation import CancellationRepository, register_cancellation_guards
+from camctl.persistence.repositories.cancellation import CancellationRepository
 
 from .test_capture_contract import _NOW
 
-register_cancellation_guards()
 pytestmark = pytest.mark.asyncio
 
 

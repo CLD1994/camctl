@@ -32,10 +32,6 @@ from camctl.outputs.cleanup_results import saved_cleanup_delete, saved_cleanup_a
 from support.repository_ports import repository_port
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.persistence.repositories.file_batches import register_file_batch_guards
-from camctl.persistence.repositories.scheduling import register_window_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..devices.test_adb_camera_transport import LocalAdbChannel
@@ -85,10 +81,6 @@ class FileChannel(LocalAdbChannel):
 async def world(tmp_path, request, capture_resources, isolated_driver_registries):
     """仅预置已登记源；清理受理、意图、结果及交接全部执行生产事务。"""
     binding = DeviceBinding("cam-1", getattr(request, "param", BINDING.driver_id))
-    register_capture_guards()
-    register_cancellation_guards()
-    register_file_batch_guards()
-    register_window_guard()
     cfg = load_config({
         "paths": {"state_db": str(tmp_path / "state.db"), "log_file": str(tmp_path / "log"),
                   **{name: str(tmp_path / name) for name in ("staging", "ready", "processing")}},

@@ -48,22 +48,13 @@ from camctl.outputs.catalog import (
     OutputKind,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository,
-    FinishCapture,
-    register_capture_guards,
-)
+from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..outputs.test_read_associations import read_targets
 from ..persistence.test_runtime import _create_valid_database
 
-register_operation_guards()
-register_capture_guards()
-register_outputs_guards()
 
 pytestmark = pytest.mark.asyncio
 
@@ -183,12 +174,8 @@ async def _submit_plan(owned) -> int:
     from camctl.acceptance.input import parse_input, read_input
     from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
     from unit.acceptance.helpers import StubCatalog
-    from camctl.persistence.repositories.acceptance import (
-        AcceptanceRepository,
-        register_acceptance_guards,
-    )
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
 
-    register_acceptance_guards()
     body = {
         "request_id": "9001",
         "created_at": "2026-01-15 08:00:00",

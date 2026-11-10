@@ -17,10 +17,7 @@ from camctl.acceptance.service import (
 )
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository,
-    register_acceptance_guards,
-)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import OwnedConnection
 
 from .test_acceptance import (
@@ -34,7 +31,6 @@ from .test_acceptance import (
 )
 from ..reporting.test_ack_sync import sync_environment
 
-register_acceptance_guards()
 
 pytestmark = pytest.mark.asyncio
 

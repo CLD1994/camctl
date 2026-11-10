@@ -19,13 +19,8 @@ from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskExecutor, FileTaskResult
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.timelapse import register_timelapse_guards
-from camctl.persistence.repositories.scheduling import (
-    ObserveWindowRequest, SchedulingRepository, StartActionRequest, register_window_guard)
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
+from camctl.persistence.repositories.scheduling import ObserveWindowRequest, SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.session.supervision import Supervisor
 
@@ -99,12 +94,6 @@ class OsvWorld:
 
 @asynccontextmanager
 async def osv_world(home, resources, content, monkeypatch):
-    register_acceptance_guards()
-    register_window_guard()
-    register_capture_guards()
-    register_operation_guards()
-    register_outputs_guards()
-    register_timelapse_guards()
     world = OsvWorld(home, resources, content)
     assert initialize_state(world.config, world.path).outcome is InitOutcome.CREATED
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())

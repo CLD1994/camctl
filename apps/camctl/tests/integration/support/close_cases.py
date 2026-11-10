@@ -28,9 +28,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.repositories.scheduling import (
-    ObserveWindowRequest, SchedulingRepository, StartActionRequest, register_window_guard,
-)
+from camctl.persistence.repositories.scheduling import ObserveWindowRequest, SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .capture import capture_database, capture_factory, restart_capture_database
@@ -144,7 +142,6 @@ async def _prepared(tmp_path, *, start="confirmed", query=False):
     catalog.duration_s = Decimal("60")
     instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
-        register_window_guard()
         await accept_plan(world.database, tmp_path, catalog, {
             "request_id": "1", "created_at": instant, "name": "原复合收场",
             "actions": [{"name": "录像", "type": "camera_record", "device_id": "cam-1",

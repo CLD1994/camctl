@@ -19,7 +19,6 @@ from camctl.logging_runtime.service import LogChannel, LogRecord
 from camctl.operations.models import AttemptStatus, AttemptTicket, CallOutcome, ErrorValue
 from camctl.operations.tool_diagnostics import ToolCallOutput, ToolDiagnostics, ToolStream, ToolStreamState
 from camctl.session.service import run_session
-from camctl.session.clock import register_clock_guard
 from camctl.session.work import WorkFacts
 from ..session.support import session_context
 from ..support.database import create_test_database
@@ -248,7 +247,6 @@ async def test_background_admission_allows_later_flow_stop_and_same_device_round
     async def stop_flow(context):
         operations.append("required-stop")
 
-    register_clock_guard()
     path = tmp_path / "session.db"
     create_test_database(path)
     facts = WorkFacts(unfinished_actions=0, required_settlements=0,
