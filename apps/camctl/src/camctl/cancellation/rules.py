@@ -324,3 +324,56 @@ def decide_origin_cancel(facts: CancelOriginFacts) -> OriginCancelDecision:
     if facts.origin_cancel_applied:
         return OriginCancelDecision.SETTLE_CANCELED
     return OriginCancelDecision.CONTINUE
+
+
+def validate_stored_cancel_mode(target, mode):
+    """核对既定生效方式对原目标状态的要求，不重新决定停止能力。"""
+    if mode is CancelApplyMode.PRE_START:
+        if target["status"] not in (1, 2) or target["cancel_requested"]:
+            raise ConsistencyError("未启动取消要求目标仍有效且未取消")
+    elif mode is CancelApplyMode.WITH_STOP:
+        if target["status"] != 2 or target["cancel_requested"]:
+            raise ConsistencyError("停止收场取消要求目标执行中且未取消")
+    elif mode is CancelApplyMode.TERMINAL:
+        if target["status"] not in _ACTION_TERMINAL:
+            raise ConsistencyError("终态取消要求目标已终态")
+    elif mode is CancelApplyMode.ALREADY:
+        if not target["cancel_requested"]:
+            raise ConsistencyError("复用取消责任要求目标取消已生效")
+    else:
+        raise ConsistencyError(f"取消生效方式不可解释: {mode!r}")
+
+
+def existing_photo_preview_decision(action, activity):
+    """终态及已生效取消先决定关联；其余情况继续判断入口事实。"""
+    if action['status'] in _ACTION_TERMINAL:
+        return True
+    if action['cancel_requested']:
+        return may_link_auto_preview(action, decide_cancel_eligibility(
+            capture_eligibility_facts(action, activity)))
+    return None
+
+
+def photo_preview_entry_decision(phase, attempts, *, reserved, allow_pending_reserved,
+                                 confirmation_pending=None):
+    """需要原 START 确认事实时返回 None；否则返回关联许可。"""
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.start_entry import EntryPhase
+    if phase is EntryPhase.ENTERED:
+        return False
+    if phase is EntryPhase.BLOCKED:
+        if confirmation_pending is None:
+            return None
+        return not confirmation_pending and (bool(attempts) or reserved)
+    if not (allow_pending_reserved and reserved and attempts):
+        return False
+    if confirmation_pending is None:
+        return None
+    return (not confirmation_pending
+            and all(attempt['status'] == int(enum_for('operation_attempts.status').RUNNING)
+                    and attempt['result_json'] is None for attempt in attempts))
+
+
+def report_cancel_settled(action):
+    """报告目标只有终态可作为取消成功依据。"""
+    return action['type'] != _REPORT_TASK_TYPE or action['status'] in _ACTION_TERMINAL
