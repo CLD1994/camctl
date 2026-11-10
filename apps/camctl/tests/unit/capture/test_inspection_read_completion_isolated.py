@@ -6,6 +6,10 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
+
+from camctl.capture.inspection_rules import (
+    inspection_read_is_complete, inspection_result_requires_read,
+)
 from unittest.mock import patch
 
 
@@ -32,7 +36,8 @@ class ReadCompletionTests(unittest.TestCase):
                  "operation_runs.status": SimpleNamespace(SUCCEEDED=3),
                  "operation_attempts.status": SimpleNamespace(SUCCEEDED=2),
                  "file_copies.verification_state": SimpleNamespace(MATCHED=3, SOURCE_CHECKSUM_UNAVAILABLE=5)}
-        self.ns = {"closing": closing, "enum_for": enums.__getitem__}
+        self.ns = {"closing": closing, "enum_for": enums.__getitem__,
+                   "inspection_read_is_complete": inspection_read_is_complete}
         self.check = extract(ROOT / "persistence/repositories/segment_inspections.py", "inspection_input_read_succeeded", self.ns)
         self.rows = [(15, 10, 10, 3, "hash", 7, 6, 3, 1, 0, 2, "{}", 21)]
         self.connection = SimpleNamespace(execute=lambda sql, params: Cursor(self.rows))
@@ -66,8 +71,7 @@ class ReadCompletionTests(unittest.TestCase):
         self.assertFalse(self.check_current())
 
     def test_read_failure_outcomes_do_not_require_probe_input(self):
-        ns = {"_STATE": SimpleNamespace(COMPLETED=2), "Mapping": dict}
-        requires = extract(ROOT / "persistence/repositories/segment_inspections.py", "_result_requires_read", ns)
+        requires = inspection_result_requires_read
         self.assertTrue(requires(2, {"tool": {"ran": False}}))
         self.assertTrue(requires(4, {"tool": {"ran": True}}))
         self.assertTrue(requires(3, {"failure": {"code": "probe_failed"}}))
