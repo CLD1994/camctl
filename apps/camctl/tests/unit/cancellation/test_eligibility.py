@@ -128,3 +128,34 @@ def test_photo_preview_requires_confirmation_only_for_original_eligible_entry():
     assert decide(EntryPhase.UNKNOWN) is None
     assert decide(EntryPhase.UNKNOWN, confirmation_pending=False) is True
     assert decide(EntryPhase.UNKNOWN, ({'status': 2, 'result_json': {}},), confirmation_pending=False) is False
+
+
+def test_pre_start_target_and_member_complete_only_after_original_preparation():
+    from camctl.cancellation.models import CancelApplyMode, CancelOutcomeChoice
+    from camctl.cancellation.rules import pre_start_cancel_finishes_target, immediate_cancel_member_outcome
+    pending_photo = {'status': 1, 'type': 1}
+    running_photo = {'status': 2, 'type': 1}
+    motor = {'status': 2, 'type': 8}
+    assert pre_start_cancel_finishes_target(pending_photo)
+    assert not pre_start_cancel_finishes_target(running_photo)
+    assert pre_start_cancel_finishes_target(motor)
+    assert immediate_cancel_member_outcome(CancelApplyMode.PRE_START, pending_photo,
+        withdrawal_pending=False, preparation_pending=False) is CancelOutcomeChoice.CANCELED
+    assert immediate_cancel_member_outcome(CancelApplyMode.PRE_START, pending_photo,
+        withdrawal_pending=False, preparation_pending=True) is None
+    assert immediate_cancel_member_outcome(CancelApplyMode.PRE_START, running_photo,
+        withdrawal_pending=False, preparation_pending=False) is None
+    assert immediate_cancel_member_outcome(CancelApplyMode.PRE_START, motor,
+        withdrawal_pending=False, preparation_pending=False) is CancelOutcomeChoice.CANCELED
+
+
+@pytest.mark.parametrize('withdrawal,preparation,expected', [
+    (False, False, True), (True, False, False),
+    (False, True, False), (True, True, False),
+])
+def test_terminal_target_cancel_waits_for_original_withdrawal_and_preparation(withdrawal, preparation, expected):
+    from camctl.cancellation.models import CancelApplyMode, CancelOutcomeChoice
+    from camctl.cancellation.rules import immediate_cancel_member_outcome
+    result = immediate_cancel_member_outcome(CancelApplyMode.TERMINAL, {'status': 6, 'type': 1},
+        withdrawal_pending=withdrawal, preparation_pending=preparation)
+    assert (result is CancelOutcomeChoice.ALREADY_TERMINAL) is expected

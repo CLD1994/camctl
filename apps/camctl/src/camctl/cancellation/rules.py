@@ -377,3 +377,26 @@ def photo_preview_entry_decision(phase, attempts, *, reserved, allow_pending_res
 def report_cancel_settled(action):
     """报告目标只有终态可作为取消成功依据。"""
     return action['type'] != _REPORT_TASK_TYPE or action['status'] in _ACTION_TERMINAL
+
+
+def preparation_cancel_pending(*, not_started, preparation_resolved, activity):
+    """原启动未发生时，准备调用或占用未收场就继续等待。"""
+    return not_started and (not preparation_resolved or (
+        activity is not None and activity['occupancy_state'] == 1))
+
+
+def pre_start_cancel_finishes_target(target):
+    """待执行目标和可靠未发送的电机可在生效时终态取消。"""
+    return target['status'] == 1 or target['type'] == 8
+
+
+def immediate_cancel_member_outcome(mode, target, *, withdrawal_pending, preparation_pending):
+    """撤回及原准备责任结束前不生成成员成功结果。"""
+    from camctl.cancellation.models import CancelOutcomeChoice
+    if mode is CancelApplyMode.PRE_START:
+        if pre_start_cancel_finishes_target(target) and not preparation_pending:
+            return CancelOutcomeChoice.CANCELED
+    elif mode is CancelApplyMode.TERMINAL:
+        if not withdrawal_pending and not preparation_pending:
+            return CancelOutcomeChoice.ALREADY_TERMINAL
+    return None
