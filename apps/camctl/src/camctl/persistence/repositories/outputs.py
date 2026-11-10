@@ -66,6 +66,11 @@ from camctl.outputs.cleanup_flow import (
     cleanup_device_absence_needs_record, cleanup_local_absence_needs_record,
 )
 from camctl.outputs.competition import has_product_predecessor
+from camctl.outputs.processing_rules import (
+    processing_completed as _processing_completed_facts,
+    processing_requires_existing_input as _processing_requires_existing_input,
+    internal_input_requirement as _internal_input_requirement,
+)
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, device_holder, first_eligible_read, positive_limit
 from camctl.outputs.copy import (
     AttemptRecord, CopyStateFacts, CopyTargetRef, PreparedCopy, PreparedDisposition,
@@ -113,7 +118,7 @@ from camctl.outputs.sources import (
     SourceSpec,
     SELECTION_NO_OUTPUTS,
     resolve_source,
-    select_outputs,
+    select_outputs, first_selection_qualification_error,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
@@ -233,17 +238,6 @@ _CHECK_STATE = enum_for("recording_processing.check_state")
 _CHECK_DECISION = enum_for("recording_processing.check_decision")
 _REPAIR_STATE = enum_for("recording_processing.repair_state")
 _DISCARD_STATE = enum_for("recording_processing.discard_state")
-
-#: 录像处理中仍未结束的状态；存在即表示适用产物处理未完成。
-_UNFINISHED_PROCESSING_CHECK = frozenset({int(_CHECK_STATE.RUNNING)})
-_UNFINISHED_PROCESSING_REPAIR = frozenset(
-    {int(member) for member in _REPAIR_STATE
-     if member.name in {"PENDING", "RUNNING"}}
-)
-_UNFINISHED_PROCESSING_DISCARD = frozenset(
-    {int(member) for member in _DISCARD_STATE
-     if member.name in {"PENDING", "RUNNING"}}
-)
 
 #: READ_PERMISSION_CHANGED 的分支。
 _GRANT_REASON = 1
@@ -881,72 +875,6 @@ def _same_selection(left: SelectionSnapshot, right: SelectionSnapshot) -> bool:
 def _processing_completed(connection, source_action_id: int) -> bool:
     """来源动作的适用产物处理是否已完成（录像检查/修复/丢弃）。"""
     return _processing_completed_facts(_CatalogReads(connection).processing(source_action_id))
-
-
-def _processing_completed_facts(row) -> bool:
-    if row is None:
-        return True
-    try:
-        states = tuple(row[column] for column in ("check_state", "repair_state", "discard_state"))
-        if not all(is_json_integer(value) for value in states):
-            raise ValueError("处理状态必须是登记的整数编号")
-        check_state, repair_state, discard_state = (
-            enum(value) for enum, value in zip((_CHECK_STATE, _REPAIR_STATE, _DISCARD_STATE), states))
-    except (KeyError, TypeError, ValueError) as error:
-        raise ConsistencyError("来源处理状态缺失或无效") from error
-    return (
-        check_state not in _UNFINISHED_PROCESSING_CHECK
-        and repair_state not in _UNFINISHED_PROCESSING_REPAIR
-        and discard_state not in _UNFINISHED_PROCESSING_DISCARD
-    )
-
-
-def _processing_requires_existing_input(processing) -> bool:
-    """工具阶段是否证明原输入已经建立；False 不授予首次输入资格。"""
-    try:
-        check, repair = processing["check_state"], processing["repair_state"]
-        if not is_json_integer(check) or not is_json_integer(repair):
-            raise ValueError("处理阶段必须是登记的整数编号")
-        check, repair = _CHECK_STATE(check), _REPAIR_STATE(repair)
-    except (KeyError, TypeError, ValueError) as error:
-        raise ConsistencyError("原录像的检查或修复阶段缺失或无法解释") from error
-    return (check in (_CHECK_STATE.RUNNING, _CHECK_STATE.COMPLETED)
-            or repair in (_REPAIR_STATE.RUNNING, _REPAIR_STATE.SUCCEEDED))
-
-
-def _internal_input_requirement(processing) -> str | None:
-    """三类准备记录均无时的当前内部输入需求判定。
-
-    返回 None 表示存在输入需求（独立检查或修复需求）；否则返回只
-    读不授予的原因。工具阶段已证明输入存在、或检查需求仍在而修
-    复已终局结束（2026-10-03 决策按不可解释状态处理）时抛一致性
-    错误。检查已失败或未确认时不保留待执行修复的输入需求。
-    """
-    try:
-        decision = _CHECK_DECISION(processing["check_decision"])
-        check = _CHECK_STATE(processing["check_state"])
-        repair = _REPAIR_STATE(processing["repair_state"])
-        discard = _DISCARD_STATE(processing["discard_state"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise ConsistencyError("原录像的处理决定或阶段缺失或无法解释") from error
-    if _processing_requires_existing_input(processing):
-        raise ConsistencyError("原片工具处理已经开始，但原输入准备责任缺失")
-    if discard in (_DISCARD_STATE.PENDING, _DISCARD_STATE.RUNNING):
-        return "discard_active"
-    if decision is _CHECK_DECISION.REQUIRED and check is _CHECK_STATE.NOT_PERFORMED:
-        if repair in (_REPAIR_STATE.FAILED, _REPAIR_STATE.CANCELED):
-            raise ConsistencyError("检查需求仍在而修复已终局结束，处理阶段组合不可解释")
-        return None
-    if repair is _REPAIR_STATE.PENDING:
-        if check in (_CHECK_STATE.FAILED, _CHECK_STATE.UNCONFIRMED):
-            return "input_need_ended"
-        return None
-    if (check in (_CHECK_STATE.FAILED, _CHECK_STATE.UNCONFIRMED)
-            or repair in (_REPAIR_STATE.FAILED, _REPAIR_STATE.CANCELED)):
-        return "input_need_ended"
-    if decision is _CHECK_DECISION.UNDETERMINED or repair is _REPAIR_STATE.UNDETERMINED:
-        return "input_undecided"
-    return "input_not_needed"
 
 
 def _read_is_due(action, occurred_at: int) -> bool:
@@ -6699,17 +6627,9 @@ def _current_selection_snapshot(context, selection_id: int, *, preview_validatio
         if not all(is_json_integer(facts[column]) for column in columns):
             raise EventValidationError("当前动作的类型、状态或来源身份无效")
     source_plan_id = ObjectId(int(source["plan_id"]))
-    if (owner["type"] != _OBTAIN_TYPE
-            or owner["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED)
-            or source["type"] not in _CAPTURE_TYPES
-            or owner["resolved_source_plan_id"] != source_plan_id):
-        raise EventValidationError("首次选择要求已固定的取回来源及同计划拍摄成员")
-    if (owner["status"] != int(_ACTION_STATUS.RUNNING)
-            or not json_equal(owner["cancel_requested"], 0)
-            or not json_equal(owner["execution_started"], 1)):
-        raise EventValidationError("选择固定要求取回动作执行中且未取消")
-    if source["status"] not in _ACTION_TERMINAL:
-        raise EventValidationError("选择固定要求来源动作已终态")
+    error = first_selection_qualification_error(owner=owner, source=source, source_plan_id=source_plan_id)
+    if error is not None:
+        raise EventValidationError(error)
     if context.complete_rows("obtain_items", "selection_id", selection_id):
         raise EventValidationError("PENDING 选择已有条目，不能追加首次选择")
     mode, requested = read_selection_request(owner["execution_spec_json"], owner["input_fields_json"])
