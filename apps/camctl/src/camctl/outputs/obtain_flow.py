@@ -326,7 +326,7 @@ async def _fix_pending_selections(
         FixSegmentSelection,
         fix_segment_selection,
     )
-    from camctl.persistence.repositories.outputs import _processing_completed_facts
+    from camctl.outputs.processing_rules import processing_completed
 
     async def save_selection(identity, pending):
         async def save_and_apply():
@@ -367,7 +367,7 @@ async def _fix_pending_selections(
                 continue
             processing = None if processing_id is None else {
                 "check_state": check_state, "repair_state": repair_state, "discard_state": discard_state}
-            if not _processing_completed_facts(processing):
+            if not processing_completed(processing):
                 continue
             request, key = FixSegmentSelection(int(selection_id), now), new_operation_key()
             pending = PendingSegmentSelection(request, key)

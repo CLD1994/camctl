@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, parse_object_id
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
@@ -90,6 +90,26 @@ ItemStatus = enum_for("obtain_items.status")
 ItemBasis = enum_for("obtain_items.basis")
 
 Availability = enum_for("outputs.availability")
+
+
+def first_selection_qualification_error(*, owner: Mapping, source: Mapping,
+                                        source_plan_id: int) -> str | None:
+    """按固定来源与动作当前状态判断能否首次选择产物。"""
+    action_type = enum_for("actions.type")
+    status = enum_for("actions.status")
+    if (owner["type"] != int(action_type.OBTAIN_ACTION_OUTPUTS)
+            or owner["source_resolution_state"] != int(ResolutionState.FIXED)
+            or source["type"] not in _CAPTURE_TYPES
+            or owner["resolved_source_plan_id"] != source_plan_id):
+        return "首次选择要求已固定的取回来源及同计划拍摄成员"
+    if (owner["status"] != int(status.RUNNING)
+            or not json_equal(owner["cancel_requested"], 0)
+            or not json_equal(owner["execution_started"], 1)):
+        return "选择固定要求取回动作执行中且未取消"
+    if source["status"] not in tuple(int(getattr(status, name)) for name in
+            ("SUCCEEDED", "FAILED", "EXPIRED", "CANCELED")):
+        return "选择固定要求来源动作已终态"
+    return None
 
 
 def obtain_source_ready(*, selection: Mapping, owner: Mapping, source: Mapping) -> bool:

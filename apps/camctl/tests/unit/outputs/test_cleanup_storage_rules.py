@@ -78,3 +78,44 @@ def test_local_absence_requires_prior_file_fact_for_waiting_item(state_name):
     assert not cleanup_local_absence_needs_record(item_status=int(STATUS.PENDING_DELETE), cleanup_state=int(cleanup.COMPLETED))
     with pytest.raises(ConsistencyError, match="清理状态未决"):
         cleanup_local_absence_needs_record(item_status=int(STATUS.DELETING), cleanup_state=int(cleanup.UNKNOWN))
+
+
+def test_cleanup_restriction_checks_target_then_action_then_member():
+    from camctl.outputs.cleanup_flow import CleanupRestrictionChoice, decide_cleanup_restriction
+    target = enum_for("actions.target_selection_state")
+    action_status = enum_for("actions.status")
+    action = {"target_selection_state": int(target.FIXED), "status": int(action_status.RUNNING), "cancel_requested": 0}
+    item = {"status": int(STATUS.UNRESOLVED)}
+    assert decide_cleanup_restriction(action=action, item=item) is CleanupRestrictionChoice.CHECK_OUTPUT
+    assert decide_cleanup_restriction(action=action, item={"status": int(STATUS.DELETING)}) is CleanupRestrictionChoice.ALREADY
+    assert decide_cleanup_restriction(action=action | {"cancel_requested": 1}, item={}) is CleanupRestrictionChoice.ACTION_INACTIVE
+    assert decide_cleanup_restriction(action=action | {"status": int(action_status.SUCCEEDED), "cancel_requested": 1}, item={}) is CleanupRestrictionChoice.ACTION_INACTIVE
+    assert decide_cleanup_restriction(action={"target_selection_state": int(target.PENDING)}, item={}) is CleanupRestrictionChoice.TARGET_UNFIXED
+
+
+@pytest.mark.parametrize("name", ["AVAILABLE", "RESTRICTED", "CLEANED"])
+def test_cleanup_restriction_accepts_known_product_state(name):
+    from camctl.outputs.cleanup_flow import validate_cleanup_restriction_output
+    validate_cleanup_restriction_output({"availability": int(AVAILABILITY[name])})
+
+
+@pytest.mark.parametrize("name", ["MISSING", "UNKNOWN"])
+def test_cleanup_restriction_rejects_unconfirmed_product_state(name):
+    from camctl.outputs.cleanup_flow import validate_cleanup_restriction_output
+    with pytest.raises(ConsistencyError, match="产物文件事实不允许建立删除限制"):
+        validate_cleanup_restriction_output({"availability": int(AVAILABILITY[name])})
+
+
+def test_cleanup_entry_checks_each_actual_related_member():
+    from camctl.outputs.cleanup_flow import (cleanup_read_dependency_blocks,
+        cleanup_other_delete_blocks, cleanup_own_restriction_blocks)
+    assert cleanup_read_dependency_blocks({"source_dependency": 1})
+    assert not cleanup_read_dependency_blocks({"source_dependency": 0})
+    deleting = {"status": int(STATUS.DELETING)}
+    assert cleanup_other_delete_blocks(current_id=1, member_id=2, member=deleting)
+    assert not cleanup_other_delete_blocks(current_id=1, member_id=1, member=deleting)
+    assert not cleanup_other_delete_blocks(current_id=1, member_id=2, member={"status": int(STATUS.PENDING_DELETE)})
+    unresolved = {"requested_output_id": 7, "status": int(STATUS.UNRESOLVED)}
+    assert cleanup_own_restriction_blocks(output_id=7, member=unresolved)
+    assert not cleanup_own_restriction_blocks(output_id=8, member=unresolved)
+    assert not cleanup_own_restriction_blocks(output_id=7, member=unresolved | {"status": int(STATUS.PENDING_DELETE)})

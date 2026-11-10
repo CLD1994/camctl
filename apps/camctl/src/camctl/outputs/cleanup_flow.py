@@ -283,6 +283,52 @@ _ITEM_SUCCEEDED, _ITEM_FAILED, _ITEM_CANCELED = 4, 5, 6
 
 
 
+def cleanup_read_dependency_blocks(item: Mapping) -> bool:
+    """尚未解除原源依赖的取回项阻止共同来源进入删除。"""
+    return item.get("source_dependency") == 1
+
+
+def cleanup_other_delete_blocks(*, current_id: int, member_id: int, member: Mapping) -> bool:
+    """同一共同来源已有其他删除中成员时不能再取得处理责任。"""
+    return member_id != current_id and member.get("status") == _ITEM_DELETING
+
+
+def cleanup_own_restriction_blocks(*, output_id: int, member: Mapping) -> bool:
+    """本请求中指向该产物但尚未建立限制的成员阻止删除。"""
+    return member.get("requested_output_id") == output_id and member.get("status") == _ITEM_UNRESOLVED
+
+
+class CleanupRestrictionChoice(Enum):
+    """清理动作与成员对首次建立限制的决定。"""
+
+    TARGET_UNFIXED = "target_unfixed"
+    ACTION_INACTIVE = "action_inactive"
+    ALREADY = "already"
+    CHECK_OUTPUT = "check_output"
+
+
+def decide_cleanup_restriction(*, action: Mapping, item: Mapping) -> CleanupRestrictionChoice:
+    """先核对目标集合，再判断执行责任及成员是否仍需建立限制。"""
+    from camctl.contracts.enums import enum_for
+    if action["target_selection_state"] != int(enum_for("actions.target_selection_state").FIXED):
+        return CleanupRestrictionChoice.TARGET_UNFIXED
+    if (action["status"] != int(enum_for("actions.status").RUNNING)
+            or action["cancel_requested"]):
+        return CleanupRestrictionChoice.ACTION_INACTIVE
+    if item["status"] != _ITEM_UNRESOLVED:
+        return CleanupRestrictionChoice.ALREADY
+    return CleanupRestrictionChoice.CHECK_OUTPUT
+
+
+def validate_cleanup_restriction_output(output: Mapping) -> None:
+    """可用、受限及已清理产物可以进入该请求的限制流程。"""
+    from camctl.contracts.enums import enum_for
+    availability = enum_for("outputs.availability")
+    if output["availability"] not in (int(availability.AVAILABLE), int(availability.RESTRICTED),
+                                       int(availability.CLEANED)):
+        raise ConsistencyError("产物文件事实不允许建立删除限制")
+
+
 def decide_cleanup_progress(*, item: Mapping, irreversible: bool) -> CleanupItemDisposition:
     """依据成员阶段判断进入删除或确认不可撤销派发。"""
     from camctl.contracts.enums import enum_for
