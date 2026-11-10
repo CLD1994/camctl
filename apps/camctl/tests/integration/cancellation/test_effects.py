@@ -380,8 +380,25 @@ class TestFinishCancelAction:
             owned, "SELECT status, error_code, error_details_json"
             " FROM actions WHERE id = 50") == (4, 23, "{}")
 
-    def test_all_succeeded_completes_action_and_plan(self, pipeline):
+    @pytest.mark.parametrize('pending_sibling', [False, True], ids=['last-action', 'pending-sibling'])
+    def test_all_succeeded_completes_action_and_plan(self, pipeline, pending_sibling):
         owned = pipeline
+        if pending_sibling:
+            # 仓储专项的合法待执行同计划成员；完成判断使用真实存储行。
+            owned.connection.execute(
+                "INSERT INTO actions (id,plan_id,input_index,name,type,device_id,scheduled_at,"
+                "group_name,input_fields_json,effective_params_json,driver_id,max_delay_ms,"
+                "execution_spec_json,status,execution_started,cancel_requested,error_code,"
+                "error_details_json,first_window_observed_at,expiration_reason,"
+                "source_resolution_state,resolved_source_plan_id,target_selection_state,"
+                "created_event_id,last_event_id,change_count)"
+                " SELECT 51,2,0,'pending-sibling',type,device_id,scheduled_at,group_name,"
+                "input_fields_json,effective_params_json,driver_id,max_delay_ms,execution_spec_json,"
+                "status,execution_started,cancel_requested,error_code,error_details_json,"
+                "first_window_observed_at,expiration_reason,source_resolution_state,"
+                "resolved_source_plan_id,target_selection_state,created_event_id,last_event_id,change_count"
+                " FROM actions WHERE id=12")
+            owned.connection.commit()
         repository = CancellationRepository()
         for item_id, mode in ((91, CancelApplyMode.WITH_STOP),
                               (92, CancelApplyMode.PRE_START),
@@ -392,13 +409,28 @@ class TestFinishCancelAction:
         repository.record_cancel_result(
             RecordCancelResult(91, _NOW, outcome=CancelOutcomeChoice.CANCELED),
             new_operation_key(), owned)
-        outcome = self._finish(owned)
+        plan_before = _value(owned, 'SELECT status,last_event_id FROM plans WHERE id=2')
+        key = new_operation_key()
+        outcome = self._finish(owned, key=key)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         assert _value(
             owned, "SELECT status, error_code FROM actions WHERE id = 50"
         ) == (3, None)
-        assert _value(
-            owned, "SELECT status FROM plans WHERE id = 2") == (3,)
+        plan_after = _value(owned, 'SELECT status,last_event_id FROM plans WHERE id=2')
+        assert plan_after[0] == (plan_before[0] if pending_sibling else 3)
+        if pending_sibling:
+            assert plan_after == plan_before
+            assert _value(owned, 'SELECT status,execution_started FROM actions WHERE id=51') == (1, 0)
+        else:
+            events = owned.connection.execute(
+                'SELECT event_type,transaction_id FROM history_events WHERE id IN ('
+                'SELECT last_event_id FROM actions WHERE id=50 UNION ALL SELECT last_event_id FROM plans WHERE id=2)'
+            ).fetchall()
+            assert {event[0] for event in events} == {8, 9}
+            assert len({event[1] for event in events}) == 1
+        before_replay = tuple(owned.connection.iterdump())
+        assert self._finish(owned, key=key).kind is DbOutcomeKind.COMPLETED
+        assert tuple(owned.connection.iterdump()) == before_replay
 
     def test_terminal_new_key_recovers_without_new_history(self, pipeline):
         owned = pipeline
