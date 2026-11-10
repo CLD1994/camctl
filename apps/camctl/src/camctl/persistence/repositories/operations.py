@@ -47,6 +47,8 @@ from camctl.operations.attempts import (
     responsibility_key,
     seconds_from_json,
     retry_wait_violation,
+    may_resolve_output_scope,
+    may_prepare_capture_attempt,
     ticket_target_id,
     ticket_target_for_identity,
     operation_responsibility_key,
@@ -2014,9 +2016,7 @@ def _attempt_intent_guard(event, context) -> None:
     kind = run_after.get("kind")
     if kind == int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE):
         activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
-        if (activity.get("activity_state") != 3 or activity.get("occupancy_state") != 1
-                or activity.get("baseline_state") != 3
-                or activity.get("output_set_finalized_event_id") is not None):
+        if not may_resolve_output_scope(activity):
             _fail("范围收尾意图要求原活动已结束、占用仍保留、基准固定且范围未确定")
     if kind==int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
         if context.current_reads is None:
@@ -2047,12 +2047,9 @@ def _attempt_intent_guard(event, context) -> None:
         eligible = (type(context.preparation_reads) is PreparationReads
                     and context.preparation_reads.can_prepare(action, activity, event.occurred_at)
                     and context.preparation_reads.calls_resolved(activity["id"]))
-        if (not eligible or action.get("cancel_requested") != 0
-                or activity.get("occupancy_state") != 1 or activity.get("dispatch_state") not in (1, 4)
-                or activity.get("activity_state") != 1 or attempt_no != 1
-                or run_after.get("max_attempts_used") != 1
-                or run_after.get("timeout_s_json") is None
-                or run_after.get("retry_interval_s_json") is not None):
+        if not may_prepare_capture_attempt(action, activity, eligible=eligible, attempt_no=attempt_no,
+                max_attempts=run_after.get("max_attempts_used"), timeout=run_after.get("timeout_s_json"),
+                retry_interval=run_after.get("retry_interval_s_json")):
             _fail("设置准备意图要求原pending动作的占用及单次配置")
     if kind == int(_RUN_KIND.START):
         activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))

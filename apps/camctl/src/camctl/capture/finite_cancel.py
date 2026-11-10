@@ -38,3 +38,18 @@ def require_capture_sent(outcome, activity_id):
     if (outcome.status is not AttemptStatus.SUCCEEDED or outcome.effect is not EffectState.CONFIRMED
             or not any(o.type == 'timelapse_sent' and o.data.get('activity_id') == str(activity_id) for o in outcome.observations)):
         raise ConsistencyError('有限取消结束缺少原活动的可靠 SENT')
+
+
+def finite_cancel_file(entry, facts, action_id, rules):
+    """逐条核对当前结果与固定文件事实，按原规则跳过非必要预览。"""
+    from camctl.capture.results import CaptureFile, is_optional_preview
+    complete = (entry.complete and facts['completion_state'] == 3
+                and type(entry.size_bytes) is int and entry.size_bytes == facts['size_bytes'])
+    owned = (facts['source_action_id'] == action_id and facts['ownership_evidence_json'] is not None)
+    if (is_optional_preview(entry.kind, entry.format_id, entry.paired_identity, rules)
+            and facts['source_action_id'] in (None, action_id)
+            and (not complete or not owned or entry.size_bytes <= 0)):
+        return None
+    return CaptureFile(entry.identity, entry.kind, complete, owned,
+        format_id=entry.format_id, pairing_confirmed=entry.paired_identity is not None,
+        size_bytes=entry.size_bytes)

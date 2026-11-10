@@ -30,3 +30,17 @@ def test_stop_must_be_failed_once_and_without_confirmed_effect():
                                  (run, {**attempt, 'effect_state': int(enum_for('operation_attempts.effect_state').CONFIRMED)})):
         with pytest.raises(ConsistencyError):
             require_failed_stop(bad_run, bad_attempt)
+
+
+def test_file_uses_current_page_and_fixed_size_and_ownership():
+    from types import SimpleNamespace
+    from camctl.capture.finite_cancel import finite_cancel_file
+    from camctl.capture.results import FileKind
+    entry = SimpleNamespace(identity='video', kind=FileKind.VIDEO, complete=True,
+        size_bytes=100, format_id='mp4', paired_identity=None)
+    facts = {'completion_state': 3, 'size_bytes': 100, 'source_action_id': 7,
+             'ownership_evidence_json': {'basis': 'fixed'}}
+    file = finite_cancel_file(entry, facts, 7, ())
+    assert file.complete and file.ownership_confirmed
+    assert not finite_cancel_file(entry, {**facts, 'size_bytes': 101}, 7, ()).complete
+    assert not finite_cancel_file(entry, {**facts, 'ownership_evidence_json': None}, 7, ()).ownership_confirmed

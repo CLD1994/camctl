@@ -651,3 +651,18 @@ def retry_wait_violation(status, retry_interval):
     if status not in (int(states.PENDING), int(states.ACTIVE)):
         return "只有未结束流程保存重试等待责任"
     return None
+
+
+def may_resolve_output_scope(activity):
+    """范围收尾要求设备已结束，仍保留占用并已有固定基准。"""
+    return (activity.get("activity_state") == 3 and activity.get("occupancy_state") == 1
+            and activity.get("baseline_state") == 3
+            and activity.get("output_set_finalized_event_id") is None)
+
+
+def may_prepare_capture_attempt(action, activity, *, eligible, attempt_no, max_attempts, timeout, retry_interval):
+    """设置准备只能在原活动未派发时使用一次有界调用。"""
+    return (eligible and action.get("cancel_requested") == 0
+            and activity.get("occupancy_state") == 1 and activity.get("dispatch_state") in (1, 4)
+            and activity.get("activity_state") == 1 and attempt_no == 1
+            and max_attempts == 1 and timeout is not None and retry_interval is None)

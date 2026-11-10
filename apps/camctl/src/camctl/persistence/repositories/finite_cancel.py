@@ -2,9 +2,10 @@
 from dataclasses import dataclass
 from collections.abc import Mapping
 
-from camctl.capture.finite_cancel import require_finite_cancel_end, require_failed_stop, require_capture_sent
+from camctl.capture.finite_cancel import (require_finite_cancel_end, require_failed_stop,
+    require_capture_sent, finite_cancel_file)
 from camctl.capture.result_pages import ResultPageRef
-from camctl.capture.results import CaptureFile, CaptureFileSet, FileKind, ProductRequirements, ProductRule, assess_capture_files, is_optional_preview
+from camctl.capture.results import CaptureFileAssessment, FileKind, ProductRequirements, ProductRule
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, new_operation_key
@@ -198,22 +199,13 @@ def _assess_files(reader, action, request):
             )
     rules = tuple(ProductRule.from_json(value) for value in action['execution_spec_json'].get('product_rules', ()))
     from .result_pages import iter_result_file_facts
-    def files():
-        for entry, facts in iter_result_file_facts(reader, action, request.page.ticket, request.page.event_id):
-            # 当前页与可靠固定长度必须同时成立，旧完整事实不填补当前缺口。
-            complete = (entry.complete and facts['completion_state'] == 3
-                and type(entry.size_bytes) is int and entry.size_bytes == facts['size_bytes'])
-            owned = (facts['source_action_id'] == request.action_id
-                     and facts['ownership_evidence_json'] is not None)
-            if (is_optional_preview(entry.kind, entry.format_id, entry.paired_identity, rules)
-                    and facts['source_action_id'] in (None, request.action_id)
-                    and (not complete or not owned or entry.size_bytes <= 0)):
-                continue
-            yield CaptureFile(entry.identity, entry.kind, complete, owned,
-                format_id=entry.format_id, pairing_confirmed=entry.paired_identity is not None,
-                size_bytes=entry.size_bytes)
-    return assess_capture_files(CaptureFileSet(files(), True),
-        ProductRequirements(frozenset({FileKind.VIDEO}), rules))
+    assessment = CaptureFileAssessment(
+        ProductRequirements(frozenset({FileKind.VIDEO}), rules), set_finalized=True)
+    for entry, facts in iter_result_file_facts(reader, action, request.page.ticket, request.page.event_id):
+        file = finite_cancel_file(entry, facts, request.action_id, rules)
+        if file is not None:
+            assessment.add(file)
+    return assessment.finish()
 
 
 def _verify_files(reader, action, request, state):
