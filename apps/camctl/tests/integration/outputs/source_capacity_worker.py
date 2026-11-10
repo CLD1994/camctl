@@ -17,19 +17,13 @@ def main(input_path, result_path):
     from camctl.contracts.values import OperationKey
     from camctl.outputs.sources import SourceSpec
     from camctl.persistence.models import DbOutcomeKind
-    from camctl.persistence.repositories.acceptance import register_acceptance_guards
-    from camctl.persistence.repositories.capture import register_capture_guards
-    from camctl.persistence.repositories.operations import register_operation_guards
     from camctl.persistence.repositories.outputs import (
-        OutputsRepository, ResolveSources, register_outputs_guards,
+        OutputsRepository, ResolveSources,
     )
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
     manifest = json.loads(input_path.read_text())
     assert manifest["version"] == 1
-    for register in (register_acceptance_guards, register_capture_guards,
-                     register_operation_guards, register_outputs_guards):
-        register()
     raw = manifest["request"]
     request = ResolveSources(raw["action_id"], SourceSpec(**raw["spec"]), raw["occurred_at"])
     key = OperationKey(manifest["key"])

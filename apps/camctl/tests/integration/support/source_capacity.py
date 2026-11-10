@@ -79,19 +79,13 @@ async def prepare_case(directory, *, count=2400):
     from camctl.contracts.values import new_operation_key
     from camctl.outputs.sources import read_source_spec
     from camctl.persistence.models import DbOutcomeKind
-    from camctl.persistence.repositories.acceptance import register_acceptance_guards
-    from camctl.persistence.repositories.capture import register_capture_guards
-    from camctl.persistence.repositories.operations import register_operation_guards
     from camctl.persistence.repositories.outputs import (
-        OutputsRepository, ResolveSources, StartObtainAction, register_outputs_guards,
+        OutputsRepository, ResolveSources, StartObtainAction,
     )
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from .database import create_test_database
     from .output_source_cases import accept_body
 
-    for register in (register_acceptance_guards, register_capture_guards,
-                     register_operation_guards, register_outputs_guards):
-        register()
     directory.mkdir()
     path = directory / "state.db"
     create_test_database(path)
