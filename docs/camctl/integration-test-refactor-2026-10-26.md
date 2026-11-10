@@ -172,7 +172,49 @@ OSMO 两个新结果轮次测试现从相同正式入口等待实际第二调用
 
 补充核对[报告保存测试](../../apps/camctl/tests/integration/reporting/test_sync_lifecycle.py) 的 `test_local_report_saved_with_action_success` 与 `test_final_action_success_completes_plan`，已有“其他成员未结束时计划不完成”和“末项结束时动作与计划共同提交”断言；成员状态来自存储准备，不等于全部业务入口的链路验收。[计划守卫反例](../../apps/camctl/tests/integration/outputs/test_read_discovery.py) 的 `test_plan_guard_independently_rejects_skipped_unfinished_sibling` 则在提案生成副本中先把兄弟动作改为结束，再将所得提案交回原库，验证未结束兄弟会使其被拒绝、原库不变；它是故意提交不实提案的存储专项，不是正常计划增加成员的并发见证。若取消对应运行时复核，须明确该专项覆盖的取舍，不能解释成普通业务结果测试已等价承接。
 
-同事务内的业务完成判断继续保留，额外复核列为测试承接候选。具体方案须让实际生产采用的判断受到测试约束，并验证成员范围、当前动作终态与父计划更新、相关历史共同提交；取消、过期、逐事件前序及原键恢复保持。目前只补强录像完成这一实际入口，不代表其他主要入口已全部闭合。完成对应映射后再决定是否删减复核，不为每项内部守卫另建完整设备链，也不由本批测试通过推导生产复核已可直接删除。
+同事务内的业务完成判断继续保留。以下方案将额外复核的删减范围、测试承接和保障变化分开说明；录像完成的补强不代表其余入口已经完成验收。
+
+#### 计划完成复核的具体删减方案
+
+**状态：方案待确认和实施，生产代码及其余入口测试均未修改。** 源码依据为 `910ead91`。本项只调整已有计划进入 `completed` 时的责任：保存当前动作结果的业务模块，在原写事务中查询同计划的实际成员，决定计划是否结束；事务写入模块继续保证整组事实一起提交，不再为这一个决定重新聚合全部动作。
+
+例如，计划包含录像和稍后才执行的报告。录像结束后，录像保存入口应查询到尚未执行的报告，只结束录像；最后一个动作结束时，该入口才一起保存动作结束与计划完成。拟删的是上述业务判断之后的第二遍检查，不是查询实际成员、判断当前状态或保存动作和计划的步骤。
+
+| 具体位置 | 建议修改 | 保持的责任 |
+| --- | --- | --- |
+| `database/event-transitions.json` 的 `PLAN_STATUS_CHANGED.COMPLETE.guards` | 只移除此分支的 `plan_aggregate` 要求；该规则的说明收窄为仍保留的新计划创建检查。 | 事件格式、允许的状态转换、事务范围、对象归属和报告变化检查继续执行。 |
+| `persistence/repositories/capture.py::_plan_aggregate_guard` | 删除已有计划完成时的分支，包括按 `PlanReadScope` 重新分页和按 `state_rows` 再次聚合两种实现。 | 新计划创建检查及现有注册保留；`acceptance.py` 的创建检查与注册不变。 |
+| `persistence/repositories/outputs.py::_completion_siblings` 的说明 | 按“查询是否仍有其他未结束动作”的实际职责更新注释。 | 保留原事务中的 `LIMIT 1` 查询；判断是否存在阻塞成员，不需要先取回全部成员。 |
+| 事务职责文档及事件登记的派生内容 | 在 `persistence-runtime.md` 和 `database/plans-actions.md` 说明该完成判断由正式业务保存入口承担，按权威登记生成索引和包资源。 | 动作、计划和历史共同提交，以及原键核实、回滚和 `UNKNOWN` 的业务契约保持。 |
+
+其余九处 `plan_aggregate` 声明本项保留：七个动作结束分支和取消生效分支没有计划行，计划开始分支也不进入完成检查；它们目前不会执行这里拟删的聚合。计划开始分支还是底层事务测试的上下文观察点，因此不把这些声明的整理混入本项。也不连带删除 `PlanReadScope`、内核读取能力、来源规范事件组检查、分段完成证明或电机自身检查；这些仍有其他使用者或独立职责。
+
+**删前的测试承接。** 按真正独立生成完成结果的路径补断言，优先扩充下表已有文件。仓储专项可按其正式存储格式准备数据，明确其验证范围；已有正常业务准备则继续从公开入口受理，不增加完整 CLI 或相机链。共享测试支持集中准备，不能调用私有生成函数或替换内部集合。
+
+| 真实保存路径 | 已核对的测试基础 | 删前应完成的承接 |
+| --- | --- | --- |
+| 普通录像完成 | `capture/test_recording_finish.py::test_finish_registers_outputs_action_and_plan_together` 已有合法未来报告及末项结束两个分区；实际复验见下文。 | 复用现有结果；其他动作复用同一完成判断时不重复建立设备矩阵。取消结果走不同分支时另核其实际调用。 |
+| 执行前过期 | `scheduling/test_window_expiration.py::TestPendingExpiration.test_last_expired_action_completes_plan` 依次让两个合法动作过期，检查第一次计划仍待执行、第二次完成。 | 补充实际历史事务编号比较，不能仅凭注释或事件数量认定共同提交；保留执行标记未增加。 |
+| 准备失败和设备可用性失败 | `SchedulingRepository.fail_binding_preparation`、`fail_preparation` 及 `availability_failure.py` 分别生成完成结果；本次有限检索尚未找到其计划状态与事务编号的直接断言。 | 调度仓储专项优先扩充 `scheduling/test_start_action.py`，覆盖两个失败入口；设备可用性失败从所属模块的正式入口安排独立见证。每个独立完成判断验证仍有未结束成员和最后一项失败，保留原错误与执行标记。 |
+| 取消目标及取消动作自身结束 | `cancellation/test_hasselblad_start_boundary.py::test_atomic_cancel_of_all_pending_photo_sources_completes_original_plan` 已验证两个未开始目标一起取消后计划完成；`test_effects.py` 已有 `test_all_succeeded_completes_action_and_plan`。 | 目标取消补仅结束部分成员时保持原计划状态和实际共同提交断言；取消动作自身的普通完成与自身被取消分别补两分区，保留同事务前序及原键复用。 |
+| 取回结束与清理结束 | `outputs/test_obtain_summary.py` 的 `test_finish_obtain_succeeds_after_all_published`、`test_finish_obtain_completes_plan_with_terminal_siblings` 已检查运行中成员阻止完成和混合终态允许完成；`test_cleanup_guards.py::TestFinishCleanupAction.test_failed_member_fails_action_with_registered_error` 已检查最后清理动作失败后计划完成。 | 取回及清理补同事务检查；清理的空目标、普通结束和取消结束，以及取消取回，分别在已有准备补齐两种计划结果。清理动作内部还有未结束文件，与同计划还有其他未结束动作是不同条件，不混为一项覆盖。 |
+| 来源解析失败 | `outputs/test_sources.py::test_resolve_sources_failure_completes_last_action_plan` 使用真实 `resolve_sources`；`test_source_resolution_batches.py::test_canonical_failure_binds_original_error_and_parent_completion` 另核对有限及有界事务入口。两者已有失败后计划完成断言。 | 在真实仓储用例补仍有未结束成员时不完成，以及动作失败与计划完成的同事务检查；原错误、有限／有界事件组和原键恢复继续验证。 |
+| 分段录像完成 | `capture/test_native_segment_completion.py` 已通过真实分段流程核对动作和文件结果，但不能凭动作终态推定父计划正确。 | 在现有最短合法分段准备增加未结束成员及末项两分区，核对父计划与共同提交；保留分段自身的完整事件组检查。 |
+| 报告动作 | `reporting/test_sync_lifecycle.py::TestLocalReport` 的两个完成用例已检查有未结束成员、末项完成和共同提交，属于存储格式准备。 | 复用这两个用例；另核开始时找不到固定报告起点、报告取消两个独立失败／取消分支，不重复铺开报告进程链。 |
+
+上述表格区分现有断言与待补内容，不表示这些文件本批全部重跑，也不预先规定新增节点数。成员范围还须有一个对照：其他计划存在未结束动作，不应阻止本计划最后一项结束。各路径仍须保留自己的成功、失败、过期或取消结果，不能把所有终态都改成成功来准备测试。若某条路径缺少合适的公开装配，先说明具体缺口并讨论，不为完成本表直接调用内部命令或新增生产接口；这只阻塞复核的最终移除，其他测试补强仍可继续。
+
+**明确减少的保障。** 删除完成复核后，事务内核不再依靠此守卫独立发现“自有业务模块故意或错误地交来与实际成员不符的完成结果”。现有 `outputs/test_read_discovery.py::test_plan_guard_independently_rejects_skipped_unfinished_sibling` 专门在副本中把成员改成结束，再将完成提案交回仍有未结束成员的原库；建议随本次职责调整删除该专项，由真实保存入口的两分区约束正确生成结果。两者不是等价覆盖。错误读取范围、空成员等不实完成提案也不再由这个分支兜底；其他检查是否拒绝具体输入，仍按其自身契约判断。正常合法计划不会为空，初始受理约束继续保留。
+
+**实施顺序与验收。**
+
+1. 先在未删复核的源码上完成上表最少缺口。每个独立生成路径均须证明：仍有未结束成员时本次保存成功且计划保持原状态；最后一项结束时计划完成；应共同保存的动作和计划历史具有同一事务编号。复用已满足要求的用例，不按每个内部守卫新建测试。
+2. 确认上述职责及保障取舍后，更新权威说明，实施表列出的局部生产调整，删除唯一明确只验证该独立复核的旧专项。来源读取测试通过最后一个正式守卫观察事务上下文；完成分支移除登记后，观察点会落到 `report_impact`，应核对页权限及前序事实目标仍被真实执行，不按名称删除这些测试。
+3. 用 `node --disable-warning=ExperimentalWarning scripts/check-event-transitions.mjs --write` 同步事件派生内容，再由部署版本 Python 执行 `apps/camctl/scripts/sync_resources.py`。包内资源由脚本生成，不手改；事件编号、分支编号和已有历史格式保持。
+4. 逐目录独立运行本项受影响的完整测试文件，覆盖上述业务保存路径、创建检查、事务上下文、来源分页和分段存储。原有原键恢复、提交前后失败、历史与投影原子性用例继续保留；出现失败先定位是否由本次调整引入，不因当前全量已有失败而放宽预期。只有新差异和未决问题才追加验证。
+5. 由独立评审核对实际删除、调用方与验证结果，记录局部结论；完整集成回归安排在后续明确的组合点。没有同输入、同环境的前后计时，不声称已经提速，也不以此推算全量回归收益。
+
+本次只读核对及独立方案评审已完成，没有运行测试或修改生产代码。尚未证明完成复核是集成测试长耗时的主要来源；预期直接减少的是计划最终结束时的一次额外聚合，以及相关重复维护。保留的业务查询和其他专项校验不会因此自动消失。
 
 ### 历史保存取消的覆盖边界
 
