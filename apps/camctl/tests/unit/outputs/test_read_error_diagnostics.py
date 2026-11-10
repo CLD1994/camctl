@@ -9,7 +9,7 @@ from camctl.capture import media_flow
 from camctl.capture.input_copy import InputPhase, InputStep
 from camctl.devices.read_session import ReadEnd
 from camctl.host_files.segments import SegmentFailure, SegmentResult
-from camctl.operations.attempts import AttemptConfig, RetryWaitGate
+from camctl.operations.attempts import AttemptConfig, FinishAttemptResult, FinishDisposition, RetryWaitGate
 from camctl.operations.models import AttemptTicket
 from camctl.operations.error_diagnostics import DiagnosticError
 from camctl.outputs import obtain_flow
@@ -33,7 +33,8 @@ async def test_read_result_consumer_keeps_exception_and_read_end_on_original_req
         return callback(owned)
     database.write.side_effect = write
     database.read.return_value = (None, None) if consumer == 'internal' else False
-    operations.finish_attempt.return_value = DbOutcome(initial_kind)
+    operations.finish_attempt.return_value = DbOutcome(initial_kind,
+        value=FinishAttemptResult(FinishDisposition.SAVED) if initial_kind is DbOutcomeKind.COMPLETED else None)
     monkeypatch.setattr(media_flow, 'OperationRepository', lambda: operations)
     runtime = SimpleNamespace(database=database, operations=operations,
         pending_read_results={}, pending_read_business={}, pending_read_ends={},
@@ -102,7 +103,8 @@ async def test_read_result_consumer_keeps_exception_and_read_end_on_original_req
     assert original.outcome.outcome.error.code == ('local_read_failed' if consumer == 'local' else 'device_error')
     assert original.retry_wait is True and original.run_finish is None
     if initial_kind is DbOutcomeKind.UNKNOWN:
-        operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+        operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+            value=FinishAttemptResult(FinishDisposition.SAVED))
         if consumer == 'internal':
             await media_flow.resume_prepared_internal_reads(database,
                 pending_read_results=runtime.pending_read_results,
@@ -116,3 +118,20 @@ async def test_read_result_consumer_keeps_exception_and_read_end_on_original_req
         assert operations.finish_attempt.call_count == 2
         assert all(call.args[:2] == (original, key) for call in operations.finish_attempt.call_args_list)
     assert not runtime.pending_read_results
+
+
+@pytest.mark.parametrize("failure,close_error,source_failed,expected", [
+    (None, None, False, True),
+    (OSError("write"), None, False, False),
+    (None, OSError("close"), False, False),
+    (None, None, True, False),
+])
+def test_controlled_local_stop_requires_clean_actual_segment_and_close(failure, close_error, source_failed, expected):
+    from camctl.outputs.read_attempts import controlled_read_stop
+    result = SegmentResult(5, False, SegmentFailure.STOPPED, failure, True,
+                           ReadEnd(True, 5, None), close_error)
+    error = CopySegmentError("segment_transfer_failed", "stopped", result=result,
+                             source_failed=source_failed)
+    step = InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, error=error,
+                     source_failed=source_failed, read_end=ReadEnd(True, 5, None), stop_requested=True)
+    assert controlled_read_stop(step) is expected

@@ -715,15 +715,15 @@ def controlled_read_stop(step):
     from camctl.outputs.copy import CopySegmentError
     from camctl.host_files.segments import SegmentFailure
 
-    if (step.source_failed or step.read_end is None or step.read_end.error != "stopped"
-            or not step.stop_requested):
+    if (step.source_failed or step.read_end is None or step.read_end.stopped is not True
+            or step.read_end.error not in (None, "stopped") or not step.stop_requested):
         return False
     error = step.error
     if error is None or (type(error) is RuntimeError and error.args == ("stopped",)):
-        return True
+        return step.read_end.error == "stopped"
     if isinstance(error, CopySegmentError):
         result = error.result
-        return ((result is None and error.detail == "stopped") or
+        return ((result is None and step.read_end.error == "stopped" and error.detail == "stopped") or
                 (result is not None and result.error is SegmentFailure.STOPPED
                  and result.failure is None and result.source_close_error is None))
     return False
@@ -736,7 +736,7 @@ def stopped_read_result(runtime, ticket, step, evidence, occurred_at):
     if (step.source_failed or end is None or end.stopped is not True
             or not step.stop_requested):
         return None
-    partial_stop = end.error == "stopped"
+    partial_stop = end.error == "stopped" or (end.error is None and controlled_read_stop(step))
     owner_skipped = (step.phase is InputPhase.OWNER_SKIPPED and end.error is None
                      and step.error is None)
     if not (partial_stop or owner_skipped):
