@@ -61,3 +61,48 @@ def repair_output_error(facts):
     if facts.get("size_bytes") is None or facts.get("sha256") is None:
         return "修复成品承载文件缺少完整字节事实"
     return None
+
+
+def origin_links_error(identity, kind, links):
+    if kind == _OUTPUT_KIND.ORIGINAL:
+        if links:
+            return "原片不能携带派生关联"
+        return None
+    if len(links) != 1:
+        return "派生产物必须共同登记唯一原片关联"
+    if links[0]["original_output_id"] == identity:
+        return "派生产物不能引用自身"
+    return None
+
+
+def derivative_origin_error(original, output, kind):
+    if (original.get("kind") != _OUTPUT_KIND.ORIGINAL
+            or original.get("source_action_id") != output["source_action_id"]
+            or (kind == _OUTPUT_KIND.REPAIRED and original.get("device_file_id") is None)):
+        return "派生关联必须指向同源原片；修复保持设备原片资格"
+    return None
+
+
+def preview_source_pair_error(original, output, file):
+    if output["device_file_id"] is not None:
+        if (file.get("original_device_file_id") != original["device_file_id"]
+                or file.get("pairing_evidence_json") is None):
+            return "预览的产物关联与设备文件配对不一致"
+    elif original["intermediate_file_id"] is None:
+        return "主机预览必须关联同源主机原图"
+    return None
+
+
+def existing_derivative_error(previous, output, seen_kinds):
+    previous_kind = previous.get("kind")
+    if (previous_kind not in {_OUTPUT_KIND.PREVIEW, _OUTPUT_KIND.REPAIRED}
+            or previous_kind in seen_kinds
+            or previous.get("source_action_id") != output["source_action_id"]):
+        return "已有原片派生集合的种类或来源矛盾"
+    return None
+
+
+def duplicate_derivative_error(kind, seen_kinds):
+    if kind in seen_kinds:
+        return "同一原片至多登记一份预览和一份修复成品"
+    return None

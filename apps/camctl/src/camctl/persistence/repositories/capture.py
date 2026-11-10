@@ -25,7 +25,8 @@ from camctl.capture.photo_pair_rules import (
 from camctl.capture.output_file_rules import (
     CAPTURE_TYPES as _CAPTURE_TYPES, capture_binding_error, device_output_error,
     device_source_ownership_error, intermediate_output_ownership_error,
-    output_carrier_error, repair_output_error,
+    output_carrier_error, repair_output_error, derivative_origin_error, existing_derivative_error,
+    origin_links_error, preview_source_pair_error, duplicate_derivative_error,
 )
 from camctl.capture.terminal_rules import (
     activity_capture_action_error, activity_capture_transition_error,
@@ -760,45 +761,39 @@ def _output_relationships(event, context) -> None:
             raise EventValidationError("新产物不能已有原片关联")
         own_links = links.get(identity, ())
         kind = output["kind"]
+        error = origin_links_error(identity, kind, own_links)
+        if error is not None:
+            raise EventValidationError(error)
         if kind == _OUTPUT_KIND.ORIGINAL:
-            if own_links:
-                raise EventValidationError("原片不能携带派生关联")
             continue
-        if len(own_links) != 1:
-            raise EventValidationError("派生产物必须共同登记唯一原片关联")
         original_id = own_links[0]["original_output_id"]
-        if original_id == identity:
-            raise EventValidationError("派生产物不能引用自身")
         original = _registration_facts(context, "outputs", original_id)
-        if (original.get("kind") != _OUTPUT_KIND.ORIGINAL
-                or original.get("source_action_id") != output["source_action_id"]
-                or (kind == _OUTPUT_KIND.REPAIRED and original.get("device_file_id") is None)):
-            raise EventValidationError("派生关联必须指向同源原片；修复保持设备原片资格")
+        error = derivative_origin_error(original, output, kind)
+        if error is not None:
+            raise EventValidationError(error)
         if context.complete_rows("output_origins", "output_id", original_id):
             raise EventValidationError("引用的原片不能携带派生关联")
         _output_file(original, context)
-        if kind == _OUTPUT_KIND.PREVIEW and output["device_file_id"] is not None:
-            file = _registration_facts(context, "device_files", output["device_file_id"])
-            if (file.get("original_device_file_id") != original["device_file_id"]
-                    or file.get("pairing_evidence_json") is None):
-                raise EventValidationError("预览的产物关联与设备文件配对不一致")
-        elif kind == _OUTPUT_KIND.PREVIEW and original["intermediate_file_id"] is None:
-            raise EventValidationError("主机预览必须关联同源主机原图")
+        if kind == _OUTPUT_KIND.PREVIEW:
+            file = (_registration_facts(context, "device_files", output["device_file_id"])
+                    if output["device_file_id"] is not None else None)
+            error = preview_source_pair_error(original, output, file)
+            if error is not None:
+                raise EventValidationError(error)
         if original_id not in kinds_by_original:
             related = context.complete_rows("output_origins", "original_output_id", original_id)
             kinds: set[int] = set()
             for relation in related.values():
                 previous = _registration_facts(context, "outputs", relation["output_id"])
-                previous_kind = previous.get("kind")
-                if (previous_kind not in {_OUTPUT_KIND.PREVIEW, _OUTPUT_KIND.REPAIRED}
-                        or previous_kind in kinds
-                        or previous.get("source_action_id") != output["source_action_id"]):
-                    raise EventValidationError("已有原片派生集合的种类或来源矛盾")
-                kinds.add(previous_kind)
+                error = existing_derivative_error(previous, output, kinds)
+                if error is not None:
+                    raise EventValidationError(error)
+                kinds.add(previous.get("kind"))
             kinds_by_original[original_id] = kinds
         kinds = kinds_by_original[original_id]
-        if kind in kinds:
-            raise EventValidationError("同一原片至多登记一份预览和一份修复成品")
+        error = duplicate_derivative_error(kind, kinds)
+        if error is not None:
+            raise EventValidationError(error)
         kinds.add(kind)
 
 

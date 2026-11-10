@@ -3,6 +3,8 @@
 from camctl.capture.output_file_rules import (
     capture_binding_error, device_output_error, device_source_ownership_error,
     intermediate_output_ownership_error, output_carrier_error, repair_output_error,
+    derivative_origin_error, existing_derivative_error, origin_links_error,
+    preview_source_pair_error, duplicate_derivative_error,
 )
 from camctl.contracts.enums import enum_for
 
@@ -65,3 +67,24 @@ def test_photo_promotion_preserves_original_path_exception(monkeypatch):
         facts, source, int(enum_for("outputs.kind").ORIGINAL))
     assert error == "主机拍摄源路径与稳定身份不一致"
     assert cause is failure
+
+
+def test_output_derivatives_require_same_source_original_and_unique_roles():
+    kinds = enum_for("outputs.kind")
+    original = {"kind": int(kinds.ORIGINAL), "source_action_id": 7,
+                "device_file_id": 8, "intermediate_file_id": None}
+    preview = {"kind": int(kinds.PREVIEW), "source_action_id": 7,
+               "device_file_id": 9, "intermediate_file_id": None}
+    assert origin_links_error(11, int(kinds.ORIGINAL), ()) is None
+    assert origin_links_error(11, int(kinds.ORIGINAL), ({"original_output_id": 10},))
+    assert origin_links_error(12, int(kinds.PREVIEW), ({"original_output_id": 11},)) is None
+    assert origin_links_error(12, int(kinds.PREVIEW), ({"original_output_id": 12},))
+    assert derivative_origin_error(original, preview, int(kinds.PREVIEW)) is None
+    assert derivative_origin_error(original | {"source_action_id": 6}, preview, int(kinds.PREVIEW))
+    assert preview_source_pair_error(original, preview, {"original_device_file_id": 8,
+                                                          "pairing_evidence_json": {}}) is None
+    assert preview_source_pair_error(original, preview, {"original_device_file_id": 7,
+                                                          "pairing_evidence_json": {}})
+    assert existing_derivative_error(preview, preview, set()) is None
+    assert existing_derivative_error(preview, preview, {int(kinds.PREVIEW)})
+    assert duplicate_derivative_error(int(kinds.PREVIEW), {int(kinds.PREVIEW)})
