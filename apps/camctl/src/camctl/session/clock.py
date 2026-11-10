@@ -16,6 +16,7 @@ from camctl.contracts.values import OperationKey
 from camctl.history.events import RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.repositories.transactions import CommandPlan, commit_operation
+from camctl.session.clock_rules import ClockBoundError, validate_trusted_bound
 
 __all__ = [
     "ClockCheck",
@@ -153,12 +154,9 @@ def _clock_guard(event, context) -> None:
             continue
         before = row.before.values
         after = row.after.values
-        old_bound = before.get("trusted_time_lower_bound")
-        new_bound = after.get("trusted_time_lower_bound")
-        if old_bound is None:
-            if new_bound is None:
-                raise EventValidationError("首次建立必须写入可信时间下界")
-        elif new_bound is None or new_bound <= old_bound:
-            raise EventValidationError("可信时间下界只严格提高")
-        if after.get("trusted_time_event_id") != event.event_id:
-            raise EventValidationError("下界依据必须引用本事件")
+        try:
+            validate_trusted_bound(before.get("trusted_time_lower_bound"),
+                                   after.get("trusted_time_lower_bound"),
+                                   after.get("trusted_time_event_id"), event.event_id)
+        except ClockBoundError as error:
+            raise EventValidationError(str(error)) from error
