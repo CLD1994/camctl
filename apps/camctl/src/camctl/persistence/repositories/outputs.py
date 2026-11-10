@@ -61,6 +61,7 @@ from camctl.outputs.cleanup_flow import (
     ProgressCleanupItem,
     RestrictCleanupItem,
     StartCleanupAction,
+    CleanupRestrictionChoice, decide_cleanup_restriction, validate_cleanup_restriction_output,
     decide_cleanup_progress, validate_cleanup_success,
     cleanup_device_absence_needs_record, cleanup_local_absence_needs_record,
 )
@@ -9120,11 +9121,12 @@ class _RestrictCleanupCommand(_CleanupItemCommandMixin):
             return self._verify_and_reuse(saved, (24, 1))
         item = self._load_item(connection, command.item_id)
         action = self._state["actions"][item["action_id"]]
-        if action["target_selection_state"] != _TARGET_FIXED:
+        choice = decide_cleanup_restriction(action=action, item=item)
+        if choice is CleanupRestrictionChoice.TARGET_UNFIXED:
             raise ConsistencyError("限制建立要求目标集合已固定")
-        if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
+        if choice is CleanupRestrictionChoice.ACTION_INACTIVE:
             raise TransactionError("限制建立要求清理动作执行中且未取消")
-        if item["status"] != int(_CLEANUP_ITEM_STATUS.UNRESOLVED):
+        if choice is CleanupRestrictionChoice.ALREADY:
             return self._already(item)
         if item["output_id"] is None:
             # 目标固定创建的成员尚未确认产物身份：按原请求目标装载。
@@ -9137,11 +9139,7 @@ class _RestrictCleanupCommand(_CleanupItemCommandMixin):
         if output is None:
             raise ConsistencyError(
                 f"请求产物不存在，不能建立限制: {item['requested_output_id']}")
-        if output["availability"] not in (
-                int(_AVAILABILITY.AVAILABLE),
-                int(_AVAILABILITY.RESTRICTED),
-                int(_AVAILABILITY.CLEANED)):
-            raise ConsistencyError("产物文件事实不允许建立删除限制")
+        validate_cleanup_restriction_output(output)
         if action["scheduled_at"] > command.occurred_at:
             return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
                 read_only=True, result=CleanupItemSaved(CleanupItemDisposition.WAITING, command.item_id))
