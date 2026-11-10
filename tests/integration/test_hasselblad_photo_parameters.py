@@ -270,10 +270,9 @@ def _scheduled_at(seconds: int) -> str:
 def _installed_plan(cases: tuple[dict[str, Any], ...], scheduled_at: str, request_id: str) -> str:
     action_type = json.dumps(ACTION_TYPE)
     device_id = json.dumps(DEVICE_ID)
-    action_name = json.dumps(ACTION_NAME, ensure_ascii=False)
     actions = ",".join(
         "{" + ",".join((
-            f'"name":{action_name}',
+            f'"name":{json.dumps(case["action_name"], ensure_ascii=False)}',
             f'"type":{action_type}',
             f'"device_id":{device_id}',
             f'"scheduled_at":{json.dumps(scheduled_at)}',
@@ -315,21 +314,24 @@ def test_installed_hasselblad_parameter_validation_agrees_across_consumers(
     store = tmp_path / "client-store"
     store.mkdir()
     (store / "device-capabilities.json").write_text(description, encoding="utf-8")
+    cases = tuple({**case, "action_name": f'{ACTION_NAME} / {case["name"]}'}
+                  for case in PARAMETER_CASES)
+    assert len({case["action_name"] for case in cases}) == len(cases)
     input_path = tmp_path / "hasselblad-parameter-cases.json"
     input_path.write_text(json.dumps({
         "action_type": ACTION_TYPE,
         "device_id": DEVICE_ID,
         "action_name": ACTION_NAME,
         "scheduled_at": _scheduled_at(3600),
-        "cases": PARAMETER_CASES,
+        "cases": cases,
     }, ensure_ascii=False), encoding="utf-8")
     receipt_path = tmp_path / "client-receipt.json"
     client = _client_driver(input_path, store, receipt_path)
     assert client.returncode == 0, f"Node/Chromium 参数接缝失败:\n{client.stdout}\n{client.stderr}"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert len(receipt["cases"]) == len(PARAMETER_CASES)
-    for case, observed in zip(PARAMETER_CASES, receipt["cases"], strict=True):
+    assert len(receipt["cases"]) == len(cases)
+    for case, observed in zip(cases, receipt["cases"], strict=True):
         assert observed["name"] == case["name"]
         assert observed["browser_valid"] == case["valid"], case["name"]
         assert observed["shared_valid"] == case["valid"], case["name"]
@@ -340,14 +342,14 @@ def test_installed_hasselblad_parameter_validation_agrees_across_consumers(
             exported = observed["exported"]
             request = json.loads(exported)
             action = request["actions"][0]
-            assert action["name"] == ACTION_NAME
+            assert action["name"] == case["action_name"]
             assert action["type"] == ACTION_TYPE
             assert action["device_id"] == DEVICE_ID
             assert parse_exact_json(exported)["actions"][0]["params"] == parse_exact_json(case["params_text"])
         else:
             assert observed["export_error"] == "invalid_plan", case["name"]
 
-    for case in PARAMETER_CASES:
+    for case in cases:
         if '"shutter_s"' not in case["params_text"]:
             continue
         expected_token = _value_token(case["params_text"], "shutter_s")
@@ -362,26 +364,39 @@ def test_installed_hasselblad_parameter_validation_agrees_across_consumers(
         installed_camctl.python,
         "-c",
         "from camctl.contracts.enums import enum_for; import json; "
-        "status=enum_for('actions.status'); "
-        "print(json.dumps({'pending':int(status.PENDING),'failed':int(status.FAILED)}))",
+        "status=enum_for('actions.status'); action=enum_for('actions.type'); "
+        "print(json.dumps({'pending':int(status.PENDING),'failed':int(status.FAILED),"
+        "'photo':int(action.CAMERA_TAKE_PHOTO)}))",
     ]).stdout
     statuses = json.loads(status_text)
 
-    for index, case in enumerate(PARAMETER_CASES):
-        request_id = str(826102100000 + index)
-        plan_path = tmp_path / f"installed-parameter-plan-{index}.json"
-        plan_path.write_text(_installed_plan((case,), scheduled_at, request_id), encoding="utf-8")
-        installed_camctl.cli("submit", str(plan_path), "--config", str(installed_camctl.config_path))
-        assert not installed_camctl.device_marker.exists(), "submit 调用了设备工具"
-        with sqlite3.connect(installed_camctl.state_db) as connection:
-            row = connection.execute(
-                "SELECT a.status,a.error_code,a.effective_params_json,a.driver_id "
-                "FROM actions AS a JOIN plans AS p ON p.id=a.plan_id "
-                "WHERE p.request_id=?",
-                (int(request_id),),
-            ).fetchone()
-        assert row is not None, case["name"]
-        status, error_code, effective, driver_id = row
+    request_id = "826102100000"
+    plan_path = tmp_path / "installed-parameter-plan.json"
+    plan_path.write_text(_installed_plan(cases, scheduled_at, request_id), encoding="utf-8")
+    assert not installed_camctl.device_marker.exists(), "submit 前调用了设备工具"
+    installed_camctl.cli("submit", str(plan_path), "--config", str(installed_camctl.config_path))
+    assert not installed_camctl.device_marker.exists(), "submit 调用了设备工具"
+    with sqlite3.connect(installed_camctl.state_db) as connection:
+        rows = connection.execute(
+            "SELECT p.id,p.request_id,a.name,a.type,a.device_id,a.input_fields_json,"
+            "a.status,a.error_code,a.effective_params_json,a.driver_id "
+            "FROM actions AS a JOIN plans AS p ON p.id=a.plan_id "
+            "WHERE p.request_id=?", (int(request_id),),
+        ).fetchall()
+    assert len(rows) == len(cases)
+    assert {row[1] for row in rows} == {int(request_id)}
+    assert len({row[0] for row in rows}) == 1
+    by_name = {row[2]: row for row in rows}
+    assert len(by_name) == len(cases)
+    assert set(by_name) == {case["action_name"] for case in cases}
+    for case in cases:
+        _, _, name, action_type, device_id, raw_fields, status, error_code, effective, driver_id = by_name[case["action_name"]]
+        assert name == case["action_name"], case["name"]
+        assert action_type == statuses["photo"], case["name"]
+        assert device_id == DEVICE_ID, case["name"]
+        assert parse_exact_json(raw_fields)["params"] == parse_exact_json(case["params_text"]), case["name"]
+        if '"shutter_s"' in case["params_text"]:
+            assert _value_token(raw_fields, "shutter_s") == _value_token(case["params_text"], "shutter_s"), case["name"]
         if case["valid"]:
             assert status == statuses["pending"], case["name"]
             assert error_code is None, case["name"]
@@ -404,6 +419,8 @@ def test_installed_hasselblad_parameter_validation_agrees_across_consumers(
         ("device_id", " "),
         ("action_name", None),
         ("action_name", ""),
+        ("cases.action_name", None),
+        ("cases.action_name", " "),
     ),
 )
 def test_validate_parameters_requires_explicit_action_identity(
@@ -418,7 +435,10 @@ def test_validate_parameters_requires_explicit_action_identity(
         "scheduled_at": _scheduled_at(3600),
         "cases": [],
     }
-    value[field] = invalid_value
+    if field == "cases.action_name":
+        value["cases"] = [{"name": "case", "params_text": "{}", "action_name": invalid_value}]
+    else:
+        value[field] = invalid_value
     input_path = tmp_path / "invalid-input.json"
     input_path.write_text(json.dumps(value), encoding="utf-8")
     completed = _client_driver(input_path, tmp_path / "missing-store", tmp_path / "receipt.json")

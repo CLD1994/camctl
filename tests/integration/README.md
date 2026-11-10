@@ -63,7 +63,7 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --check
 ```
 
-`test_hasselblad_photo_parameters.py` 构建并独立安装当前 wheel，由安装版 `describe` 导出 Hasselblad 能力，再将同一份有限参数用例交给安装版 camctl、Chromium 中的客户端共享校验和 Node.js 后端导出。用例只保留有代表性的 RAW/JPEG、M/A/S/P、白平衡、对焦、短快门和色温边界，以及互斥字段、tint、缺项与 `null` 反例；每项保存原始 `params_text` 和独立预期，不复制完整档位。计划只受理，不运行设备工具。
+`test_hasselblad_photo_parameters.py` 构建并独立安装当前 wheel，由安装版 `describe` 导出 Hasselblad 能力，再将同一份有限参数用例交给安装版 camctl、Chromium 中的客户端共享校验和 Node.js 后端导出。用例只保留有代表性的 RAW/JPEG、M/A/S/P、白平衡、对焦、短快门和色温边界，以及互斥字段、tint、缺项与 `null` 反例；每项保存原始 `params_text` 和独立预期，不复制完整档位。安装版以一份计划受理全部参数案例，并逐项核对保存的动作；计划只受理，不运行设备工具。
 
 ```bash
 UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_hasselblad_photo_parameters.py -q
@@ -134,7 +134,7 @@ ADB 提供的 OSV／LRF 是合成字节样例，不证明真实媒体可解码�
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
 ```
 
-`client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <凭据路径>` 是测试接缝。存储目录应含真实 `describe` 输出的 `device-capabilities.json`；用例 JSON 显式包含非空字符串 `action_type`、`device_id`、`action_name`，以及 `scheduled_at` 和 `cases`。每项用例有 `name`、保存完整原数字词元的 `params_text` 字符串和独立预期。浏览器共享校验与客户端后端共享校验都使用输入中的动作类型和设备标识，真实导出使用同一身份及动作名；身份字段缺失或为空时命令明确报出字段错误。凭据按同序记录 `browser_valid`、`shared_valid`、`export_valid`、两处未改写的参数正文，以及成功导出的完整 JSON 正文或明确的 `invalid_plan`。测试命令不接收产品候选能力开关，也不维护设备完整参数枚举。
+`client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <凭据路径>` 是测试接缝。存储目录应含真实 `describe` 输出的 `device-capabilities.json`；用例 JSON 显式包含非空字符串 `action_type`、`device_id`、`action_name`，以及 `scheduled_at` 和 `cases`。每项用例有 `name`、保存完整原数字词元的 `params_text` 字符串和独立预期；可选的 `action_name` 为该项导出指定动作名，省略时使用顶层名称。浏览器共享校验与客户端后端共享校验都使用输入中的动作类型和设备标识，真实导出使用对应的动作类型、设备标识和动作名；必需身份字段或显式提供的动作名为空时命令明确报错。凭据按同序记录 `browser_valid`、`shared_valid`、`export_valid`、两处未改写的参数正文，以及成功导出的完整 JSON 正文或明确的 `invalid_plan`。测试命令不接收产品候选能力开关，也不维护设备完整参数枚举。
 
 ### Hasselblad 网页与文件上传接缝
 

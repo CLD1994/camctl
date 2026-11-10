@@ -321,7 +321,7 @@ async function validateParameters(
   inputPath: string,
   receiptPath: string,
 ) {
-  type ParameterCase = { name: string; params_text: string };
+  type ParameterCase = { name: string; params_text: string; action_name?: unknown };
   const input = JSON.parse(readFileSync(inputPath, "utf8")) as {
     action_type: unknown;
     device_id: unknown;
@@ -337,6 +337,11 @@ async function validateParameters(
   const actionType = requiredInputString("action_type", input.action_type);
   const deviceId = requiredInputString("device_id", input.device_id);
   const actionName = requiredInputString("action_name", input.action_name);
+  const caseActionNames = input.cases.map((item) =>
+    Object.hasOwn(item, "action_name")
+      ? requiredInputString("cases.action_name", item.action_name)
+      : actionName,
+  );
   const capabilitiesText = readFileSync(
     join(storeDir, "device-capabilities.json"),
     "utf8",
@@ -425,7 +430,7 @@ async function validateParameters(
         name: "时间参数接缝",
         actions: [
           {
-            name: actionName,
+            name: caseActionNames[index],
             type: actionType,
             device_id: deviceId,
             scheduled_at: input.scheduled_at,
