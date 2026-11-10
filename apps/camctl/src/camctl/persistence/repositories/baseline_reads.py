@@ -79,14 +79,8 @@ def _check_intent(connection, request, transaction_id=None):
     activity, action = _activity(connection, request.activity_id)
     expected_directories = DirectoryRequest(DeviceBinding(action['device_id'], action['driver_id']),
         tuple(_directories(activity)), None, 128, request.timeout_s).directories
-    if (request.action_id != action['id'] or request.binding != DeviceBinding(action['device_id'], action['driver_id'])
-            or request.directories != expected_directories
-            or (action['status'], action['execution_started']) not in ((1, 0), (2, 1))
-            or action['cancel_requested'] != 0
-            or activity['baseline_state'] != BaselineState.COLLECTING
-            or activity['dispatch_state'] != enum_for('device_activities.dispatch_state').NOT_DISPATCHED
-            or activity['occupancy_state'] != enum_for('device_activities.occupancy_state').HELD):
-        raise ConsistencyError('基准调用不属于原动作正在占用的未派发收集活动')
+    from camctl.capture.baseline_qualification import require_baseline_read_intent
+    require_baseline_read_intent(request, action, activity, expected_directories)
     previous = _one(connection, 'SELECT id FROM baseline_read_calls WHERE activity_id=?'
         ' ORDER BY read_no DESC LIMIT 1', (request.activity_id,))
     if previous is None:

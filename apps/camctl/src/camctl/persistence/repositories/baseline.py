@@ -28,8 +28,6 @@ _APPEND = _EVENT["branches"]["APPEND"]["reason"]
 _FIX = _EVENT["branches"]["FIX"]["reason"]
 _FIX_EMPTY = _EVENT["branches"]["FIX_EMPTY"]["reason"]
 _OWNERSHIP = enum_for("device_activities.ownership_mode")
-_DISPATCH = enum_for("device_activities.dispatch_state")
-_OCCUPANCY = enum_for("device_activities.occupancy_state")
 _EVENT_COLUMNS = "id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
 
 
@@ -263,10 +261,11 @@ class _BaselineCommand:
         saved = saved_transaction_events(scope.connection, self.key)
         if saved is not None:
             return self._reuse(scope, saved)
-        if (activity["baseline_state"] != BaselineState.COLLECTING
-                or activity["dispatch_state"] != _DISPATCH.NOT_DISPATCHED
-                or activity["occupancy_state"] != _OCCUPANCY.HELD):
-            raise ConsistencyError("只有未派发且保持占用的收集活动可保存基准")
+        from camctl.capture.baseline_qualification import require_baseline_collecting_activity
+        try:
+            require_baseline_collecting_activity(activity)
+        except ValueError as error:
+            raise ConsistencyError("只有未派发且保持占用的收集活动可保存基准") from error
         return self._new(scope)
 
     def _saved(self, saved, reason, evidence):
@@ -371,11 +370,8 @@ def baseline_guard(event, context):
             raise ValueError("基准证据与活动行不同")
         activity = context.state_rows["device_activities"][activity_id]
         action = context.state_rows["actions"][activity["action_id"]]
-        if (activity["ownership_mode"] != _OWNERSHIP.BASELINE_COMPARISON
-                or activity["baseline_state"] != BaselineState.COLLECTING
-                or activity["dispatch_state"] != _DISPATCH.NOT_DISPATCHED
-                or activity["occupancy_state"] != _OCCUPANCY.HELD):
-            raise ValueError("基准活动不满足未派发收集资格")
+        from camctl.capture.baseline_qualification import require_baseline_collecting_activity
+        require_baseline_collecting_activity(activity)
         stats = context.baseline_reads[activity_id]
         if (stats.first_event_id, stats.last_event_id) != (activity["baseline_first_event_id"], activity["baseline_last_event_id"]):
             raise ValueError("基准读取摘要属于其他收集范围")
