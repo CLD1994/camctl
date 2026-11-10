@@ -34,7 +34,7 @@ from camctl.devices.tasks import CaptureResultPolicy
 from camctl.outputs.catalog import OutputKind
 from camctl.history.events import load_event_registry, business_columns
 from camctl.history.reads import SegmentReadScope
-from camctl.history.validators import register_guard, EventValidationError
+from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.transactions import (
     CommandPlan, commit_operation, event_envelope, next_row_id, row_change, row_facts,
@@ -1185,7 +1185,7 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
                         raise ConsistencyError('正式默认关联必须与来源终态、实际 original 共同发布')
 
 
-def register_segment_guards(register=register_guard):
+def register_segment_guards(register):
     def guard(event,context):
         try:
             if context.current_reads is None:raise ConsistencyError('分段守卫缺少原事务有限读端口')
@@ -1387,7 +1387,6 @@ class SegmentRepository:
 
     def create_result_set(self,request,key,owned):
         from .segment_result_sets import CreateResultSetCommand
-        register_segment_guards()
         receipt=commit_operation(CreateResultSetCommand(request,key),key,owned)
         return (DbOutcome(DbOutcomeKind.COMPLETED,value=receipt.result) if receipt.kind=='completed'
             else DbOutcome(DbOutcomeKind.ROLLED_BACK if receipt.kind=='rolled_back' else DbOutcomeKind.UNKNOWN,
@@ -1396,7 +1395,6 @@ class SegmentRepository:
     def decide_result(self, ref, occurred_at, key, owned):
         from .segment_dispositions import DecideResultCommand
 
-        register_segment_guards()
         receipt = commit_operation(
             DecideResultCommand(ref, occurred_at, key), key, owned
         )
@@ -1406,7 +1404,6 @@ class SegmentRepository:
 
     def conclude_result_check(self,request,key,owned):
         from .segment_check_conclusions import ConcludeResultCheckCommand
-        register_segment_guards()
         receipt=commit_operation(ConcludeResultCheckCommand(request,key),key,owned)
         return DbOutcome(DbOutcomeKind(receipt.kind),value=receipt.result,error=receipt.error)
 
@@ -1447,7 +1444,6 @@ class SegmentRepository:
 
     def _save_result_members(self,kind,ref,payload,occurred_at,key,owned):
         from .segment_result_members import ResultMembersCommand
-        register_segment_guards()
         receipt=commit_operation(ResultMembersCommand(kind,ref,payload,occurred_at,key),key,owned)
         return (DbOutcome(DbOutcomeKind.COMPLETED,value=receipt.result) if receipt.kind=='completed'
             else DbOutcome(DbOutcomeKind.ROLLED_BACK if receipt.kind=='rolled_back' else DbOutcomeKind.UNKNOWN,
@@ -1459,7 +1455,6 @@ class SegmentRepository:
     def fix_result_members(self,ref,occurred_at,key,owned):
         return self._save_result_members('FIX_RESULT_MEMBERS',ref,None,occurred_at,key,owned)
     def _save(self,kind,ref,payload,occurred_at,key,owned):
-        register_segment_guards()
         receipt=commit_operation(_Command(kind,ref,payload,occurred_at,key),key,owned)
         return DbOutcome(DbOutcomeKind(receipt.kind),value=receipt.result,error=receipt.error)
 

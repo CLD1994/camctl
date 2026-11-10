@@ -1148,9 +1148,6 @@ class _FinishCommand:
 def finish_segment_recording(request,key,owned,*,batch_size=128):
     if not isinstance(request,FinishSegmentRecording):raise TypeError('必须保存原有限分段申请')
     if type(batch_size) is not int or not 1<=batch_size<=128:raise ValueError('批次必须为1—128')
-    from .capture import register_capture_guards
-    from .operations import register_operation_guards
-    register_capture_guards();register_operation_guards();storage.register_segment_guards()
     return commit_operation(_FinishCommand(request,key,batch_size),key,owned)
 
 

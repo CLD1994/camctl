@@ -2,18 +2,13 @@
 
 import pytest
 
-from camctl.history import validators
-from camctl.persistence.repositories.validation import build_business_rules
+from camctl.persistence.repositories.validation import build_business_rules, default_business_storage
 
 
-def test_formal_rules_ignore_shared_registration_state(monkeypatch):
-    poisoned = lambda event, context: None
-    monkeypatch.setitem(validators.NAMED_GUARDS, "window", poisoned)
-    before = dict(validators.NAMED_GUARDS)
+def test_formal_rules_are_defined_and_default_storage_is_stable():
     rules = build_business_rules()
-    assert rules["window"] is not poisoned
     assert rules["window"].__module__ == "camctl.persistence.repositories.scheduling"
-    assert validators.NAMED_GUARDS == before
+    assert default_business_storage() is default_business_storage()
 
 
 def test_rule_sets_have_independent_replacements():

@@ -12,7 +12,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.contracts.workflow_errors import action_error_id, validate_error_details
 from camctl.history.reads import ReadCoverage
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.motor.models import (
     FinishSendRequest,
     FinishSendResult,
@@ -784,7 +784,7 @@ def _motor_guard(event, context):
         raise EventValidationError(f"电机共同事务违反契约: {error}") from error
 
 
-def register_motor_guards(register=register_guard):
+def register_motor_guards(register):
     register("motor", _motor_guard)
 
 

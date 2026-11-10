@@ -16,7 +16,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.history.reads import PlanReadScope
 from camctl.persistence.repositories.transactions import (
     CommandPlan,
@@ -319,7 +319,7 @@ def _report_guard(event, context) -> None:
             raise EventValidationError("新登记报告尚无文件处理错误")
 
 
-def register_report_guards(register=register_guard) -> None:
+def register_report_guards(register) -> None:
     register("report", _report_guard)
     register_sync_guard(register)
 
@@ -1091,6 +1091,6 @@ def _action_start_guard(event, context) -> None:
                 f" actions#{action_id} status={facts.get('status')!r}")
 
 
-def register_sync_guard(register=register_guard) -> None:
+def register_sync_guard(register) -> None:
     register("sync", _sync_guard)
     register("action_start", _action_start_guard)

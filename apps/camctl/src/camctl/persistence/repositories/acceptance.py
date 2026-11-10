@@ -29,7 +29,7 @@ from camctl.contracts.values import OperationKey, parse_object_id, ValueTypeErro
 from camctl.contracts.workflow_errors import action_error_id, action_error_ids, registered_error_spec
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.reads import AdmissionSourceReadScope
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection, require_host_photo_format, require_deferred_photo_format
 from camctl.persistence.repositories.reporting import (
@@ -731,7 +731,7 @@ def _ack_guard(event, context) -> None:
             raise EventValidationError("累计确认水位只严格提高")
 
 
-def register_acceptance_guards(register=register_guard) -> None:
+def register_acceptance_guards(register) -> None:
     """注册受理事务的正式业务守卫（装配期调用，替换测试替身）。"""
     register("admission", _admission_guard)
     register("plan_aggregate", _plan_aggregate_guard)

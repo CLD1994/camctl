@@ -49,7 +49,7 @@ from camctl.contracts.workflow_errors import (
     validate_error_details,
 )
 from camctl.history.reads import ReadCoverage
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture_facts import (
     include_start_facts, load_start_facts, start_finish_event,
@@ -2108,7 +2108,7 @@ def _withdrawal_guard(event, context) -> None:
                 raise EventValidationError("撤回明细必须属于仍有效的原取消责任")
 
 
-def register_cancellation_guards(register=register_guard) -> None:
+def register_cancellation_guards(register) -> None:
     """注册取消目标固定事件的正式业务守卫（装配期调用）。"""
     register("cancel", _cancel_targets_guard)
     register("withdrawal", _withdrawal_guard)

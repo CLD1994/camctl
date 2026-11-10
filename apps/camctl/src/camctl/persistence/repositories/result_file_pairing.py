@@ -11,7 +11,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
 from camctl.history.events import load_event_registry
 from camctl.history.reads import CaptureResultReadScope
-from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
+from camctl.history.validators import EventValidationError, validate_event_structure
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.fact_reads import (
     opened_operation_fact_scope, read_event, read_operation_transaction, read_transaction,
@@ -254,7 +254,7 @@ def _pairing_guard(event, context):
         raise EventValidationError(str(error)) from error
 
 
-def register_result_scan_pairing_guard(register=register_guard):
+def register_result_scan_pairing_guard(register):
     register('result_scan_pairing', _pairing_guard)
 
 

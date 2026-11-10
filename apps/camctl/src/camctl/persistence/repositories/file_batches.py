@@ -2,7 +2,7 @@
 
 from camctl.contracts.values import ConsistencyError
 from camctl.history.events import load_event_registry
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.outputs.batches import BatchOutcome, decide_batch_grant
 from camctl.persistence.repositories.file_batch_reads import FileBatchReads
 from camctl.persistence.repositories.transactions import (
@@ -95,7 +95,7 @@ def _batch_guard(event, context):
             raise EventValidationError("文件批次尚未可靠结束，不能释放")
 
 
-def register_file_batch_guards(register=register_guard):
+def register_file_batch_guards(register):
     register("file_batch", _batch_guard)
 
 

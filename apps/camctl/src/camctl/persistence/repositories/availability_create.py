@@ -11,7 +11,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, Ut
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.start_entry import is_hasselblad_photo
 from camctl.history.events import load_event_registry
-from camctl.history.validators import EventContext, register_guard
+from camctl.history.validators import EventContext
 from camctl.persistence.repositories.transactions import (BoundedCommandPlan, CommandPlan, commit_operation,
     event_envelope, next_row_id, row_change, row_facts, read_saved_transaction_page,
     read_transaction_range)
@@ -408,5 +408,5 @@ def availability_guard(event, context):
         raise ConsistencyError("设备检查事件缺少原内核独立事务组")
 
 
-def register_availability_guard(register=register_guard):
+def register_availability_guard(register):
     register("availability_check", availability_guard)

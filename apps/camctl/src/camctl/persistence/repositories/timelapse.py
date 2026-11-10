@@ -19,7 +19,7 @@ from camctl.capture.timelapse import WaitPlan
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import MAX_OBJECT_ID, ConsistencyError, OperationKey
 from camctl.devices.capture_timing import CaptureTiming
-from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import load_activity_of_action
 from camctl.persistence.runtime import OwnedConnection
@@ -412,6 +412,6 @@ def _validate_wait_values(values) -> None:
                 raise EventValidationError(f"{column} 必须是非负毫秒: {value!r}")
 
 
-def register_timelapse_guards(register=register_guard) -> None:
+def register_timelapse_guards(register) -> None:
     """注册等待安排事件的正式业务守卫（装配期调用）。"""
     register("capture_wait", _capture_wait_guard)
