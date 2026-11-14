@@ -95,28 +95,39 @@ def _record_history(path, plan_guards):
         opened.connection.close()
 
 
-def _intercept_upgrade_connection(monkeypatch, failure_stage, error):
+def _intercept_upgrade_connection(monkeypatch, failure_stage, error=None):
     import camctl.persistence.initialization as module
-    import camctl.persistence.software_recovery_upgrade as upgrade_module
+    import camctl.persistence.runtime as runtime
     from dataclasses import replace
 
-    original_open = module.open_existing
-    original_verify = upgrade_module._verify_upgraded
+    original_open = runtime.open_existing
     hits = []
+    denied = []
     closed = []
+    reopened = []
+
+    def authorize(action, table, _detail, _database, _trigger):
+        if action == sqlite3.SQLITE_CREATE_TABLE and table == "software_recoveries":
+            denied.append(table)
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
 
     class Connection:
         def __init__(self, actual):
             self.actual = actual
+            if failure_stage == "create":
+                self.actual.set_authorizer(authorize)
 
         def __getattr__(self, name):
             return getattr(self.actual, name)
 
         def execute(self, statement, *args):
-            if failure_stage == "create" and statement.startswith("CREATE TABLE software_recoveries"):
-                hits.append(error)
-                raise error
-            return self.actual.execute(statement, *args)
+            try:
+                return self.actual.execute(statement, *args)
+            except sqlite3.Error as actual_error:
+                if len(denied) > len(hits):
+                    hits.append(actual_error)
+                raise
 
         def commit(self):
             self.actual.commit()
@@ -128,29 +139,31 @@ def _intercept_upgrade_connection(monkeypatch, failure_stage, error):
             self.actual.close()
             closed.append(self.actual)
 
-    def opened(*args):
-        owned = original_open(*args)
+    def opened(*args, **kwargs):
+        owned = original_open(*args, **kwargs)
         return replace(owned, connection=Connection(owned.connection))
 
-    def verify(*args):
-        if failure_stage == "commit":
+    def observed_open(*args, **kwargs):
+        if hits:
             assert len(hits) == 1 and closed
             with pytest.raises(sqlite3.ProgrammingError):
                 closed[0].execute("SELECT 1")
-        return original_verify(*args)
+            reopened.append((args[0], args[1]))
+        return original_open(*args, **kwargs)
 
     monkeypatch.setattr(module, "open_existing", opened)
-    monkeypatch.setattr(upgrade_module, "_verify_upgraded", verify)
-    return hits, closed
+    monkeypatch.setattr(runtime, "open_existing", observed_open)
+    return hits, denied, closed, reopened
 
 
 def test_upgrade_commit_ack_unknown_reopens_and_verifies_actual_v3(tmp_path, monkeypatch, plan_guards):
     cfg, path = legacy(tmp_path)
     original_history = _record_history(path, plan_guards)
     error = sqlite3.OperationalError("真实 COMMIT 完成，回执丢失")
-    hits, closed = _intercept_upgrade_connection(monkeypatch, "commit", error)
+    hits, denied, closed, reopened = _intercept_upgrade_connection(monkeypatch, "commit", error)
     assert initialize_state(cfg, path, upgrade_software_recovery=True).outcome is InitOutcome.VERIFIED_EXISTING
-    assert hits == [error] and closed
+    assert hits == [error] and not denied and closed
+    assert reopened == [(path, DbOpenMode.EXISTING_RO)]
     with pytest.raises(sqlite3.ProgrammingError):
         closed[0].execute("SELECT 1")
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -165,11 +178,12 @@ def test_upgrade_commit_ack_unknown_reopens_and_verifies_actual_v3(tmp_path, mon
 def test_upgrade_before_commit_rolls_back_and_reuses_original_backup(tmp_path, monkeypatch, plan_guards):
     cfg, path = legacy(tmp_path)
     original_history = _record_history(path, plan_guards)
-    error = sqlite3.OperationalError("独立表创建失败")
-    hits, closed = _intercept_upgrade_connection(monkeypatch, "create", error)
+    hits, denied, closed, reopened = _intercept_upgrade_connection(monkeypatch, "create")
     result = initialize_state(cfg, path, upgrade_software_recovery=True)
     assert result.outcome is InitOutcome.FAILED
-    assert result.error is error and hits == [error] and closed
+    assert denied == ["software_recoveries"] and len(hits) == 1
+    assert isinstance(hits[0], sqlite3.DatabaseError)
+    assert result.error is hits[0] and closed and not reopened
     with pytest.raises(sqlite3.ProgrammingError):
         closed[0].execute("SELECT 1")
     backup = Path(str(path) + ".before-software-recovery-v3.sqlite")
