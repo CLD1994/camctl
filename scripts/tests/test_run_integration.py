@@ -247,10 +247,11 @@ class IntegrationRunnerTest(unittest.TestCase):
                 '@pytest.mark.parametrize("value", range(7), ids=["a","b","c","d","e","f","new"])\n'
                 'def test_value(value):\n    assert value >= 0\n',
                 history=True)
-            result, output = self._run_fixture(root, source, '--root-shards', '2')
+            result, output = self._run_fixture(root, source, '--timing-history', str(root / 'history'), '--root-shards', '2')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             plan = json.loads((output / 'plan.json').read_text())
             self.assertEqual(len(plan), 2)
+            self.assertCountEqual([task['estimated_seconds'] for task in plan], [480, 451])
             nodes = [node for task in plan for node in task['targets']]
             expected = ['tests/integration/test_matrix.py::test_value[' + name + ']' for name in ('a','b','c','d','e','f','new')]
             self.assertCountEqual(nodes, expected)
@@ -259,6 +260,75 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertEqual(sum(task['progress']['collected'] for task in summary['tasks']), 7)
             self.assertFalse(any((output / 'collection').glob('*/source')))
             self.assertTrue(Path(plan[0]['collection'], 'inventory.json').is_file())
+
+    def test_timing_history_orders_discovered_tasks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_a.py', 'def test_value():\n    assert True\n', history=True)
+            (source / 'tests/integration/test_z.py').write_text('def test_value():\n    assert True\n')
+            (root / 'history/cross-component-cases.csv').write_text(
+                'nodeid,status,total_s\ntests/integration/test_z.py::test_value,passed,4\n')
+            result, output = self._run_fixture(root, source, '--timing-history', str(root / 'history'),
+                                               '--root-shards', '1', '--plan-only')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            plan = json.loads((output / 'plan.json').read_text())
+            self.assertEqual([task['path'] for task in plan],
+                             ['tests/integration/test_z.py', 'tests/integration/test_a.py'])
+            self.assertEqual([task['estimated_seconds'] for task in plan], [4, 0])
+
+    def test_timing_input_is_explicit_and_excluded_from_snapshot(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_matrix.py',
+                'import pytest\n@pytest.mark.parametrize("value", [1, 2])\n'
+                'def test_value(value):\n    assert value\n', history=True)
+            legacy = source / 'docs/camctl/verification-data/history'
+            legacy.mkdir(parents=True)
+            for path in (root / 'history').iterdir():
+                (legacy / path.name).write_bytes(path.read_bytes())
+            result, output = self._run_fixture(root, source, '--plan-only', '--root-shards', '2')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            task, = json.loads((output / 'plan.json').read_text())
+            self.assertEqual(task['estimated_seconds'], 0)
+            self.assertFalse(task['historical_failure_observed'])
+            self.assertFalse((output / 'collection').exists())
+            self.assertFalse(any(item['path'].startswith('docs/camctl/verification-data/')
+                                 for item in json.loads((output / 'source.json').read_text())['files']))
+
+    def test_invalid_explicit_timing_input_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / 'history'
+            for problem in ('missing_directory', 'missing_file', 'bad_header', 'bad_seconds'):
+                with self.subTest(problem=problem):
+                    if problem != 'missing_directory':
+                        directory.mkdir(exist_ok=True)
+                        (directory / 'camctl-files.csv').write_text('name,total_s\n')
+                        (directory / 'cross-component-files.csv').write_text('name,total_s\n')
+                        (directory / 'cross-component-cases.csv').write_text('nodeid,status,total_s\n')
+                        if problem == 'missing_file':
+                            (directory / 'camctl-files.csv').unlink()
+                        elif problem == 'bad_header':
+                            (directory / 'camctl-files.csv').write_text('name\n')
+                        elif problem == 'bad_seconds':
+                            (directory / 'camctl-files.csv').write_text('name,total_s\ntest.py,nan\n')
+                    result = subprocess.run([sys.executable, str(RUNNER), '--list',
+                        '--timing-history', str(directory)], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn(str(directory), result.stderr)
+
+    def test_local_timing_files_are_not_copied_into_source_snapshot(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_matrix.py', 'def test_value():\n    assert True\n', history=True)
+            local = source / 'local-timing'
+            local.mkdir()
+            for path in (root / 'history').iterdir():
+                (local / path.name).write_bytes(path.read_bytes())
+            result, output = self._run_fixture(root, source, '--timing-history', str(local), '--plan-only')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            files = json.loads((output / 'source.json').read_text())['files']
+            self.assertFalse(any(item['path'].startswith('local-timing/') for item in files))
 
     def test_failed_worker_cache_is_reused_then_removed_after_later_task(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -303,7 +373,7 @@ class IntegrationRunnerTest(unittest.TestCase):
                 # 不启动受限 camctl；真实参数仍经预算插件传入并完成配置。
                 delegated = root / 'external-budget-directory'
                 delegated.mkdir()
-                result, output = self._run_fixture(root, source, '--root-shards', str(shards),
+                result, output = self._run_fixture(root, source, '--timing-history', str(root / 'history'), '--root-shards', str(shards),
                     '--camctl-memory-cgroup-root', str(delegated))
                 plan = json.loads((output / 'plan.json').read_text())
                 expected = ['tests/integration/test_matrix.py::test_value[' + name + ']'
@@ -348,13 +418,13 @@ class IntegrationRunnerTest(unittest.TestCase):
                     'import pytest\n'
                     '@pytest.mark.parametrize("value", range(3), ids=["a","b","new"])\n'
                     'def test_value(value):\n    assert value >= 0\n', history=True)
-                timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
+                timing = root / 'history'
                 (timing / 'cross-component-files.csv').write_text('name,total_s\ntests/integration/test_matrix.py,6\n')
                 (timing / 'cross-component-cases.csv').write_text(
                     'nodeid,status,total_s\n'
                     'tests/integration/test_matrix.py::test_value[a],passed,5\n'
                     f'tests/integration/test_matrix.py::test_value[b],{historical_status},1\n')
-                result, output = self._run_fixture(root, source, '--root-shards', '2')
+                result, output = self._run_fixture(root, source, '--timing-history', str(root / 'history'), '--root-shards', '2')
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 plan = json.loads((output / 'plan.json').read_text())
                 self.assertEqual(len(plan), expected_tasks)
@@ -384,11 +454,7 @@ class IntegrationRunnerTest(unittest.TestCase):
                 self._fixture_repository(source, 'test_matrix.py',
                     'import pytest\n'
                     '@pytest.mark.parametrize("value", range(3), ids=["a","b","new"])\n'
-                    'def test_value(value):\n    assert value >= 0\n', history=True)
-                timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
-                (timing / 'cross-component-cases.csv').write_text(
-                    'nodeid,status,total_s\n' + ''.join(
-                        f'{node},passed,1\n' for node in expected[:2]))
+                    'def test_value(value):\n    assert value >= 0\n')
                 selection = () if case == 'one-node' else (
                     '--target', target, '--target', expected[0])
                 preview = () if case == 'forced' else ('--plan-only',)
@@ -450,8 +516,9 @@ class IntegrationRunnerTest(unittest.TestCase):
             "require('fs').mkdirSync('dist/web',{recursive:true});"
             "require('fs').writeFileSync('dist/web/built','current')")
         if history:
-            timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
-            timing.mkdir(parents=True)
+            timing = source.parent / 'history'
+            timing.mkdir()
+            (timing / 'camctl-files.csv').write_text('name,total_s\n')
             (timing / 'cross-component-files.csv').write_text('name,total_s\ntests/integration/test_matrix.py,930\n')
             (timing / 'cross-component-cases.csv').write_text('nodeid,status,total_s\n' + ''.join(
                 f'tests/integration/test_matrix.py::test_value[{name}],passed,{seconds}\n'
@@ -557,6 +624,7 @@ class IntegrationRunnerTest(unittest.TestCase):
             process = subprocess.Popen([
                 sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
                 '--uv-cache', str(cache), '--output', str(output), '--jobs', '2', '--plan-only',
+                '--timing-history', str(root / 'history'),
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             pid = None
             deadline = time.monotonic() + 15
@@ -649,7 +717,7 @@ class IntegrationRunnerTest(unittest.TestCase):
             after = {str(path): (path.stat().st_size, path.stat().st_mtime_ns) for path in shared.rglob('*.pyc')}
             self.assertEqual(before, after)
 
-    def test_snapshot_omits_evidence_but_retains_timing_and_dirty_source_identity(self):
+    def test_snapshot_omits_evidence_and_timing_and_retains_dirty_source_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root, source = Path(temporary), Path(temporary) / 'input'
             self._fixture_repository(source, 'test_snapshot.py',
@@ -660,16 +728,19 @@ class IntegrationRunnerTest(unittest.TestCase):
                 '    assert (root / "protocol/new").read_text() == "new"\n'
                 '    assert not (root / "protocol/deleted").exists()\n'
                 '    assert not (root / "docs/camctl/verification-data/old/output.log").exists()\n'
+                '    assert not (root / "docs/camctl/verification-data/history/camctl-files.csv").exists()\n'
                 '    assert (root / "docs/contract.md").read_text() == "contract"\n'
                 '    status = subprocess.check_output(["git", "status", "--short"], text=True)\n'
-                '    assert "docs/camctl/verification-data/old/output.log" in status\n', history=True)
+                '    assert "docs/camctl/verification-data/old/output.log" in status\n')
             evidence = source / 'docs/camctl/verification-data/old/output.log'
             evidence.parent.mkdir(parents=True)
             evidence.write_text('old')
             (source / 'docs/contract.md').write_text('contract')
             (source / 'protocol/deleted').write_text('deleted')
-            timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
-            (timing / 'camctl-files.csv').write_text('name,total_s\n')
+            timing = source / 'docs/camctl/verification-data/history'
+            timing.mkdir()
+            for name in ('camctl-files.csv', 'cross-component-files.csv', 'cross-component-cases.csv'):
+                (timing / name).write_text('evidence')
             subprocess.run(['git', 'add', '.'], cwd=source, check=True)
             subprocess.run(['git', '-c', 'user.name=runner-test', '-c', 'user.email=runner@example.invalid',
                             'commit', '-qm', 'inputs'], cwd=source, check=True)
@@ -684,7 +755,7 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertIn('protocol/new', paths)
             self.assertNotIn('protocol/deleted', paths)
             for name in ('camctl-files.csv', 'cross-component-files.csv', 'cross-component-cases.csv'):
-                self.assertIn(f'docs/camctl/verification-data/2026-10-25-integration-timing/{name}', paths)
+                self.assertNotIn(f'docs/camctl/verification-data/history/{name}', paths)
             self.assertIn('protocol/marker', identity['status'])
             self.assertIn('excluded tracked files appear deleted', identity['snapshot_scope']['git_index'])
 

@@ -8,6 +8,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -25,9 +26,7 @@ CAMCTL = 'apps/camctl/tests/integration'
 ROOT = 'tests/integration'
 HB_MODULE = ROOT + '/test_hasselblad_photo_roundtrip.py'
 ROOT_SHARD_SECONDS = 600
-TIMING = 'docs/camctl/verification-data/2026-10-25-integration-timing'
-TIMING_INPUTS = {f'{TIMING}/{name}' for name in (
-    'camctl-files.csv', 'cross-component-files.csv', 'cross-component-cases.csv')}
+TIMING_FILES = ('camctl-files.csv', 'cross-component-files.csv', 'cross-component-cases.csv')
 VERIFICATION_DATA = 'docs/camctl/verification-data/'
 
 
@@ -86,28 +85,42 @@ def covers(parent, child):
     return child == parent or any(child.startswith(parent + boundary) for boundary in ('/', '::', '['))
 
 
-def case_history(source):
-    path = source / TIMING / 'cross-component-cases.csv'
-    if not path.exists():
-        return {}, set()
-    with path.open(encoding='utf-8-sig', newline='') as stream:
-        rows = list(csv.DictReader(stream))
-    costs = {row['nodeid']: float(row['total_s']) for row in rows}
-    failed_modules = {row['nodeid'].partition('::')[0] for row in rows if row['status'] == 'failed'}
-    return costs, failed_modules
+def load_timing_history(directory):
+    """读取显式提供的调度输入；未提供时使用空历史。"""
+    if directory is None:
+        return {}, {}, set()
+    if not directory.is_dir():
+        raise ValueError(f'计时历史目录不存在或不是目录: {directory}')
+    costs, cases, failed_modules = {}, {}, set()
+    for name in TIMING_FILES:
+        path = directory / name
+        required = {'nodeid', 'status', 'total_s'} if name == 'cross-component-cases.csv' else {'name', 'total_s'}
+        with path.open(encoding='utf-8-sig', newline='') as stream:
+            reader = csv.DictReader(stream)
+            if not reader.fieldnames or not required.issubset(reader.fieldnames):
+                raise ValueError(f'计时历史列缺失: {path}')
+            for line, row in enumerate(reader, start=2):
+                key = row['nodeid'] if name == 'cross-component-cases.csv' else row['name']
+                try:
+                    seconds = float(row['total_s'])
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f'计时历史耗时无效: {path}:{line}') from error
+                if not key or not math.isfinite(seconds) or seconds < 0:
+                    raise ValueError(f'计时历史记录无效: {path}:{line}')
+                if name == 'cross-component-cases.csv':
+                    if not row['status']:
+                        raise ValueError(f'计时历史状态无效: {path}:{line}')
+                    cases[key] = seconds
+                    if row['status'] == 'failed':
+                        failed_modules.add(key.partition('::')[0])
+                else:
+                    costs[key] = seconds
+    return costs, cases, failed_modules
 
 
-def order_by_measurement(source, tasks):
+def order_by_measurement(tasks, history):
     """既有记录只用于排程；未测目标仍完整执行。"""
-    timing = source / TIMING
-    costs = {}
-    for name in ('camctl-files.csv', 'cross-component-files.csv'):
-        path = timing / name
-        if path.exists():
-            with path.open(encoding='utf-8-sig', newline='') as stream:
-                for row in csv.DictReader(stream):
-                    costs[row['name']] = float(row['total_s'])
-    cases, failed_modules = case_history(source)
+    costs, cases, failed_modules = history
     for task in tasks:
         task['estimated_seconds'] = sum(cost for path, cost in costs.items()
                                         if path == task['path'] or path.startswith(task['path'] + '/'))
@@ -167,7 +180,7 @@ def remove_owned_tree(path):
             continue
 
 
-def snapshot(source, destination):
+def snapshot(source, destination, timing_directory=None):
     head = command_output(['git', 'rev-parse', 'HEAD'], source)
     files = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=source)
     paths = sorted(set(os.fsdecode(path) for path in files.split(b'\0') if path))
@@ -177,9 +190,16 @@ def snapshot(source, destination):
         output_relative = None
     subprocess.run(['git', 'clone', '--shared', '--no-checkout', '--quiet', str(source), str(destination)], check=True)
     subprocess.run(['git', 'read-tree', 'HEAD'], cwd=destination, check=True)
+    timing_paths = set()
+    if timing_directory is not None:
+        for name in TIMING_FILES:
+            try:
+                timing_paths.add((timing_directory / name).relative_to(source).as_posix())
+            except ValueError:
+                pass
     inventory = []
     for relative in paths:
-        if ((relative.startswith(VERIFICATION_DATA) and relative not in TIMING_INPUTS) or
+        if (relative.startswith(VERIFICATION_DATA) or relative in timing_paths or
                 (output_relative is not None and relative.startswith(output_relative))):
             continue
         original = source / relative
@@ -198,7 +218,6 @@ def snapshot(source, destination):
     return {'root': str(source), 'head': head,
             'status': command_output(['git', 'status', '--short'], source),
             'snapshot_scope': {'excluded_directory': VERIFICATION_DATA,
-                               'allowed_timing_inputs': sorted(TIMING_INPUTS),
                                'excluded_output_directory': output_relative,
                                'git_index': 'HEAD; excluded tracked files appear deleted'},
             'snapshot_sha256': hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest(),
@@ -263,9 +282,8 @@ def managed_wait_sync(process):
         raise
 
 
-def collect_and_shard(args, tasks, output, seed, python, versions, identity):
+def collect_and_shard(args, tasks, output, seed, python, versions, identity, costs):
     """当前收集清单决定覆盖；历史记录用于自动选择及均衡权重。"""
-    costs, _ = case_history(seed)
     result = []
     for task in tasks:
         if (task['scope'] != 'root' or args.root_shards == 1 or
@@ -558,6 +576,7 @@ def main():
     parser.add_argument('--root-shards', type=int, help='历史长模块或曾失败根pytest模块最多分为几片（默认随jobs，1禁用）')
     parser.add_argument('--force-root-shards', action='store_true',
                         help='对本次所选根pytest模块收集并分片，不受历史时长和失败记录限制')
+    parser.add_argument('--timing-history', type=Path, help='可选的本地计时 CSV 目录')
     parser.add_argument('--scope', choices=('all', 'camctl', 'root', 'node'), default='all')
     parser.add_argument('--target', action='append', default=[], help='仓库相对目录、文件或 pytest nodeid，可重复')
     parser.add_argument('--python', type=Path, default=Path(sys.executable), help='已准备测试依赖的外部 Python 3.11')
@@ -582,6 +601,8 @@ def main():
         if args.root_shards < 1:
             raise ValueError('--root-shards 必须大于 0')
         source = args.source.resolve()
+        timing_directory = args.timing_history.resolve() if args.timing_history is not None else None
+        history = load_timing_history(timing_directory)
         tasks = select(discover(source), args.scope, args.target)
         if not tasks:
             raise ValueError('所选范围没有集成测试')
@@ -613,16 +634,16 @@ def main():
         write_json(output / 'summary.json', {'status': 'preparing', 'runner_pid': os.getpid(),
                    'started_utc': started_utc, 'tasks': [{**task, 'status': 'pending'} for task in tasks]})
         seed = output / 'snapshot'
-        identity = snapshot(source, seed)
+        identity = snapshot(source, seed, timing_directory)
         write_json(output / 'source.json', identity)
         # 调度清单由冻结后的实际源码生成，确保与执行来源一致。
-        tasks = order_by_measurement(seed, select(discover(seed), args.scope, args.target))
+        tasks = order_by_measurement(select(discover(seed), args.scope, args.target), history)
         (output / 'control').mkdir()
         shutil.copy2(Path(__file__).with_name('integration_progress.py'), output / 'control')
         shutil.copy2(Path(__file__).with_name('camctl_memory_plugin.py'),
                      output / 'control' / 'camctl_memory_plugin.py')
         shutil.copy2(Path(camctl_memory.__file__), output / 'control' / 'camctl_memory.py')
-        tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity)
+        tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity, history[1])
         write_json(output / 'plan.json', tasks)
         if args.plan_only:
             write_json(output / 'summary.json', {'status': 'planned', 'exit_code': 0,
