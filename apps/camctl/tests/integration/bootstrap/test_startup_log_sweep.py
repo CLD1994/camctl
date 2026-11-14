@@ -20,7 +20,6 @@ pytestmark = pytest.mark.asyncio
 from camctl.acceptance.input import FileInputReader, ParsedInput, parse_input, read_input
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.bootstrap import lifecycle
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.persistence.initialization import InitOutcome, initialize_state
@@ -615,7 +614,14 @@ async def test_cancelled_run_preserves_unprocessed_log_copy(tmp_path: Path) -> N
 async def test_late_clock_winddown_stops_before_blocked_log_settlement(
         tmp_path: Path, monkeypatch) -> None:
     """真实受限录像停止不等待已开始的启动日志目录扫描。"""
-    from camctl.bootstrap.flows import winddown_flow
+    from dataclasses import replace
+    from camctl.bootstrap.flows import report_flow, winddown_flow
+    from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
+    from camctl.reporting.maintenance import MaintenanceLimits
+    from camctl.reporting.supervisor import WorkerSupervisor
+    from camctl.reporting.worker import report_lock_path
+    from camctl.session.service import run_session
+    from ..support.bootstrap_log_cases import log_session
     from camctl.session.clock import ClockBecameUntrusted
     from .test_media_assembly import _SessionDriver, _registry
     from .test_restricted_winddown import (
@@ -663,17 +669,15 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
     async def late_clock(_context):
         raise ClockBecameUntrusted("clock changed during ordinary flow")
 
-    async def restricted_report_failure(_context):
-        once_report_started.set()
-        raise RuntimeError("controlled restricted report failure")
+    original_link = os.link
 
-    original_run_session = lifecycle.run_session
+    def fail_report_link(source, target, *args, **kwargs):
+        if Path(target).parent == Path(config.paths.ready) and Path(target).name.startswith("status-report-"):
+            loop.call_soon_threadsafe(once_report_started.set)
+            raise OSError("controlled restricted report publication failure")
+        return original_link(source, target, *args, **kwargs)
 
-    async def run_with_restricted_report(context, source):
-        context.once_report = restricted_report_failure
-        return await original_run_session(context, source)
-
-    monkeypatch.setattr(lifecycle, "run_session", run_with_restricted_report)
+    monkeypatch.setattr(os, "link", fail_report_link)
 
     fake_clock = _FakeWinddownClock()
     restricted_winddown = winddown_flow(
@@ -684,11 +688,32 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
         sleep=fake_clock.wait,
     )
 
-    run_task = asyncio.create_task(execute_command(
-        deps, None,
-        flows={"late_clock": late_clock},
-        restricted_flows={"winddown": restricted_winddown},
-    ))
+    context, service, close_channel = log_session(deps, {"late_clock": late_clock})
+    supervisor = WorkerSupervisor(
+        limits=MaintenanceLimits.defaults(),
+        lock_path=str(report_lock_path(deps.state_db)))
+
+    async def on_report_failure(current, error):
+        await current.logging_owner.run_service_operation(
+            "report_failure", lambda: service.on_report_failure_with_factory(
+                lambda: current.copy_request_factory(error)))
+
+    report = report_flow(
+        state_db=deps.state_db, staging=Path(config.paths.staging),
+        ready=Path(config.paths.ready), processing=Path(config.paths.processing),
+        history=config.history, database=config.database, supervisor=supervisor,
+        start_actions=False, on_failure=on_report_failure)
+    context = replace(context, restricted_flows={"winddown": restricted_winddown},
+                      once_report=report)
+
+    async def run():
+        with error_diagnostics_context(deps.log_runtime.channel, lambda text: False, background=True):
+            try:
+                return await run_session(context, None)
+            finally:
+                await flush_diagnostics()
+
+    run_task = asyncio.create_task(run())
     try:
         await _wait_event(listdir_started)
         await _wait_event(stop_started)
@@ -711,12 +736,26 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
         if not run_task.done():
             run_task.cancel("test cleanup")
             await _wait_task(asyncio.gather(run_task, return_exceptions=True))
+        await supervisor.stop()
+        close_channel()
         close_runtime(deps)
 
     assert len([call for call in driver.calls if call[0] == "stop"]) == 1
     assert once_report_started.is_set()
     assert old_copy.exists()  # 本次未声明旧 owner 已收场，不能删除旧副本。
     assert (Path(config.paths.staging) / "logs" / "failure-marker.json").is_file()
+    assert list((Path(config.paths.staging) / "reports").glob("status-report-*.json"))
+    assert not list(Path(config.paths.ready).glob("status-report-*.json"))
+    copies = list(Path(config.paths.ready).glob("log-copy-*.log"))
+    assert len(copies) == 1
+    assert b"controlled restricted report publication failure" in copies[0].read_bytes()
+    with closing(sqlite3.connect(config.paths.state_db)) as connection:
+        report_row, = connection.execute(
+            "SELECT status, size_bytes, publication_count, last_error_json FROM reports").fetchall()
+    assert report_row[0] == 5 and report_row[1] > 0 and report_row[2] == 0
+    assert "controlled restricted report publication failure" in report_row[3]
+    lease = acquire_session(deps.session_lock)
+    lease.close()
     assert outcome.succeeded is False
     assert outcome.reason == "clock_invalid"
 
@@ -1103,12 +1142,23 @@ async def test_cancelled_started_unlink_keeps_lock_and_stops_next_candidate(
 async def test_initial_restricted_run_sweeps_once(
         tmp_path: Path, monkeypatch) -> None:
     """初始时钟受限仍完成一次扫描、必要停止和唯一报告机会。"""
+    from camctl.bootstrap.background_flow import CombinedLocalWork
+    from camctl.bootstrap.clocks import SystemClock
+    from camctl.logging_runtime.copies import RunFileOwnership
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.session.service import run_session
+    from camctl.session.clock import ClockCheckInput
+    from camctl.session.supervision import Supervisor
+    from ..support.session import session_context
+
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     old_copy, old_temp, formal_marker, _unknown = _seed_log_paths(config)
-    deps = build_runtime(
-        CommandMode.RUN, config,
-        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+    owner = LoggingOwner(
+        logs_dir=Path(config.paths.staging) / "logs",
+        ownership=RunFileOwnership(), supervisor=Supervisor(),
+        owner_settled=True, diagnose=lambda message: asyncio.sleep(0),
+        ordinary_log_path=Path(config.paths.log_file),
     )
     loop = asyncio.get_running_loop()
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="restricted-sweep")
@@ -1140,24 +1190,22 @@ async def test_initial_restricted_run_sweeps_once(
     monkeypatch.setattr(os, "listdir", blocked_listdir)
 
     monkeypatch.setattr(time, "time_ns", lambda: 1_000)
-    original_run_session = lifecycle.run_session
-
-    async def install_once_report(context, source):
-        async def report_once(_context) -> None:
-            order.append("once_report")
-            once_report.set()
-
-        context.once_report = report_once
-        return await original_run_session(context, source)
-
-    monkeypatch.setattr(lifecycle, "run_session", install_once_report)
+    async def report_once(_context) -> None:
+        order.append("once_report")
+        once_report.set()
 
     async def stop_required_work(_context) -> None:
         order.append("restricted_stop")
         restricted_stop.set()
 
-    run_task = asyncio.create_task(execute_command(
-        deps, None, flows={}, restricted_flows={"stop": stop_required_work}))
+    context = session_context(
+        Path(config.paths.state_db), clock=SystemClock(), flows={},
+        restricted_flows={"stop": stop_required_work}, once_report=report_once,
+        on_session_locked=owner.start_session, logging_owner=owner,
+        local_work=CombinedLocalWork((owner,)),
+        clock_policy=lambda connection: ClockCheckInput(None, 1_000_000, 0, 1),
+    )
+    run_task = asyncio.create_task(run_session(context, None))
     try:
         await _wait_event(worker_entered)
         await _wait_event(restricted_stop)
@@ -1167,7 +1215,7 @@ async def test_initial_restricted_run_sweeps_once(
         assert not run_task.done()
         duplicate = None
         try:
-            duplicate = acquire_session(deps.session_lock)
+            duplicate = acquire_session(context.paths.session_lock)
         except SessionLockConflictError:
             pass
         else:
@@ -1192,7 +1240,6 @@ async def test_initial_restricted_run_sweeps_once(
         if not run_task.done():
             run_task.cancel("test cleanup")
             await _wait_task(asyncio.gather(run_task, return_exceptions=True))
-        close_runtime(deps)
 
     assert outcome.succeeded is False
     assert outcome.reason == "clock_invalid"
@@ -1202,6 +1249,8 @@ async def test_initial_restricted_run_sweeps_once(
     assert not old_copy.exists()
     assert not old_temp.exists()
     assert formal_marker.exists()
+    lease = acquire_session(context.paths.session_lock)
+    lease.close()
 
 
 @pytest.mark.parametrize(
