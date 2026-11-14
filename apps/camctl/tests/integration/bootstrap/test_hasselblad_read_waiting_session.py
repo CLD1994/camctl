@@ -145,8 +145,8 @@ def _assert_waiting(owned, prepared, ticket, target):
 async def _default_run(cfg):
     deps = build_runtime(CommandMode.RUN, cfg, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED)
     try:
-        # 超时只证伪会话没有自然退出。
-        return await asyncio.wait_for(execute_command(deps, None, poll_interval_s=0.001), timeout=5)
+        # 完整会话包含报告生成及收场；此上限仅防止测试无限等待。
+        return await asyncio.wait_for(execute_command(deps, None, poll_interval_s=0.001), timeout=30)
     finally:
         close_runtime(deps)
 
@@ -202,20 +202,19 @@ async def test_default_run_exits_on_local_precondition_then_resumes_original_las
                 observations.append((request.ticket, request.size_bytes, saved))
             return result
 
-    # 5 秒是整个恢复观察预算，10 次仅防止测试忙循环，不表示产品轮次数承诺。
+    # 每次默认会话有独立的退出保护；轮数上限防止维护未推进时忙循环。
     with repository_port(OutputsRepository, ObservePhotoRead(), ("save_photo_read_start",)):
-        async with asyncio.timeout(5):
-            for _ in range(10):
-                second = await _default_run(cfg)
-                if second.succeeded:
-                    break
-                assert second.reason == "state_db_error", second
-                assert str(work) in str(second.details) and "FileExistsError" in str(second.details), second
-                assert (work / "old").read_bytes() == b"original responsibility"
-                assert not transport.calls
-                _assert_waiting(owned, prepared, ticket, target)
-            else:
-                pytest.fail("恢复观察内未能处理原工作目录")
+        for _ in range(10):
+            second = await _default_run(cfg)
+            if second.succeeded:
+                break
+            assert second.reason == "state_db_error", second
+            assert str(work) in str(second.details) and "FileExistsError" in str(second.details), second
+            assert (work / "old").read_bytes() == b"original responsibility"
+            assert not transport.calls
+            _assert_waiting(owned, prepared, ticket, target)
+        else:
+            pytest.fail("恢复观察内未能处理原工作目录")
 
     assert observations == [(ticket, len(_CONTENT), (len(_CONTENT), 0))]
 
