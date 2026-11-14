@@ -178,17 +178,21 @@ async def test_default_session_reports_unconfirmed_media_save_after_real_probe(t
         def __getattr__(self, name):
             return getattr(real_time, name)
     monkeypatch.setattr(capture_assembly, "time", TimePort())
-    requests, errors = [], []
+    requests, receipts, errors = [], [], []
 
     class SaveObserver(CaptureRepository):
         def save_check_result(self, command, key, current):
             if command.phase is CheckPhase.RUNNING:
                 return super().save_check_result(command, key, current)
             requests.append((command, key))
-            fault = TransactionFault(current.connection, after_commit=True)
-            result = super().save_check_result(command, key, replace(current, connection=fault))
-            assert fault.commit_calls == 1 and result.kind is DbOutcomeKind.UNKNOWN
-            errors.append(result.error)
+            if len(requests) == 1:
+                fault = TransactionFault(current.connection, after_commit=True)
+                result = super().save_check_result(command, key, replace(current, connection=fault))
+                assert fault.commit_calls == 1 and result.kind is DbOutcomeKind.UNKNOWN
+                errors.append(result.error)
+            else:
+                result = super().save_check_result(command, key, current)
+            receipts.append(result.kind)
             return result
 
     deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
@@ -199,11 +203,15 @@ async def test_default_session_reports_unconfirmed_media_save_after_real_probe(t
     finally:
         close_runtime(deps)
     assert not outcome.succeeded and outcome.reason == "state_db_error"
-    assert len(requests) == len(errors) == 1
+    assert len(errors) == 1 and requests
+    assert all(request == requests[0] for request in requests)
+    assert receipts == [DbOutcomeKind.UNKNOWN] + [DbOutcomeKind.COMPLETED] * (len(requests) - 1)
     assert str(errors[0]) in str(outcome.details)
     assert tools.calls == ["probe"]
     assert len([call for call in driver.calls if call[0] == "read"]) == 1 and len(closed) == 1
     with sqlite3.connect(db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+                                  (requests[0][1],)).fetchone() == (1,)
         assert connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
         assert connection.execute("SELECT check_state,check_decision FROM recording_processing WHERE id=1").fetchone() == (3, 3)
         assert connection.execute("SELECT committed_bytes FROM file_copies").fetchone() == (len(recording_support.CONTENT),)
