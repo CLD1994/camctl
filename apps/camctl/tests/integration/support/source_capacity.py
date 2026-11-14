@@ -181,16 +181,16 @@ def assert_database(manifest, expected):
                 "event_count": last - first + 1, "member_count": len(dependencies)}
 
 
-async def run_capacity(directory):
+async def run_capacity(directory, *, count=2400):
     """本来源负载的进程组预算验收；仅证明实际执行规模。"""
     backend = memory_budget_backend()
     budget = backend.get_budget_config()
-    timing = {"count": 2400, "batch_size": 4}
+    timing = {"count": count, "batch_size": 4}
     started = time.perf_counter()
     backend.ensure_memory_budget_available(budget)
     timing["preflight_seconds"] = time.perf_counter() - started
     started = time.perf_counter()
-    manifest, expected = await prepare_case(directory / "world")
+    manifest, expected = await prepare_case(directory / "world", count=count)
     timing["preparation_seconds"] = time.perf_counter() - started
     _save(directory / "input.json", manifest)
     _save(directory / "expected.json", expected)
