@@ -200,27 +200,34 @@ def test_cursor_positions_advance_independently(tmp_path: Path) -> None:
     try:
         connection.execute("BEGIN IMMEDIATE")
         _seed_plan(connection, 1)
-        for action_id in (1, 2, 3):
-            _seed_action(
-                connection, action_id, 1, status=2, scheduled_at=_NOW,
-                input_index=action_id,
-            )
-            _seed_run(connection, action_id, action_id, status=2)
+        # 两个未完成动作、三个未结束流程、四个在途尝试分别分页；
+        # 最后两个尝试所属动作已终态，最后一个流程也已终态。
+        for index, action_id in enumerate((10, 20, 30, 40)):
+            _seed_action(connection, action_id, 1,
+                status=2 if action_id in (10, 20) else 3,
+                scheduled_at=_NOW, input_index=index)
+            run_id = (101, 202, 303, 404)[index]
+            _seed_run(connection, run_id, action_id, status=2 if index < 3 else 3)
+            _seed_attempt(connection, (1001, 2002, 3003, 4004)[index], run_id, status=1)
         _commit_seed(owned)
 
-        first = discover_work(connection, limit=1)
-        assert [item["id"] for item in first.pending_actions] == [1]
-        assert [item["id"] for item in first.open_runs] == [1]
-        assert first.exhausted is False
-        second = discover_work(connection, first.next, limit=1)
-        assert [item["id"] for item in second.pending_actions] == [2]
-        assert [item["id"] for item in second.open_runs] == [2]
-        third = discover_work(connection, second.next, limit=1)
-        assert [item["id"] for item in third.pending_actions] == [3]
-        assert [item["id"] for item in third.open_runs] == [3]
-        fourth = discover_work(connection, third.next, limit=1)
-        assert fourth.open_runs == ()
-        assert fourth.exhausted is True
+        cursor = DiscoveryCursor()
+        expected = (
+            ((10,), ((101, 10),), ((1001, 101, 10),), DiscoveryCursor(10, 101, 1001), False),
+            ((20,), ((202, 20),), ((2002, 202, 20),), DiscoveryCursor(20, 202, 2002), False),
+            ((), ((303, 30),), ((3003, 303, 30),), DiscoveryCursor(20, 303, 3003), False),
+            ((), (), ((4004, 404, 40),), DiscoveryCursor(20, 303, 4004), False),
+            ((), (), (), DiscoveryCursor(20, 303, 4004), True),
+        )
+        for actions, runs, attempts, next_cursor, exhausted in expected:
+            page = discover_work(connection, cursor, limit=1)
+            assert tuple(item["id"] for item in page.pending_actions) == actions
+            assert tuple((item["id"], item["action_id"]) for item in page.open_runs) == runs
+            assert tuple((item["id"], item["run_id"], item["action_id"])
+                         for item in page.running_attempts) == attempts
+            assert page.next == next_cursor
+            assert page.exhausted is exhausted
+            cursor = page.next
     finally:
         owned.connection.close()
 

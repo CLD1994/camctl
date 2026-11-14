@@ -325,11 +325,22 @@ class TestConcludeRequiresStopFact:
         connection.execute("BEGIN IMMEDIATE")
         _seed_running_action(connection, 1)
         _seed_activity(connection, 1, dispatch_state=3, activity_state=2)
-        _seed_terminal_run(connection, 1, status=4)
+        _seed_terminal_run(connection, 1, status=4, responsibility="stop")
         connection.commit()
 
+        assert _value(
+            owned, "SELECT kind, responsibility_key, status FROM operation_runs"
+            " WHERE action_id = 1") == (2, "stop/1", 4)
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state FROM device_activities"
+            " WHERE id = 1") == (2, 1)
+        before = tuple(connection.iterdump())
         outcome = _conclude(owned, 1)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state FROM device_activities"
+            " WHERE id = 1") == (2, 1)
+        assert tuple(connection.iterdump()) == before
 
     async def test_record_start_run_is_not_stop_fact(self, owned):
         """启动调用的成功不证明录像已停止：start 责任行不作录像停止事实。"""

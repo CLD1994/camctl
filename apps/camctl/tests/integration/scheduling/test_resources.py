@@ -1,9 +1,8 @@
-"""Q4 原子授予、启动保留与派发再检查的组件集成测试。
+"""Q4 原子授予、启动保留与未派发结果的组件集成测试。
 
 真实 SQLite 与 P3 事务内核组合：首次启动机会与尝试意图、次数、
-参数及设备活动身份在同一事务共同保存；授予提交后派发前再次核对
-窗口与取消，不派发不退次数；同设备候选竞争按统一排序只有一个
-获准。
+参数及设备活动身份在同一事务共同保存；保存未派发结果后保留原
+票据和已用次数；同设备候选竞争按统一排序只有一个获准。
 """
 
 from __future__ import annotations
@@ -20,10 +19,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptFinish,
-    AttemptTarget,
-    BeginDisposition,
     FinishDisposition,
-    OperationKind,
 )
 from camctl.operations.models import (
     AttemptStatus,
@@ -47,7 +43,6 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.scheduling.resources import (
     ConsistencyError,
     current_start_holder,
-    recheck_dispatch,
 )
 from camctl.scheduling.rules import LaunchWindow
 
@@ -74,14 +69,6 @@ _CONTRACTS = EvidenceRegistry(
 )
 
 _WINDOW = LaunchWindow(scheduled_at=_NOW - 1_000_000, window_end=_NOW + 1_000_000)
-
-
-class DispatchSpy:
-    def __init__(self) -> None:
-        self.calls: list = []
-
-    def __call__(self, ticket) -> None:
-        self.calls.append(ticket)
 
 
 def _seed_environment(tmp_path: Path):
@@ -182,13 +169,12 @@ def _value(owned, sql: str, *params):
     return row
 
 
-def test_grant_does_not_skip_dispatch_recheck(tmp_path: Path) -> None:
-    """授予提交后窗口耗尽或取消生效：不派发，次数不退还。"""
+def test_grant_and_prevented_result_preserve_ticket_and_attempt_budget(tmp_path: Path) -> None:
+    """保存授予与未派发结果后，原票据及已消耗次数保持不变。"""
     owned = _seed_environment(tmp_path)
     connection = owned.connection
     repository = SchedulingRepository()
     operations = OperationRepository()
-    dispatches = DispatchSpy()
     try:
         connection.execute("BEGIN IMMEDIATE")
         _seed_plan(connection, 1)
@@ -196,22 +182,14 @@ def test_grant_does_not_skip_dispatch_recheck(tmp_path: Path) -> None:
         _seed_activity(connection, 1)
         connection.commit()
 
-        granted = repository.grant_start(
-            _grant_request(1), new_operation_key(), owned
-        )
+        request = _grant_request(1, config=AttemptConfig(max_attempts=1, timeout_s=Decimal("10")))
+        grant_key = new_operation_key()
+        granted = repository.grant_start(request, grant_key, owned)
         assert granted.kind is DbOutcomeKind.COMPLETED
         assert granted.value.outcome is GrantOutcome.GRANTED
         ticket = granted.value.ticket
         assert ticket is not None
         assert granted.value.activity_id == 1
-
-        # 授予提交后、派发前：窗口已经耗尽，再检查拒绝派发。
-        late = recheck_dispatch(
-            window=_WINDOW, trusted_wall_now=_WINDOW.window_end + 1, canceled=False
-        )
-        assert late.allowed is False
-        assert late.reason == "window_ended"
-        assert dispatches.calls == []
 
         # 可靠未派发结果：FAILED + NO_EFFECT + dispatch_prevented。
         prevented = validate_outcome(
@@ -235,6 +213,11 @@ def test_grant_does_not_skip_dispatch_recheck(tmp_path: Path) -> None:
         )
         assert finish.kind is DbOutcomeKind.COMPLETED
         assert finish.value.disposition is FinishDisposition.SAVED
+        attempt = _value(
+            owned, "SELECT status, effect_state, result_json FROM operation_attempts"
+            " WHERE run_id = ? AND attempt_no = ?", ticket.run_id, ticket.attempt_id)
+        assert attempt[:2] == (3, 2)  # FAILED, NO_EFFECT
+        assert json.loads(attempt[2])["settlement"]["basis"] == "not_dispatched"
 
         # 已提交次数保留，不因未派发退还。
         used = _value(
@@ -244,16 +227,19 @@ def test_grant_does_not_skip_dispatch_recheck(tmp_path: Path) -> None:
         )
         assert used[0] == 1
 
-        # 取消生效同样拒绝派发。
-        canceled = recheck_dispatch(
-            window=_WINDOW, trusted_wall_now=_NOW, canceled=True
-        )
-        assert canceled.allowed is False
-        assert canceled.reason == "canceled"
-
-        # 窗口内未取消的再检查允许派发。
-        ok = recheck_dispatch(window=_WINDOW, trusted_wall_now=_NOW, canceled=False)
-        assert ok.allowed is True and ok.reason is None
+        # 原授予键始终交付原票据。以夹具提供可靠未派发的活动前态；
+        # 再申请也不能因结果未派发而退还已消耗的次数。
+        replay = repository.grant_start(request, grant_key, owned)
+        assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
+        assert replay.value.ticket == ticket
+        connection.execute("UPDATE device_activities SET dispatch_state = 1 WHERE id = 1")
+        connection.commit()
+        retry = repository.grant_start(request, new_operation_key(), owned)
+        assert retry.kind is DbOutcomeKind.COMPLETED, retry.error
+        assert retry.value.outcome is GrantOutcome.REJECTED
+        assert retry.value.reason == "budget_exhausted"
+        assert _value(owned, "SELECT attempts_used FROM operation_runs WHERE id = ?", ticket.run_id) == (1,)
+        assert _value(owned, "SELECT COUNT(*) FROM operation_attempts WHERE run_id = ?", ticket.run_id) == (1,)
     finally:
         owned.connection.close()
 
