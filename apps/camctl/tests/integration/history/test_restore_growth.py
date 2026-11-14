@@ -1,9 +1,10 @@
-"""对象恢复的访问计划核验与增长测量。
+"""对象恢复的查询形状与增长测量。
 
 任务 7 的开发环境成本记录：延迟与峰值不作为目标主机性能承诺，
-结构性断言（索引访问、有界读取、每页短事务）才是门禁。
+结构性断言（查询形状的索引、有界读取、每页短事务）才是门禁。
 """
 
+import os
 import sqlite3
 import time
 import tracemalloc
@@ -50,12 +51,12 @@ def _query_plan(connection: sqlite3.Connection, statement: str, parameters=()):
     return " ".join(str(row[3]) for row in rows)
 
 
-def test_restore_path_queries_use_indexes(file_world):
-    """对象恢复路径的核心查询按对象键走索引，不整表扫描。
+def test_representative_query_shapes_use_indexes(file_world):
+    """手写的代表性查询形状按对象键使用索引。
 
-    覆盖目录头与 H 位置、事件分页、快照候选、代表性成员分支
-    （活动归属列、流程三索引 UNION、取回项选择前导）与流程候选
-    分页；访问路径核验不是目标主机性能测量。
+    覆盖目录头与 H 位置、事件分页、快照候选及活动、流程、
+    取回项和尝试的代表性成员查询；本项只解释这些手写 SQL，
+    不证明实际恢复使用相同路径。
     """
     world = file_world
     connection = sqlite3.connect(world.history.path)
@@ -104,8 +105,8 @@ def test_restore_path_queries_use_indexes(file_world):
 def test_member_growth_restore_cost(file_world):
     """动作自身成员增长时的恢复成本与完整性。
 
-    以真实重试链建立单流程多尝试成员；开发环境记录延迟与 Python
-    分配峰值，门禁是全部成员进入恢复结果（成员读取按稳定行身份
+    以真实重试链建立单流程多尝试成员；开发环境记录延迟，按需
+    跟踪 Python 分配峰值，门禁是全部成员进入恢复结果（成员读取按稳定行身份
     分页，不预载完整清单）。
     """
     world = file_world
@@ -144,16 +145,22 @@ def test_member_growth_restore_cost(file_world):
             (ticket.run_id,))) as cursor:
         grown_ids = {int(row[0]) for row in cursor.fetchall()}
     assert len(grown_ids) == attempts
-    tracemalloc.start()
+    diagnostics = os.environ.get("CAMCTL_HISTORY_GROWTH_DIAGNOSTICS") == "1"
+    if diagnostics:
+        tracemalloc.start()
     started = time.perf_counter()
-    rows = world.history.restore_entity("action", 1, _current_boundary(world))
-    elapsed = time.perf_counter() - started
-    _, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    try:
+        rows = world.history.restore_entity("action", 1, _current_boundary(world))
+        elapsed = time.perf_counter() - started
+        peak = tracemalloc.get_traced_memory()[1] if diagnostics else None
+    finally:
+        if diagnostics:
+            tracemalloc.stop()
     restored = sum(1 for (table, row_id) in rows
                    if table == "operation_attempts" and row_id in grown_ids)
     assert restored == attempts
-    print(f"\n成员增长 {attempts} 尝试: 恢复 {len(rows)} 行 {elapsed:.3f}s 峰值 {peak}B")
+    diagnostic = f"，跟踪峰值 {peak}B" if diagnostics else ""
+    print(f"\n成员增长 {attempts} 尝试: 恢复 {len(rows)} 行 {elapsed:.3f}s{diagnostic}")
 
 
 def test_event_growth_restore_pages_cost(file_world, monkeypatch):
@@ -187,13 +194,18 @@ def test_event_growth_restore_pages_cost(file_world, monkeypatch):
         views.append(active.pop(connection, []))
 
     opened = observe_readonly_rows(monkeypatch, world.history.path, record, end_view)
-    tracemalloc.start()
+    diagnostics = os.environ.get("CAMCTL_HISTORY_GROWTH_DIAGNOSTICS") == "1"
+    if diagnostics:
+        tracemalloc.start()
     started = time.perf_counter()
-    rows = world.history.restore_entity(
-        "device_file", 1, boundary, event_batch_size=batch)
-    elapsed = time.perf_counter() - started
-    _, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    try:
+        rows = world.history.restore_entity(
+            "device_file", 1, boundary, event_batch_size=batch)
+        elapsed = time.perf_counter() - started
+        peak = tracemalloc.get_traced_memory()[1] if diagnostics else None
+    finally:
+        if diagnostics:
+            tracemalloc.stop()
     assert rows == {("device_files", 1): expected}
     pages = -(-changes // batch)
     # 种子一个读事务加每页一个；事件页全部读取自身目录，无空页。
@@ -204,14 +216,15 @@ def test_event_growth_restore_pages_cost(file_world, monkeypatch):
     for connection in opened:
         with pytest.raises(sqlite3.ProgrammingError):
             connection.execute("SELECT 1")
-    print(f"\n事件增长 {changes} 次: 恢复 {elapsed:.3f}s 峰值 {peak}B 读事务 {len(views)}")
+    diagnostic = f"，跟踪峰值 {peak}B" if diagnostics else ""
+    print(f"\n事件增长 {changes} 次: 恢复 {elapsed:.3f}s{diagnostic}，读事务 {len(views)}")
 
 
 def test_unrelated_growth_keeps_target_restore_stable(file_world, monkeypatch):
     """无关对象历史增长不改变目标对象的恢复结果。
 
-    开发环境记录增长前后的恢复延迟；隔离的结构性依据是查询按
-    对象键走索引（上一用例的访问计划），这里证明结果事实不变。
+    开发环境记录增长前后的恢复延迟；本项核对无关增长前后结果
+    一致，代表性手写查询形状由前面的用例单独核对。
     """
     world = file_world
     _presence_change(world)

@@ -661,6 +661,7 @@ async def test_snapshot_validation_reuses_schema_and_closes_connection(
 async def test_projection_row_validation_rolls_back_and_measures_1000_rows(
         file_world, monkeypatch):
     from time import perf_counter
+    import os
     import tracemalloc
     from camctl.history.events import load_event_registry
     from camctl.persistence.row_validation import (
@@ -670,7 +671,9 @@ async def test_projection_row_validation_rolls_back_and_measures_1000_rows(
     values = row_facts(file_world.owned.connection, "device_files", 1)
     original = dict(values)
     created = _track_validation_connections(monkeypatch)
-    tracemalloc.start()
+    diagnostics = os.environ.get("CAMCTL_HISTORY_GROWTH_DIAGNOSTICS") == "1"
+    if diagnostics:
+        tracemalloc.start()
     started = perf_counter()
     try:
         with ProjectionRowValidator() as validator:
@@ -690,12 +693,14 @@ async def test_projection_row_validation_rolls_back_and_measures_1000_rows(
             for table in load_event_registry()["tables"]:
                 assert created[0].execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         elapsed = perf_counter() - started
-        _, peak = tracemalloc.get_traced_memory()
+        peak = tracemalloc.get_traced_memory()[1] if diagnostics else None
     finally:
-        tracemalloc.stop()
+        if diagnostics:
+            tracemalloc.stop()
     assert values == original
     assert created[0].closed
-    print(f"1000 行完整值校验：{elapsed:.6f} 秒，Python 跟踪峰值 {peak} 字节")
+    diagnostic = f"，Python 跟踪峰值 {peak} 字节" if diagnostics else ""
+    print(f"1000 行完整值校验：{elapsed:.6f} 秒{diagnostic}")
 
 
 def test_projection_row_validation_closes_connection_after_schema_error(monkeypatch):

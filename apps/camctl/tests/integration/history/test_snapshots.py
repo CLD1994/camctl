@@ -12,7 +12,7 @@ from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 import asyncio
-import time
+import threading
 
 import pytest
 import pytest_asyncio
@@ -264,23 +264,29 @@ async def test_enqueue_timeout_disables_session_and_business_continues(
         tmp_path: Path) -> None:
     """快照操作入队前超时停用本次会话；业务操作不受影响继续执行。"""
     owned, target = _environment(tmp_path)
-    _seed_obtain_action(owned.connection, 31, 1)
-    _seed_device_file(owned.connection, 501, 11)
-    _seed_output(owned.connection, 701, 11, 501)
-    _seed_selection_and_item(
-        owned.connection, dependency_id=31, selection_id=31, item_id=101,
-        owner_action_id=31, source_action_id=11, output_id=701)
-    owned.connection.commit()
-    capture = CaptureRepository()
-    _observe(capture, owned, 11, "task-a/original.mp4")
+    executor = None
+    holder = waiter = None
+    entered = threading.Event()
+    release = threading.Event()
     try:
+        _seed_obtain_action(owned.connection, 31, 1)
+        _seed_device_file(owned.connection, 501, 11)
+        _seed_output(owned.connection, 701, 11, 501)
+        _seed_selection_and_item(
+            owned.connection, dependency_id=31, selection_id=31, item_id=101,
+            owner_action_id=31, source_action_id=11, output_id=701)
+        owned.connection.commit()
+        capture = CaptureRepository()
+        _observe(capture, owned, 11, "task-a/original.mp4")
         executor = DbExecutor(
             lambda: open_existing(target, DbOpenMode.EXISTING_RW, DbConfig()),
             capacity=1, enqueue_timeout_seconds=0.05)
         store = SqliteSnapshotStore(target, executor)
 
         def slow(owned_connection):
-            time.sleep(0.4)
+            entered.set()
+            if not release.wait(10):
+                raise TimeoutError("等待测试放行超时")
             return DbOutcome(kind=DbOutcomeKind.COMPLETED)
 
         def quick(owned_connection):
@@ -294,7 +300,7 @@ async def test_enqueue_timeout_disables_session_and_business_continues(
         holder = executor.submit_write(DbJob(
             key=new_operation_key(), description="占位慢写", kind=DbJobKind.WRITE,
             priority=DbPriority.BUSINESS, execute=slow))
-        await asyncio.sleep(0.05)  # 让占位开始执行（占用线程，队列空位仍在）
+        assert await asyncio.to_thread(entered.wait, 10), "占位任务未开始"
         waiter = executor.submit_write(DbJob(
             key=new_operation_key(), description="占位等待", kind=DbJobKind.WRITE,
             priority=DbPriority.BUSINESS, execute=quick))
@@ -314,6 +320,7 @@ async def test_enqueue_timeout_disables_session_and_business_continues(
         assert pending >= 1
 
         # 占位操作结束后，普通业务操作照常排队执行。
+        release.set()
         outcomes = [await holder, await waiter]
         assert all(item.kind is DbOutcomeKind.COMPLETED for item in outcomes)
         business = executor.submit_read(DbJob(
@@ -322,6 +329,16 @@ async def test_enqueue_timeout_disables_session_and_business_continues(
         receipt = await business
         assert receipt.error is None
         assert receipt.value >= 1
-        await executor.close()
     finally:
-        owned.connection.close()
+        release.set()
+        try:
+            try:
+                if holder is not None:
+                    await asyncio.wait_for(asyncio.shield(holder), 10)
+                if waiter is not None:
+                    await asyncio.wait_for(asyncio.shield(waiter), 10)
+            finally:
+                if executor is not None:
+                    await executor.close()
+        finally:
+            owned.connection.close()

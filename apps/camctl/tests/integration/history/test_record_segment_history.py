@@ -331,26 +331,49 @@ async def test_stream_snapshot_matches_all_paths_and_preserves_later_pending(tmp
         owned.connection.close()
 
 
-def _after_read_transactions(monkeypatch, path, target, action):
-    """在业务库只读事务结束后提交，控制历史构建跨页竞争。"""
-    import sqlite3
-    original = sqlite3.connect
-    commits = 0
-    class ReadConnection(sqlite3.Connection):
-        def execute(self, sql, *args, **kwargs):
-            nonlocal commits
-            cursor = super().execute(sql, *args, **kwargs)
-            if sql.strip().upper() == 'COMMIT':
-                commits += 1
-                if commits == target:
-                    action()
-            return cursor
-    def connect(database, *args, **kwargs):
-        if str(database) == path.resolve().as_uri() + '?mode=ro':
-            kwargs['factory'] = ReadConnection
-        return original(database, *args, **kwargs)
-    monkeypatch.setattr(sqlite3, 'connect', connect)
-    return lambda: commits
+def _between_candidate_pages(monkeypatch, path, owned, action_id, action):
+    """见证记录处理候选后提交，再见证同一动作的活动候选。"""
+    import re
+    from ..support.history_rows import observe_readonly_rows
+
+    processing_id, = owned.connection.execute(
+        "SELECT id FROM recording_processing WHERE action_id = ?", (action_id,)).fetchone()
+    activity_id, = owned.connection.execute(
+        "SELECT id FROM device_activities WHERE action_id = ?", (action_id,)).fetchone()
+    statements = {}
+    active = {}
+    before = []
+    after = []
+    committed = False
+    candidate = re.compile(r"^\s*SELECT\s+id\s+FROM\s+(recording_processing|device_activities)\b", re.I)
+
+    def observe(cursor, row):
+        connection = cursor.connection
+        if connection not in statements:
+            statements[connection] = ""
+            connection.set_trace_callback(lambda sql: statements.__setitem__(connection, sql))
+        match = candidate.match(statements[connection])
+        if match and [column[0] for column in cursor.description] == ["id"]:
+            assert connection.in_transaction
+            active.setdefault(connection, []).append((match.group(1).lower(), row[0]))
+
+    def end_view(connection):
+        nonlocal committed
+        page = active.pop(connection, [])
+        if not committed and ("recording_processing", processing_id) in page:
+            before.extend(page)
+            action()
+            committed = True
+        elif committed:
+            after.extend(page)
+
+    observe_readonly_rows(monkeypatch, path, observe, end_view)
+
+    def check():
+        assert committed and ("recording_processing", processing_id) in before
+        assert ("device_activities", activity_id) in after
+        assert not active
+    return check
 
 
 @pytest.mark.asyncio
@@ -358,12 +381,15 @@ async def test_current_restores_old_h_when_new_version_arrives_between_candidate
     owned,runtime,repo,ref,history = await _fixture(tmp_path)
     try:
         boundary = history.current_boundary()
-        commits = _after_read_transactions(monkeypatch, history.path, 4,
+        with history.open_segment_history(ref.action_id,boundary,strategy='initial',batch_size=1) as baseline:
+            expected = {(row.table, row.row_id): dict(row.values) for row in baseline.iter_rows()}
+        check_pages = _between_candidate_pages(monkeypatch, history.path, owned, ref.action_id,
             lambda: _version(owned,runtime,repo,ref,2))
         with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=1) as handle:
             assert [row.values['version'] for row in _rows(handle,'segment_sets')] == [1]
             assert len(tuple(_rows(handle,'segment_members',ref))) == 5
-        assert commits() >= 4
+            assert {(row.table, row.row_id): dict(row.values) for row in handle.iter_rows()} == expected
+        check_pages()
         with history.open_segment_history(ref.action_id,history.current_boundary(),strategy='current',batch_size=1) as latest:
             assert [row.values['version'] for row in _rows(latest,'segment_sets')] == [1,2]
     finally:
@@ -724,15 +750,19 @@ async def test_current_keeps_h_when_completion_commits_between_candidate_pages(t
     try:
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         boundary=history.current_boundary()
+        with history.open_segment_history(ref.action_id,boundary,strategy='initial',batch_size=1) as baseline:
+            expected = {(row.table, row.row_id): dict(row.values) for row in baseline.iter_rows()}
         status=owned.connection.execute('SELECT status FROM actions WHERE id=?',(ref.action_id,)).fetchone()[0]
         def complete():
             _finish_recording(owned,repo,ref)
-        commits=_after_read_transactions(monkeypatch,history.path,4,complete)
+        check_pages=_between_candidate_pages(monkeypatch,history.path,owned,ref.action_id,complete)
         with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=1) as handle:
             assert handle.active_ref() is None
             assert handle.primary()['status'] == status
             assert all(row.values['output_id'] is None for row in _rows(handle,'segment_scope_members',ref,limit=1))
-        assert commits() >= 4 and repo.read_active_set(ref.action_id,owned)==ref
+            assert {(row.table, row.row_id): dict(row.values) for row in handle.iter_rows()} == expected
+        check_pages()
+        assert repo.read_active_set(ref.action_id,owned)==ref
     finally:owned.connection.close()
 
 

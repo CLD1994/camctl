@@ -37,7 +37,8 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
-from camctl.persistence.repositories.history import HistoryRepository
+from camctl.contracts.json_values import parse_exact_json
+from camctl.persistence.transaction_data import json_columns
 from camctl.scheduling.rules import LaunchWindow
 
 from ..bootstrap.test_recording_stop import (
@@ -181,17 +182,41 @@ def _boundary_at(connection) -> HistoryBoundary:
     return HistoryBoundary(row[0], row[1])
 
 
-def _business_rows(rows) -> dict:
-    """按各表的权威登记保留完整业务列。"""
-    return {key: {name: value for name, value in facts.items()
-                  if name in business_columns(key[0])}
-            for key, facts in rows.items()}
+class _Rows(dict):
+    sql_rows: dict
+    last_event_id: int
+    change_count: int
 
 
-def _current_rows(db: Path, connection, entity_id: int) -> dict:
-    """经权威归属枚举读取动作对象的全部当前行（读事务内调用）。"""
-    return _business_rows(HistoryRepository(db).restore_within(
-        connection, "action", entity_id, _boundary_at(connection)))
+def _current_rows(connection, entity_id: int) -> _Rows:
+    """按本场景明确的动作、活动、流程及尝试关系独立读取投影。"""
+    queries = {
+        "actions": ("SELECT * FROM actions WHERE id = ?", (entity_id,)),
+        "device_activities": ("SELECT * FROM device_activities WHERE action_id = ?", (entity_id,)),
+        "recording_processing": ("SELECT * FROM recording_processing WHERE action_id = ?", (entity_id,)),
+        "operation_runs": ("SELECT r.* FROM operation_runs r LEFT JOIN device_activities a ON a.id = r.activity_id WHERE CASE WHEN r.kind IN (8, 9) THEN a.action_id ELSE r.action_id END = ?", (entity_id,)),
+        "operation_attempts": ("SELECT t.* FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id LEFT JOIN device_activities a ON a.id = r.activity_id WHERE CASE WHEN r.kind IN (8, 9) THEN a.action_id ELSE r.action_id END = ?", (entity_id,)),
+    }
+    result = _Rows()
+    result.sql_rows = {}
+    for table, (sql, params) in queries.items():
+        cursor = connection.execute(sql, params)
+        names = [column[0] for column in cursor.description]
+        for values in cursor:
+            full = dict(zip(names, values))
+            for name in json_columns().get(table, ()):
+                if full.get(name) is not None:
+                    full[name] = parse_exact_json(full[name])
+            result.sql_rows[(table, full["id"])] = dict(full)
+            result[(table, full["id"])] = {
+                name: full[name] for name in business_columns(table)}
+    position = connection.execute(
+        "SELECT event_id, change_count FROM entity_event_links"
+        " WHERE entity_type = 1 AND entity_id = ? ORDER BY event_id DESC LIMIT 1",
+        (entity_id,)).fetchone()
+    assert position is not None
+    result.last_event_id, result.change_count = position
+    return result
 
 
 def _snapshot_at(db: Path, entity_id: int):
@@ -200,7 +225,7 @@ def _snapshot_at(db: Path, entity_id: int):
     try:
         connection.execute("BEGIN")
         boundary = _boundary_at(connection)
-        rows = _current_rows(db, connection, entity_id)
+        rows = _current_rows(connection, entity_id)
         connection.execute("COMMIT")
         return boundary, rows
     finally:
@@ -252,7 +277,7 @@ def _assert_three_paths(db: Path, entity_id: int, checkpoints) -> None:
         connection.execute("BEGIN")
         events = _events_of(connection, 1, entity_id)
         latest = _boundary_at(connection)
-        current_rows = _current_rows(db, connection, entity_id)
+        current_rows = _current_rows(connection, entity_id)
         connection.execute("COMMIT")
     finally:
         connection.close()
@@ -262,22 +287,27 @@ def _assert_three_paths(db: Path, entity_id: int, checkpoints) -> None:
         initial = restore(RestoreSeed(
             EntityImage(1, entity_id, False, {}, 0, 0), INITIAL_BOUNDARY),
             upto, boundary)
+        assert initial.exists and initial.last_event_id == rows.last_event_id
+        assert initial.change_count == rows.change_count
         assert initial.rows == rows, f"直接回放与检查点 {index} 投影不一致"
         if index > 0:
             previous_boundary, previous_rows = checkpoints[index - 1]
             forward = restore(RestoreSeed(EntityImage(
                 1, entity_id, True, previous_rows,
-                previous_boundary.last_event_id, initial.change_count),
+                previous_rows.last_event_id, previous_rows.change_count),
                 previous_boundary), upto, boundary)
+            assert forward.exists and forward.last_event_id == rows.last_event_id
+            assert forward.change_count == rows.change_count
             assert forward.rows == rows, f"快照正向与检查点 {index} 投影不一致"
         current = EntityImage(
-            1, entity_id, True, current_rows, latest.last_event_id,
-            initial.change_count)
+            1, entity_id, True, current_rows, current_rows.last_event_id,
+            current_rows.change_count)
         remaining = [event for event in events
                      if boundary.last_event_id < event.envelope.event_id
                      <= latest.last_event_id]
         for event in reversed(remaining):
             current = apply_reverse(current, event)
+        assert current.exists and current.change_count == rows.change_count
         assert current.rows == rows, f"投影逆向与检查点 {index} 投影不一致"
 
 
@@ -313,8 +343,10 @@ async def test_stop_result_transaction_three_paths(tmp_path):
         _assert_three_paths(db, 1, [
             base, (before_boundary, before), (after_boundary, after)])
     finally:
-        await _cancel(task)
-    close_runtime(deps)
+        try:
+            await _cancel(task)
+        finally:
+            close_runtime(deps)
 
 
 async def test_query_conclude_transaction_three_paths(tmp_path):
@@ -356,8 +388,10 @@ async def test_query_conclude_transaction_three_paths(tmp_path):
         _assert_three_paths(db, 1, [
             base, (before_boundary, before), (after_boundary, after)])
     finally:
-        await _cancel(task)
-    close_runtime(deps)
+        try:
+            await _cancel(task)
+        finally:
+            close_runtime(deps)
 
 
 async def test_residual_query_conclude_three_paths(tmp_path):
@@ -439,5 +473,7 @@ async def test_residual_query_conclude_three_paths(tmp_path):
             (trigger_before_boundary, trigger_before),
             (trigger_after_boundary, trigger_after)])
     finally:
-        await _cancel(task)
-    close_runtime(deps)
+        try:
+            await _cancel(task)
+        finally:
+            close_runtime(deps)

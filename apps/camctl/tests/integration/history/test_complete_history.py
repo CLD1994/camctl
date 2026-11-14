@@ -5,8 +5,7 @@
 始回放、快照正向恢复与当前投影逆向恢复到同一完整边界，并与按事
 件事实独立推导（朴素全库重放）的映像比较成员完整性、精确值与计
 数。登记的全部事件类型到具体用例的映射单独断言；代表性数据更新
-统计信息后核对分页选择的实际查询计划与有序去重；并发读取与提交
-按开发环境实测记录队列等待，不写成目标主机性能承诺。
+统计信息后核对手写查询形状的计划及公开分页选择的有序去重。
 """
 
 from __future__ import annotations
@@ -516,65 +515,69 @@ async def world(tmp_path: Path):
     照片动作 12、交付链前提），其后全部经生产命令推进。
     """
     owned, target = _environment(tmp_path)
-    connection = owned.connection
-    capture = CaptureRepository()
-    repository = HistoryRepository(target)
-    executor = DbExecutor(
-        lambda: open_existing(target, DbOpenMode.EXISTING_RW, DbConfig()),
-        capacity=4, enqueue_timeout_seconds=9.0)
-    store = SqliteSnapshotStore(target, executor)
-
-    photo_action = await _submit_plan(owned)
-    source_file = _observe(capture, owned, 11, "task-a/original.mp4")
-    _seed_processing(connection, 1, 11, source_file)
-    _seed_repair_pending(capture, owned)
-    repair_file = _start_repair(capture, owned)
-    _finish_output(capture, owned, 11, source_file)
-    _presence(capture, owned, source_file, 3)
-
-    # 交付链前提（与快照用例同款种子）：取回动作 31 引用动作 11 的
-    # 产物 701 与设备文件 501。
-    from ..outputs.test_qualification import (
-        _seed_device_file,
-        _seed_output,
-        _seed_selection_and_item,
-    )
-    from .test_file_history import _seed_obtain_action, _set_video_identity
-    _seed_obtain_action(connection, 31, 1)
-    _seed_device_file(connection, 501, 11)
-    _set_video_identity(connection, 501)
-    _seed_output(connection, 701, 11, 501)
-    _seed_selection_and_item(
-        connection, dependency_id=31, selection_id=31, item_id=101,
-        owner_action_id=31, source_action_id=11, output_id=701)
-    connection.commit()
-
-    from ..outputs.test_read_associations import _command
-    from camctl.persistence.repositories.outputs import OutputsRepository
-    grant = OutputsRepository().grant_file(
-        _command(), new_operation_key(), owned)
-    assert grant.kind.value == "completed", grant.error
-
-    # 剧本继续推进后维护快照：中间边界 S 供快照正向恢复路径。
-    late_file = _observe(capture, owned, 11, "task-a/second.mp4")
-    maintained = await maintain_snapshots(MaintenanceContext(
-        threshold=1, batch_size=32,
-        state=MaintenanceState(), store=store))
-    assert maintained.outcome is MaintenanceOutcome.DRAINED
-
-    state = SimpleNamespace(
-        owned=owned, target=target, capture=capture,
-        repository=repository, executor=executor, store=store,
-        photo_action=photo_action, source_file=source_file,
-        repair_file=repair_file, late_file=late_file,
-        delivery_id=grant.value.delivery_id,
-        copy_target=grant.value.target_file_id,
-    )
+    executor = None
     try:
+        connection = owned.connection
+        capture = CaptureRepository()
+        repository = HistoryRepository(target)
+        executor = DbExecutor(
+            lambda: open_existing(target, DbOpenMode.EXISTING_RW, DbConfig()),
+            capacity=4, enqueue_timeout_seconds=9.0)
+        store = SqliteSnapshotStore(target, executor)
+
+        photo_action = await _submit_plan(owned)
+        source_file = _observe(capture, owned, 11, "task-a/original.mp4")
+        _seed_processing(connection, 1, 11, source_file)
+        _seed_repair_pending(capture, owned)
+        repair_file = _start_repair(capture, owned)
+        _finish_output(capture, owned, 11, source_file)
+        _presence(capture, owned, source_file, 3)
+
+        # 交付链前提（与快照用例同款种子）：取回动作 31 引用动作 11 的
+        # 产物 701 与设备文件 501。
+        from ..outputs.test_qualification import (
+            _seed_device_file,
+            _seed_output,
+            _seed_selection_and_item,
+        )
+        from .test_file_history import _seed_obtain_action, _set_video_identity
+        _seed_obtain_action(connection, 31, 1)
+        _seed_device_file(connection, 501, 11)
+        _set_video_identity(connection, 501)
+        _seed_output(connection, 701, 11, 501)
+        _seed_selection_and_item(
+            connection, dependency_id=31, selection_id=31, item_id=101,
+            owner_action_id=31, source_action_id=11, output_id=701)
+        connection.commit()
+
+        from ..outputs.test_read_associations import _command
+        from camctl.persistence.repositories.outputs import OutputsRepository
+        grant = OutputsRepository().grant_file(
+            _command(), new_operation_key(), owned)
+        assert grant.kind.value == "completed", grant.error
+
+        # 剧本继续推进后维护快照：中间边界 S 供快照正向恢复路径。
+        late_file = _observe(capture, owned, 11, "task-a/second.mp4")
+        maintained = await maintain_snapshots(MaintenanceContext(
+            threshold=1, batch_size=32,
+            state=MaintenanceState(), store=store))
+        assert maintained.outcome is MaintenanceOutcome.DRAINED
+
+        state = SimpleNamespace(
+            owned=owned, target=target, capture=capture,
+            repository=repository, executor=executor, store=store,
+            photo_action=photo_action, source_file=source_file,
+            repair_file=repair_file, late_file=late_file,
+            delivery_id=grant.value.delivery_id,
+            copy_target=grant.value.target_file_id,
+        )
         yield state
     finally:
-        await executor.close()
-        owned.connection.close()
+        try:
+            if executor is not None:
+                await executor.close()
+        finally:
+            owned.connection.close()
 
 
 def _objects_in_library(
@@ -772,10 +775,10 @@ def _grow_catalog_sample(target: Path, scale: int = 4000) -> None:
         connection.close()
 
 
-async def test_paged_selection_plan_on_analyzed_sample(world) -> None:
-    """带统计信息样本上的实际查询计划与有界分页选择。
+async def test_paged_selection_and_representative_plan_on_analyzed_sample(world) -> None:
+    """带统计信息样本上的手写查询计划与公开有界分页选择。
 
-    首批与续读使用覆盖索引（SEARCH 而非 SCAN，无临时排序）；不同
+    手写查询使用覆盖索引（SEARCH 而非 SCAN，无临时排序）；不同
     页大小取得相同升序集合，无重复无遗漏；每批返回不超过批量上
     限（选择只保存容量以内的整数身份）。
     """
@@ -830,12 +833,12 @@ async def test_paged_selection_plan_on_analyzed_sample(world) -> None:
         connection.close()
 
 
-async def test_candidate_scan_plan_on_analyzed_sample(world) -> None:
-    """带统计信息样本上候选扫描的实际索引与有界批量。
+async def test_candidate_scan_shape_plan_on_analyzed_sample(world) -> None:
+    """带统计信息样本上手写候选扫描的索引与有界批量。
 
     扫描 SQL 与 `_read_candidate_files` 的候选查询同形（恢复侧
-    由 H5 用例与三路径用例核对，这里测查询本身）：首屏与续读命
-    中观察者索引；每批候选不超过固定批量，早于边界的候选被窗口
+    由 H5 用例与三路径用例核对，这里只解释手写查询的首屏计划）：
+    首屏使用观察者索引；每批候选不超过固定批量，早于边界的候选被窗口
     过滤；分页取得的集合与独立全量选择一致。
     """
     _grow_catalog_sample(world.target)
@@ -897,18 +900,13 @@ def _select_dense(repository: HistoryRepository, top: int):
         after = batch[-1]
 
 
-# ---- 开发环境的并发读取与队列等待实测（不作为目标主机承诺） ----
+# ---- 固定历史位置的并发读取与受理 ----
 
-async def test_concurrent_submit_and_read_queue_wait(world) -> None:
-    """并发提交与历史读取在开发环境的实际等待记录。
-
-    有限容量执行器上并发推进受理事务与对象恢复，全部完成且事件
-    计数前进；墙钟数字仅在 H7 验证记录注明环境与负载，不构成目
-    标主机性能承诺。
-    """
+async def test_concurrent_submit_and_fixed_history_reads(world, monkeypatch) -> None:
+    """真实读事务在途时受理提交，四次恢复均保持固定历史位置。"""
     from camctl.acceptance.input import parse_input, read_input
     from camctl.acceptance.service import (
-        AcceptanceContext, CommandMode, accept_input,
+        AcceptanceContext, AckDisposition, CommandMode, PlanDisposition, accept_input,
     )
     from camctl.persistence.repositories.acceptance import (
         AcceptanceRepository,
@@ -922,7 +920,7 @@ async def test_concurrent_submit_and_read_queue_wait(world) -> None:
             "SELECT COUNT(*) FROM history_events")) as cursor:
         before = int(cursor.fetchone()[0])
 
-    async def submit(index: int) -> None:
+    async def submit(index: int):
         body = {
             "request_id": str(7100 + index),
             "created_at": "2026-01-15 08:00:00",
@@ -948,21 +946,70 @@ async def test_concurrent_submit_and_read_queue_wait(world) -> None:
             ),
             new_operation_key(), database)
         assert accepted.plan_id is not None
+        return accepted
 
-    async def read_object() -> None:
-        repository = world.repository
-        boundary = repository.current_boundary()
-        repository.restore_entity("action", 11, boundary)
-
-    loop = asyncio.get_running_loop()
-    import time as _time
-    started = _time.perf_counter()
+    import threading
     from ..support.database import business_database, database_path
+    from ..support.history_rows import observe_readonly_rows
+
+    watermark = connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0]
+    boundary = world.repository.current_boundary()
+    image = _naive_replay_image(connection, boundary.last_event_id)
+    associations = _fixed_associations(connection, image)
+    keys = [key for key in associations
+            if _expected_row_owner(associations, key) == (_entity_type_of("action"), 11)]
+    expected = {key: row_facts(connection, *key) for key in keys}
+    assert ("actions", 11) in expected and all(expected.values())
+
+    entered = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    gated = False
+
+    def observe(cursor, row):
+        nonlocal gated
+        if not cursor.connection.in_transaction or [c[0] for c in cursor.description] != ["instance_id"]:
+            return
+        with lock:
+            should_wait = not gated
+            gated = True
+        if should_wait:
+            entered.set()
+            if not release.wait(20):
+                raise TimeoutError("等待受理提交后放行历史读取超时")
+
+    observe_readonly_rows(monkeypatch, world.target, observe)
     async with business_database(database_path(owned)) as database:
-        await asyncio.gather(*[submit(index) for index in range(6)],
-                             *[read_object() for _ in range(4)])
-    elapsed = _time.perf_counter() - started
-    with closing(connection.execute(
-            "SELECT COUNT(*) FROM history_events")) as cursor:
+        reads = [asyncio.create_task(asyncio.to_thread(
+            world.repository.restore_entity, "action", 11, boundary)) for _ in range(4)]
+        submissions = []
+        try:
+            assert await asyncio.to_thread(entered.wait, 20), "历史读取未进入事务"
+            submissions = [asyncio.create_task(submit(index)) for index in range(6)]
+            accepted = await asyncio.wait_for(
+                asyncio.shield(asyncio.gather(*submissions)), 30)
+            assert not all(task.done() for task in reads)
+        finally:
+            release.set()
+            await asyncio.wait_for(asyncio.shield(
+                asyncio.gather(*reads, *submissions, return_exceptions=True)), 30)
+        restored = [task.result() for task in reads]
+
+    assert len(restored) == 4
+    for result in restored:
+        assert result == expected
+    assert len({result.plan_id for result in accepted}) == 6
+    for index, result in enumerate(accepted):
+        assert result.plan_disposition is PlanDisposition.REGISTERED
+        assert result.ack_disposition is AckDisposition.NOT_PROVIDED
+        assert result.ack_watermark == watermark and result.needs_run is None
+        assert result.diagnostic_id is None and not result.diagnostics
+        plan = connection.execute(
+            "SELECT request_id, name FROM plans WHERE id = ?", (result.plan_id,)).fetchone()
+        assert plan == (7100 + index, f"concurrent-{index}")
+        actions = connection.execute(
+            "SELECT name, device_id FROM actions WHERE plan_id = ?", (result.plan_id,)).fetchall()
+        assert actions == [("shoot", "cam-1")]
+    with closing(connection.execute("SELECT COUNT(*) FROM history_events")) as cursor:
         after = int(cursor.fetchone()[0])
     assert after > before
