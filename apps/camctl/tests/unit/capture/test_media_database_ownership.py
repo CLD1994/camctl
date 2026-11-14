@@ -107,8 +107,24 @@ async def test_actual_source_dispatch_releases_marker_after_fact_read():
     ticket = AttemptTicket(1, "read", "9", "read/9", 28)
     identity = file_identity_key("camera", "other-driver", "original")
 
-    def execute(query, parameters):
-        if "FROM device_files" in query:
+    def execute(query, parameters=()):
+        if query.startswith("SELECT * FROM "):
+            table = query.split()[3]
+            facts = {
+                "device_files": {"observer_action_id": 2, "source_action_id": 2},
+                "actions": {"id": 2, "device_id": "camera", "driver_id": "other-driver", "type": 1},
+                "operation_runs": {"id": 28, "action_id": 2, "kind": 3, "copy_id": 9},
+            }[table]
+            cursor.description = [(name,) for name in facts]
+            cursor.fetchone.return_value = tuple(facts.values())
+        elif query.startswith("SELECT a.device_id FROM file_copies"):
+            assert parameters == (9,)
+            cursor.fetchone.return_value = ("camera",)
+        elif query.startswith("SELECT format_version FROM database_metadata"):
+            cursor.fetchone.return_value = (5,)
+        elif query.startswith("SELECT t.id FROM device_availability_checks"):
+            cursor.__iter__.return_value = iter(())
+        elif "FROM device_files" in query:
             assert parameters == (30,)
             cursor.fetchone.return_value = (identity, '{"path":"original"}', 20, 3, None)
         elif query.startswith("SELECT 1"):
@@ -118,7 +134,7 @@ async def test_actual_source_dispatch_releases_marker_after_fact_read():
         else:
             assert "JOIN file_copies" in query
             assert parameters == (1, 28, 9, "read/9")
-            cursor.fetchone.return_value = (2, 0, 1, 1, 1, None, 30, None, "camera")
+            cursor.fetchone.return_value = (2, 0, 1, 1, 1, None, 30, None, "camera", 4, 1, 1, 3, 50, None)
         return cursor
 
     connection.execute.side_effect = execute
