@@ -1,4 +1,4 @@
-"""清理原 completion 与监督过程的真实异常图共同交付。"""
+"""清理端口保留原完成结果及监督异常图，协作者在内存中提供。"""
 import asyncio
 import json
 from pathlib import Path
@@ -14,7 +14,7 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.host_files.models import FilePurpose, FileRef
 from camctl.host_files.tasks import FileTaskExecutor, FileTaskId, FileTaskResult
 from camctl.operations.error_diagnostics import exception_diagnostic
-from camctl.operations.models import AttemptStatus, AttemptTicket
+from camctl.operations.models import AttemptTicket
 from camctl.outputs.cleanup_flow import LocalArtifactRequest, LocalArtifactTaskFailure
 from camctl.session.supervision import OwnedTask, Supervisor, SupervisionResult
 
