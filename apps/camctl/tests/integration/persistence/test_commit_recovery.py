@@ -1,8 +1,7 @@
 """P4 提交未知身份核实的组件集成测试。
 
 真实 SQLite 与 P3 事务组合：已提交操作按 operation_key 复用原
-结果；失效连接停用后的可靠不存在允许检查原资格；原连接仍在途
-时不能重做。
+结果及同一身份不一致时的错误。
 """
 
 from __future__ import annotations
@@ -104,35 +103,3 @@ class TestRealVerification:
             lookup,
         )
         assert decision.kind is RecoveryKind.ERROR
-
-    def test_absent_after_connection_stopped_allows_eligibility_check(
-        self, tmp_path
-    ) -> None:
-        _create_valid_database(tmp_path / "state.db")
-        owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        owned.connection.close()
-        # 原连接已停用：迟到提交不可能，可靠不存在允许检查原资格。
-        lookup = SqliteCommitLookup(tmp_path / "state.db", late_commit_possible=False)
-        decision = resolve_commit(
-            new_operation_key(),
-            OperationIdentity(inputs={"request_id": 1}, stage="accept", target="plans"),
-            lookup,
-        )
-        assert decision.kind is RecoveryKind.RETRY
-        assert decision.can_retry is True
-
-    def test_original_connection_still_alive_blocks_retry(self, tmp_path) -> None:
-        _create_valid_database(tmp_path / "state.db")
-        owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        try:
-            # 原连接仍在（可能在途提交）：查询为空也不能重做。
-            lookup = SqliteCommitLookup(tmp_path / "state.db", late_commit_possible=True)
-            decision = resolve_commit(
-                new_operation_key(),
-                OperationIdentity(inputs={"request_id": 1}, stage="accept", target="plans"),
-                lookup,
-            )
-            assert decision.kind is RecoveryKind.WAIT
-            assert decision.can_retry is False
-        finally:
-            owned.connection.close()

@@ -1,7 +1,10 @@
 """显式软件恢复格式升级保留原业务历史及旧格式权限。"""
 from pathlib import Path
+from contextlib import closing
 import sqlite3
 import hashlib
+
+import pytest
 
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.persistence.initialization import initialize_state, InitOutcome
@@ -21,7 +24,7 @@ def legacy(tmp_path):
     path = Path(cfg.paths.state_db)
     _create_valid_database(path, format_version=2,
         directories=(cfg.paths.staging, cfg.paths.ready, cfg.paths.processing))
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("DROP TABLE software_recoveries")
     return cfg, path
 
@@ -29,7 +32,7 @@ def legacy(tmp_path):
 def test_ordinary_init_preserves_v2_and_explicit_upgrade_keeps_identity_and_backup(tmp_path):
     cfg, path = legacy(tmp_path)
     assert initialize_state(cfg, path).outcome is InitOutcome.VERIFIED_EXISTING
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         metadata = connection.execute("SELECT * FROM database_metadata").fetchone()
         assert metadata[3] == 2
         assert connection.execute("SELECT 1 FROM sqlite_master WHERE name='software_recoveries'").fetchone() is None
@@ -41,7 +44,7 @@ def test_ordinary_init_preserves_v2_and_explicit_upgrade_keeps_identity_and_back
         assert upgraded.connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         upgraded.connection.close()
-    with sqlite3.connect(str(path) + ".before-software-recovery-v3.sqlite") as backup:
+    with closing(sqlite3.connect(str(path) + ".before-software-recovery-v3.sqlite")) as backup, backup:
         assert backup.execute("SELECT * FROM database_metadata").fetchone() == metadata
     assert initialize_state(cfg, path, upgrade_software_recovery=True).outcome is InitOutcome.VERIFIED_EXISTING
 
@@ -52,7 +55,7 @@ def test_explicit_upgrade_rejects_combined_directory_switch(tmp_path):
         "staging": str(tmp_path / "new-staging"), "ready": cfg.paths.ready,
         "processing": cfg.paths.processing, "log_file": cfg.paths.log_file}}, ConfigDefaults())
     assert initialize_state(changed, path, upgrade_software_recovery=True).outcome is InitOutcome.FAILED
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute("SELECT format_version,staging_path FROM database_metadata").fetchone() == (2, cfg.paths.staging)
 
 
@@ -71,13 +74,13 @@ def test_upgrade_publish_race_preserves_explicit_flag(tmp_path, monkeypatch):
     def publish_other(source, destination):
         _create_valid_database(path, format_version=2,
             directories=(cfg.paths.staging, cfg.paths.ready, cfg.paths.processing))
-        with sqlite3.connect(path) as connection:
+        with closing(sqlite3.connect(path)) as connection, connection:
             connection.execute("DROP TABLE software_recoveries")
         raise FileExistsError(str(destination))
     monkeypatch.setattr(module.os, "link", publish_other)
     result = initialize_state(cfg, path, upgrade_software_recovery=True)
     assert result.outcome is InitOutcome.VERIFIED_EXISTING
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute("SELECT format_version FROM database_metadata").fetchone() == (3,)
     assert Path(str(path) + ".before-software-recovery-v3.sqlite").exists()
 
@@ -92,33 +95,64 @@ def _record_history(path, plan_guards):
         opened.connection.close()
 
 
-def _intercept_upgrade_connection(monkeypatch, change):
+def _intercept_upgrade_connection(monkeypatch, failure_stage, error):
     import camctl.persistence.initialization as module
+    import camctl.persistence.software_recovery_upgrade as upgrade_module
     from dataclasses import replace
+
     original_open = module.open_existing
+    original_verify = upgrade_module._verify_upgraded
+    hits = []
+    closed = []
+
     class Connection:
-        def __init__(self, actual): self.actual = actual
-        def __getattr__(self, name): return getattr(self.actual, name)
+        def __init__(self, actual):
+            self.actual = actual
+
+        def __getattr__(self, name):
+            return getattr(self.actual, name)
+
         def execute(self, statement, *args):
-            change("execute", self.actual, statement)
+            if failure_stage == "create" and statement.startswith("CREATE TABLE software_recoveries"):
+                hits.append(error)
+                raise error
             return self.actual.execute(statement, *args)
+
         def commit(self):
             self.actual.commit()
-            change("commit", self.actual, None)
+            if failure_stage == "commit":
+                hits.append(error)
+                raise error
+
+        def close(self):
+            self.actual.close()
+            closed.append(self.actual)
+
     def opened(*args):
         owned = original_open(*args)
         return replace(owned, connection=Connection(owned.connection))
+
+    def verify(*args):
+        if failure_stage == "commit":
+            assert len(hits) == 1 and closed
+            with pytest.raises(sqlite3.ProgrammingError):
+                closed[0].execute("SELECT 1")
+        return original_verify(*args)
+
     monkeypatch.setattr(module, "open_existing", opened)
+    monkeypatch.setattr(upgrade_module, "_verify_upgraded", verify)
+    return hits, closed
 
 
 def test_upgrade_commit_ack_unknown_reopens_and_verifies_actual_v3(tmp_path, monkeypatch, plan_guards):
     cfg, path = legacy(tmp_path)
     original_history = _record_history(path, plan_guards)
-    def fail_ack(stage, connection, statement):
-        if stage == "commit":
-            raise sqlite3.OperationalError("真实COMMIT完成，回执丢失")
-    _intercept_upgrade_connection(monkeypatch, fail_ack)
+    error = sqlite3.OperationalError("真实 COMMIT 完成，回执丢失")
+    hits, closed = _intercept_upgrade_connection(monkeypatch, "commit", error)
     assert initialize_state(cfg, path, upgrade_software_recovery=True).outcome is InitOutcome.VERIFIED_EXISTING
+    assert hits == [error] and closed
+    with pytest.raises(sqlite3.ProgrammingError):
+        closed[0].execute("SELECT 1")
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert opened.metadata.format_version == 3
@@ -131,11 +165,13 @@ def test_upgrade_commit_ack_unknown_reopens_and_verifies_actual_v3(tmp_path, mon
 def test_upgrade_before_commit_rolls_back_and_reuses_original_backup(tmp_path, monkeypatch, plan_guards):
     cfg, path = legacy(tmp_path)
     original_history = _record_history(path, plan_guards)
-    def fail_create(stage, connection, statement):
-        if stage == "execute" and statement.startswith("CREATE TABLE software_recoveries"):
-            raise sqlite3.OperationalError("独立表创建失败")
-    _intercept_upgrade_connection(monkeypatch, fail_create)
-    assert initialize_state(cfg, path, upgrade_software_recovery=True).outcome is InitOutcome.FAILED
+    error = sqlite3.OperationalError("独立表创建失败")
+    hits, closed = _intercept_upgrade_connection(monkeypatch, "create", error)
+    result = initialize_state(cfg, path, upgrade_software_recovery=True)
+    assert result.outcome is InitOutcome.FAILED
+    assert result.error is error and hits == [error] and closed
+    with pytest.raises(sqlite3.ProgrammingError):
+        closed[0].execute("SELECT 1")
     backup = Path(str(path) + ".before-software-recovery-v3.sqlite")
     backup_hash = hashlib.sha256(backup.read_bytes()).hexdigest()
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())

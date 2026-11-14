@@ -26,9 +26,11 @@ class FixedLookup:
     def __init__(self, finding: CommitFinding) -> None:
         self.finding = finding
         self.calls = 0
+        self.keys = []
 
     def lookup(self, key):
         self.calls += 1
+        self.keys.append(key)
         return self.finding
 
 
@@ -81,6 +83,7 @@ class TestPartitions:
         decision = resolve_commit(KEY, IDENTITY, lookup)
         assert decision.can_retry is False
         assert decision.kind is RecoveryKind.WAIT
+        assert lookup.keys == [KEY]
 
     def test_absent_and_cannot_arrive_late_allows_eligibility_check(self) -> None:
         lookup = FixedLookup(CommitFinding(kind=CommitFindingKind.ABSENT))
@@ -88,6 +91,7 @@ class TestPartitions:
         assert decision.kind is RecoveryKind.RETRY
         assert decision.can_retry is True
         assert decision.value is None
+        assert lookup.keys == [KEY]
 
     def test_lookup_failure_preserves_unknown(self) -> None:
         error = RuntimeError("database is locked")

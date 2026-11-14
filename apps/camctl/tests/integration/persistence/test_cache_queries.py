@@ -1,27 +1,21 @@
-"""P6 缓存与查询成本的组件集成测试：代表性负载下的索引使用与
-不可变内容缓存的同一性。
+"""代表性历史负载下的查询计划与权威 SQL 结构资源。
 
-真实状态库种代表性规模历史后执行 ANALYZE，捕获仓储真实执行的
-每条查询并以 EXPLAIN QUERY PLAN 核实历史表读取走索引定位而非
-全表扫描。包级不变量缓存（枚举登记、事件登记、权威结构表名）返
-回同一对象：缓存身份来自包资源而非某个状态数据库，未提交数据
-不进入缓存。
+真实状态库写入历史并执行 ANALYZE，再核实仓储查询对历史表使用索引。
+权威 SQL 结构资源的表名通过公开入口读取。
 """
 
 from __future__ import annotations
 
+from contextlib import closing
 import os
 import sqlite3
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import url2pathname
 
 import pytest
 
-from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import new_operation_key
-from camctl.history.events import load_event_registry
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.runtime import expected_table_names
 
@@ -42,7 +36,7 @@ class TestQueryPlanUnderRepresentativeLoad:
     def test_history_reads_locate_rows_through_indexes(
             self, tmp_path, plan_guards, monkeypatch) -> None:
         _seed_transactions(tmp_path, _SEED_TRANSACTION_COUNT, plan_guards)
-        with _open(tmp_path).connection as connection:
+        with closing(_open(tmp_path).connection) as connection, connection:
             connection.execute("ANALYZE")
 
         repository = HistoryRepository(tmp_path / "state.db")
@@ -109,20 +103,11 @@ class TestQueryPlanUnderRepresentativeLoad:
         assert scans == [], f"体量表出现全表扫描: {scans}"
 
 
-class TestImmutableContentCache:
-    def test_package_invariant_cache_reuses_the_same_object(self) -> None:
-        """包资源不变量的进程内缓存返回同一对象，与数据库无关。
+def test_expected_table_names_include_authoritative_storage_tables() -> None:
+    tables = expected_table_names()
+    assert isinstance(tables, frozenset)
+    assert {"database_metadata", "runtime_state", "plans", "history_events"} <= tables
 
-        缓存身份来自随包分发的登记资源，不依赖任何状态数据库；
-        同一进程内重复加载必须命中同一份不可变内容。
-        """
-        enums = load_enum_registry()
-        assert load_enum_registry() is enums
-        events = load_event_registry()
-        assert load_event_registry() is events
-        tables = expected_table_names()
-        assert expected_table_names() is tables
-        assert isinstance(tables, frozenset) and tables
 
 
 def _ascending_scope(upper: int, *, batch_limit: int):

@@ -1,4 +1,5 @@
 """V3 新责任表必须实际具备权威结构，旧格式不要求新表。"""
+from contextlib import closing
 import re
 import sqlite3
 
@@ -55,7 +56,7 @@ def malformed(statement, defect):
 def test_open_v3_rejects_missing_real_recovery_constraints(tmp_path, defect, entrypoint):
     path = tmp_path / "state.db"
     _create_valid_database(path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("DROP TABLE software_recoveries")
         connection.execute(malformed(create_statement(), defect))
         assert connection.execute("PRAGMA quick_check").fetchone() == ("ok",)
@@ -77,7 +78,7 @@ def test_authoritative_v3_structure_is_accepted_and_legacy_v2_needs_no_new_table
     _create_valid_database(path)
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     opened.connection.close()
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("UPDATE database_metadata SET format_version=2")
         connection.execute("DROP TABLE software_recoveries")
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -90,13 +91,13 @@ def test_real_sql_comments_preserve_constraints_and_quoted_comment_text():
     from camctl.persistence.recovery_structure import verify_recovery_structure
     sql = create_statement()
     commented = sql.replace("CREATE TABLE", "CREATE /* valid comment */ TABLE").replace("state_json TEXT", "state_json -- valid line comment\n TEXT")
-    with sqlite3.connect(":memory:") as first, sqlite3.connect(":memory:") as second:
+    with closing(sqlite3.connect(":memory:")) as first, first, closing(sqlite3.connect(":memory:")) as second, second:
         first.execute(sql)
         second.execute(commented)
         verify_recovery_structure(first)
         verify_recovery_structure(second)
     quoted = sql.replace("= 'object'", "= 'object/* quoted */ -- text'")
-    with sqlite3.connect(":memory:") as connection:
+    with closing(sqlite3.connect(":memory:")) as connection, connection:
         connection.execute(quoted)
         with pytest.raises(ValueError,match='结构约束'):
             verify_recovery_structure(connection)

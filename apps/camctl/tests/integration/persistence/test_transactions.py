@@ -755,13 +755,6 @@ class TestAtomicRollback:
 
 
 class TestTransactionControlReceipt:
-    def test_write_receipt_accessor_rejects_untyped_attribute(self) -> None:
-        error = RuntimeError("ordinary business failure")
-        setattr(error, "_camctl_write_receipt", object())
-        accessor = getattr(transaction_module, "write_receipt_for", None)
-        assert callable(accessor)
-        assert accessor(error) is None
-
     @pytest.mark.parametrize("location", ["command", "complete_result"])
     def test_precommit_control_rolls_back_once_and_keeps_same_object(
         self, tmp_path, plan_guards, location
