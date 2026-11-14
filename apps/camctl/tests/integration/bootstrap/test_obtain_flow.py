@@ -12,7 +12,6 @@ from __future__ import annotations
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
-import contextlib
 import hashlib
 import json
 import sqlite3
@@ -48,6 +47,7 @@ from camctl.capture.timelapse import CaptureWaitConfig
 
 from ..capture.test_capture_contract import ResultsDouble
 from .test_run_dispatch import _parsed
+from .test_recording_stop import _close_session
 
 pytestmark = pytest.mark.asyncio
 
@@ -487,12 +487,6 @@ async def _await_query(db_path: Path, sql: str, expected, timeout_s: float = 15.
         f"当前 {_scalar(db_path, sql)}")
 
 
-async def _cancel(task: asyncio.Task) -> None:
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
-
-
 class TestObtainExecutionLink:
     async def test_obtain_delivery_reaches_ready(self, tmp_path: Path) -> None:
         """照片完成后跨计划取回发布交付：动作成功、文件进入 ready。"""
@@ -512,11 +506,12 @@ class TestObtainExecutionLink:
         clock = {"ns": time.monotonic_ns()}
         tools_dir = _tools(tmp_path)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        task = _run_session(deps, cfg, driver, results, clock, tools_dir)
+        task = None
         try:
+            task = _run_session(deps, cfg, driver, results, clock, tools_dir)
             db = Path(cfg.paths.state_db)
             await _await_query(
-                db, "SELECT status FROM actions WHERE name='grab'", (3,))
+                db, "SELECT status FROM actions WHERE name='grab'", (3,), task=task)
             delivery = _scalar(
                 db, "SELECT id, status, display_name FROM deliveries")
             assert delivery[1] == 5, delivery
@@ -525,8 +520,7 @@ class TestObtainExecutionLink:
             assert ready_file.read_bytes() == _PHOTO_CONTENT
             assert [json.loads(call)[-1] for call in driver.read_calls] == ["shot-1"]
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_obtain_unknown_instance_fails_action(
             self, tmp_path: Path) -> None:
@@ -534,20 +528,19 @@ class TestObtainExecutionLink:
         cfg = _config(tmp_path)
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
-        await _submit(tmp_path, cfg, _photo_plan("1"))
         await _submit(tmp_path, cfg, _obtain_plan(
             "2", {"action_instance_id": "999"}))
         driver = _ObtainDriver()
-        _CONTENT_BY_IDENTITY["shot-1"] = _PHOTO_CONTENT
-        results = ResultsDouble({1: (_photo_entry("shot-1", "IMG_0001.jpg"),)})
+        results = ResultsDouble({})
         clock = {"ns": time.monotonic_ns()}
         tools_dir = _tools(tmp_path)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        task = _run_session(deps, cfg, driver, results, clock, tools_dir)
+        task = None
         try:
+            task = _run_session(deps, cfg, driver, results, clock, tools_dir)
             db = Path(cfg.paths.state_db)
             await _await_query(
-                db, "SELECT status FROM actions WHERE name='grab'", (4,))
+                db, "SELECT status FROM actions WHERE name='grab'", (4,), task=task)
             error = _scalar(
                 db,
                 "SELECT json_extract(error_details_json, '$.reason')"
@@ -555,8 +548,7 @@ class TestObtainExecutionLink:
             assert error[0] == "action_not_found", error
             assert _scalar(db, "SELECT COUNT(*) FROM deliveries") == (0,)
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_obtain_read_exhaustion_fails_delivery(
             self, tmp_path: Path) -> None:
@@ -576,11 +568,12 @@ class TestObtainExecutionLink:
         clock = {"ns": time.monotonic_ns()}
         tools_dir = _tools(tmp_path)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        task = _run_session(deps, cfg, driver, results, clock, tools_dir)
+        task = None
         try:
+            task = _run_session(deps, cfg, driver, results, clock, tools_dir)
             db = Path(cfg.paths.state_db)
             await _await_query(
-                db, "SELECT status FROM actions WHERE name='grab'", (4,))
+                db, "SELECT status FROM actions WHERE name='grab'", (4,), task=task)
             delivery = _scalar(
                 db, "SELECT status, json_extract(error_json, '$.code'),"
                     " json_extract(error_json, '$.details.attempts_used')"
@@ -591,8 +584,7 @@ class TestObtainExecutionLink:
                 db, "SELECT slot_device_id FROM file_copies")
             assert slot == (None,), slot
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_obtain_read_yields_to_recording(self, tmp_path: Path) -> None:
         """录像活动占用设备时读取让路；实际结束并释放占用后按统一排序读取。"""
@@ -617,16 +609,17 @@ class TestObtainExecutionLink:
         clock = {"ns": time.monotonic_ns()}
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        task = _run_session(deps, cfg, driver, results, clock, tools_dir)
+        task = None
         try:
+            task = _run_session(deps, cfg, driver, results, clock, tools_dir)
             # 录像启动进入执行中：读取建档完成但设备被拍摄占用。
             await _await_query(
                 db,
                 "SELECT started_at IS NOT NULL FROM device_activities"
                 " WHERE action_id ="
-                " (SELECT id FROM actions WHERE name='record')", (1,))
+                " (SELECT id FROM actions WHERE name='record')", (1,), task=task)
             await _await_query(
-                db, "SELECT status FROM deliveries", (1,))
+                db, "SELECT status FROM deliveries", (1,), task=task)
             await asyncio.sleep(0.4)
             # 让路：录像执行期间没有打开过读取会话。
             assert driver.read_calls == []
@@ -635,8 +628,7 @@ class TestObtainExecutionLink:
                 " JOIN actions a ON a.id=da.action_id WHERE a.name='record'")
             assert record_activity != record_action
         finally:
-            await _cancel(task)
-            close_runtime(deps)
+            await _close_session(task, deps)
         # 墙钟越过启动加目标加余量后，第二会话对账停止并完成录像；
         # 设备空闲后取回读取继续推进到发布。
         deadline = started_at + int(3.2 * 1_000_000)
@@ -645,13 +637,14 @@ class TestObtainExecutionLink:
         results.files_by_action[record_activity] = (
             _record_entry("clip-1", "VID_0001.mp4", _RECORD_CONTENT),)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        clock = {"ns": time.monotonic_ns()}
-        task = _run_session(deps, cfg, driver, results, clock, tools_dir)
+        task = None
         try:
+            clock = {"ns": time.monotonic_ns()}
+            task = _run_session(deps, cfg, driver, results, clock, tools_dir)
             await _await_query(
-                db, "SELECT status FROM actions WHERE name='record'", (3,))
+                db, "SELECT status FROM actions WHERE name='record'", (3,), task=task)
             await _await_query(
-                db, "SELECT status FROM actions WHERE name='grab'", (3,))
+                db, "SELECT status FROM actions WHERE name='grab'", (3,), task=task)
             delivery = _scalar(
                 db, "SELECT id, status FROM deliveries")
             assert delivery[1] == 5, delivery
@@ -779,8 +772,7 @@ class TestObtainExecutionLink:
                 assert photo_intent < end_id <= photo_result
                 assert end_id <= photo_release < internal_grant < internal_intent
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     @pytest.mark.parametrize("first", ["read_batch", "recording"])
     async def test_read_batch_and_parallel_recording_respect_start_order(
@@ -845,10 +837,11 @@ class TestObtainExecutionLink:
             {1: (_photo_entry("shot-1", "IMG_0001.jpg"),)})
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        task = _run_session(
-            deps, cfg, driver, results, clock, tools_dir,
-            capture_read_parallel=True, scenario_clock=scenario_clock)
+        task = None
         try:
+            task = _run_session(
+                deps, cfg, driver, results, clock, tools_dir,
+                capture_read_parallel=True, scenario_clock=scenario_clock)
             if first == "recording":
                 await _await_query(db, "SELECT status FROM actions WHERE name='shoot'", (3,), task=task)
                 scenario_clock.advance(1_000_000)
@@ -897,19 +890,18 @@ class TestObtainExecutionLink:
                 db, "SELECT status FROM actions WHERE name='record'") == (2,)
         finally:
             driver.release_record.set()
-            await _cancel(task)
-            close_runtime(deps)
+            await _close_session(task, deps)
         # 同一时钟越过启动加目标加余量，第二会话继续原录像结算。
         scenario_clock.advance(3_200_000)
         results.files_by_action[record_activity] = (
             _record_entry("clip-1", "VID_0001.mp4", _RECORD_CONTENT),)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        task = _run_session(
-            deps, cfg, driver, results, clock, tools_dir,
-            capture_read_parallel=True, scenario_clock=scenario_clock)
+        task = None
         try:
+            task = _run_session(
+                deps, cfg, driver, results, clock, tools_dir,
+                capture_read_parallel=True, scenario_clock=scenario_clock)
             await _await_query(
-                db, "SELECT status FROM actions WHERE name='record'", (3,))
+                db, "SELECT status FROM actions WHERE name='record'", (3,), task=task)
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)

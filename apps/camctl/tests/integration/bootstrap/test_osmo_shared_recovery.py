@@ -177,21 +177,24 @@ def _assert_unknown(world, ticket):
     assert world.owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (1,)
 
 
-async def test_formal_registry_preserves_each_original_operation_and_result_page(owned, tmp_path):
-    world = await _world(owned, tmp_path)
+async def test_formal_registry_preserves_each_original_operation_and_result_page():
+    cfg = load_config({"devices": {"cam-1": {"kind": "camera", "driver": BINDING.driver_id,
+        "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
+    register_builtin_camera_drivers(cfg)
+    entry = drivers_runtime.current_registry().entry(BINDING.driver_id)
     from camctl.operations.recovery import recovery_registry
     for operation in ("control", "stop", "result", "read"):
-        evidence = recovery_registry(world.registry.entry(BINDING.driver_id), operation)
+        evidence = recovery_registry(entry, operation)
         assert evidence is not None
         template = evidence.contract("adb_foreground_recovery", 1)
         assert template.operation == operation and not template.fields and template.identity_field is None
-        assert evidence.contract(RESULT_PAGE_CONTRACT.type, RESULT_PAGE_CONTRACT.version) is world.entry.evidence.contract(
+        assert evidence.contract(RESULT_PAGE_CONTRACT.type, RESULT_PAGE_CONTRACT.version) is entry.evidence.contract(
             RESULT_PAGE_CONTRACT.type, RESULT_PAGE_CONTRACT.version)
         returned = "result_returned" if operation == "result" else operation + "_returned"
-        assert evidence.contract(returned, 1) is world.entry.evidence.contract(returned, 1)
-    assert recovery_registry(world.registry.entry(BINDING.driver_id), "digest") is None
-    assert recovery_registry(world.registry.entry(BINDING.driver_id), "query") is not None
-    assert recovery_registry(world.registry.entry(BINDING.driver_id), "unsupported") is None
+        assert evidence.contract(returned, 1) is entry.evidence.contract(returned, 1)
+    assert recovery_registry(entry, "digest") is None
+    assert recovery_registry(entry, "query") is not None
+    assert recovery_registry(entry, "unsupported") is None
 
 
 @pytest.mark.parametrize("operation", ["control", "stop"])

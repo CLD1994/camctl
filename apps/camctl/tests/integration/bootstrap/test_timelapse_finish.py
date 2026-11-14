@@ -25,7 +25,7 @@ from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.background_flow import CombinedLocalWork
-from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+from camctl.bootstrap.lifecycle import build_runtime, execute_command
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
@@ -49,6 +49,7 @@ from ..capture.test_capture_contract import ResultsDouble, _entry
 from .test_recording_stop import (
     _await_query,
     _cancel,
+    _close_session,
     _cancel_plan,
     _config_for,
     _future_schedule,
@@ -223,10 +224,11 @@ class TestTimelapseSatisfiedFinish:
             tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        driver = _ActivityDriver()
-        results = ResultsDouble({})
-        task = _run_session(deps, driver, results)
+        task = None
         try:
+            driver = _ActivityDriver()
+            results = ResultsDouble({})
+            task = _run_session(deps, driver, results)
             # 发送成功：保存发送事实与等待安排，设备活动保持未知。
             await _await_query(
                 db,
@@ -259,8 +261,7 @@ class TestTimelapseSatisfiedFinish:
             assert _scalar(
                 db, "SELECT status FROM plans WHERE id = 1") == (3,)
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
 
 class TestTimelapseUnmetFinish:

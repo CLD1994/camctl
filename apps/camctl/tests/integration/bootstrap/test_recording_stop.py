@@ -14,7 +14,9 @@ from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONT
 
 import asyncio
 import sqlite3
+import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -197,6 +199,36 @@ async def _cancel(task: asyncio.Task) -> None:
     await cancel_session(task)
 
 
+async def _close_session(task, deps) -> None:
+    """有界等待会话结束，关闭装配并保留主要异常及收场诊断。"""
+    primary = sys.exception()
+    errors = []
+    try:
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=20)
+            if not done:
+                raise TimeoutError("会话取消后仍未结束")
+            if not task.cancelled():
+                task.result()
+    except BaseException as error:
+        errors.append(error)
+    try:
+        close_runtime(
+            deps, primary_error=primary if primary is not None else (errors[0] if errors else None))
+    except BaseException as error:
+        errors.append(error)
+    if primary is not None:
+        for error in errors:
+            if error is not primary:
+                primary.add_note("会话收场错误：\n" + "".join(traceback.format_exception(error)))
+    elif errors:
+        for error in errors[1:]:
+            errors[0].add_note("后续收场错误：\n" + "".join(traceback.format_exception(error)))
+        raise errors[0]
+
+
 def _scalar(db_path: Path, sql: str, *params):
     with sqlite3.connect(db_path) as connection:
         return connection.execute(sql, params).fetchone()
@@ -219,40 +251,53 @@ class TestNormalStopAtTarget:
         catalog.duration_s = Decimal("0.2")
         await _submit_plan(tmp_path, cfg, catalog, _record_plan("1", _future_schedule(0)))
         deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        confirmed = []
-        stopped = asyncio.Event()
-        stop_times = []
-
-        class Driver(_ActivityDriver):
-            async def control(self, request):
-                # 工具完成发生在中央循环已经进入等待之后。
-                await asyncio.sleep(0.05)
-                outcome = await super().control(request)
-                confirmed.append(time.monotonic())
-                return outcome
-
-        class Stop(_StopDouble):
-            async def stop(self, request):
-                stop_times.append(time.monotonic())
-                outcome = await super().stop(request)
-                stopped.set()
-                return outcome
-
-        driver, stopper = Driver(), Stop()
-        factory = capture_factory(
-            cfg, driver, ResultsDouble({}, set_finalized=False), _EVIDENCE,
-            stopper=stopper, monotonic_ns=time.monotonic_ns)
-
-        task = asyncio.create_task(execute_command(
-            deps, None, flows={"scheduling": capture_flow(factory)},
-            wake=WorkNotifier(), poll_interval_s=30))
+        task = None
         try:
+            confirmed = []
+            stopped = asyncio.Event()
+            waiting = asyncio.Event()
+            stop_times = []
+
+            class Notifier(WorkNotifier):
+                async def wait_changed(self, observed, deadline=None):
+                    if (deadline is not None
+                            and deadline - asyncio.get_running_loop().time() > 1
+                            and observed.version == self.snapshot().version):
+                        waiting.set()
+                    try:
+                        return await super().wait_changed(observed, deadline)
+                    finally:
+                        waiting.clear()
+
+            class Driver(_ActivityDriver):
+                async def control(self, request):
+                    # 工具完成发生在中央循环已经进入等待之后。
+                    while not waiting.is_set():
+                        await waiting.wait()
+                    outcome = await super().control(request)
+                    confirmed.append(time.monotonic())
+                    return outcome
+
+            class Stop(_StopDouble):
+                async def stop(self, request):
+                    stop_times.append(time.monotonic())
+                    outcome = await super().stop(request)
+                    stopped.set()
+                    return outcome
+
+            driver, stopper = Driver(), Stop()
+            factory = capture_factory(
+                cfg, driver, ResultsDouble({}, set_finalized=False), _EVIDENCE,
+                stopper=stopper, monotonic_ns=time.monotonic_ns)
+
+            task = asyncio.create_task(execute_command(
+                deps, None, flows={"scheduling": capture_flow(factory)},
+                wake=Notifier(), poll_interval_s=30))
             await asyncio.wait_for(stopped.wait(), 2)
             assert len(confirmed) == len(stop_times) == 1
             assert 0.2 <= stop_times[0] - confirmed[0] < 0.8
         finally:
-            await _cancel(task)
-            close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_stops_at_anchor_target_and_finishes(
             self, tmp_path: Path) -> None:
@@ -266,12 +311,13 @@ class TestNormalStopAtTarget:
             _record_plan("1", _future_schedule(2)))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_RecordCatalog())
-        driver = _ActivityDriver()
-        stopper = _StopDouble()
-        clock = {"ns": time.monotonic_ns()}
-        results = ResultsDouble({}, set_finalized=False)
-        task = _run_session(deps, cfg, driver, stopper, clock, results)
+        task = None
         try:
+            driver = _ActivityDriver()
+            stopper = _StopDouble()
+            clock = {"ns": time.monotonic_ns()}
+            results = ResultsDouble({}, set_finalized=False)
+            task = _run_session(deps, cfg, driver, stopper, clock, results)
             # 到期开始：启动确认即登记本会话计时锚点与活动启动事实。
             await _await_query(
                 db,
@@ -314,8 +360,7 @@ class TestNormalStopAtTarget:
             assert _scalar(
                 db, "SELECT status FROM plans WHERE id = 1") == (3,)
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
 
 class TestStopRetryWithinBudget:
@@ -331,12 +376,13 @@ class TestStopRetryWithinBudget:
             _record_plan("1", _future_schedule(2)))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_RecordCatalog())
-        driver = _ActivityDriver()
-        stopper = _StopDouble(failures=1)
-        clock = {"ns": time.monotonic_ns()}
-        results = ResultsDouble({1: (_entry("clip-1"),)})
-        task = _run_session(deps, cfg, driver, stopper, clock, results)
+        task = None
         try:
+            driver = _ActivityDriver()
+            stopper = _StopDouble(failures=1)
+            clock = {"ns": time.monotonic_ns()}
+            results = ResultsDouble({1: (_entry("clip-1"),)})
+            task = _run_session(deps, cfg, driver, stopper, clock, results)
             await _await_query(
                 db,
                 "SELECT started_at IS NOT NULL FROM device_activities"
@@ -375,8 +421,7 @@ class TestStopRetryWithinBudget:
                 " FROM device_activities WHERE id = 1") == (3, 2)
             assert _scalar(db, "SELECT COUNT(*) FROM outputs") == (1,)
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
 
 class TestCancelDuringRecording:
@@ -399,12 +444,13 @@ class TestCancelDuringRecording:
             tmp_path, cfg, catalog,
             _cancel_plan("2", record_id, _future_schedule(5)))
         deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        driver = _ActivityDriver()
-        stopper = _StopDouble()
-        clock = {"ns": time.monotonic_ns()}
-        task = _run_session(
-            deps, cfg, driver, stopper, clock, ResultsDouble({}))
+        task = None
         try:
+            driver = _ActivityDriver()
+            stopper = _StopDouble()
+            clock = {"ns": time.monotonic_ns()}
+            task = _run_session(
+                deps, cfg, driver, stopper, clock, ResultsDouble({}))
             # 录制中取消生效：不经目标时长立即停止并按取消终态收场。
             await _await_query(
                 db,
@@ -424,8 +470,7 @@ class TestCancelDuringRecording:
             assert _scalar(
                 db, "SELECT status FROM cancel_items") == (3,)
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
 
 class TestStopBudgetExhausted:
@@ -441,12 +486,13 @@ class TestStopBudgetExhausted:
             _record_plan("1", _future_schedule(2)))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_RecordCatalog())
-        driver = _ActivityDriver()
-        stopper = _StopDouble(failures=99)
-        clock = {"ns": time.monotonic_ns()}
-        task = _run_session(
-            deps, cfg, driver, stopper, clock, ResultsDouble({}))
+        task = None
         try:
+            driver = _ActivityDriver()
+            stopper = _StopDouble(failures=99)
+            clock = {"ns": time.monotonic_ns()}
+            task = _run_session(
+                deps, cfg, driver, stopper, clock, ResultsDouble({}))
             await _await_query(
                 db,
                 "SELECT started_at IS NOT NULL FROM device_activities"
@@ -492,6 +538,5 @@ class TestStopBudgetExhausted:
                 db, "SELECT activity_state, occupancy_state"
                 " FROM device_activities WHERE id = 1") == (2, 1)
         finally:
-            await _cancel(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 

@@ -26,7 +26,7 @@ from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.flows import cancel_flow, capture_flow, residual_flow
 from camctl.bootstrap.background_flow import CombinedLocalWork
-from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+from camctl.bootstrap.lifecycle import build_runtime, execute_command
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.devices.evidence import (
     DeviceObservation, EvidenceContract, EvidenceRegistry,
@@ -43,6 +43,7 @@ from camctl.bootstrap.capture_assembly import execution_wait_config
 from camctl.session.service import run_session
 from ..support.session import session_context
 from .session_clock import SessionClock
+from .test_recording_stop import _close_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -406,14 +407,15 @@ class TestResidualWinddown:
                   _photo_action("followup", due)))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        driver = _ControlDouble()
-        stopper = _StopDouble(failures=3)
-        query = _QueryDouble((1,), paused=True)
-        clock = {"ns": time.monotonic_ns()}
-        files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
+        task = None
         try:
+            driver = _ControlDouble()
+            stopper = _StopDouble(failures=3)
+            query = _QueryDouble((1,), paused=True)
+            clock = {"ns": time.monotonic_ns()}
+            files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
             await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,), task=task)
             assert _scalar(db, "SELECT id FROM operation_runs"
                            " WHERE responsibility_key = 'start/2'") is None
@@ -438,8 +440,7 @@ class TestResidualWinddown:
                 db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 2"
             ) == (1,)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_trigger_cancelled_before_winddown_keeps_residual(
             self, tmp_path: Path) -> None:
@@ -455,13 +456,14 @@ class TestResidualWinddown:
                   _photo_action("followup", _future_schedule(3))))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        driver = _ControlDouble()
-        stopper = _StopDouble(failures=3)
-        query = _QueryDouble(("error",))
-        clock = {"ns": time.monotonic_ns()}
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock))
+        task = None
         try:
+            driver = _ControlDouble()
+            stopper = _StopDouble(failures=3)
+            query = _QueryDouble(("error",))
+            clock = {"ns": time.monotonic_ns()}
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock))
             await _exhaust_original_stop(db, clock, task=task)
             # 触发动作到期执行前检查失败：不建立收场流程，动作保持
             # 待执行并按间隔重查。
@@ -473,16 +475,16 @@ class TestResidualWinddown:
                 db, "SELECT COUNT(*) FROM operation_runs"
                 " WHERE kind = 8") == (0,)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
         # 触发动作在收场流程发出停止前取消：不再开始收场，其执行前
         # 检查责任随取消结束，残留事实与占用原样保留。
         await _submit_plan(
             tmp_path, cfg, _WinddownCatalog(), _cancel_plan("2", 2))
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock))
+        task = None
         try:
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock))
             await _await_query(db, "SELECT status FROM actions WHERE id = 2", (6,), task=task)
             await _await_query(
                 db,
@@ -496,8 +498,7 @@ class TestResidualWinddown:
                 db, "SELECT activity_state, occupancy_state"
                 " FROM device_activities WHERE id = 1") == (2, 1)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_cancelled_trigger_after_first_stop_finishes_winddown(
             self, tmp_path: Path) -> None:
@@ -513,29 +514,30 @@ class TestResidualWinddown:
                   _photo_action("followup", _future_schedule(3))))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        driver = _ControlDouble()
-        # 第 4 次（收场首停）仍失败，触发动作取消后第 5 次成功。
-        stopper = _StopDouble(failures=4)
-        query = _QueryDouble((1,))
-        clock = {"ns": time.monotonic_ns()}
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock))
+        task = None
         try:
+            driver = _ControlDouble()
+            # 第 4 次（收场首停）仍失败，触发动作取消后第 5 次成功。
+            stopper = _StopDouble(failures=4)
+            query = _QueryDouble((1,))
+            clock = {"ns": time.monotonic_ns()}
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock))
             await _exhaust_original_stop(db, clock, task=task)
             await _await_followup_result(db, 1, task=task)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
         # 首停失败结果可靠保存后取消触发动作；下一会话沿原停止责任
         # 和剩余次数继续处理残留录像。
         await _submit_plan(
             tmp_path, cfg, _WinddownCatalog(), _cancel_plan("2", 2))
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        settled_round = asyncio.Event()
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock),
-            settled_round=settled_round)
+        task = None
         try:
+            settled_round = asyncio.Event()
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock),
+                settled_round=settled_round)
             await _await_query(db, "SELECT status FROM actions WHERE id = 2", (6,), task=task)
             deadline = time.monotonic() + 20.0
             await _await_settled_round(settled_round, task, timeout_s=20.0)
@@ -551,8 +553,7 @@ class TestResidualWinddown:
                 "SELECT activity_state, occupancy_state"
                 " FROM device_activities WHERE id = 1", (3, 2), task=task)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_winddown_budget_exhausted_keeps_residual_and_trigger_expires(
             self, tmp_path: Path) -> None:
@@ -628,27 +629,28 @@ class TestResidualWinddown:
                                 max_delay_ms=90000)))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        driver = _ControlDouble()
-        stopper = _StopDouble(failures=5)
-        query = _QueryDouble((1,))
-        clock = {"ns": time.monotonic_ns()}
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock))
+        task = None
         try:
+            driver = _ControlDouble()
+            stopper = _StopDouble(failures=5)
+            query = _QueryDouble((1,))
+            clock = {"ns": time.monotonic_ns()}
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock))
             await _exhaust_original_stop(db, clock, task=task)
             await _await_followup_result(db, 1, task=task)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
         # 重启后沿原收场流程继续：累计次数不重置，同一流程用剩余两
         # 次完成停止（第 5 次失败、第 6 次确认），触发动作随后放行。
         files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        settled_round = asyncio.Event()
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock, files),
-            settled_round=settled_round)
+        task = None
         try:
+            settled_round = asyncio.Event()
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock, files),
+                settled_round=settled_round)
             # 首轮公开推进完整交付后，原重试等待已观察到本次单调钟。
             deadline = time.monotonic() + 20.0
             await _await_settled_round(settled_round, task, timeout_s=20.0)
@@ -672,8 +674,7 @@ class TestResidualWinddown:
             await _await_query(
                 db, "SELECT status FROM actions WHERE id = 2", (3,), task=task)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     async def test_preflight_idle_confirms_and_trigger_proceeds_without_stop(
             self, tmp_path: Path) -> None:
@@ -689,14 +690,15 @@ class TestResidualWinddown:
                   _photo_action("followup", _future_schedule(3))))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        driver = _ControlDouble()
-        stopper = _StopDouble(failures=3)
-        query = _QueryDouble(("idle",))
-        clock = {"ns": time.monotonic_ns()}
-        files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
+        task = None
         try:
+            driver = _ControlDouble()
+            stopper = _StopDouble(failures=3)
+            query = _QueryDouble(("idle",))
+            clock = {"ns": time.monotonic_ns()}
+            files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
             await _exhaust_original_stop(db, clock, task=task)
             # 执行前检查可靠确认设备空闲（设备已自行停止）：保存观察
             # 后触发动作直接开始，不建立收场流程，也不发送停止命令；
@@ -715,8 +717,7 @@ class TestResidualWinddown:
                 db, "SELECT activity_state, occupancy_state"
                 " FROM device_activities WHERE id = 1") == (2, 1)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
 
     @pytest.mark.parametrize("window_ms,final_query", [(8000, 5), (12000, 6)],
                              ids=["window-expires", "budget-exhausted"])
@@ -883,16 +884,17 @@ class TestResidualWinddown:
                   _photo_action("followup", _future_schedule(3))))
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
-        driver = _ControlDouble()
-        # 收场首停发出但未确认：先由确认查询核实设备已空闲，按停止
-        # 事实收场，不再重复停止。
-        stopper = _StopDouble(failures=3, unconfirmed=1)
-        query = _QueryDouble((1, "idle"))
-        clock = {"ns": time.monotonic_ns()}
-        files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
-        task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
+        task = None
         try:
+            driver = _ControlDouble()
+            # 收场首停发出但未确认：先由确认查询核实设备已空闲，按停止
+            # 事实收场，不再重复停止。
+            stopper = _StopDouble(failures=3, unconfirmed=1)
+            query = _QueryDouble((1, "idle"))
+            clock = {"ns": time.monotonic_ns()}
+            files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
+            task = _run_session(
+                deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
             await _exhaust_original_stop(db, clock, task=task)
             await _await_query(
                 db,
@@ -910,5 +912,4 @@ class TestResidualWinddown:
             await _await_query(
                 db, "SELECT status FROM actions WHERE id = 2", (3,), task=task)
         finally:
-            await _cancel_task(task)
-        close_runtime(deps)
+            await _close_session(task, deps)
