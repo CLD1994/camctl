@@ -210,6 +210,7 @@ async def test_background_cancellation_without_result_is_delivered_and_retains_o
     owner = SimpleNamespace(action_id=1, saved=False, interrupted=original)
     coordinator.calls[7] = owner
     async def advance(*args):
+        coordinator.task_owners[(1, None)] = owner
         raise original
     coordinator.advance = advance
     await coordinator.request(None, Request(1, None), None, None, None, None)
@@ -219,6 +220,48 @@ async def test_background_cancellation_without_result_is_delivered_and_retains_o
     assert delivered.value is original
     assert coordinator.calls[7] is owner
     assert coordinator.required_settlements() == 1
+
+
+@pytest.mark.asyncio
+async def test_each_copy_delivers_its_own_interrupted_check(coordinator_module, monkeypatch):
+    module, _ = coordinator_module
+    install_repositories(monkeypatch)
+    coordinator = make_coordinator(module)
+    errors = [asyncio.CancelledError("设备一未交付结果"), asyncio.CancelledError("设备二未交付结果")]
+
+    class Owner:
+        action_id = 1
+        saved = False
+
+        def __init__(self, error):
+            self.interrupted = error
+
+        async def advance(self):
+            raise self.interrupted
+
+        async def settle(self):
+            raise self.interrupted
+
+    owners = [Owner(error) for error in errors]
+    coordinator.calls.update({7: owners[0], 8: owners[1]})
+    monkeypatch.setattr(module, "_open_check", lambda owned, request:
+                        (request.trigger_copy_id + 100, 7 if request.trigger_copy_id == 11 else 8,
+                         request.trigger_copy_id))
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    requests = [Request(1, 11), Request(1, 22)]
+    for request in requests:
+        await coordinator.request(database, request, None, None, None, None)
+    await asyncio.sleep(0)
+    for request, original in zip(requests, errors):
+        with pytest.raises(asyncio.CancelledError) as delivered:
+            await coordinator.request(database, request, None, None, None, None)
+        assert delivered.value is original
+    assert coordinator.calls == {7: owners[0], 8: owners[1]}
+    assert coordinator.required_settlements() == 2
+    with pytest.raises(BaseExceptionGroup) as settled:
+        await coordinator.settle()
+    assert settled.value.exceptions == tuple(errors)
+    assert coordinator.calls == {7: owners[0], 8: owners[1]}
 
 
 def install_repositories(monkeypatch):

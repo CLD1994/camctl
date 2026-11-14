@@ -115,6 +115,7 @@ class AvailabilityCoordinator:
         self.writes: dict[tuple, _Write] = {}
         self.calls: dict[int, AvailabilityAttemptOwner] = {}
         self.tasks: dict[tuple, asyncio.Task] = {}
+        self.task_owners: dict[tuple, AvailabilityAttemptOwner] = {}
         self.results: dict[tuple, Any] = {}
         self.recovery_diagnostics: dict[int, DiagnosticState] = {}
         self.binding_diagnostics: dict[int, DiagnosticState] = {}
@@ -230,13 +231,12 @@ class AvailabilityCoordinator:
         self.tasks[identity] = task
         def completed(actual):
             self.tasks.pop(identity, None)
+            owner = self.task_owners.pop(identity, None)
             try:
                 result = actual.result()
             except asyncio.CancelledError as error:
-                pending = next((owner for owner in self.calls.values()
-                                if getattr(owner, "action_id", None) == identity[0] and not owner.saved), None)
-                if pending is not None:
-                    self.results[identity] = getattr(pending, "interrupted", None) or error
+                if owner is not None and not owner.saved:
+                    self.results[identity] = owner.interrupted or error
                 self._notify()
                 return
             except BaseException as error:
@@ -368,6 +368,7 @@ class AvailabilityCoordinator:
             owner = self.calls.get(run_id)
             if owner is not None:
                 if not owner.saved:
+                    self.task_owners[identity] = owner
                     await owner.advance()
                 if owner.saved:
                     self.calls.pop(run_id, None)
@@ -434,6 +435,7 @@ class AvailabilityCoordinator:
             owner = self._attempt_owner(database, begun.ticket, current, config, driver, evidence, binding, check_id)
             owner.action_id = request.action_id
             self.calls[run_id] = owner
+            self.task_owners[identity] = owner
             await owner.advance()
             if owner.saved:
                 self.calls.pop(run_id, None)
