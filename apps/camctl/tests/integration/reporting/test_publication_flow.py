@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from camctl.contracts.values import new_operation_key
+from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.host_files.handoff import (
     HandoffDirectories,
     PublishResult,
@@ -24,6 +25,7 @@ from camctl.host_files.handoff import (
 )
 from camctl.host_files.io import DirectorySyncStage
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import (
     DbConfig,
     DbOpenMode,
@@ -31,8 +33,8 @@ from camctl.persistence.runtime import (
     open_existing,
 )
 from camctl.reporting.ack import AckReport
-from camctl.reporting.models import FrozenReport, ReportBytes
-from camctl.reporting.policy import ReportingRepository, publish_report, record_recovered_publication, record_report_bytes, record_report_failure, record_report_publish_intent
+from camctl.reporting.models import FrozenReport, ReportBytes, SyncDisposition, SyncMode
+from camctl.reporting.policy import ReportingRepository, publish_report, record_recovered_publication, record_report_bytes, record_report_failure, record_report_publish_intent, start_sync
 from camctl.reporting.publication import (
     DeliveryOutcome,
     DbPublicationSession,
@@ -46,7 +48,8 @@ from camctl.reporting.publication import (
 )
 
 from ..persistence.test_runtime import _create_valid_database
-from .test_freeze import _submit
+from .test_freeze import Catalog, _plan_body, _submit
+from ..support.acceptance import accept_document
 from ..support.database import business_database, database_path
 
 
@@ -119,32 +122,40 @@ def _advance_to(pipeline, report: FrozenReport, target: int) -> None:
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
 
 
-def _seed_sync_action(pipeline) -> None:
-    """运行中的报告动作 40 与其未结束同步责任。"""
-    owned = pipeline[0]
-    connection = owned.connection
-    boundary = connection.execute(
-        "SELECT last_event_id FROM history_transactions ORDER BY id DESC"
-    ).fetchone()[0]
-    connection.execute(
-        "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
-        " scheduled_at, group_name, input_fields_json, effective_params_json,"
-        " driver_id, max_delay_ms, execution_spec_json, status, execution_started,"
-        " cancel_requested, error_code, error_details_json,"
-        " first_window_observed_at, expiration_reason, source_resolution_state,"
-        " resolved_source_plan_id, target_selection_state, created_event_id,"
-        " last_event_id, change_count)"
-        " VALUES (40, 1, 9, 'act-40', 7, NULL, 1750000000000000, NULL, '{}',"
-        " NULL, NULL, NULL,"
-        " '{}', 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, 1)",
-        (boundary, boundary))
-    connection.execute(
-        "INSERT INTO state_syncs (id, action_id, mode, after_report_id, from_wm,"
-        " started_boundary_event_id, status, local_report_id, ack_report_id,"
-        " ended_event_id)"
-        " VALUES (1, 40, 1, NULL, 0, ?, 1, NULL, NULL, NULL)",
-        (boundary,))
-    connection.commit()
+def _freeze_sync_report(pipeline):
+    """正式受理并开始同步，再冻结包含开始记录的报告。"""
+    owned, _, _ = pipeline
+
+    async def scenario():
+        return await accept_document(
+            _plan_body("1"),
+            AcceptanceContext(
+                mode=CommandMode.RUN, catalog=Catalog(),
+                repository=AcceptanceRepository(),
+                clock=type("Clock", (), {"utc_micros": staticmethod(lambda: 1)})()),
+            database_path(owned))
+
+    accepted = asyncio.run(scenario())
+    assert accepted.plan_id is not None
+    action_id = _value(owned, "SELECT id FROM actions WHERE plan_id = ?",
+                       accepted.plan_id)[0]
+    started = start_sync(new_operation_key(), _owned(owned), action_id=action_id,
+                         mode=SyncMode.FULL, occurred_at=2)
+    assert started.kind is DbOutcomeKind.COMPLETED, started.error
+    assert started.value.disposition is SyncDisposition.SAVED
+    sync_id = started.value.sync_id
+    assert sync_id is not None
+    boundary = _value(owned,
+        "SELECT started_boundary_event_id FROM state_syncs WHERE id = ?",
+        sync_id)[0]
+    frozen = ReportingRepository().freeze_report(
+        new_operation_key(), _owned(owned), occurred_at=3)
+    assert frozen.kind is DbOutcomeKind.COMPLETED, frozen.error
+    report = frozen.value.report
+    assert report.boundary is not None
+    assert report.boundary.last_event_id >= boundary
+    assert report.from_wm == 0
+    return report, action_id, sync_id
 
 
 def _value(owned, sql: str, *params):
@@ -400,14 +411,19 @@ def test_staging_residue_is_regenerated_and_published(pipeline):
 
 def test_republish_reuses_identity_and_settles_sync(pipeline):
     owned, directories, _ = pipeline
-    report = _freeze_report(pipeline)
+    report, action_id, sync_id = _freeze_sync_report(pipeline)
     _advance_to(pipeline, report, 4)
-    _seed_sync_action(pipeline)
+    assert _value(owned,
+        "SELECT status, publication_count FROM reports WHERE id = ?",
+        report.report_id) == (4, 1)
+    assert _value(owned,
+        "SELECT local_report_id, status FROM state_syncs WHERE id = ?",
+        sync_id) == (None, 1)
     before = _last_event_id(owned)
     decision = decide_republish(
         True, _covering(report), observe_report_locations(directories))
     assert decision is RepublishDecision.REPUBLISH_EXISTING
-    result = _deliver(pipeline, report.report_id, local_actions=(40,))
+    result = _deliver(pipeline, report.report_id, local_actions=(action_id,))
     assert result.outcome is DeliveryOutcome.PUBLISHED
     ready_file = directories.ready / f"status-report-{report.report_id}-{_SHA}.json"
     assert ready_file.read_bytes() == _PAYLOAD
@@ -416,11 +432,11 @@ def test_republish_reuses_identity_and_settles_sync(pipeline):
         report.report_id)
     assert row[0] == 4 and row[1] == 2
     assert _new_events(owned, before) == [
-        (28, 3), (28, 4), (29, 2), (8, 1)]
+        (28, 3), (28, 4), (29, 2), (8, 1), (9, 2)]
     sync = _value(owned,
-        "SELECT local_report_id FROM state_syncs WHERE id = 1")
-    assert sync[0] == report.report_id
-    assert _value(owned, "SELECT status FROM actions WHERE id = 40")[0] == 3
+        "SELECT local_report_id, status FROM state_syncs WHERE id = ?", sync_id)
+    assert sync == (report.report_id, 1)
+    assert _value(owned, "SELECT status FROM actions WHERE id = ?", action_id)[0] == 3
 
 
 def test_republish_not_needed_without_responsibility(pipeline):
@@ -445,16 +461,20 @@ def test_existing_delivered_report_is_kept(pipeline):
 
 
 def test_publication_settles_local_report_and_action_success(pipeline):
-    owned, _, _ = pipeline
-    report = _freeze_report(pipeline)
-    _seed_sync_action(pipeline)
+    owned, directories, _ = pipeline
+    report, action_id, sync_id = _freeze_sync_report(pipeline)
     before = _last_event_id(owned)
-    result = _deliver(pipeline, report.report_id, local_actions=(40,))
+    result = _deliver(pipeline, report.report_id, local_actions=(action_id,))
     assert result.outcome is DeliveryOutcome.PUBLISHED
     assert result.error is None
+    ready_file = directories.ready / f"status-report-{report.report_id}-{_SHA}.json"
+    assert ready_file.read_bytes() == _PAYLOAD
+    assert _value(owned,
+        "SELECT status, publication_count FROM reports WHERE id = ?",
+        report.report_id) == (4, 1)
     sync = _value(owned,
-        "SELECT local_report_id, status FROM state_syncs WHERE id = 1")
+        "SELECT local_report_id, status FROM state_syncs WHERE id = ?", sync_id)
     assert sync == (report.report_id, 1)
-    assert _value(owned, "SELECT status FROM actions WHERE id = 40")[0] == 3
+    assert _value(owned, "SELECT status FROM actions WHERE id = ?", action_id)[0] == 3
     assert _new_events(owned, before) == [
-        (28, 2), (28, 3), (28, 4), (29, 2), (8, 1)]
+        (28, 2), (28, 3), (28, 4), (29, 2), (8, 1), (9, 2)]
