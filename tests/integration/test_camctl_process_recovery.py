@@ -309,6 +309,9 @@ def test_early_reap_never_signals_stale_group_or_starts_run(session_factory):
     session.submit()
     session.command("pause-scan")
     session.exit_first()
+    # 等模块取得并保留实际退出记录后，再模拟主程序抢先回收。
+    session.until(lambda: session.log_entries(command="run", pid=session.old["pid"],
+                                              stream="exit_observed"), "旧 CLI 退出记录已保留")
     assert session.command(f"steal-exit {session.old['pid']}") == f"stolen {session.old['pid']}"
     session.until(lambda: session.log_entries(command="run", pid=session.old["pid"],
                                               stream="wait_unknown"), "提前回收诊断")
