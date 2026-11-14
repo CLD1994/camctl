@@ -22,6 +22,7 @@ import pytest
 
 from _wsl_host_demo import HostDemo, query_state, to_wsl, wait_for
 from camctl_fixtures import Deployment, future_schedule, terminate_process_tree
+from test_camctl_c_module_roundtrip import _open_ready_report
 
 
 def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
@@ -63,25 +64,53 @@ def _deployment_with_client(tmp_path: Path) -> tuple[Deployment, Path]:
     return deployment, deployment.state_db
 
 
+def _matches_request(report: dict, request_id: int, plan_id: int, action_id: int) -> bool:
+    return any(
+        plan["request_id"] == str(request_id)
+        and plan["plan_instance_id"] == str(plan_id)
+        and plan["status"] == "completed"
+        and any(action["action_instance_id"] == str(action_id)
+                and action["name"] == "sync"
+                and action["type"] == "report_status"
+                and action["status"] == "succeeded"
+                for action in plan["actions"])
+        for plan in report["plans"]
+    )
+
+
 def _published_report(deployment: Deployment, demo: HostDemo,
-                      plan_path: Path) -> tuple[int, str]:
+                      plan_path: Path, request_id: int) -> tuple[int, str]:
     """递交计划并等待报告发布，返回（报告 id、ready 文件名）。"""
     demo.submit(plan_path)
-    ready_name = _await(
+    _await(
         lambda: glob.glob("status-report-*.json",
                           root_dir=str(deployment.ready)) or None,
-        timeout_s=120, message="报告未发布到 ready")[0]
-    _await(lambda: (
-        _query(deployment.state_db,
-               "SELECT status FROM actions WHERE name = 'sync'"),
-        _query(deployment.state_db, "SELECT status FROM plans"),
-    ) == ([(3,)], [(3,)]) or None,
-        timeout_s=120, message="同步动作与计划未到终态")
-    rows = _query(
-        deployment.state_db,
-        "SELECT id FROM reports WHERE status = 4 ORDER BY id")
-    assert rows, "没有已发布报告"
-    return rows[-1][0], ready_name
+        timeout_s=120, message="报告未发布到 ready")
+
+    def completed_report():
+        rows = _query(deployment.state_db,
+            "SELECT p.id, a.id, p.status, a.status FROM plans p"
+            " JOIN actions a ON a.plan_id = p.id"
+            " WHERE p.request_id = ? AND a.name = 'sync'", (request_id,))
+        assert len(rows) <= 1, rows
+        if not rows or rows[0][2:] != (3, 3):
+            return None
+        plan_id, action_id = rows[0][:2]
+        for path in sorted(deployment.ready.glob("status-report-*.json")):
+            try:
+                with _open_ready_report(path) as reader:
+                    report = json.load(reader)
+            except FileNotFoundError:
+                continue
+            if _matches_request(report, request_id, plan_id, action_id):
+                report_id = int(report["report_id"])
+                if _query(deployment.state_db,
+                        "SELECT status FROM reports WHERE id = ?", (report_id,)) == [(4,)]:
+                    return report_id, path.name
+        return None
+
+    return _await(completed_report, timeout_s=120,
+                  message="同步动作与计划未到终态，或 ready 报告尚未覆盖其结果")
 
 
 def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
@@ -95,29 +124,40 @@ def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
 
     # 客户端真实导出：能力校验+整数请求身份分配；首份无 ACK。
     plan_path, receipt = deployment.export_plan_with_client(_plan_body("首份同步"))
-    request_id = receipt["request_id"]
+    request_id = int(receipt["request_id"])
     assert receipt["has_ack"] is False
 
     demo = HostDemo(deployment, host_demo)
     try:
         demo.start()
-        report_id, ready_name = _published_report(deployment, demo, plan_path)
-        size_sha = _query(
-            state_db, "SELECT size_bytes, sha256 FROM reports WHERE id = ?",
-            (report_id,))[0]
-        assert str(report_id) == json.loads(
-            (deployment.ready / ready_name).read_text("utf-8")
-        )["report_id"]
+        _published_report(deployment, demo, plan_path, request_id)
 
-        demo.claim()
+        def claim_completed_report():
+            demo.claim()
+            files = sorted(deployment.processing.glob("status-report-*.json"))
+            if not files:
+                return None
+            assert len(files) == 1, files
+            claimed = files[0]
+            content = claimed.read_bytes()
+            report = json.loads(content.decode("utf-8"))
+            rows = _query(state_db,
+                "SELECT p.id, a.id, p.status, a.status FROM plans p"
+                " JOIN actions a ON a.plan_id = p.id"
+                " WHERE p.request_id = ? AND a.name = 'sync'", (request_id,))
+            assert len(rows) == 1 and rows[0][2:] == (3, 3), rows
+            assert _matches_request(report, request_id, *rows[0][:2])
+            return int(report["report_id"]), claimed, content
+
+        report_id, claimed, content_bytes = _await(
+            claim_completed_report, timeout_s=30, message="领取未移动完整报告到 processing")
+        size_sha = _query(
+            state_db, "SELECT size_bytes, sha256 FROM reports WHERE id = ? AND status = 4",
+            (report_id,))[0]
         # 领取后位置：ready 撤空、processing 收到同一文件（原字节）。
-        _await(lambda: glob.glob("status-report-*",
-                                  root_dir=str(deployment.processing)) or None,
-               timeout_s=30, message="领取未移动报告到 processing")
         assert not glob.glob("status-report-*",
                              root_dir=str(deployment.ready))
-        claimed = deployment.processing / ready_name
-        content_bytes = claimed.read_bytes()
+        assert claimed.name == f"status-report-{report_id}-{size_sha[1]}.json"
         assert len(content_bytes) == size_sha[0]
         assert hashlib.sha256(content_bytes).hexdigest() == size_sha[1]
 
@@ -151,11 +191,12 @@ def test_invalid_body_with_valid_ack_absorbs_ack_only(
         tmp_path: Path, host_demo: str) -> None:
     """非法正文但有效 ACK：正文被拒、不建计划，ACK 仍被吸收。"""
     deployment, state_db = _deployment_with_client(tmp_path)
-    plan_path, _ = deployment.export_plan_with_client(_plan_body("同步前序"))
+    plan_path, receipt = deployment.export_plan_with_client(_plan_body("同步前序"))
     demo = HostDemo(deployment, host_demo)
     try:
         demo.start()
-        report_id, _ = _published_report(deployment, demo, plan_path)
+        report_id, _ = _published_report(
+            deployment, demo, plan_path, int(receipt["request_id"]))
         plans_before = _query(state_db, "SELECT COUNT(*) FROM plans")[0][0]
         # 正文缺少名称与动作：受理必须拒绝；顶层 ACK 引用已发布报告。
         invalid = deployment.root / "invalid-with-ack.json"
