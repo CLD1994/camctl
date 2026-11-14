@@ -105,9 +105,22 @@ async def test_expired_spawn_handoff_reaps_real_child_and_retains_both_channels(
                 await handle.wait()
                 await handle.wait_output()
             else:
-                async with asyncio.timeout(5):
-                    while not marker.exists():
-                        await asyncio.sleep(.001)
+                exit_wait = asyncio.create_task(handle.wait())
+                try:
+                    async with asyncio.timeout(5):
+                        while not marker.exists():
+                            done, _ = await asyncio.wait({exit_wait}, timeout=.001)
+                            if done:
+                                exit_value = exit_wait.result()
+                                await handle.wait_output()
+                                raise AssertionError(
+                                    f"启动信号出现前进程退出: {exit_value!r}, "
+                                    f"stdout={handle.output!r}, stderr={handle.stderr!r}"
+                                )
+                finally:
+                    if not exit_wait.done():
+                        exit_wait.cancel()
+                    await asyncio.gather(exit_wait, return_exceptions=True)
             if gate_fails:
                 raise RuntimeError("启动门失败")
             await asyncio.sleep(.03)
@@ -157,16 +170,18 @@ async def test_cancel_uses_same_termination_flow(tmp_path) -> None:
     try:
         async with asyncio.timeout(5):
             while not marker.exists():
-                await asyncio.sleep(.005)
+                done, _ = await asyncio.wait({task}, timeout=.005)
+                if done:
+                    outcome = task.result()
+                    raise AssertionError(f"启动信号出现前工具调用已结束: {outcome!r}")
         stop.request()
-        outcome = await task
+        outcome = await asyncio.wait_for(asyncio.shield(task), 5)
         assert outcome.error == "cancelled"
         assert outcome.used_grace_s == GRACE
         assert outcome.exit is not None
     finally:
-        if not task.done():
-            task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        stop.request()
+        await asyncio.wait_for(asyncio.shield(task), 5)
 
 
 async def test_canceled_waiter_reaps_real_process_and_finishes_both_output_readers(tmp_path):
