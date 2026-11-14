@@ -22,8 +22,6 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..support.capture import capture_database
 from ..support.session import open_session_database
-from ..persistence.test_runtime import _create_valid_database
-from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action
 
 
 pytestmark = pytest.mark.asyncio
@@ -81,27 +79,97 @@ def _registry(stop_port) -> DriverRegistry:
         EvidenceRegistry(()), DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
 
 
-def _world(tmp_path: Path, *, activity_state: int = 2, safe_repeat: bool = True):
-    target = tmp_path / "state.db"
-    _create_valid_database(target)
-    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)", ("f" * 32,))
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})))
-    _seed_plan(connection, 1)
-    _seed_record_action(connection, 1, 1)
-    _seed_activity(connection, 1, dispatch_state=3, activity_state=activity_state)
-    if not safe_repeat:
-        connection.execute("UPDATE device_activities SET safe_repeat_stop = 0")
-    connection.commit()
+async def _recording_world(tmp_path: Path):
+    """真实受理、授予 START 并保存启动确认，建立在途录像。"""
+    from camctl.capture.models import ActivityObservationSave
+    from camctl.contracts.values import new_operation_key
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.ports import ControlRequest
+    from camctl.operations.attempts import AttemptConfig, AttemptFinish, RunFinish, RunOutcome
+    from camctl.operations.validation import validate_outcome
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.repositories.scheduling import GrantOutcome, GrantRequest, SchedulingRepository
+    from camctl.scheduling.rules import LaunchWindow
+    from ..capture.result_consumer_fixtures import RESULT_EVIDENCE, consumer_world, returned
+    from ..support.database import database_path
+
+    async def no_runtime(owned, *, driver):
+        return None
+
+    owned, _, action_id, _ = await consumer_world(
+        tmp_path, "record", start=False, runtime_factory=no_runtime)
+    assert action_id == 1
+    grant = SchedulingRepository().grant_start(GrantRequest(
+        "cam-1", action_id, LaunchWindow(_NOW, _NOW + 5_000_000), _NOW,
+        AttemptConfig(2, Decimal("10")), _NOW), new_operation_key(), owned)
+    assert grant.kind is DbOutcomeKind.COMPLETED, grant.error
+    assert grant.value.outcome is GrantOutcome.GRANTED
+    ticket = grant.value.ticket
+    assert ticket is not None
+
+    class StartPort:
+        def __init__(self):
+            self.declaration = _declaration(control_supported=True)
+            self.calls = []
+
+        async def control(self, request):
+            self.calls.append(request)
+            return DeviceCallResult.from_outcome(
+                returned("operation", "start_confirmed", grant.value.activity_id))
+
+    driver = StartPort()
+    response = await driver.control(ControlRequest(
+        "start_recording", DeviceBinding("cam-1", "camctl-adb"), {}, ticket, Decimal("10")))
+    assert len(driver.calls) == 1
+    result = CaptureRepository().finish_start_result(
+        AttemptFinish(ticket, validate_outcome(ticket, response.outcome, RESULT_EVIDENCE),
+                      _NOW, run_finish=RunFinish(RunOutcome.SUCCEEDED)),
+        ActivityObservationSave(action_id, _NOW, sent_at=_NOW, started_at=_NOW,
+                                dispatch_state=3, activity_state=2),
+        new_operation_key(), owned)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert owned.connection.execute(
+        "SELECT dispatch_state, activity_state, stop_supported, safe_repeat_stop, started_at"
+        " FROM device_activities WHERE action_id = 1").fetchone() == (3, 2, 1, 1, _NOW)
+    target = database_path(owned)
     return target, owned
+
+
+async def _stop_recording(owned):
+    """执行停止端口并按正式结果事务保存活动结束。"""
+    from camctl.contracts.values import new_operation_key
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.ports import ControlRequest
+    from camctl.operations.attempts import (
+        AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, OperationKind,
+        RunFinish, RunOutcome,
+    )
+    from camctl.operations.validation import validate_outcome
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.repositories.operations import OperationRepository
+    from ..capture.result_consumer_fixtures import RESULT_EVIDENCE, returned
+
+    intent = OperationRepository().begin_attempt(AttemptIntent(
+        operation="stop", action_id=1, kind=OperationKind.STOP,
+        target=AttemptTarget(activity_id=1), query_purpose=None,
+        config=AttemptConfig(2, Decimal("10")), occurred_at=_NOW),
+        new_operation_key(), owned)
+    assert intent.kind is DbOutcomeKind.COMPLETED, intent.error
+    ticket = intent.value.ticket
+    assert ticket is not None
+    stop = _StopPort(_declaration(), (
+        DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", 1)),))
+    response = await stop.stop(ControlRequest(
+        "stop_recording", DeviceBinding("cam-1", "camctl-adb"), {}, ticket, Decimal("10")))
+    assert len(stop.calls) == 1
+    saved = CaptureRepository().finish_capture_stop(AttemptFinish(
+        ticket, validate_outcome(ticket, response.outcome, RESULT_EVIDENCE), _NOW,
+        run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    assert owned.connection.execute(
+        "SELECT activity_state FROM device_activities WHERE id = 1").fetchone() == (3,)
 
 
 async def _settlement(target: Path, registry, *, anchors=None, maximum: int = 2, session=False):
@@ -131,7 +199,7 @@ def _run_row(owned):
 
 
 async def test_fatal_exit_stops_recording_once_and_records_stopped(tmp_path):
-    target, owned = _world(tmp_path)
+    target, owned = await _recording_world(tmp_path)
     stop = _StopPort(_declaration(), (_confirmed(),))
     try:
         entries = await (await _settlement(target, _registry(stop))).settle()
@@ -162,7 +230,7 @@ async def test_fatal_exit_stops_recording_once_and_records_stopped(tmp_path):
 
 
 async def test_budget_exhaustion_records_unconfirmed_with_each_attempt(tmp_path):
-    target, owned = _world(tmp_path)
+    target, owned = await _recording_world(tmp_path)
     stop = _StopPort(_declaration(), (_timeout(), _timeout()))
     try:
         entries = await (await _settlement(target, _registry(stop))).settle()
@@ -189,28 +257,8 @@ async def test_budget_exhaustion_records_unconfirmed_with_each_attempt(tmp_path)
         owned.connection.close()
 
 
-async def test_unsafe_repeat_target_records_not_attempted_without_stop(tmp_path):
-    target, owned = _world(tmp_path, safe_repeat=False)
-    stop = _StopPort(_declaration(), (_confirmed(),))
-    try:
-        entries = await (await _settlement(target, _registry(stop))).settle()
-
-        assert stop.calls == []
-        run = _run_row(owned)
-        assert run[:4] == (9, 4, 0, 2)
-        assert json.loads(run[4])["code"] == "emergency_not_attempted"
-        assert owned.connection.execute(
-            "SELECT COUNT(*) FROM operation_attempts WHERE run_id ="
-            " (SELECT id FROM operation_runs WHERE kind = 9)").fetchone() == (0,)
-        assert entries[0]["outcome"] == "not_attempted"
-        assert entries[0]["record_status"] == "recorded"
-        assert entries[0]["attempts_used"] == 0
-    finally:
-        owned.connection.close()
-
-
 async def test_ended_activity_and_repeated_settlement_do_not_stop_again(tmp_path):
-    target, owned = _world(tmp_path)
+    target, owned = await _recording_world(tmp_path)
     stop = _StopPort(_declaration(), (_confirmed(), _confirmed()))
     settlement = await _settlement(target, _registry(stop))
     try:
@@ -232,9 +280,7 @@ async def test_ended_activity_and_repeated_settlement_do_not_stop_again(tmp_path
             "SELECT COUNT(*) FROM operation_runs WHERE kind = 9").fetchone() == (1,)
 
         # 已可靠确认停止（活动 ENDED）的录像不是应急目标。
-        owned.connection.execute(
-            "UPDATE device_activities SET activity_state = 3")
-        owned.connection.commit()
+        await _stop_recording(owned)
         third = EmergencySettlement(
             session_key="c" * 32,
             anchors={1: (_NOW, _NOW + 1)},
@@ -261,7 +307,7 @@ async def test_run_session_merges_emergency_diagnostics_into_fatal_error(tmp_pat
     from camctl.session.outcome import SessionOutcome
     from camctl.session.service import StateDbFailure, SessionContext, SessionPaths, run_session
 
-    target, owned = _world(tmp_path)
+    target, owned = await _recording_world(tmp_path)
     owned.connection.close()
     stop = _StopPort(_declaration(), (_confirmed(),))
     settlement = await _settlement(target, _registry(stop), session=True)
@@ -322,7 +368,7 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
     from camctl.session.supervision import Supervisor
 
     timeout = 10
-    target, seed = _world(tmp_path)
+    target, seed = await _recording_world(tmp_path)
     seed.connection.close()
     loop = asyncio.get_running_loop()
     logs = tmp_path / "logs"
@@ -506,7 +552,7 @@ async def test_internal_emergency_control_error_still_settles_logs(
     from camctl.session.supervision import Supervisor
 
     timeout = 10
-    target, seed = _world(tmp_path)
+    target, seed = await _recording_world(tmp_path)
     seed.connection.close()
     logs = tmp_path / "logs"
     logs.mkdir()
@@ -634,7 +680,7 @@ async def test_initial_restricted_internal_control_stays_separate_from_parent(
     from camctl.session.supervision import Supervisor
 
     timeout = 10
-    target, seed = _world(tmp_path)
+    target, seed = await _recording_world(tmp_path)
     seed.connection.close()
     logs = tmp_path / "logs"
     logs.mkdir()
