@@ -1,6 +1,7 @@
 """真实 OSMO 部署绑定穿过单文件媒体链及 native 公共发布。"""
 
 import json
+from dataclasses import replace
 import shlex
 
 import pytest
@@ -13,7 +14,9 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.operations.process import LocalExit, RawToolOutcome
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.capture import CaptureRepository
+from ..support.bootstrap_consumers import TransactionFault
 from camctl.persistence.repositories.segments import SegmentRepository
 
 from ..support.bootstrap_driver_cases import driver_owned as owned
@@ -173,13 +176,30 @@ async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_dev
         world.wall[0] = _SCHEDULED + wait_ms * 1_000 + 1
         world.mono[0] = wait_ms * 1_000_000 + 1
 
-        finish = runtime.capture.finish_segment_recording
-        runtime.capture.finish_segment_recording = lambda *args, **kwargs: DbOutcome(
-            DbOutcomeKind.ROLLED_BACK, error=OSError("公共结果提交前中断")
-        )
-        with pytest.raises(ConsistencyError):
-            await capture_handler(world.kind)(1, runtime)
-        runtime.capture.finish_segment_recording = finish
+        finish = CaptureRepository.finish_segment_recording
+        requests, receipts, faults = [], [], []
+
+        def fail_commit(repository, request, key, owned, **options):
+            requests.append((request, key))
+            fault = TransactionFault(owned.connection, after_commit=False)
+            faults.append(fault)
+            receipt = finish(repository, request, key, replace(owned, connection=fault), **options)
+            receipts.append(receipt)
+            return receipt
+
+        with monkeypatch.context() as patch:
+            patch.setattr(CaptureRepository, "finish_segment_recording", fail_commit)
+            with pytest.raises(ConsistencyError):
+                await capture_handler(world.kind)(1, runtime)
+        assert len(requests) == len(receipts) == len(faults) == 1
+        assert faults[0].commit_calls == 1
+        assert receipts[0].kind is DbOutcomeKind.UNKNOWN
+        request, key = requests[0]
+        assert request.ref.action_id == 1
+        assert request.occurred_at == world.wall[0]
+        assert world.owned.connection.execute(
+            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)
+        ).fetchone() == (0,)
 
         prepared = SegmentRepository().read_prepared_result_ref(1, world.owned)
         assert isinstance(prepared, SegmentResultRef)

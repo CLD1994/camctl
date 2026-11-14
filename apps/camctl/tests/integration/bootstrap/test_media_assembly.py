@@ -17,12 +17,15 @@ import hashlib
 import sys
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from camctl.acceptance.service import CommandMode
+from camctl.bootstrap import lifecycle
 from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow
@@ -303,13 +306,6 @@ def _run_session(deps, cfg, factory):
     ))
 
 
-async def _wait_wall_past(db: Path, started_at_us: int, span_s: float) -> None:
-    """等待真实墙钟越过已保存启动墙钟加指定秒数。"""
-    deadline = started_at_us + int(span_s * 1_000_000)
-    while time.time() * 1_000_000 < deadline:
-        await asyncio.sleep(0.05)
-
-
 async def _wait_failed_check(db: Path, task: asyncio.Task) -> None:
     from camctl.capture.processing import CheckPhase
 
@@ -333,7 +329,7 @@ class TestExcessRepairThroughSessionAssembly:
     @pytest.mark.parametrize("osv,digest_failure", [(False, False), (True, False), (False, True)],
                              ids=["mp4", "osv", "mp4-source-digest-failure"])
     async def test_cross_session_excess_repairs_and_finishes(
-            self, tmp_path: Path, osv, digest_failure) -> None:
+            self, tmp_path: Path, monkeypatch, osv, digest_failure) -> None:
         home = tmp_path / "excess"
         home.mkdir()
         cfg = _config(home)
@@ -341,9 +337,18 @@ class TestExcessRepairThroughSessionAssembly:
         tools_dir.mkdir()
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        scheduled = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, _ShortRecordCatalog(),
-            _record_plan("1", _future_schedule(2)))
+            tmp_path, cfg, _ShortRecordCatalog(), _record_plan("1", scheduled))
+        wall = [int(datetime.strptime(scheduled, "%Y-%m-%d %H:%M:%S")
+                    .replace(tzinfo=timezone.utc).timestamp() * 1_000_000)]
+        actual_session = lifecycle.run_session
+
+        async def session(context, source):
+            context.clock = SimpleNamespace(utc_micros=lambda: wall[0])
+            return await actual_session(context, source)
+
+        monkeypatch.setattr(lifecycle, "run_session", session)
         db = Path(cfg.paths.state_db)
         driver = _DigestFailureDriver(_CONTENT) if digest_failure else _SessionDriver(_CONTENT)
         clock = {"ns": time.monotonic_ns()}
@@ -354,7 +359,7 @@ class TestExcessRepairThroughSessionAssembly:
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
             cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor,
-            prohibit_media=digest_failure))
+            prohibit_media=digest_failure, wall_us=lambda: wall[0]))
         try:
             await _await_query(
                 db,
@@ -364,11 +369,11 @@ class TestExcessRepairThroughSessionAssembly:
         finally:
             await _cancel(task)
             close_runtime(deps)
-        # 墙钟越过启动加目标加余量（1 + 2 秒）：第二个会话对账满
-        # 足后停止，控制耗时超过门槛触发异常多录修复。
+        # 新会话使用的墙钟越过启动加目标及余量（1 + 2 秒）；
+        # 旧会话的单调钟锚点已经失效。
         started_at = _scalar(
             db, "SELECT started_at FROM device_activities WHERE id = 1")[0]
-        await _wait_wall_past(db, int(started_at), 3.2)
+        wall[0] = int(started_at) + 3_200_000
         entry = _entry("clip-1", size=len(_CONTENT))
         if osv:
             entry = replace(entry, original_name="clip-1.OSV", media_type=None, format_id="osv")
@@ -376,7 +381,7 @@ class TestExcessRepairThroughSessionAssembly:
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
             cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor,
-            prohibit_media=digest_failure))
+            prohibit_media=digest_failure, wall_us=lambda: wall[0]))
         try:
             if digest_failure:
                 await _wait_failed_check(db, task)
@@ -454,7 +459,7 @@ class TestExcessRepairThroughSessionAssembly:
 
 class TestUndeclaredReadKeepsWaiting:
     async def test_no_media_port_when_read_not_declared(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, monkeypatch) -> None:
         home = tmp_path / "waiting"
         home.mkdir()
         cfg = _config(home)
@@ -462,9 +467,18 @@ class TestUndeclaredReadKeepsWaiting:
         tools_dir.mkdir()
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        scheduled = _future_schedule(2)
         await _submit_plan(
-            tmp_path, cfg, _ShortRecordCatalog(),
-            _record_plan("1", _future_schedule(2)))
+            tmp_path, cfg, _ShortRecordCatalog(), _record_plan("1", scheduled))
+        wall = [int(datetime.strptime(scheduled, "%Y-%m-%d %H:%M:%S")
+                    .replace(tzinfo=timezone.utc).timestamp() * 1_000_000)]
+        actual_session = lifecycle.run_session
+
+        async def session(context, source):
+            context.clock = SimpleNamespace(utc_micros=lambda: wall[0])
+            return await actual_session(context, source)
+
+        monkeypatch.setattr(lifecycle, "run_session", session)
         db = Path(cfg.paths.state_db)
         driver = _SessionDriver(_CONTENT)
         clock = {"ns": time.monotonic_ns()}
@@ -472,7 +486,7 @@ class TestUndeclaredReadKeepsWaiting:
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
             cfg, _registry(driver, read_supported=False),
-            results, tools_dir, clock))
+            results, tools_dir, clock, wall_us=lambda: wall[0]))
         try:
             await _await_query(
                 db,
@@ -483,12 +497,12 @@ class TestUndeclaredReadKeepsWaiting:
             close_runtime(deps)
         started_at = _scalar(
             db, "SELECT started_at FROM device_activities WHERE id = 1")[0]
-        await _wait_wall_past(db, int(started_at), 3.2)
+        wall[0] = int(started_at) + 3_200_000
         results.files_by_action[1] = (_entry("clip-1", size=len(_CONTENT)),)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
             cfg, _registry(driver, read_supported=False),
-            results, tools_dir, clock))
+            results, tools_dir, clock, wall_us=lambda: wall[0]))
         try:
             # 停止与异常多录决定照常建立；读取未声明所以媒体端口
             # 未装配，修复责任保持待执行，动作不终局。

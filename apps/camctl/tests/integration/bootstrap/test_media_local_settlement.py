@@ -13,7 +13,7 @@ from camctl.session.clock import ClockBecameUntrusted
 from camctl.session.locks import acquire_session, probe_admission
 from camctl.session.service import StateDbFailure, run_session
 
-from ..capture.media_retry_fixtures import _Catalog, media_pipeline as pipeline  # noqa: F401
+from ..capture.media_retry_fixtures import _Catalog
 from ..capture.test_input_copy import _NOW
 from ..session.test_session import FixedClock
 
@@ -25,10 +25,11 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.parametrize("primary", ["state", "configuration", "clock", "cancel"])
-async def test_local_settlement_failures_preserve_fatal_primary(pipeline, primary):
+async def test_local_settlement_failures_preserve_fatal_primary(tmp_path, primary):
     from pathlib import Path
     from camctl.bootstrap.background_flow import CombinedLocalWork
-    from ..support.session import session_context
+    from ..support.session import session_config, session_context
+    from camctl.persistence.initialization import InitOutcome, initialize_state
 
     class Owner:
         def __init__(self, name):
@@ -46,7 +47,9 @@ async def test_local_settlement_failures_preserve_fatal_primary(pipeline, primar
             raise self.error
 
     owners = [Owner("settlement-first"), Owner("settlement-second")]
-    path = Path(pipeline[0].connection.execute("PRAGMA database_list").fetchone()[2])
+    cfg = session_config(tmp_path)
+    path = Path(cfg.paths.state_db)
+    assert initialize_state(cfg, path).outcome is InitOutcome.CREATED
     context = session_context(path, catalog=_Catalog(), clock=FixedClock(_NOW + 100),
         local_work=CombinedLocalWork(owners))
     errors = {"state": StateDbFailure("primary-state"),
