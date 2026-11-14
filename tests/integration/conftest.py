@@ -12,5 +12,5 @@ from _wsl_host_demo import build_host_demo
 
 
 @pytest.fixture(scope="session")
-def host_demo() -> str:
-    return build_host_demo()
+def host_demo(request) -> str:
+    return build_host_demo(request.addfinalizer)

@@ -144,12 +144,15 @@ def _launcher_body(exec_line: str) -> str:
     return f"#!/bin/bash\n{_LAUNCHER_CONVERSION}{exec_line}"
 
 
-def build_host_demo() -> str:
+def build_host_demo(register_cleanup) -> str:
     """在部署验证环境构建真实 host-demo 并部署 camctl 启动桥。
 
     WSL 不可用时跳过：C 主程序组合按部署验证裁决需要 WSL x86
     Linux。构建使用当前工作区源码，基础 launcher 直接
     进入生产 CLI（无设备替身）。
+
+    调用方通过 register_cleanup 登记清理回调，在测试会话结束时
+    执行；回调在实际构建前登记，构建失败时也会执行。
     """
     import pytest
 
@@ -158,6 +161,14 @@ def build_host_demo() -> str:
                                capture_output=True, timeout=30)
         if probe.returncode != 0:
             pytest.skip("WSL 不可用：C 主程序组合按部署验证裁决需要 WSL x86 Linux")
+
+    def remove_build() -> None:
+        removed = run_wsl(f"rm -rf -- {shlex.quote(_WSL_BUILD)}", timeout_s=30)
+        assert removed.returncode == 0, f"host-demo 构建目录清理失败: {removed.stderr}"
+
+    # 在构建可能失败之前登记。pytest 分别交付构建和收场错误，
+    # 避免清理异常覆盖原来的构建失败。
+    register_cleanup(remove_build)
     python = Path(sys.executable)
     steps = [
         (f"cmake -S {shlex.quote(to_wsl(_REPO / 'apps/host-demo'))} -B {_WSL_BUILD}"
