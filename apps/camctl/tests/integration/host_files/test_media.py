@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from .file_boundary_helpers import fail_fd_operation
+from camctl.host_files import media
 from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.media import (
     ProbeRequest,
@@ -25,6 +26,8 @@ from camctl.host_files.media import (
 )
 from media_helpers import probe_media, repair_media
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+from camctl.host_files.tasks import FileTaskExecutor, FileTaskId
+from camctl.session.supervision import Supervisor
 
 pytestmark = pytest.mark.asyncio
 
@@ -236,26 +239,50 @@ async def test_real_subprocess_repair_success_and_failure(tmp_path: Path) -> Non
 
 
 async def test_cancel_terminates_media_tool(tmp_path: Path) -> None:
-    input_ref, output_ref, roots, _, _ = _setup(tmp_path)
-    tool = _tool(tmp_path, "repair", _REPAIR_BODY)
+    input_ref, output_ref, roots, input_path, output_path = _setup(tmp_path)
+    tool = _tool(tmp_path, "cancel-repair", """
+import sys, time
+from pathlib import Path
+Path(sys.argv[-1]).write_bytes(b"partial output")
+Path(__file__).with_suffix(".ready").write_text("ready")
+time.sleep(5)
+""")
+    ready = tmp_path / "cancel-repair.ready"
 
-    class CancelAfterDelay:
-        def __init__(self) -> None:
-            self._event = asyncio.Event()
+    class Owner:
+        async def take_over(self, task):
+            raise AssertionError("等待者未取消，不应产生接手")
 
-        async def requested(self) -> None:
-            await asyncio.sleep(0.2)
-            self._event.set()
-
-    artifact = await repair_media(
-        input_ref,
-        output_ref,
-        roots,
-        RepairRequest(ffmpeg=tool, output_args=("--sleep",)),
-        stop=CancelAfterDelay(),
-    )
+    executor = FileTaskExecutor(Supervisor())
+    identity = FileTaskId("cancel-repair")
+    running = asyncio.create_task(media.repair_media(
+        input_ref, output_ref, roots, RepairRequest(ffmpeg=tool),
+        executor=executor, task_id=identity, owner=Owner()))
+    try:
+        deadline = asyncio.get_running_loop().time() + 5
+        while not ready.exists() and not running.done() and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
+        if running.done():
+            result = await running
+            pytest.fail(f"工具到达启动标记前任务已结束: {result!r}")
+        assert ready.exists(), "工具未到达可取消阶段"
+        assert executor.unfinished_files() == (11, 12)
+        executor.request_stop(identity)
+        result = await asyncio.wait_for(asyncio.shield(running), 10)
+        assert result.ran is True and result.error is None
+        assert executor.unfinished_files() == ()
+    finally:
+        executor.request_stop(identity)
+        await asyncio.wait_for(asyncio.shield(asyncio.gather(running, return_exceptions=True)), 10)
+    artifact = result.value
     assert artifact.complete is False
-    assert artifact.error is not None
+    assert artifact.error is not None and artifact.error.startswith("tool_failed:")
+    diagnostics = artifact.tool_diagnostics
+    assert diagnostics is not None and diagnostics.control_only
+    assert diagnostics.outcome is not None
+    assert diagnostics.outcome.error == "cancelled" and diagnostics.outcome.exit is not None
+    assert artifact.exists is True and output_path.read_bytes() == b"partial output"
+    assert input_path.read_bytes() == b"x" * 250
 
 
 async def test_missing_tool_is_classified(tmp_path: Path) -> None:

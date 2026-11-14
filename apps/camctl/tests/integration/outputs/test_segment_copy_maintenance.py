@@ -80,7 +80,17 @@ async def test_unbound_inspection_copy_waits_for_actual_file_task_then_is_cleane
         FileTaskId("maintenance-check-source-read"), (file_id,),
         "read_file", "检查副本实际读取", actual_read)))
     try:
-        await entered.wait()
+        marker_wait = asyncio.create_task(entered.wait())
+        try:
+            done, _ = await asyncio.wait((marker_wait, operation), timeout=5,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if operation in done:
+                await operation
+                pytest.fail("实际读取在到达标记之前结束")
+            assert marker_wait in done, "等待实际读取标记超时"
+        finally:
+            marker_wait.cancel()
+            await asyncio.gather(marker_wait, return_exceptions=True)
         before = owned.connection.execute(
             "SELECT status FROM actions WHERE id=?", (source,),
         ).fetchone()
@@ -88,7 +98,7 @@ async def test_unbound_inspection_copy_waits_for_actual_file_task_then_is_cleane
         assert kept.outcome is WorkFileSingleOutcome.KEPT
         assert path.exists() and file_id in executor.unfinished_files()
         finish.set()
-        assert len(await operation) == path.stat().st_size
+        assert len(await asyncio.wait_for(asyncio.shield(operation), 5)) == path.stat().st_size
         assert file_id not in executor.unfinished_files()
         cleaned = await clean_one_work_file(file_id, _context(world, executor))
         assert cleaned.outcome is WorkFileSingleOutcome.DELETED
@@ -98,8 +108,10 @@ async def test_unbound_inspection_copy_waits_for_actual_file_task_then_is_cleane
         ).fetchone() == before
     finally:
         finish.set()
-        await operation
-        await world.close()
+        try:
+            await asyncio.wait_for(asyncio.shield(asyncio.gather(operation, return_exceptions=True)), 5)
+        finally:
+            await asyncio.wait_for(asyncio.shield(world.close()), 10)
 
 
 async def test_inspection_copy_delete_failure_is_retried_after_database_reopen(

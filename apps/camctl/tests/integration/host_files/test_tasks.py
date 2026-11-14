@@ -184,22 +184,48 @@ async def test_background_stop_delivers_actual_save_error_after_source_and_conne
             observations.append("connection_closed")
 
     background = BackgroundFlow(flow)
-    await background(None)
-    await entered.wait()
-    background.stop_new_work()
-    waiter = asyncio.create_task(CombinedLocalWork((background,)).settle())
-    await stopped.wait()
-    assert not waiter.done() and executor.unfinished_files() == (1,)
-    assert observations == []
-    release.set()
-    with pytest.raises(sqlite3.IntegrityError) as caught:
-        await waiter
-    assert caught.value is failures[0]
-    assert observations == ["source_closed", "actual_body_ended", "connection_closed"]
-    assert executor.unfinished_files() == () and background.required_settlements() == 0
-    assert source.read_bytes() == b"original source"
-    with sqlite3.connect(database) as reopened:
-        assert reopened.execute("SELECT operation_key FROM requests").fetchall() == [("original-key",)]
+    waiter = None
+    try:
+        await background(None)
+
+        async def wait_for_marker(marker, task):
+            marker_wait = asyncio.create_task(marker.wait())
+            try:
+                done, _ = await asyncio.wait((marker_wait, task), timeout=5,
+                                             return_when=asyncio.FIRST_COMPLETED)
+                if task in done:
+                    # 后台任务的原始错误由公开收场入口交付。
+                    if waiter is None:
+                        await background.settle()
+                    else:
+                        await waiter
+                    pytest.fail("实际任务在到达标记之前结束")
+                assert marker_wait in done, "等待实际任务标记超时"
+            finally:
+                marker_wait.cancel()
+                await asyncio.gather(marker_wait, return_exceptions=True)
+
+        await wait_for_marker(entered, background.unconsumed_task)
+        background.stop_new_work()
+        waiter = asyncio.create_task(CombinedLocalWork((background,)).settle())
+        await wait_for_marker(stopped, waiter)
+        assert not waiter.done() and executor.unfinished_files() == (1,)
+        assert observations == []
+        release.set()
+        with pytest.raises(sqlite3.IntegrityError) as caught:
+            await asyncio.wait_for(asyncio.shield(waiter), 5)
+        assert caught.value is failures[0]
+        assert observations == ["source_closed", "actual_body_ended", "connection_closed"]
+        assert executor.unfinished_files() == () and background.required_settlements() == 0
+        assert source.read_bytes() == b"original source"
+        with sqlite3.connect(database) as reopened:
+            assert reopened.execute("SELECT operation_key FROM requests").fetchall() == [("original-key",)]
+    finally:
+        release.set()
+        background.stop_new_work()
+        if waiter is None:
+            waiter = asyncio.create_task(CombinedLocalWork((background,)).settle())
+        await asyncio.wait_for(asyncio.shield(asyncio.gather(waiter, return_exceptions=True)), 5)
 
 
 async def test_default_pool_runs_tasks_on_worker_threads() -> None:

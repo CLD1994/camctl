@@ -37,15 +37,10 @@ from .test_work_files import _cancel_delivery, _context, _file_state
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["prepare", "segment", "hash", "move"])
+@pytest.mark.parametrize("stage", ["prepare", "segment", "hash"])
 async def test_shared_file_operation_keeps_qualification_until_actual_end(
         segment_env, tmp_path, monkeypatch, stage):
     owned, roots, qualification = segment_env
-    if stage == 'move':
-        if qualification.delivery_id is None:
-            pytest.skip('内部副本不执行普通 delivery 发布')
-        await _real_publication_and_cancel(tmp_path / 'public', monkeypatch)
-        return
     async with business_database(database_path(owned)) as database:
         file_id, copy_id = qualification.target_file_id, qualification.copy_id
         owned.connection.execute("UPDATE device_files SET checksum_support=3 WHERE id=501")
@@ -117,7 +112,8 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
                 await session.wait_stopped()
 
 
-async def _real_publication_and_cancel(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_publication_cancel_keeps_file_until_actual_move(tmp_path, monkeypatch):
     from camctl.bootstrap.flows import cancel_flow
     from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.outputs.work_files import WorkFileLimits
