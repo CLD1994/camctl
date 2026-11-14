@@ -6151,7 +6151,11 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
     if begin.disposition is not BeginDisposition.GRANTED:
         if begin.reason == "budget_exhausted":
             return ListingRound(ListingPhase.EXHAUSTED)
-        return (await _saved_result_listing(runtime, action_id))
+        if begin.reason in ("file_batch_waiting", "device_recovery"):
+            return ListingRound(ListingPhase.RETRY_WAIT)
+        if begin.reason in ("run_ended", "result_set_fixed"):
+            return (await _saved_result_listing(runtime, action_id))
+        raise ConsistencyError(f"结果核实意图被意外拒绝: {begin.reason!r}")
     ticket = begin.ticket
     if photo or _uses_result_pages(runtime):
         activity = (await runtime.database.read(lambda owned, inputs=("device_activities", activity_id): row_facts(owned.connection, *inputs), description="读取拍摄直接事实"))

@@ -30,6 +30,15 @@ def _started(deployment, name):
     return rows[0] if rows and (rows[0][1] is not None or rows[0][2] is not None) else None
 
 
+def _stopped(deployment, name):
+    rows = query_state(deployment.state_db,
+        "SELECT t.result_event_id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " JOIN actions a ON a.id=r.action_id WHERE a.name=? AND r.kind=? AND t.status=?"
+        " AND t.result_event_id IS NOT NULL",
+        (name, int(enum_for("operation_runs.kind").STOP), int(enum_for("operation_attempts.status").SUCCEEDED)))
+    return rows[0][0] if rows else None
+
+
 def _body(name, actions):
     return {"name": name, "actions": actions}
 
@@ -117,7 +126,7 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
         saved = deployment.import_reports_with_client(deployment.processing)
         assert saved["saved_report_ids"] == [capture_report["report_id"]]
 
-        # 取回首拍期间另起同设备十秒录像；长读取不能挡住停止或报告。
+        # 取回首拍期间另起同设备十秒录像；长读取不能挡住必要停止或报告。
         (deployment.gates / "hold-read").touch()
         obtain_body = _body("camera-demo-obtain", [
             _capture(recording_params(model), clock, name="next-record"),
@@ -131,11 +140,24 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
         wait_for(lambda: _reading(deployment, demo), 60, "原片读取未开始")
         wait_for(lambda: _started(deployment, "next-record"), 60, "后续录像未开始")
         advance_clock(clock, 10)
-        wait_for(lambda: _report_with_statuses(deployment.ready, {"next-record": "succeeded", "obtain": "running"}),
-                 45, "长读取期间到期停止及报告未独立推进")
+        def stopped_report():
+            stopped_event = _stopped(deployment, "next-record")
+            if stopped_event is None:
+                return None
+            report = _report_with_statuses(deployment.ready, {"next-record": "running", "obtain": "running"})
+            if report is None:
+                return None
+            frozen = query_state(deployment.state_db, "SELECT frozen_event_id FROM reports WHERE id=?",
+                                 (int(report["report_id"]),))
+            return report if frozen and frozen[0][0] >= stopped_event else None
+        wait_for(stopped_report, 45, "长读取期间到期停止或停止后的报告未推进")
         assert query_state(deployment.state_db,
             "SELECT t.status,t.result_event_id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
             " WHERE r.copy_id IS NOT NULL") == [(int(enum_for("operation_attempts.status").RUNNING), None)]
+        assert query_state(deployment.state_db,
+            "SELECT t.id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+            " JOIN actions a ON a.id=r.action_id WHERE a.name=? AND r.kind=?",
+            ("next-record", int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS))) == []
         (deployment.gates / "release-read").touch()
         report = wait_for(lambda: _report_with_statuses(deployment.ready, {"obtain": "succeeded", "next-record": "succeeded"}),
                           60, "独立 obtain 未成功")
