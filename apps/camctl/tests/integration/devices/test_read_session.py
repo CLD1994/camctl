@@ -100,11 +100,26 @@ async def test_real_file_offset_and_short_read(tmp_path: Path) -> None:
 async def test_cancel_while_waiting_and_recording_stop_still_runs(tmp_path: Path) -> None:
     path = tmp_path / "source"
     path.write_bytes(b"abcdef")
-    stream = RealFileStream(str(path), delay_before_first=30.0)
+    read_entered = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    class WaitingFileStream(RealFileStream):
+        def read(self, limit: int) -> bytes:
+            loop.call_soon_threadsafe(read_entered.set)
+            return super().read(limit)
+
+    stream = WaitingFileStream(str(path), delay_before_first=30.0)
     async with _read_session(stream, size=6, offset=0, timeout=Decimal("30")) as session:
         reading = asyncio.create_task(asyncio.to_thread(session.read_chunk, 4))
+        entered = asyncio.create_task(read_entered.wait())
         try:
-            await asyncio.sleep(0.05)
+            done, _ = await asyncio.wait(
+                (reading, entered), timeout=5, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if reading.done():
+                reading.result()
+                pytest.fail("源读取在必要控制执行前已经结束")
+            assert entered in done, "源读取没有进入真实等待"
             # 读取线程在真实等待源数据时，事件循环执行真实受管的必要控制。
             class _Never:
                 async def requested(self) -> None:
@@ -120,14 +135,18 @@ async def test_cancel_while_waiting_and_recording_stop_still_runs(tmp_path: Path
             )
             assert control.exit is not None
             assert control.exit.exit_code == 0
+            assert not reading.done(), "必要控制完成前源读取已结束"
             session.request_stop()
             chunk = await asyncio.wait_for(reading, 5)
             assert chunk.error == "stopped"
             end = await asyncio.wait_for(session.wait_stopped(), 5)
             assert end.stopped is True
         finally:
+            entered.cancel()
             session.request_stop()
-            await asyncio.wait_for(asyncio.gather(reading, return_exceptions=True), 5)
+            await asyncio.wait_for(
+                asyncio.gather(reading, entered, return_exceptions=True), 5,
+            )
     assert stream.cancelled == 1
     assert stream.closed
 
