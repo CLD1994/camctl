@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import _wsl_host_demo as host_support
 from _wsl_host_demo import HostDemo, wait_for
 from camctl.contracts.enums import enum_for
 
@@ -83,6 +84,42 @@ def test_host_exit_does_not_wait_for_descendant_to_close_output(tmp_path, hold_s
         assert "提前退出" in str(failure.value)
         assert "original error" in str(failure.value)
         assert time.monotonic() - started < 1.5
+    finally:
+        demo.stop()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="测试进程使用 POSIX 可执行脚本")
+def test_host_exit_after_empty_output_probe_preserves_error(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    host = tmp_path / "host"
+    host.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "sys.stdin.readline()\n"
+        "sys.stderr.write('late original error'); sys.stderr.flush()\n"
+        "sys.exit(7)\n", encoding="utf-8")
+    host.chmod(0o700)
+    demo = HostDemo(deployment, str(host), launcher_is_camctl=False, reply_timeout_s=2)
+    probe = host_support._readable_pipes
+    first_probe = []
+
+    def release_after_empty_probe(pipes, timeout):
+        if not first_probe:
+            first_probe.append(probe(pipes, 0))
+            demo.proc.stdin.write("continue\n")
+            demo.proc.stdin.flush()
+            demo.proc.wait(timeout=1)
+            return first_probe[0]
+        return probe(pipes, timeout)
+
+    monkeypatch.setattr(host_support, "_readable_pipes", release_after_empty_probe)
+    try:
+        with pytest.raises(AssertionError) as failure:
+            demo.start()
+        assert first_probe == [[]]
+        assert "late original error" in str(failure.value)
+        demo._reader.join(timeout=1)
+        assert not demo._reader.is_alive()
     finally:
         demo.stop()
 

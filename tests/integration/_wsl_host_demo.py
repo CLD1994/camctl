@@ -281,8 +281,10 @@ class HostDemo:
         pending = bytearray()
         try:
             while pipes and not self._reader_stop.is_set():
+                # 退出确认必须发生在输出探测之前，才能保留退出前写入的诊断。
+                exited = self.proc.poll() is not None
                 stdout_closed = False
-                for pipe in _readable_pipes(pipes, 0.05):
+                for pipe in _readable_pipes(pipes, 0 if exited else 0.05):
                     data = os.read(pipe.fileno(), 4096)
                     if not data:
                         pipes.remove(pipe)
@@ -296,10 +298,11 @@ class HostDemo:
                             line, _, remainder = pending.partition(b"\n")
                             pending = bytearray(remainder)
                             self._replies.put(line)
-                if stdout_closed or self.proc.poll() is not None:
+                if exited:
                     self._replies.put(None)
-                    if self.proc.poll() is not None:
-                        break
+                    break
+                if stdout_closed and (not pipes or self.proc.poll() is None):
+                    self._replies.put(None)
         except OSError as error:
             self._replies.put(error)
 
