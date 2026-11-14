@@ -55,29 +55,26 @@ def motor_cancel(owned):
     return owned, motor, prepared.value.permit
 
 
-@pytest.mark.parametrize(
-    "target",
-    [
+def test_four_entries_share_motor_permission(motor_cancel):
+    owned, motor, permit = motor_cancel
+    targets = (
         CancelTarget(request_id="101"),
         CancelTarget(plan_instance_id=1),
         CancelTarget(action_instance_id=1),
         CancelTarget(plan_instance_id=1, group="g"),
-    ],
-)
-@pytest.mark.parametrize("local", [False, True])
-def test_four_entries_share_motor_permission(motor_cancel, target, local):
-    owned, motor, permit = motor_cancel
-    ids = resolve_cancel_target(target, SqliteCancelLookup(owned.connection)).action_ids
-    assert ids == (1,)
-    facts = load_eligibility_facts(
-        owned.connection, 1, motor_permit=permit if local else None
     )
-    expected = (
-        CancelEligibility.ALLOW_PRE_START
-        if local
-        else CancelEligibility.REJECT_UNSUPPORTED
-    )
-    assert decide_cancel_eligibility(facts) is expected
+    for target in targets:
+        for local, expected in (
+            (False, CancelEligibility.REJECT_UNSUPPORTED),
+            (True, CancelEligibility.ALLOW_PRE_START),
+        ):
+            case = (target, local)
+            ids = resolve_cancel_target(target, SqliteCancelLookup(owned.connection)).action_ids
+            assert ids == (1,), case
+            facts = load_eligibility_facts(
+                owned.connection, 1, motor_permit=permit if local else None
+            )
+            assert decide_cancel_eligibility(facts) is expected, case
 
 
 @pytest.mark.asyncio
