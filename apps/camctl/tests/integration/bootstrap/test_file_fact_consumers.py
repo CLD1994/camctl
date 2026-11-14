@@ -3,13 +3,9 @@
 from copy import deepcopy
 from dataclasses import replace
 import sqlite3
-from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.acceptance.service import CommandMode
-from camctl.bootstrap import capture_assembly, lifecycle
-from camctl.session.outcome import SessionOutcome
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.drivers.registry import DriverRegistry
 from camctl.history.events import business_columns
@@ -18,8 +14,7 @@ from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.transactions import row_facts, saved_transaction_events
 
-from ..capture.result_consumer_fixtures import ResultCatalog, consumer_world
-from .test_media_assembly import _config
+from ..capture.result_consumer_fixtures import consumer_world
 from ..capture.test_result_consumer_saves import _actual
 
 
@@ -31,42 +26,6 @@ _METHODS = {
     "ownership": "save_file_ownership",
     "completion": "save_file_completion",
 }
-
-
-async def _default_context(tmp_path, monkeypatch):
-    """只隔离会话循环，保留默认流程和三个真实工厂，驱动登记为空。"""
-    from camctl.devices.drivers import runtime as driver_runtime
-
-    monkeypatch.setattr(driver_runtime, "current_registry", lambda: DriverRegistry(()))
-    contexts, factory_calls = [], []
-    original = capture_assembly.session_capture_assembly
-
-    def factory(**kwargs):
-        real = original(**kwargs)
-
-        def observed(owned, device_id):
-            factory_calls.append(device_id)
-            return real(owned, device_id)
-
-        return observed
-
-    async def session(context, _source):
-        contexts.append(context)
-        return SessionOutcome(succeeded=True)
-
-    monkeypatch.setattr(capture_assembly, "session_capture_assembly", factory)
-    monkeypatch.setattr(lifecycle, "run_session",
-                        create_autospec(lifecycle.run_session, side_effect=session))
-    deps = lifecycle.build_runtime(CommandMode.RUN, _config(tmp_path), catalog=ResultCatalog())
-    try:
-        assert deps.startup_error is None
-        outcome = await lifecycle.execute_command(deps, None)
-        assert outcome.succeeded
-        assert len(contexts) == 1
-        return deps, contexts[0], factory_calls
-    except BaseException:
-        lifecycle.close_runtime(deps)
-        raise
 
 
 async def _hold_original_file_stage(tmp_path, resources, monkeypatch, stage, commit_after):

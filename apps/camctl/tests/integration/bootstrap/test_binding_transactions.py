@@ -27,7 +27,6 @@ from camctl.persistence.repositories.transactions import TransactionError
 
 from ..capture.test_cancel_late_start import _cancel
 from ..capture.test_capture_contract import _environment, _EVIDENCE, _NOW
-from .test_binding_changes import environment
 
 
 def _unknown_owned(home, canceled):
@@ -88,9 +87,8 @@ def _reject_operation_projection(connection):
 
 @pytest.mark.parametrize("canceled", [False, True])
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
-def test_binding_failure_recovers_whole_transaction(environment, canceled, phase):
-    _, _, home = environment
-    directory = home / "atomic"
+def test_binding_failure_recovers_whole_transaction(tmp_path, canceled, phase):
+    directory = tmp_path / "atomic"
     owned, command = _unknown_owned(directory, canceled)
     repository = CaptureRepository()
     key = new_operation_key()
@@ -135,9 +133,8 @@ def test_binding_failure_recovers_whole_transaction(environment, canceled, phase
         reopened.connection.close()
 
 
-def test_binding_failure_rejects_action_only_transaction_for_original_key(environment):
-    _, _, home = environment
-    owned, command = _unknown_owned(home / "incomplete", False)
+def test_binding_failure_rejects_action_only_transaction_for_original_key(tmp_path):
+    owned, command = _unknown_owned(tmp_path / "incomplete", False)
     try:
         repository = CaptureRepository()
         key = new_operation_key()
@@ -157,42 +154,36 @@ def test_binding_failure_rejects_action_only_transaction_for_original_key(enviro
         owned.connection.close()
 
 
-@pytest.mark.parametrize("changed", ["time", "canceled", "reason", "stop_config"])
-def test_binding_failure_original_key_rejects_changed_input(environment, changed):
-    _, _, home = environment
-    owned, command = _unknown_owned(home / "input", True)
+def test_binding_failure_original_key_rejects_changed_input(tmp_path):
+    owned, command = _unknown_owned(tmp_path / "input", True)
     try:
         repository = CaptureRepository()
         key = new_operation_key()
         saved = repository.finish_binding_failure(command, key, owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-        if changed == "time":
-            different = replace(command, occurred_at=command.occurred_at + 1)
-        elif changed == "canceled":
-            different = replace(command, canceled=False)
-        elif changed == "stop_config":
-            different = replace(command, stop_config=AttemptConfig(
+        changes = {
+            "time": replace(command, occurred_at=command.occurred_at + 1),
+            "canceled": replace(command, canceled=False),
+            "stop_config": replace(command, stop_config=AttemptConfig(
                 command.stop_config.max_attempts + 1, command.stop_config.timeout_s,
-                command.stop_config.retry_interval_s))
-        else:
-            different = replace(command, failure=RecordingFailure("device_binding_unavailable", {
+                command.stop_config.retry_interval_s)),
+            "reason": replace(command, failure=RecordingFailure("device_binding_unavailable", {
                 "device_id": "cam-1", "expected_driver_id": "camctl-adb", "reason": "mismatch",
-                "actual_driver_id": "alternate-camera",
-            }))
+                "actual_driver_id": "alternate-camera"})),
+        }
         before = tuple(owned.connection.iterdump())
-
-        result = repository.finish_binding_failure(different, key, owned)
-
-        assert result.kind is DbOutcomeKind.ROLLED_BACK
-        assert isinstance(result.error, TransactionError)
-        assert tuple(owned.connection.iterdump()) == before
+        for changed, different in changes.items():
+            result = repository.finish_binding_failure(different, key, owned)
+            assert result.kind is DbOutcomeKind.ROLLED_BACK, changed
+            assert isinstance(result.error, TransactionError), changed
+            assert not owned.connection.in_transaction, changed
+            assert tuple(owned.connection.iterdump()) == before, changed
     finally:
         owned.connection.close()
 
 
-def test_binding_failure_original_key_rejects_changed_responsibility_set(environment):
-    _, _, home = environment
-    owned, command = _unknown_owned(home / "responsibilities", False)
+def test_binding_failure_original_key_rejects_changed_responsibility_set(tmp_path):
+    owned, command = _unknown_owned(tmp_path / "responsibilities", False)
     try:
         repository = CaptureRepository()
         key = new_operation_key()

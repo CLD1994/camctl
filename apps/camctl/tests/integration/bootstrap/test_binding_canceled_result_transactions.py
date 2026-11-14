@@ -3,6 +3,7 @@
 from dataclasses import replace
 from decimal import Decimal
 import json
+import sqlite3
 
 import pytest
 
@@ -17,11 +18,10 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import TransactionError
 
 from ..capture.test_capture_contract import _NOW
-from ..operations.test_result_reuse import _FaultConnection
 from camctl.capture.handlers import capture_handler
 from .test_binding_canceled_results import FailedResults
 from ..support.bootstrap_capture_cases import bootstrap_case, SavedBoundary
-from .test_binding_changes import environment
+from ..support.outputs import SqliteOperationFault
 from .test_binding_transactions import _CommitFailure
 
 
@@ -53,9 +53,8 @@ async def _command(home, *, result_started, case):
 @pytest.mark.parametrize("result_started", [False, True])
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
 async def test_canceled_results_failure_recovers_complete_transaction(
-        environment, bootstrap_case, result_started, phase):
-    _, _, home = environment
-    directory = home / "atomic-results"
+        tmp_path, bootstrap_case, result_started, phase):
+    directory = tmp_path / "atomic-results"
     owned, command = await _command(directory, result_started=result_started, case=bootstrap_case)
     repository = CaptureRepository()
     key = new_operation_key()
@@ -63,12 +62,13 @@ async def test_canceled_results_failure_recovers_complete_transaction(
     stop_before = owned.connection.execute(
         "SELECT * FROM operation_runs WHERE responsibility_key = ?", (f"stop/{bootstrap_case.action_id}",)).fetchone()
     attempts_before = tuple(owned.connection.execute("SELECT * FROM operation_attempts"))
-    faulty = (_FaultConnection(owned.connection, "UPDATE operation_runs")
+    faulty = (SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, "operation_runs")
               if phase == "projection" else _CommitFailure(owned.connection, phase == "commit_after"))
     try:
         result = repository.finish_binding_failure(command, key, replace(owned, connection=faulty))
         assert result.kind is (DbOutcomeKind.ROLLED_BACK if phase == "projection" else DbOutcomeKind.UNKNOWN)
         if phase == "projection":
+            assert faulty.triggered
             assert tuple(owned.connection.iterdump()) == before
     finally:
         owned.connection.close()
@@ -110,43 +110,38 @@ async def test_canceled_results_failure_recovers_complete_transaction(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("result_started, changed", [
-    (False, "time"), (False, "reason"), (False, "check_config"), (False, "responsibilities"),
-    (True, "time"), (True, "reason"), (True, "responsibilities"),
-])
-async def test_canceled_results_original_key_rejects_changed_input(environment, bootstrap_case, result_started, changed):
-    _, _, home = environment
-    owned, command = await _command(home / "input-results", result_started=result_started, case=bootstrap_case)
+@pytest.mark.parametrize("result_started", [False, True])
+async def test_canceled_results_original_key_rejects_changed_input(tmp_path, bootstrap_case, result_started):
+    owned, command = await _command(tmp_path / "input-results", result_started=result_started, case=bootstrap_case)
     try:
         repository = CaptureRepository()
         key = new_operation_key()
         saved = repository.finish_binding_failure(command, key, owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-        if changed == "time":
-            different = replace(command, occurred_at=command.occurred_at + 1)
-        elif changed == "reason":
-            different = replace(command, failure=RecordingFailure("device_binding_unavailable", {
+        changes = {
+            "time": replace(command, occurred_at=command.occurred_at + 1),
+            "reason": replace(command, failure=RecordingFailure("device_binding_unavailable", {
                 "device_id": "cam-1", "expected_driver_id": "camctl-adb", "reason": "mismatch",
-                "actual_driver_id": "alternate-camera"}))
-        elif changed == "check_config":
-            different = replace(command, check_config=AttemptConfig(7, Decimal("17"), Decimal("2")))
-        else:
-            different = replace(command, responsibility_keys=() if result_started else (f"results/{bootstrap_case.activity_id}",))
+                "actual_driver_id": "alternate-camera"})),
+            "responsibilities": replace(command, responsibility_keys=(
+                () if result_started else (f"results/{bootstrap_case.activity_id}",))),
+        }
+        if not result_started:
+            changes["check_config"] = replace(command, check_config=AttemptConfig(7, Decimal("17"), Decimal("2")))
         before = tuple(owned.connection.iterdump())
-
-        changed_result = repository.finish_binding_failure(different, key, owned)
-
-        assert changed_result.kind is DbOutcomeKind.ROLLED_BACK
-        assert isinstance(changed_result.error, TransactionError)
-        assert tuple(owned.connection.iterdump()) == before
+        for changed, different in changes.items():
+            changed_result = repository.finish_binding_failure(different, key, owned)
+            assert changed_result.kind is DbOutcomeKind.ROLLED_BACK, changed
+            assert isinstance(changed_result.error, TransactionError), changed
+            assert not owned.connection.in_transaction, changed
+            assert tuple(owned.connection.iterdump()) == before, changed
     finally:
         owned.connection.close()
 
 
 @pytest.mark.asyncio
-async def test_canceled_results_original_key_rejects_action_only_group(environment, bootstrap_case):
-    _, _, home = environment
-    owned, command = await _command(home / "partial-results", result_started=False, case=bootstrap_case)
+async def test_canceled_results_original_key_rejects_action_only_group(tmp_path, bootstrap_case):
+    owned, command = await _command(tmp_path / "partial-results", result_started=False, case=bootstrap_case)
     try:
         repository = CaptureRepository()
         key = new_operation_key()

@@ -24,7 +24,6 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..capture.test_capture_contract import ResultsDouble
-from ..persistence.test_runtime import _create_valid_database
 from .test_obtain_flow import _CAMERA_SCHEMA, _EVIDENCE, _photo_entry
 from ..support.database import business_database
 from ..support.session import (accept_plan, session_config,
@@ -87,21 +86,6 @@ def _registry(driver):
     ))
 
 
-@pytest.fixture
-def environment(tmp_path):
-    path = tmp_path / "state.db"
-    _create_valid_database(path)
-    owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-    context = SimpleNamespace(
-        open_connection=lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()),
-        clock=SimpleNamespace(utc_micros=lambda: _NOW),
-    )
-    try:
-        yield owned, context, tmp_path
-    finally:
-        owned.connection.close()
-
-
 @pytest_asyncio.fixture
 async def functional_environment(tmp_path):
     config = session_config(tmp_path, devices={device: {
@@ -155,7 +139,7 @@ def _capture(devices, driver, home):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
-@pytest.mark.parametrize("state", ["due", "future", "expired", "terminal", "canceled"])
+@pytest.mark.parametrize("state", ["due", "expired", "terminal", "canceled"])
 async def test_changed_binding_respects_execution_eligibility(functional_environment, change, state):
     owned, context, home = functional_environment
     ids = await _photos(context.database, home, state)
@@ -184,7 +168,7 @@ async def test_changed_binding_respects_execution_eligibility(functional_environ
         " FROM actions WHERE id = ?", (ids["cam-a"],),
     ).fetchone()
     assert row[:4] == {
-        "due": (4, 1, 0, "camctl-adb"), "future": (1, 0, 0, "camctl-adb"),
+        "due": (4, 1, 0, "camctl-adb"),
         "expired": (5, 0, 0, "camctl-adb"), "terminal": (3, 1, 0, "camctl-adb"),
         "canceled": (6, 0, 1, "camctl-adb"),
     }[state]
@@ -236,8 +220,8 @@ async def test_future_action_gains_eligibility_only_at_original_time(functional_
     await first(context)
     await first.settle()
     assert owned.connection.execute(
-        "SELECT status, execution_started, error_code FROM actions WHERE id = ?",
-        (ids["cam-a"],)).fetchone() == (1, 0, None)
+        "SELECT status, execution_started, cancel_requested, driver_id, error_code FROM actions WHERE id = ?",
+        (ids["cam-a"],)).fetchone() == (1, 0, 0, "camctl-adb", None)
     assert owned.connection.execute(
         "SELECT status FROM actions WHERE id = ?", (ids["cam-b"],)).fetchone() == (3,)
     assert not any(binding.device_id == "cam-a" for binding in driver.calls)
