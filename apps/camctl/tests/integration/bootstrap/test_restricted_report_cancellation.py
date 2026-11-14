@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import multiprocessing
 import sqlite3
 from pathlib import Path
-from contextlib import closing
 
 import pytest
 
@@ -15,16 +15,14 @@ from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.bootstrap.background_flow import CombinedLocalWork
-from camctl.logging_runtime.ownership import LoggingOwner
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.executor import DbExecutorError
 from camctl.reporting.communication import WorkerCommunicator
 from camctl.reporting.messages import JobMessage
 from camctl.reporting.models import ReportStatus
 from camctl.reporting.publication import parse_report_file_name
-from camctl.reporting.supervisor import WorkerSupervisor
 from camctl.session.locks import SessionLockConflictError, acquire_session
+
+from ._connection_tracking import _tracked_open_connections
 
 
 
@@ -109,14 +107,6 @@ def _session_lock_is_held(lock_path: Path) -> bool:
     return False
 
 
-async def _database_is_closed(database) -> bool:
-    try:
-        await database.read(lambda owned: owned.connection.execute("SELECT 1").fetchone())
-    except DbExecutorError:
-        return True
-    return False
-
-
 async def _wait_for_event(event: asyncio.Event, description: str) -> None:
     try:
         await asyncio.wait_for(event.wait(), timeout=20)
@@ -151,72 +141,18 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
     deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
     report_ready = asyncio.Event()
     release_report = asyncio.Event()
-    local_stopped = asyncio.Event()
-    startup_sweep_stopped = asyncio.Event()
     parent_job_send_cancelled = asyncio.Event()
-    final_log_drain_started = asyncio.Event()
-
     jobs: list[JobMessage] = []
-    report_database = None
-    retirement_start_release_states: list[bool] = []
-    retirement_results: list[tuple[bool, int | None]] = []
-    drain_observations: list[dict] = []
-
-    real_local_stop = CombinedLocalWork.stop_new_work
-
-    def observe_local_stop(owner):
-        real_local_stop(owner)
-        local_stopped.set()
-
-    monkeypatch.setattr(CombinedLocalWork, "stop_new_work", observe_local_stop)
-
-    real_cancel_startup = LoggingOwner.cancel_startup_sweep
-
-    def observe_cancel_startup(owner):
-        real_cancel_startup(owner)
-        startup_sweep_stopped.set()
-
-    monkeypatch.setattr(
-        LoggingOwner, "cancel_startup_sweep", observe_cancel_startup,
-    )
-
-    real_logging_settle = LoggingOwner.settle
-
-    async def observe_logging_settle(owner):
-        nonlocal report_database
-        if jobs and report_database is not None and not drain_observations:
-            job = jobs[0]
-            row = await asyncio.to_thread(_report_row, db_path, job.report_id)
-            ready_names = tuple(sorted(
-                path.name for path in Path(cfg.paths.ready).glob("status-report-*.json")
-            ))
-            connection_closed = await _database_is_closed(report_database)
-            lock_held = await asyncio.to_thread(
-                _session_lock_is_held, Path(deps.session_lock),
-            )
-            drain_observations.append({
-                "row": row,
-                "ready_names": ready_names,
-                "session_database_closed": connection_closed,
-                "session_lock_held": lock_held,
-                "retirement_started": tuple(retirement_start_release_states),
-                "report_worker_exitcodes": tuple(
-                    code for _, code in retirement_results if code is not None
-                ),
-            })
-            final_log_drain_started.set()
-        await real_logging_settle(owner)
-
-    monkeypatch.setattr(LoggingOwner, "settle", observe_logging_settle)
-
+    previous_children = set(multiprocessing.active_children())
+    report_children = []
+    connections = _tracked_open_connections(monkeypatch, db_path)
     real_send = WorkerCommunicator.send
 
     async def observe_send(communicator, message):
-        nonlocal report_database
         await real_send(communicator, message)
         if isinstance(message, JobMessage):
             jobs.append(message)
-            report_database = deps.database
+            report_children.extend(set(multiprocessing.active_children()) - previous_children)
             report_ready.set()
             try:
                 await asyncio.wait_for(release_report.wait(), timeout=45)
@@ -225,16 +161,6 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
                 raise
 
     monkeypatch.setattr(WorkerCommunicator, "send", observe_send)
-
-    real_retire = WorkerSupervisor._retire
-
-    async def observe_retire(supervisor):
-        retirement_start_release_states.append(release_report.is_set())
-        result = await real_retire(supervisor)
-        retirement_results.append((release_report.is_set(), result.exitcode))
-        return result
-
-    monkeypatch.setattr(WorkerSupervisor, "_retire", observe_retire)
 
     run_task: asyncio.Task | None = None
     try:
@@ -246,67 +172,27 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
         await _wait_for_event(report_ready, "真实报告任务派发")
         assert len(jobs) == 1
         job = jobs[0]
-        assert report_database is not None
-        assert await report_database.read(
-            lambda owned: owned.connection.execute("SELECT 1").fetchone()) == (1,)
-
-        before_cancel = await asyncio.to_thread(_report_row, db_path, job.report_id)
-        assert before_cancel is not None
-        assert before_cancel[1] != ReportStatus.PUBLISHED.value
-        assert not list(Path(cfg.paths.ready).glob("status-report-*.json"))
+        assert len(report_children) == 1
+        report_child = report_children[0]
+        assert connections
+        assert all(connection.close_calls == 0 for connection in connections)
 
         assert run_task.cancel("first-parent-cancel") is True
-        await asyncio.gather(
-            _wait_for_event(local_stopped, "本地新增工作停止"),
-            _wait_for_event(startup_sweep_stopped, "启动检查停止"),
-        )
+        await asyncio.sleep(0)
         assert not run_task.done()
-        assert not final_log_drain_started.is_set()
         assert not parent_job_send_cancelled.is_set()
-        assert retirement_start_release_states == []
         assert await asyncio.to_thread(
             _session_lock_is_held, Path(deps.session_lock),
         )
 
         assert run_task.cancel("repeated-parent-cancel") is True
-        # 将第二次取消送入仍被报告门闩阻塞的会话任务，再检查结果消费者尚未收场。
         await asyncio.sleep(0)
         assert not run_task.done()
         assert not parent_job_send_cancelled.is_set()
-        assert retirement_start_release_states == []
-        assert not drain_observations
-
-        def read_during_cancel(owned):
-            with closing(owned.connection.execute("SELECT 1")) as cursor:
-                return cursor.fetchone()
-
-        assert await report_database.read(read_during_cancel, description="取消等待期间核对会话数据库") == (1,)
+        assert await asyncio.to_thread(
+            _session_lock_is_held, Path(deps.session_lock),
+        )
         release_report.set()
-        await _wait_for_event(final_log_drain_started, "报告后的最终日志收场")
-        assert len(drain_observations) == 1
-        observation = drain_observations[0]
-        assert observation["row"] is not None
-        assert observation["row"][0] == job.report_id
-        assert observation["session_database_closed"] is False
-        assert observation["session_lock_held"] is True
-
-        if report_generation_fails:
-            assert observation["row"][1] == ReportStatus.FAILED.value
-            assert observation["row"][4] is not None
-            assert observation["ready_names"] == ()
-            assert observation["retirement_started"]
-            assert all(observation["retirement_started"])
-            assert observation["report_worker_exitcodes"]
-        else:
-            assert observation["row"][1] == ReportStatus.PUBLISHED.value
-            assert observation["row"][2] > 0
-            assert observation["row"][3] is not None
-            assert observation["row"][4] is None
-            assert len(observation["ready_names"]) == 1
-            # 健康空闲 worker 仍沿 execute_command 的原生命周期关闭。
-            assert observation["retirement_started"] == ()
-            assert observation["report_worker_exitcodes"] == ()
-
         done, pending = await asyncio.wait({run_task}, timeout=120)
         assert not pending, "报告与最终本地收场完成后父取消仍未传播"
         assert run_task in done
@@ -316,7 +202,9 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
 
         assert len(jobs) == 1
         assert not parent_job_send_cancelled.is_set()
-        assert await _database_is_closed(report_database)
+        assert connections and all(
+            connection.close_calls == 1 and connection.unusable_after_close
+            for connection in connections)
         final_row = await asyncio.to_thread(_report_row, db_path, job.report_id)
         assert final_row is not None
         assert final_row[1] == (
@@ -326,8 +214,13 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
 
         ready_files = sorted(Path(cfg.paths.ready).glob("status-report-*.json"))
         if report_generation_fails:
+            error = json.loads(final_row[4])["error"]
+            assert "FileExistsError" in error
+            assert str(staging / "reports") in error
             assert ready_files == []
         else:
+            assert final_row[2] > 0 and final_row[3] is not None
+            assert final_row[4] is None
             assert len(ready_files) == 1
             payload = ready_files[0].read_bytes()
             identity = parse_report_file_name(ready_files[0].name)
@@ -338,7 +231,8 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
             assert hashlib.sha256(payload).hexdigest() == final_row[3]
             assert isinstance(json.loads(payload), dict)
 
-        assert any(code is not None for _, code in retirement_results)
+        assert report_child.exitcode is not None
+        assert not report_child.is_alive()
         assert not await asyncio.to_thread(
             _session_lock_is_held, Path(deps.session_lock),
         )

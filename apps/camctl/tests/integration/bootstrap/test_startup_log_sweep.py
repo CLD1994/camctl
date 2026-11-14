@@ -736,7 +736,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         _FakeWinddownClock, _factory, _recording_in_flight,
     )
     from .test_recording_stop import _RecordCatalog, _entry
-    from ..session.support import assert_database_closed
+    from ._connection_tracking import _tracked_open_connections
 
     driver = _SessionDriver(b"restricted stop source")
     config, database, driver, results = await _recording_in_flight(
@@ -758,8 +758,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
     stop_started = asyncio.Event()
     release_stop = asyncio.Event()
     stop_cancelled = asyncio.Event()
-    once_report_started = asyncio.Event()
-    session_contexts = []
+    connections = _tracked_open_connections(monkeypatch, Path(database))
     stop_entries: list[object] = []
     original_listdir = os.listdir
 
@@ -784,19 +783,6 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         return await original_stop(request)
 
     driver.stop = gated_stop
-
-    original_run_session = lifecycle.run_session
-
-    async def observe_session(context, source):
-        session_contexts.append(context)
-
-        async def observe_once_report(_context):
-            once_report_started.set()
-
-        context.once_report = observe_once_report
-        return await original_run_session(context, source)
-
-    monkeypatch.setattr(lifecycle, "run_session", observe_session)
 
     fake_clock = _FakeWinddownClock()
     restricted_winddown = winddown_flow(
@@ -824,6 +810,16 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
                 duplicate.close()
         pytest.fail("必要 winddown 或日志诊断收场期间提前释放 SessionLock")
 
+    def report_snapshot():
+        with closing(sqlite3.connect(database)) as connection:
+            rows = connection.execute("SELECT * FROM reports ORDER BY id").fetchall()
+        files = tuple(
+            (directory, path.name, path.read_bytes())
+            for directory in ("ready", "processing")
+            for path in sorted(Path(getattr(config.paths, directory)).glob("status-report-*.json"))
+        )
+        return rows, files
+
     async def wait_for_saved_stop() -> None:
         while True:
             with closing(sqlite3.connect(database)) as connection:
@@ -847,6 +843,8 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         await _wait_event(stop_started)
         assert len(stop_entries) == 1
         assert not stop_cancelled.is_set()
+        assert connections and all(connection.close_calls == 0 for connection in connections)
+        report_baseline = report_snapshot()
         assert_session_lock_held()
         assert probe_admission(deps.admission_lock).status.value == (
             "acquired_and_released")
@@ -868,7 +866,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         await asyncio.wait_for(wait_for_saved_stop(), timeout=_GATE_TIMEOUT)
         assert not release_listdir.is_set()
         assert not run_task.done()
-        assert not once_report_started.is_set()
+        assert report_snapshot() == report_baseline
         assert not stop_cancelled.is_set()
         assert_session_lock_held()
         assert len([call for call in driver.calls if call[0] == "stop"]) == 1
@@ -879,9 +877,11 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         assert cancelled.value.args == ("parent during restricted winddown STOP",)
         assert len(stop_entries) == 1
         assert not stop_cancelled.is_set()
-        assert not once_report_started.is_set()
+        assert report_snapshot() == report_baseline
         assert old_copy.read_bytes() == b"old copy awaiting scan"
-        await assert_database_closed(session_contexts[0].database)
+        assert connections and all(
+            connection.close_calls == 1 and connection.unusable_after_close
+            for connection in connections)
         lease = acquire_session(deps.session_lock)
         lease.close()
     finally:
