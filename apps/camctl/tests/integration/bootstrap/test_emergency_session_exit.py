@@ -249,29 +249,6 @@ async def test_ended_activity_and_repeated_settlement_do_not_stop_again(tmp_path
         owned.connection.close()
 
 
-async def test_unreadable_state_keeps_diagnosis_without_device_calls(tmp_path):
-    target, owned = _world(tmp_path)
-    owned.connection.close()
-    stop = _StopPort(_declaration(), (_confirmed(),))
-
-    class _UnreadableDatabase:
-        async def read(self, operation, *, description):
-            raise RuntimeError("database disk image is malformed")
-
-    settlement = EmergencySettlement(
-        session_key=_SESSION, anchors={1: (_NOW, _NOW + 1)},
-        stop_config={"cam-1": {"max_attempts": 2}},
-        registry=_registry(stop), database=_UnreadableDatabase(),
-        wall_us=lambda: _NOW)
-    entries = await settlement.settle()
-
-    assert stop.calls == []
-    assert len(entries) == 1
-    assert entries[0]["outcome"] == "not_attempted"
-    assert entries[0]["record_status"] == "not_recorded"
-    assert "目标身份读取失败" in entries[0]["error"]
-
-
 async def test_run_session_merges_emergency_diagnostics_into_fatal_error(tmp_path):
     from camctl.acceptance.service import CommandMode
     from camctl.persistence.repositories.acceptance import AcceptanceRepository

@@ -27,7 +27,6 @@ from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_com
 from camctl.devices.drivers.registry import DriverRegistry
 from camctl.host_files.media import ProbeRequest, RepairRequest
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from ..capture.test_recording_media_link import _CONTENT
@@ -42,6 +41,7 @@ from .test_recording_stop import (
     _RecordCatalog,
     _await_query,
     _cancel,
+    _cancel_plan,
     _future_schedule,
     _record_plan,
     _scalar,
@@ -184,15 +184,22 @@ async def _restricted_session(
         close_runtime(deps)
 
 
-def _mark_canceled(db: Path) -> None:
-    """把执行中录像标记为取消已生效（取消链已保存的联动事实）。"""
-    owned = open_existing(db, DbOpenMode.EXISTING_RW, DbConfig())
+async def _mark_canceled(tmp_path: Path, cfg, db: Path, driver) -> None:
+    """实际受理并执行取消，停在取消生效但尚未派发停止的状态。"""
+    await _submit_plan(tmp_path, cfg, _RecordCatalog(),
+                       _cancel_plan("2", 1, _future_schedule(0)))
+    deps = build_runtime(CommandMode.RUN, cfg, catalog=_RecordCatalog())
+    task = asyncio.create_task(execute_command(
+        deps, None, flows={"cancel": cancel_flow(
+            staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
+            processing=Path(cfg.paths.processing))}, poll_interval_s=0.1))
     try:
-        owned.connection.execute(
-            "UPDATE actions SET cancel_requested = 1 WHERE id = 1")
-        owned.connection.commit()
+        await _await_query(db, "SELECT cancel_requested FROM actions WHERE id = 1", (1,))
+        assert not [call for call in driver.calls if call[0] == "stop"]
+        assert _scalar(db, "SELECT COUNT(*) FROM cancel_items WHERE target_action_id = 1")[0] == 1
     finally:
-        owned.connection.close()
+        await _cancel(task)
+        close_runtime(deps)
 
 
 class TestRestrictedWinddownSavesProgress:
@@ -301,7 +308,7 @@ class TestCanceledRecordingStopsImmediately:
             self, tmp_path: Path) -> None:
         cfg, db, driver, results = await _recording_in_flight(
             tmp_path, "canceled")
-        _mark_canceled(db)
+        await _mark_canceled(tmp_path, cfg, db, driver)
         fake = _FakeWinddownClock()
         outcome = await _restricted_session(
             tmp_path, "canceled", driver, results, fake)

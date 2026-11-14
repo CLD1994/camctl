@@ -37,6 +37,7 @@ from ..support.bootstrap_log_cases import (
     observe_failure_service,
 )
 from ..support.distribution import prepare_project_metadata
+from ..support.session import session_config
 
 
 def _lock_path(log_path: Path) -> Path:
@@ -926,7 +927,7 @@ async def test_default_format_failure_keeps_listener_for_later_record(
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import LogRecord
 
-    deps = await _runtime(tmp_path)
+    deps = build_runtime(CommandMode.RUN, session_config(tmp_path))
     stderr = io.StringIO()
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stderr", stderr)
@@ -974,7 +975,7 @@ async def test_default_file_io_failure_stops_listener_and_uses_stderr(
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import ChannelError, LogRecord
 
-    deps = await _runtime(tmp_path)
+    deps = build_runtime(CommandMode.RUN, session_config(tmp_path))
     stderr = io.StringIO()
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stderr", stderr)
@@ -1125,7 +1126,7 @@ async def test_default_rotation_failure_is_reported_once_and_keeps_writes(
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import LogRecord
 
-    deps = await _runtime(tmp_path)
+    deps = build_runtime(CommandMode.RUN, session_config(tmp_path))
     stderr = io.StringIO()
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stderr", stderr)
