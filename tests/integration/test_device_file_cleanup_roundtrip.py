@@ -34,8 +34,9 @@ def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatc
         world.prepare_hasselblad()
         world.publish_copies()
         sources = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
-        for source in sources:
-            world.clean_exact(source, verify_report=False)
+        with world.reuse_client("cleanup"):
+            for source in sources:
+                world.clean_exact(source, verify_report=False)
         snapshot = world.assert_report_ack_and_history()
         outputs = {output["output_id"]: output for plan in snapshot["plans"]
                    for action in plan.get("actions", [])

@@ -5,7 +5,7 @@ from __future__ import annotations
 from camctl_memory_plugin import finalize_receipts, run_test_command
 
 import base64
-from contextlib import closing
+from contextlib import closing, contextmanager
 from copy import copy, deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,6 +23,7 @@ import time
 
 import pytest
 
+from _client_session import ClientSession
 from _osmo_builtin_clock import format_utc, read_clock, set_frozen, whole_second_utc_us
 from _wsl_host_demo import HostDemo
 from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
@@ -303,6 +304,43 @@ max_query_attempts={max_q}
         result = run(["node", "--import", "tsx", HERE / "client_driver.ts", *args, output],
                      cwd=REPO / "apps/client", env=self.package.env, logs=self.root / "commands")
         return json.loads(output.read_text())
+
+    @contextmanager
+    def reuse_client(self, label):
+        """连续导出复用真实客户端；报告交接前恢复独立客户端。"""
+        receipts = self.root / f"client-receipts-{label}"
+        receipts.mkdir()
+        original = self.deployment.run_client_driver
+        session = ClientSession(
+            ["node", "--import", "tsx", str(HERE / "client_driver.ts")],
+            cwd=REPO / "apps/client", env=self.package.env, root=self.root,
+            timeout=180,
+        )
+        number = 0
+
+        def client_driver(*args, output):
+            nonlocal number
+            number += 1
+            return session.call(*args, output=receipts / f"{number:03d}-{output.name}")
+
+        self.deployment.run_client_driver = client_driver
+        try:
+            yield
+        except BaseException as error:
+            try:
+                session.close()
+            except BaseException as closing_error:
+                error.add_note(f"客户端会话收场失败：{closing_error}")
+            raise
+        else:
+            session.close()
+        finally:
+            self.deployment.run_client_driver = original
+        for name in ("client-session-node.json", "client-session-python.json",
+                     "client-session.stdout.log", "client-session.stderr.log"):
+            path = self.root / name
+            if path.exists():
+                path.rename(self.root / f"{label}-{name}")
 
     def install_capabilities(self):
         described = self.command(self.package.cli, "describe", "--config", self.deployment.config_path, camctl=True)
@@ -659,10 +697,11 @@ max_query_attempts={max_q}
 
     def publish_copies(self):
         keys = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
-        for key in keys:
-            plan, receipt = self.export("obtain-" + key, [self.action("obtain-" + key, "obtain_action_outputs", {"source": {"action_instance_id": str(self.sources[key]["source_action_id"])}, "output_ids": [str(self.sources[key]["id"])]})])
-            self.host.submit(plan)
-            self.wait_action(receipt["request_id"], "SUCCEEDED")
+        with self.reuse_client("obtain"):
+            for key in keys:
+                plan, receipt = self.export("obtain-" + key, [self.action("obtain-" + key, "obtain_action_outputs", {"source": {"action_instance_id": str(self.sources[key]["source_action_id"])}, "output_ids": [str(self.sources[key]["id"])]})])
+                self.host.submit(plan)
+                self.wait_action(receipt["request_id"], "SUCCEEDED")
         self.assert_report_ack_and_history()
         sources = {self.sources[key]["id"]: key for key in keys}
         deliveries = rows(self.db, "SELECT output_id,file_name FROM deliveries WHERE output_id IN ("
