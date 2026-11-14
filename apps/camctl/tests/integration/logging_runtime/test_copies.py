@@ -1345,7 +1345,8 @@ class TestRecovery:
                 if state["stage"] == MarkerStage.COPIED.value and not paused["done"]:
                     paused["done"] = True
                     progress_temp_ready.set()
-                    release_progress.wait()
+                    if not release_progress.wait(10):
+                        raise TimeoutError("测试未在期限内释放副本进度门闩")
             return original_replace(source, target, *args, **kwargs)
 
         monkeypatch.setattr(os, "replace", pause_after_writing_progress_temp)
@@ -1392,10 +1393,15 @@ class TestRecovery:
                         if is_marker_temp_name(path.name)]
         finally:
             release_progress.set()
-            await asyncio.gather(*(task for task in
-                (entered, first_task, recovery_task, next_failure_task) if task is not None),
-                return_exceptions=True)
-            channel.close()
+            try:
+                tasks = {task for task in
+                         (entered, first_task, recovery_task, next_failure_task) if task is not None}
+                done, pending = await asyncio.wait(tasks, timeout=10)
+                await asyncio.gather(*done, return_exceptions=True)
+                if pending:
+                    raise TimeoutError("副本或恢复任务未在期限内结束")
+            finally:
+                channel.close()
 
     async def test_suspension_lifted_by_recovery(
             self, tmp_path: Path, monkeypatch) -> None:

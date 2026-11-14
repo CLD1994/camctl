@@ -52,11 +52,20 @@ def _channel(writer, *, capacity=8, low=3, high=6, random_source=None) -> LogCha
     )
 
 
+async def _close_channel(channel):
+    try:
+        channel.start()
+        stopped = await asyncio.to_thread(channel.stop_listener, timeout=10)
+        assert stopped
+    finally:
+        channel.async_close()
+        await channel.await_closed()
+
+
 class TestAtomicAdmission:
     async def test_concurrent_admission_is_atomic(self) -> None:
         writer = CollectingWriter()
         channel = _channel(writer, capacity=8, low=3, high=6)
-        channel.start()
         results: list = []
         lock = threading.Lock()
 
@@ -77,12 +86,19 @@ class TestAtomicAdmission:
                     results.append(result)
 
         thread = threading.Thread(target=sync_producer)
-        thread.start()
-        await async_producer()
-        thread.join(timeout=10)
-        await asyncio.to_thread(channel.stop_listener, timeout=10)
-        channel.async_close()
-        await channel.await_closed()
+        started = False
+        try:
+            channel.start()
+            thread.start()
+            started = True
+            await async_producer()
+        finally:
+            try:
+                if started:
+                    await asyncio.to_thread(thread.join, 10)
+                    assert not thread.is_alive()
+            finally:
+                await _close_channel(channel)
         for result in results:
             assert result.queue_depth <= 8
         accepted = [r for r in results if r.decision.kind is AdmissionKind.ACCEPTED]
@@ -95,27 +111,24 @@ class TestAtomicAdmission:
         writer = CollectingWriter()
         counting = CountingRandom(value=0.99)
         channel = _channel(writer, capacity=16, low=3, high=6, random_source=counting)
-        # 不启动监听：先以警告记录把深度推入中间区 [3,6)。
-        for index in range(3):
-            await channel.alog(LogRecord(level=LogLevel.WARNING, message=f"warm-{index}"))
-        # 中间区三条 INFO：每条恰一次采样。
-        for _ in range(3):
-            await channel.alog(LogRecord(level=LogLevel.INFO, message="x"))
-        assert counting.calls == 3
-        # 非采样区（低水位）不调用随机源。
-        counting2 = CountingRandom()
-        channel2 = _channel(writer, capacity=16, low=6, high=12, random_source=counting2)
-        await channel2.alog(LogRecord(level=LogLevel.INFO, message="low"))
-        assert counting2.calls == 0
-        # 排空两个通道并确认 FIFO 保留已接纳记录。
-        channel.start()
-        channel2.start()
-        await asyncio.to_thread(channel.stop_listener, timeout=10)
-        await asyncio.to_thread(channel2.stop_listener, timeout=10)
-        channel.async_close()
-        channel2.async_close()
-        await channel.await_closed()
-        await channel2.await_closed()
+        channel2 = None
+        try:
+            # 不启动监听：先以警告记录把深度推入中间区 [3,6)。
+            for index in range(3):
+                await channel.alog(LogRecord(level=LogLevel.WARNING, message=f"warm-{index}"))
+            for _ in range(3):
+                await channel.alog(LogRecord(level=LogLevel.INFO, message="x"))
+            assert counting.calls == 3
+            counting2 = CountingRandom()
+            channel2 = _channel(writer, capacity=16, low=6, high=12, random_source=counting2)
+            await channel2.alog(LogRecord(level=LogLevel.INFO, message="low"))
+            assert counting2.calls == 0
+        finally:
+            try:
+                await _close_channel(channel)
+            finally:
+                if channel2 is not None:
+                    await _close_channel(channel2)
 
     async def test_warning_and_error_survive_middle_zone(self) -> None:
         writer = CollectingWriter()
@@ -133,23 +146,20 @@ class TestAtomicAdmission:
                     assert result.queue_depth == 2 + index * 2 + (level is LogLevel.ERROR)
                     assert 1 <= result.queue_depth - 1 < 10
         finally:
-            channel.start()
-            await asyncio.to_thread(channel.stop_listener, timeout=10)
-            channel.async_close()
-            await channel.await_closed()
+            await _close_channel(channel)
         assert [record.message for record in writer.written] == [
             "warm", *[message for index in range(4) for message in (f"w{index}", f"e{index}")]]
 
     async def test_accepted_fifo_order_preserved(self) -> None:
         writer = CollectingWriter()
         channel = _channel(writer, capacity=32, low=20, high=24)
-        channel.start()
-        for index in range(10):
-            await channel.alog(LogRecord(level=LogLevel.ERROR, message=f"m{index}"))
-            channel.slog(LogRecord(level=LogLevel.ERROR, message=f"s{index}", source=LogSource.SYNC))
-        await asyncio.to_thread(channel.stop_listener, timeout=10)
-        channel.async_close()
-        await channel.await_closed()
+        try:
+            channel.start()
+            for index in range(10):
+                await channel.alog(LogRecord(level=LogLevel.ERROR, message=f"m{index}"))
+                channel.slog(LogRecord(level=LogLevel.ERROR, message=f"s{index}", source=LogSource.SYNC))
+        finally:
+            await _close_channel(channel)
         assert [r.message for r in writer.written] == [
             m for index in range(10) for m in (f"m{index}", f"s{index}")
         ]

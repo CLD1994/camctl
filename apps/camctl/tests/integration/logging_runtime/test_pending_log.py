@@ -26,8 +26,25 @@ class BlockingWriter:
 
     def __call__(self, record: LogRecord) -> bool:
         self.started.set()
-        self.release.wait()
+        if not self.release.wait(10):
+            raise TimeoutError("测试未在期限内释放日志写入")
         return True
+
+
+async def _finish_channel(channel, tasks=()):
+    try:
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=10)
+            await asyncio.gather(*done, return_exceptions=True)
+            if pending:
+                raise TimeoutError("日志等待任务未在期限内结束")
+    finally:
+        try:
+            stopped = await asyncio.to_thread(channel.stop_listener, timeout=10)
+            assert stopped
+        finally:
+            channel.async_close()
+            await channel.await_closed()
 
 
 class TestPendingLog:
@@ -59,10 +76,7 @@ class TestPendingLog:
             assert channel.pending_count() == 1
         finally:
             writer.release.set()
-            await asyncio.gather(entered, waiter, return_exceptions=True)
-            await asyncio.to_thread(channel.stop_listener, timeout=10)
-            channel.async_close()
-            await channel.await_closed()
+            await _finish_channel(channel, (entered, waiter))
 
     async def test_disable_channel_preserves_inflight_writer_fact(self) -> None:
         writer = BlockingWriter()
@@ -85,10 +99,7 @@ class TestPendingLog:
             assert (await waiter).delivered is True
         finally:
             writer.release.set()
-            await asyncio.gather(entered, waiter, return_exceptions=True)
-            await asyncio.to_thread(channel.stop_listener, timeout=10)
-            channel.async_close()
-            await channel.await_closed()
+            await _finish_channel(channel, (entered, waiter))
 
     async def test_accepted_record_delivers_receipt(self) -> None:
         written: list[LogRecord] = []
@@ -98,12 +109,12 @@ class TestPendingLog:
             return True
 
         channel = self._channel(writer)
-        channel.start()
-        result = await channel.deliver_important(
-            LogRecord(level=LogLevel.ERROR, message="ok")
-        )
-        assert result.delivered is True
-        await asyncio.to_thread(channel.stop_listener, timeout=10)
-        channel.async_close()
-        await channel.await_closed()
+        try:
+            channel.start()
+            result = await channel.deliver_important(
+                LogRecord(level=LogLevel.ERROR, message="ok")
+            )
+            assert result.delivered is True
+        finally:
+            await _finish_channel(channel)
         assert [r.message for r in written] == ["ok"]
