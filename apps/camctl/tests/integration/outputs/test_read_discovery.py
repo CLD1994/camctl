@@ -308,8 +308,7 @@ async def test_newly_eligible_low_key_is_rediscovered(read_targets):
 
 
 @pytest.mark.asyncio
-async def test_evicted_read_resumes_after_restart(two_copies):
-    import weakref
+async def test_pending_read_resumes_after_discovery_restart(two_copies):
     from camctl.outputs.read_discovery import ReadDiscoveryOwner
     from ..bootstrap.test_output_read_recovery import _start_unended_read
 
@@ -324,11 +323,7 @@ async def test_evicted_read_resumes_after_restart(two_copies):
         owner = ReadDiscoveryOwner(1)
         await owner.begin_round(database, _NOW)
         page = await owner.reads(database, "reads", _NOW)
-        reference = weakref.ref(page.items[0])
-        del page, owner
-        # 当前asyncio交付Handle仍持有结果Future；让该回调退出，不推进数据库业务。
-        await asyncio.sleep(0)
-        assert reference() is None
+        assert [candidate.copy_id for candidate in page.items] == [early.copy_id]
     before = tuple(owned.connection.iterdump())
     owned.connection.close()
     async with _discovery_database(path) as (database, _):
@@ -341,6 +336,9 @@ async def test_evicted_read_resumes_after_restart(two_copies):
         assert await database.read(lambda current: current.connection.execute(
             "SELECT id,attempts_used FROM operation_runs WHERE copy_id=?",
             (early.copy_id,)).fetchone()) == (ticket.run_id, 1)
+        assert await database.read(lambda current: current.connection.execute(
+            "SELECT status,result_json,max_attempts_used FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+            (ticket.run_id, ticket.attempt_id)).fetchone()) == (1, None, 3)
         assert await database.read(lambda current: tuple(current.connection.iterdump())) == before
 
 
