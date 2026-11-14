@@ -184,6 +184,7 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
         assert await asyncio.to_thread(
             _session_lock_is_held, Path(deps.session_lock),
         )
+        assert connections and all(connection.close_calls == 0 for connection in connections)
 
         assert run_task.cancel("repeated-parent-cancel") is True
         await asyncio.sleep(0)
@@ -192,6 +193,7 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
         assert await asyncio.to_thread(
             _session_lock_is_held, Path(deps.session_lock),
         )
+        assert connections and all(connection.close_calls == 0 for connection in connections)
         release_report.set()
         done, pending = await asyncio.wait({run_task}, timeout=120)
         assert not pending, "报告与最终本地收场完成后父取消仍未传播"
