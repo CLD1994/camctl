@@ -742,6 +742,8 @@ SQL 对每次行修改即时检查这些组合。一个事件同时确定设备�
 
 `check_decision` 为 `UNDETERMINED`、`NOT_NEEDED`、`REQUIRED`；为 `NOT_NEEDED` 或 `REQUIRED` 时，`check_basis_json` 必填。对象使用 `reason`（`CONTINUOUS_CONTROL_COMPLETE` 表示连续控制完成，`INSUFFICIENT_TIMING` 表示计时不足需媒体证据，`EXCESS_DURATION_CHECK` 表示异常多录检查）、`target_duration_ms`，以及实际用于判定的原始 `control_elapsed_ns`、`continuity_evidence` 等已知成员；未知的依据省略，不能默认为零。启动余量适用时，程序从原冻结定义推导可保证的录制时长下界；该派生下界不覆盖原始控制时长，也不作为媒体实测保存。
 
+`INSUFFICIENT_TIMING` 检查依据的 `threshold_s` 是目标时长加原动作采用的余量所得完整比较门槛，以精确 JSON 秒数保存且不低于目标时长。检查副本读取前须可靠保存该门槛，后续检查和恢复沿用原值。旧依据缺少门槛时，只有原动作仍在执行且未取消、检查尚未执行、修复尚未决定，并且实际没有读取尝试或可靠读取进度时，才能补写门槛；已登记的空副本须具有唯一读取流程且没有任何尝试。已有读取意图即使尚无字节进度也不能证明未派发，不能补造门槛。其他检查理由不保存此字段。
+
 `check_state` 为 `NOT_PERFORMED`、`RUNNING`、`COMPLETED`、`FAILED`、`UNCONFIRMED`，`media_json` 使用公共媒体结构并保持检查阶段一致。工具未取得时长与实测时长不足分别表达。
 
 检查取得的实际容器与逐流事实保存在原动作的 `RECORDING_PROCESSED` 历史依据中，不扩展公共 `media_json`。检查结果以 `source_probe` 保存实际输入探测；未执行检查而直接修复时，首次登记修复输出的同一事务保存该输入事实。修复成功以 `output_probe` 保存实际成品探测，恢复和正式产物的格式信息读取原已保存的事实。原键重送同时核对这些探测事实；结果提交未知时先核实原完整申请，不重新探测替换。旧事件未含这些成员时保持原规则；需要 OSV 双流验证的恢复缺少原输入事实时，不猜测或发布修复成品。成员的适用分支由[事件登记](event-transitions.json)维护。

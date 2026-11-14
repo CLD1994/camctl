@@ -8107,6 +8107,11 @@ def _validate_check_basis(basis) -> None:
         if not isinstance(evidence, list) or not evidence or any(
                 not isinstance(item, str) or not item for item in evidence):
             raise EventValidationError(f"连续性证据必须是非空文本列表: {evidence!r}")
+    if "threshold_s" in basis:
+        threshold = basis["threshold_s"]
+        if (reason != 2 or not _is_precise_non_negative(threshold)
+                or Decimal(threshold) < Decimal(target) / 1000):
+            raise EventValidationError("检查门槛须为不低于目标时长的精确秒数")
 
 
 def _validate_repair_basis(basis) -> None:
@@ -8208,14 +8213,62 @@ def _recording_source_guard(event, context) -> None:
         raise EventValidationError("关联原片属于其他动作")
 
 
+def _require_unread_check_input(action, processing, copies, action_id, old_basis):
+    """按独立读取的原始事实判断旧检查是否仍可补门槛。"""
+    if (action["status"] != 2 or action["cancel_requested"] != 0
+            or processing is None or processing["action_id"] != action_id
+            or processing["check_decision"] != 3 or processing["check_state"] != 1
+            or processing["repair_state"] != 1
+            or not json_equal(processing["check_basis_json"], old_basis)):
+        raise ConsistencyError("原动作或检查处理已不具备门槛补写资格")
+    if len(copies) > 1:
+        raise ConsistencyError("原处理存在多个输入副本")
+    if not copies:
+        return
+    copy, target, runs = copies[0]
+    if (copy["delivery_id"] is not None or copy["inspection_id"] is not None
+            or copy["source_device_file_id"] != processing["source_device_file_id"]
+            or copy["source_intermediate_file_id"] is not None
+            or copy["round"] != 1 or copy["recopies_used"] != 0
+            or copy["committed_bytes"] != 0 or copy["reset_state"] != 1
+            or copy["read_end_event_id"] is not None or copy["verification_state"] != 1
+            or copy["target_sha256"] is not None or copy["verification_error_json"] is not None
+            or target is None or target["owner_action_id"] != action_id
+            or target["owner_delivery_id"] is not None or target["purpose"] != 2
+            or target["size_bytes"] is not None or target["sha256"] is not None):
+        raise ConsistencyError("输入副本已有读取、校验或重拷事实")
+    if (len(runs) != 1 or runs[0][1] != action_id or runs[0][2] is not None
+            or runs[0][3] != 1 or runs[0][4] != 0 or runs[0][5]):
+        raise ConsistencyError("输入副本的读取流程已有尝试或状态不符")
+
+
 def _decided_processing_guard(event, context) -> None:
     """RECORDING_DECIDED 检查与修复决定：一次固定、依据完整。"""
     if event.reason == _DECIDED_CHECK_REASON:
-        row, _ = _single_processing_row(event, context)
-        decision = row.after.values.get("check_decision")
-        if row.before.values.get("check_decision") != 1 or decision not in (2, 3):
-            raise EventValidationError("检查决定必须从未判定一次固定")
-        _validate_check_basis(row.after.values.get("check_basis_json"))
+        row, processing = _single_processing_row(event, context)
+        before, after = row.before.values, row.after.values
+        _validate_check_basis(after.get("check_basis_json"))
+        if set(after) == {"check_decision", "check_basis_json"}:
+            if before.get("check_decision") != 1 or after["check_decision"] not in (2, 3):
+                raise EventValidationError("检查决定必须从未判定一次固定")
+        elif set(after) == {"check_basis_json"}:
+            old, new = before.get("check_basis_json"), after["check_basis_json"]
+            if (not isinstance(old, Mapping) or "threshold_s" in old
+                    or "threshold_s" not in new or new.get("reason") != 2
+                    or not json_equal(old, {k: v for k, v in new.items() if k != "threshold_s"})):
+                raise EventValidationError("只能为原检查依据补写门槛")
+            if (context.transaction.first_event_id != event.event_id
+                    or context.transaction.last_event_id != event.event_id):
+                raise EventValidationError("检查门槛补写必须独立提交")
+            if context.current_reads is None:
+                raise EventValidationError("检查门槛补写缺少独立读取事实")
+            try:
+                action, actual, copies = context.current_reads.check_input_facts(processing["action_id"], row.row_id)
+                _require_unread_check_input(action, actual, copies, processing["action_id"], old)
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
+        else:
+            raise EventValidationError("检查决定事件字段不完整")
     elif event.reason == _DECIDED_REPAIR_REASON:
         row, _ = _single_processing_row(event, context)
         state = row.after.values.get("repair_state")

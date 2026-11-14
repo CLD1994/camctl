@@ -1683,8 +1683,8 @@ class _MediaProcessingCommand(_ProcessingCommand):
             ProcessingOutcome(ProcessingDisposition.ALREADY))
 
 
-class _CheckDecisionCommand(_ProcessingCommand):
-    """固定原片检查决定：UNDETERMINED 一次固定，不因重送重算。"""
+class _CheckDecisionCommand(_MediaProcessingCommand):
+    """固定检查决定或在未读取时补足原门槛，按完整申请恢复原键。"""
 
     def __init__(self, request: CheckDecisionSave, key: OperationKey) -> None:
         if not isinstance(request, CheckDecisionSave):
@@ -1698,14 +1698,28 @@ class _CheckDecisionCommand(_ProcessingCommand):
         request = self._request
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(
-                saved, _RECORDING_DECIDED_EVENT, _DECIDED_CHECK_REASON,
-                request.occurred_at)
+            processing = self._saved_processing(scope, saved,
+                [(_RECORDING_DECIDED_EVENT, _DECIDED_CHECK_REASON)])
+            return self._reuse_specs(scope, saved, self._specs(processing))
         processing = self._load_processing(connection, request.processing_id)
-        if processing["check_decision"] != 1:
-            raise ConsistencyError(
-                f"检查决定已固定，不重新判断: {processing['check_decision']!r}")
         self._claim(processing)
+        specs = self._specs(processing)
+        plan = self._save_specs(scope, specs)
+        if processing["check_decision"] == 3:
+            action = self._load_row(connection, "actions", processing["action_id"])
+            plan = replace(plan, plan_read_scope=PlanReadScope(action["plan_id"], 128))
+        return plan
+
+    def _specs(self, processing):
+        request = self._request
+        if processing["check_decision"] not in (1, 3):
+            raise ConsistencyError("检查决定已固定，不重新判断")
+        if processing["check_decision"] == 3:
+            old, new = processing["check_basis_json"], request.basis.as_json()
+            if (request.decision.value != 3 or not isinstance(old, Mapping)
+                    or "threshold_s" in old or "threshold_s" not in new
+                    or not json_equal(old, {k: v for k, v in new.items() if k != "threshold_s"})):
+                raise ConsistencyError("只能为原检查依据补写门槛")
         row = _update(
             "recording_processing", processing["id"],
             {"check_decision": processing["check_decision"],
@@ -1713,9 +1727,7 @@ class _CheckDecisionCommand(_ProcessingCommand):
             {"check_decision": request.decision.value,
              "check_basis_json": request.basis.as_json()},
         )
-        return self._emit(
-            scope, _RECORDING_DECIDED_EVENT, _DECIDED_CHECK_REASON,
-            row, request.occurred_at)
+        return ((_RECORDING_DECIDED_EVENT, _DECIDED_CHECK_REASON, (row,)),)
 
 
 class _RepairDecisionCommand(_MediaProcessingCommand):

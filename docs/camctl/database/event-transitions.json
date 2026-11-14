@@ -699,7 +699,6 @@
       ],
       "write_once": [
         "source_device_file_id",
-        "check_basis_json",
         "repair_basis_json",
         "repair_output_file_id"
       ],
@@ -6748,7 +6747,8 @@
               ],
               "before": {
                 "check_decision": [
-                  1
+                  1,
+                  3
                 ]
               },
               "after": {
@@ -6758,7 +6758,6 @@
                 ]
               },
               "required": [
-                "check_decision",
                 "check_basis_json"
               ],
               "transitions": {

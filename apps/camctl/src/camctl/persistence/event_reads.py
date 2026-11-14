@@ -746,3 +746,27 @@ class SqlEventReads:
             raise ConsistencyError("修复媒体不属于原计划")
         require_repair_media_proof(self.connection, action_id, processing_id, output_file_id,
             output_probe=output_probe, saved=saved)
+
+    def check_input_facts(self, action_id: int, processing_id: int):
+        """读取原计划内的处理、副本、读取流程及尝试存在事实。"""
+        from camctl.persistence.repositories.transactions import row_facts
+        if not isinstance(self.scope, PlanReadScope):
+            raise ConsistencyError("检查输入事实要求原计划读取范围")
+        action = row_facts(self.connection, "actions", action_id)
+        if action is None or action["plan_id"] != self.scope.plan_id:
+            raise ConsistencyError("检查输入不属于原计划")
+        processing = row_facts(self.connection, "recording_processing", processing_id)
+        with closing(self.connection.execute(
+                "SELECT id FROM file_copies WHERE processing_id=? LIMIT 2", (processing_id,))) as cursor:
+            ids = cursor.fetchall()
+        copies = []
+        for (copy_id,) in ids:
+            copy = row_facts(self.connection, "file_copies", copy_id)
+            target = row_facts(self.connection, "intermediate_files", copy["target_file_id"])
+            with closing(self.connection.execute(
+                    "SELECT id,action_id,delivery_id,status,attempts_used,"
+                    "EXISTS(SELECT 1 FROM operation_attempts a WHERE a.run_id=r.id) "
+                    "FROM operation_runs r WHERE copy_id=? AND kind=3 LIMIT 2", (copy_id,))) as cursor:
+                runs = tuple(cursor.fetchall())
+            copies.append((copy, target, runs))
+        return action, processing, tuple(copies)

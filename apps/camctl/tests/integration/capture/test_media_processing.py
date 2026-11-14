@@ -653,3 +653,70 @@ def test_guard_rejects_success_without_registered_output(environment, monkeypatc
         return replace(plan, state_rows=rows)
 
     _assert_guard_rejected(monkeypatch, owned, request, remove_output, "缺少输出文件事实")
+
+
+def _threshold_request(value="72.5", *, occurred_at=_NOW + 2, **changes):
+    basis = replace(_check_required().basis, threshold_s=Decimal(value), **changes)
+    return CheckDecisionSave(1, CheckDecisionChoice.REQUIRED, basis, occurred_at)
+
+
+def _seed_empty_check_copy(owned, *, attempt=False, progress=False, complete=False):
+    """按存储格式准备已登记副本，实际补写仍经公开仓储提交。"""
+    c = owned.connection
+    _assert_saved(_save(owned, SourceFileSave(1, 11, _NOW)))
+    _seed_intermediate(c, 702, action=1, purpose=2, path="recording-inputs/702.mp4",
+                       size=1024 if complete else None, sha256="a" * 64 if complete else None)
+    c.execute("INSERT INTO file_copies (id,delivery_id,processing_id,inspection_id,"
+        "source_device_file_id,source_intermediate_file_id,target_file_id,round,recopies_used,"
+        "max_recopies_used,source_size,source_sha256,committed_bytes,reset_state,slot_device_id,"
+        "read_end_event_id,verification_state,target_sha256,verification_error_json) "
+        "VALUES (1,NULL,1,NULL,11,NULL,702,1,0,0,1024,NULL,?,1,NULL,?, ?, ?,NULL)",
+        (1024 if complete else 1 if progress else 0, 1 if complete else None,
+         5 if complete else 1, "a" * 64 if complete else None))
+    c.execute("INSERT INTO operation_runs (id,action_id,delivery_id,kind,query_purpose,"
+        "responsibility_key,activity_id,copy_id,cleanup_item_id,obtain_item_id,availability_check_id,"
+        "session_key,status,attempts_used,max_attempts_used,timeout_s_json,retry_interval_s_json,"
+        "retry_wait_required,error_json) VALUES (1,1,NULL,3,NULL,'read/1',NULL,1,NULL,NULL,NULL,"
+        "NULL,1,0,1,NULL,NULL,0,NULL)")
+    if attempt:
+        c.execute("INSERT INTO operation_attempts (id,run_id,attempt_no,copy_round,status,"
+            "intent_event_id,result_event_id,result_first_page_event_id,result_last_page_event_id,"
+            "max_attempts_used,timeout_s_json,retry_interval_s_json,effect_state,result_json,error_json) "
+            "VALUES (1,1,1,1,1,1,NULL,NULL,NULL,1,NULL,NULL,1,NULL,NULL)")
+    c.commit()
+
+
+def test_check_threshold_completion_and_original_keys(environment):
+    owned = environment
+    initial_key, completion_key = new_operation_key(), new_operation_key()
+    _assert_saved(_save(owned, _check_required(), key=initial_key))
+    _seed_empty_check_copy(owned)
+    request = _threshold_request()
+    _assert_saved(_save(owned, request, key=completion_key))
+    assert _json_column(owned, "check_basis_json")["threshold_s"] == Decimal("72.5")
+    for modified in (_threshold_request("73"), replace(request, processing_id=2),
+                     replace(request, occurred_at=_NOW + 3)):
+        _assert_rolled_back(_save(owned, modified, key=completion_key))
+    for modified in (_threshold_request("73"), _check_required(_NOW + 3),
+                     _threshold_request(target_duration_ms=61_000)):
+        _assert_rolled_back(_save(owned, modified))
+    # 后续出现读取意图与取消，不影响原键的历史核实。
+    owned.connection.execute("INSERT INTO operation_attempts (id,run_id,attempt_no,copy_round,status,"
+        "intent_event_id,result_event_id,result_first_page_event_id,result_last_page_event_id,"
+        "max_attempts_used,timeout_s_json,retry_interval_s_json,effect_state,result_json,error_json) "
+        "VALUES (1,1,1,1,1,1,NULL,NULL,NULL,1,NULL,NULL,1,NULL,NULL)")
+    owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
+    owned.connection.commit()
+    replay = _save(owned, request, key=completion_key)
+    assert replay.kind is DbOutcomeKind.COMPLETED
+    assert replay.value.disposition is ProcessingDisposition.ALREADY
+    assert _save(owned, _check_required(), key=initial_key).value.disposition is ProcessingDisposition.ALREADY
+
+
+@pytest.mark.parametrize("copy_state", ["attempt", "progress", "complete"])
+def test_check_threshold_rejects_actual_read_facts(environment, copy_state):
+    owned = environment
+    _assert_saved(_save(owned, _check_required()))
+    _seed_empty_check_copy(owned, **{copy_state: True})
+    _assert_rolled_back(_save(owned, _threshold_request()))
+    assert "threshold_s" not in _json_column(owned, "check_basis_json")
