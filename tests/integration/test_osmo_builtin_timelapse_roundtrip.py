@@ -25,6 +25,7 @@ import time
 import pytest
 
 from _wsl_host_demo import HostDemo, query_state, wait_for
+from _client_session import ClientSession
 from _osmo_builtin_clock import (
     format_utc, read_clock, set_frozen, set_running, whole_second_utc_us,
 )
@@ -606,7 +607,7 @@ def test_installed_osmo_describe_exposes_both_formal_capture_types(osmo_package,
     ids=["record-with-preview", "timelapse-with-preview", "timelapse-without-preview"],
 )
 def test_installed_osmo_capture_recovery_and_available_delivery(
-        tmp_path, host_demo, osmo_package, monkeypatch, action_type, include_preview):
+        tmp_path, host_demo, osmo_package, monkeypatch, request, action_type, include_preview):
     """正式 OSMO 合同经客户端、C host、安装 CLI、恢复、取回与 ACK。
 
     受控时钟只接入既有业务时钟模块。driver 的 asyncio.sleep(3) 与
@@ -644,8 +645,40 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
     (client_store / "device-capabilities.json").write_text(
         json.dumps(described, ensure_ascii=False), encoding="utf-8")
 
+    client = None
+    session_number = 0
+    receipt_number = 0
+    receipts = deployment.root / "client-receipts"
+    receipts.mkdir()
+
+    def close_client():
+        nonlocal client
+        if client is None:
+            return
+        current, client = client, None
+        try:
+            current.close()
+        finally:
+            evidence = receipts / f"session-{session_number:03d}"
+            evidence.mkdir(exist_ok=True)
+            for path in (current.python_metrics, current.node_metrics,
+                         current.stdout_path, current.stderr_path):
+                if path.exists():
+                    shutil.copy2(path, evidence / path.name)
+
+    request.addfinalizer(close_client)
+
     def client_driver(*args: str, output: Path) -> dict:
-        return _client_driver(package, *args, output=output)
+        nonlocal client, session_number, receipt_number
+        if client is None:
+            session_number += 1
+            client = ClientSession(
+                ["node", "--import", "tsx", str(_ROOT / "client_driver.ts")],
+                cwd=_REPO / "apps/client", env=package.environment,
+                root=deployment.root, timeout=120,
+            )
+        receipt_number += 1
+        return client.call(*args, output=receipts / f"{receipt_number:03d}-{output.name}")
 
     deployment.run_client_driver = client_driver
     capture_plan, capture_receipt = deployment.export_plan_with_client(
@@ -1019,6 +1052,8 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         demo.claim()
         saved = deployment.import_reports_with_client(deployment.processing)
         assert capture_report["report_id"] in saved["saved_report_ids"]
+        # 后续导出必须由重建的客户端读取已保存的报告位置。
+        close_client()
         assert len(_records(process_log)) >= 3
 
         delivery_ids = []
@@ -1164,9 +1199,11 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
                 assert not preview_source.exists()
             saved = deployment.import_reports_with_client(deployment.processing)
             assert report["report_id"] in saved["saved_report_ids"]
+            # 媒体关联由重建的客户端读取持久报告后验证。
+            close_client()
             media_receipt_path = deployment.root / f"client-media-{obtain_name}.json"
-            media_receipt = _client_driver(
-                package, "import-media", str(client_store), str(claimed),
+            media_receipt = client_driver(
+                "import-media", str(client_store), str(claimed),
                 output=media_receipt_path)
             assert media_receipt["file_name"] == file_name
             assert media_receipt["delivery_id"] == str(delivery_id)
@@ -1220,10 +1257,15 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         _assert_cli_process_provenance(package, process_log)
         _assert_adb_process_provenance(package, adb_log)
     finally:
-        demo.stop()
         try:
-            finalize_receipts(deployment.root)
+            demo.stop()
         finally:
-            archive = _archive_logs(package.root, package.log_dir)
-            shutil.copytree(deployment.root,
-                archive / "cases" / f"{action_type}-{preview_suffix}", dirs_exist_ok=True)
+            try:
+                close_client()
+            finally:
+                try:
+                    finalize_receipts(deployment.root)
+                finally:
+                    archive = _archive_logs(package.root, package.log_dir)
+                    shutil.copytree(deployment.root,
+                        archive / "cases" / f"{action_type}-{preview_suffix}", dirs_exist_ok=True)
