@@ -183,25 +183,33 @@ def _factory(world, **kwargs):
         occurred_at=lambda: _NOW, **kwargs)
 
 
+@pytest.fixture
+def driver_entry(request, isolated_driver_registries):
+    """通过正式登记取得驱动声明，不建立清理业务资源。"""
+    register_builtin_camera_drivers(load_config(None, ConfigDefaults()))
+    driver_id = getattr(request, "param", BINDING.driver_id)
+    return drivers_runtime.current_registry().entry(driver_id)
+
+
 @pytest.mark.parametrize("operation", ["query", "delete"])
-@pytest.mark.parametrize("world", ["dji-osmo360-ii", "dji-action6"], indirect=True)
-async def test_registered_osmo_recovery_registry_preserves_operation_contract(world, operation):
-    evidence = recovery_registry(world.entry, operation)
+@pytest.mark.parametrize("driver_entry", ["dji-osmo360-ii", "dji-action6"], indirect=True)
+async def test_registered_osmo_recovery_registry_preserves_operation_contract(driver_entry, operation):
+    evidence = recovery_registry(driver_entry, operation)
     assert evidence is not None
     template = evidence.contract("adb_foreground_recovery", 1)
     assert template.operation == operation and template.fields == frozenset()
     assert template.identity_field is None
-    assert evidence.contract(operation + "_returned", 1) is world.entry.evidence.contract(operation + "_returned", 1)
+    assert evidence.contract(operation + "_returned", 1) is driver_entry.evidence.contract(operation + "_returned", 1)
     assert evidence.contract(operation + "_foreground_recovery", 1).fields == frozenset({"terminate_grace_s"})
-    assert recovery_registry(world.entry, "digest") is None
-    assert world.entry.declaration.file_query_supported and world.entry.declaration.delete_supported
-    assert not world.entry.declaration.query_supported
+    assert recovery_registry(driver_entry, "digest") is None
+    assert driver_entry.declaration.file_query_supported and driver_entry.declaration.delete_supported
+    assert not driver_entry.declaration.query_supported
 
 
 @pytest.mark.parametrize("operation", ["query", "delete"])
 @pytest.mark.parametrize("missing", ["authorization", "template", "body", "identity"])
-async def test_recovery_registry_rejects_missing_or_invalid_registration(world, operation, missing):
-    entry = world.entry
+async def test_recovery_registry_rejects_missing_or_invalid_registration(driver_entry, operation, missing):
+    entry = driver_entry
     if missing == "authorization":
         entry = replace(entry, declaration=replace(entry.declaration, adb_foreground_recovery_operations=frozenset()))
     elif missing == "template":
