@@ -8,22 +8,37 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
-from camctl.history.validators import EventValidationError
-from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
+from camctl.history.validators import EventContext, EventValidationError
+from ..support.output_planning import proposal_state
+from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.history.reads import ReadCoverage
 from camctl.persistence.repositories.transactions import (
     CommandPlan, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change,
 )
 
-from .test_read_associations import read_targets
+from .test_read_associations import open_read_targets, read_targets
 from .test_qualification import _NOW
 from ..support.output_planning import storage_fault as _FaultConnection
 
 
+@pytest.fixture(scope="module")
+def _member_snapshot(tmp_path_factory):
+    """每个测试模块准备完整事实和读取范围，关闭数据库后交给静态测试。"""
+    with open_read_targets(tmp_path_factory.mktemp("member-snapshot")) as owned:
+        _complete_source(owned.connection)
+        proposal = proposal_state(owned, owners={("obtain_items", 101): ("action", 31)})
+    return EventContext(TransactionRange(2, 2, 2), proposal.owners,
+                        proposal.state_rows, read_coverage=proposal.read_coverage)
+
+
 @pytest.fixture
-def member_context(read_targets):
-    _complete_source(read_targets.connection)
-    return proposal_state(read_targets, owners={("obtain_items", 101): ("action", 31)})
+def member_context(_member_snapshot):
+    return replace(_member_snapshot, owners=deepcopy(_member_snapshot.owners),
+                   state_rows=deepcopy(_member_snapshot.state_rows))
+
+
+def validate_event(event, context):
+    return BusinessStorage().validate_event(event, context)
 
 
 def _complete_source(connection):

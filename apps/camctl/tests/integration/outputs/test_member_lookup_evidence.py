@@ -6,10 +6,9 @@ import pytest
 
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
-from ..support.output_planning import validate_static_event as validate_event
 from camctl.persistence.repositories.transactions import event_envelope, update_change
 
-from .test_member_guard import member_context, read_targets
+from .test_member_guard import _member_snapshot, member_context, validate_event
 from .test_qualification import _NOW
 
 

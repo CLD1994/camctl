@@ -4,20 +4,6 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from camctl.contracts.json_encoding import encode_exact_json
-
-
-def history_body(event):
-    """按 database/history-formats.md 的事件正文版本1编码静态输入。"""
-    return encode_exact_json({
-        "reason": event.reason, "evidence": dict(event.evidence),
-        "rows": [{"table": row.table, "id": row.row_id,
-            "before": {"exists": row.before.exists, "values": dict(row.before.values)},
-            "after": {"exists": row.after.exists, "values": dict(row.after.values)}}
-            for row in event.rows],
-    })
-
-
 @asynccontextmanager
 async def host_cleanup(owned, staging):
     """清理仓储专项使用正式工厂、真实worker与文件执行器，并完整关闭。"""

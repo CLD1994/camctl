@@ -1,6 +1,6 @@
 """读取资格在等待、取消或建档前核对持久化对象的固定关联。"""
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from decimal import Decimal
 import sqlite3
@@ -21,8 +21,8 @@ from .test_qualification import (
 )
 
 
-@pytest.fixture
-def read_targets(tmp_path):
+@contextmanager
+def open_read_targets(tmp_path):
     _, owned = _seed_environment(tmp_path)
     try:
         connection = owned.connection
@@ -51,6 +51,12 @@ def read_targets(tmp_path):
         yield owned
     finally:
         owned.connection.close()
+
+
+@pytest.fixture
+def read_targets(tmp_path):
+    with open_read_targets(tmp_path) as owned:
+        yield owned
 
 
 def _command(*, internal=False):

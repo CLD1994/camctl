@@ -4,13 +4,12 @@ import pytest
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import TransactionRange
+from camctl.contracts.json_encoding import encode_exact_json
 from camctl.devices.tasks import CompletionMode, EndControl, StartReturn
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.persistence.repositories.validation import BusinessStorage
 from camctl.persistence.repositories.transactions import event_envelope, update_change
-
-from ..support.capture_guard_cases import history_body
 
 
 _SENT_AT = 1_700_000_000_000_000
@@ -44,6 +43,17 @@ def _sent_result(activity_id: int):
              "data": {"activity_id": str(activity_id)}}
         ],
     }
+
+
+def _history_body(event):
+    """按事件正文版本 1 编码静态输入。"""
+    return encode_exact_json({
+        "reason": event.reason, "evidence": dict(event.evidence),
+        "rows": [{"table": row.table, "id": row.row_id,
+            "before": {"exists": row.before.exists, "values": dict(row.before.values)},
+            "after": {"exists": row.after.exists, "values": dict(row.after.values)}}
+            for row in event.rows],
+    })
 
 
 def _source_attempt_event(attempt):
@@ -87,7 +97,7 @@ def _source_attempt_event(attempt):
         "occurred_at": event.occurred_at,
         "clock_status": event.clock_status,
         "change_seq": event.change_seq,
-        "body_json": history_body(event),
+        "body_json": _history_body(event),
     }
 
 
