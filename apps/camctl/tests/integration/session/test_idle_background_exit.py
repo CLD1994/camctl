@@ -98,6 +98,15 @@ async def test_late_background_failure_is_delivered_before_normal_close(tmp_path
         raise failure
 
     context, state, local, entered, release = idle_world(tmp_path, completed=fail)
+    facts_calls = []
+    injection_hits = []
+    original_facts_query = context.facts_query
+
+    def facts_query(connection):
+        facts_calls.append(connection)
+        return original_facts_query(connection)
+
+    context.facts_query = facts_query
     if completion_phase == "facts_read":
         original_open = context.open_database
 
@@ -106,10 +115,13 @@ async def test_late_background_failure_is_delivered_before_normal_close(tmp_path
             original_read = database.read
 
             async def read(callback, **kwargs):
+                calls_before = len(facts_calls)
                 result = await original_read(callback, **kwargs)
-                if kwargs.get("description") == "会话工作事实":
+                background = context.flows["obtain"].unconsumed_task
+                if len(facts_calls) > calls_before and background is not None and not injection_hits:
+                    injection_hits.append(facts_calls[-1])
                     release.set()
-                    await context.flows["obtain"].unconsumed_task
+                    await background
                 return result
 
             database.read = read
@@ -121,6 +133,7 @@ async def test_late_background_failure_is_delivered_before_normal_close(tmp_path
         await asyncio.wait_for(local.settling.wait(), 2)
         release.set()
         result = await asyncio.wait_for(task, 2)
+        assert bool(injection_hits) is (completion_phase == "facts_read")
         assert result.reason == "state_db_error"
         assert "后台实际保存失败" in str(result.details)
         assert "/state" in str(result.details)

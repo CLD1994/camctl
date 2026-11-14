@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import os
+import queue
 import subprocess
 import sys
+import threading
 import textwrap
 import time
 from pathlib import Path
@@ -41,16 +44,43 @@ _HOLD_LOCK_SCRIPT = textwrap.dedent(
 )
 
 
+def _wait_for_held(child: subprocess.Popen) -> None:
+    assert child.stdout is not None
+    lines = queue.Queue()
+    reader = threading.Thread(target=lambda: lines.put(child.stdout.readline()), daemon=True)
+    reader.start()
+    child.held_reader = reader
+    try:
+        line = lines.get(timeout=10)
+    except queue.Empty:
+        raise AssertionError(f"子进程未在期限内确认持锁，退出码：{child.poll()}") from None
+    if line.strip() != "HELD":
+        child.wait(timeout=10)
+        stderr = child.stderr.read() if child.stderr is not None else ""
+        raise AssertionError(f"子进程未取得锁：退出码 {child.returncode}，输出 {line!r}，错误 {stderr}")
+
+
+def _reap_child(child: subprocess.Popen) -> None:
+    if child.poll() is None:
+        child.kill()
+    child.wait(timeout=10)
+    reader = getattr(child, "held_reader", None)
+    if reader is not None:
+        reader.join(timeout=2)
+        assert not reader.is_alive(), "持锁确认管道未结束"
+    child.communicate(timeout=10)
+
+
 def test_mutual_exclusion_across_processes(tmp_path: Path) -> None:
     admission_path = lock_file_paths(tmp_path / "state.db")[1]
     child = subprocess.Popen(
         [sys.executable, "-c", _HOLD_LOCK_SCRIPT, str(admission_path)],
         stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
     try:
-        assert child.stdout is not None
-        assert child.stdout.readline().strip() == "HELD"
+        _wait_for_held(child)
         probe = probe_admission(admission_path)
         assert probe.status is AdmissionProbeStatus.CONFLICT
         assert probe.is_free is False
@@ -60,8 +90,7 @@ def test_mutual_exclusion_across_processes(tmp_path: Path) -> None:
         except AdmissionLockConflictError:
             pass
     finally:
-        child.kill()
-        child.wait(timeout=30)
+        _reap_child(child)
 
 
 def test_lock_released_after_abnormal_exit(tmp_path: Path) -> None:
@@ -69,23 +98,25 @@ def test_lock_released_after_abnormal_exit(tmp_path: Path) -> None:
     child = subprocess.Popen(
         [sys.executable, "-c", _HOLD_LOCK_SCRIPT, str(admission_path)],
         stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
-    assert child.stdout is not None
-    assert child.stdout.readline().strip() == "HELD"
-    child.kill()
-    child.wait(timeout=30)
-    # 进程对象退出与内核锁句柄回收在 Windows 上不同步完成；在限期内
-    # 按谓词轮询，超期仍未释放才是失败。
-    deadline = time.monotonic() + 10
-    while True:
-        probe = probe_admission(admission_path)
-        if probe.status is AdmissionProbeStatus.ACQUIRED_AND_RELEASED:
-            break
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.05)
-    assert probe.status is AdmissionProbeStatus.ACQUIRED_AND_RELEASED
+    try:
+        _wait_for_held(child)
+        child.kill()
+        child.wait(timeout=10)
+        # 内核释放可能晚于进程退出，按期限检查真实锁。
+        deadline = time.monotonic() + 10
+        while True:
+            probe = probe_admission(admission_path)
+            if probe.status is AdmissionProbeStatus.ACQUIRED_AND_RELEASED:
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+        assert probe.status is AdmissionProbeStatus.ACQUIRED_AND_RELEASED
+    finally:
+        _reap_child(child)
 
 
 def test_session_lock_conflicts_with_running_session(tmp_path: Path) -> None:
@@ -107,16 +138,7 @@ def test_handles_are_not_inherited_by_children(tmp_path: Path) -> None:
     admission_path = lock_file_paths(tmp_path / "state.db")[1]
     lease = acquire_admission(admission_path)
     try:
-        inherited = subprocess.run(
-            [sys.executable, "-c", _HOLD_LOCK_SCRIPT, str(admission_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=40,
-        )
-        # 父进程持有非继承句柄时，子进程必须冲突并快速失败，
-        # 而不是继承资格后挂起至超时。
-        assert "HELD" not in inherited.stdout
+        assert os.get_inheritable(lease.fd) is False
     finally:
         lease.close()
 

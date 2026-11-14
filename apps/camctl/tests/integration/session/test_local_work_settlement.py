@@ -59,6 +59,50 @@ async def _turns(count=5):
         await asyncio.sleep(0)
 
 
+async def _wait_signal(event, task, timeout=2):
+    signal = asyncio.create_task(event.wait())
+    try:
+        done, _ = await asyncio.wait((signal, task), timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+        if signal not in done:
+            if task in done:
+                try:
+                    result = task.result()
+                except BaseException as error:
+                    raise AssertionError("会话在同步点前结束") from error
+                raise AssertionError(f"会话在同步点前返回：{result!r}")
+            raise AssertionError("会话未在期限内到达同步点")
+    finally:
+        signal.cancel()
+        await asyncio.gather(signal, return_exceptions=True)
+
+
+async def _result(task, timeout=5):
+    done, _ = await asyncio.wait((task,), timeout=timeout)
+    if not done:
+        raise AssertionError("会话未在业务期限内结束")
+    return await task
+
+
+async def _finish_tasks(*tasks):
+    pending = [task for task in tasks if task is not None]
+    if pending and not pending[0].done() and not pending[0].cancelling():
+        pending[0].cancel("测试失败后的收场")
+    if pending:
+        done, remaining = await asyncio.wait(pending, timeout=5)
+        if remaining:
+            raise AssertionError(f"放行后原任务未在期限内结束：{remaining!r}")
+        await asyncio.gather(*done, return_exceptions=True)
+
+
+def _close_extra_lease(lease, expected):
+    if lease.fd >= 0:
+        try:
+            lease.close()
+        except BaseException as error:
+            if error is not expected:
+                raise
+
+
 def _assert_locks_held(context):
     assert not probe_admission(context.paths.admission_lock).is_free
     with pytest.raises(SessionLockConflictError):
@@ -89,14 +133,14 @@ async def test_session_waits_actual_local_owner_before_releasing_locks(environme
     context.flows = {"local": start, "device": device}
     task = asyncio.create_task(run_session(context, None))
     try:
-        await local.started.wait()
+        await _wait_signal(local.started, task)
         await _turns()
         assert device_rounds, "后台文件责任不能阻塞设备流程"
         assert not task.done(), "实际责任未结束时会话不能返回"
         _assert_locks_held(context)
         assert await local.database.read(lambda owned: owned.connection.execute("SELECT 1").fetchone()) == (1,)
         local.release.set()
-        outcome = await asyncio.wait_for(task, 1)
+        outcome = await _result(task, timeout=1)
         assert local.saved == 1 and local.closed
         assert probe_admission(context.paths.admission_lock).is_free
         if exit_kind == "normal":
@@ -106,7 +150,7 @@ async def test_session_waits_actual_local_owner_before_releasing_locks(environme
                                       "clock": "clock_invalid"}[exit_kind]
     finally:
         local.release.set()
-        await asyncio.gather(task, local.task, return_exceptions=True)
+        await _finish_tasks(task, local.task)
 
 
 @pytest.mark.asyncio
@@ -124,7 +168,7 @@ async def test_repeated_cancel_waits_local_owner_and_preserves_cancellation(envi
     context.facts_query = lambda _connection: _facts(unfinished_actions=1)
     task = asyncio.create_task(run_session(context, None))
     try:
-        await local.started.wait()
+        await _wait_signal(local.started, task)
         task.cancel()
         await _turns()
         task.cancel()
@@ -134,13 +178,13 @@ async def test_repeated_cancel_waits_local_owner_and_preserves_cancellation(envi
         assert not local.task.cancelled() and not local.closed
         local.release.set()
         with pytest.raises(asyncio.CancelledError) as canceled:
-            await task
+            await _result(task)
         assert local.saved == 1 and local.closed
         if state_failure:
             assert "canceled cleanup commit unknown" in str(getattr(canceled.value, "__notes__", ()))
     finally:
         local.release.set()
-        await asyncio.gather(task, local.task, return_exceptions=True)
+        await _finish_tasks(task, local.task)
 
 
 @pytest.mark.asyncio
@@ -165,9 +209,9 @@ async def test_local_state_failure_preserves_exit_error_priority(environment, pr
     context.flows = {"local": flow}
     task = asyncio.create_task(run_session(context, None))
     try:
-        await local.started.wait()
+        await _wait_signal(local.started, task)
         local.release.set()
-        outcome = await asyncio.wait_for(task, 1)
+        outcome = await _result(task, timeout=1)
         assert outcome.reason == ("state_db_error" if primary in (None, "report_error") else primary)
         assert "cleanup result commit unknown" in str(outcome.details)
         if primary in ("state_db_error", "configuration_error"):
@@ -178,7 +222,7 @@ async def test_local_state_failure_preserves_exit_error_priority(environment, pr
         await assert_database_closed(local.database)
     finally:
         local.release.set()
-        await asyncio.gather(task, local.task, return_exceptions=True)
+        await _finish_tasks(task, local.task)
 
 
 @pytest.mark.asyncio
@@ -201,11 +245,11 @@ async def test_clock_transition_stops_restricted_work_after_local_state_failure(
     context.once_report = limited
     task = asyncio.create_task(run_session(context, None))
     try:
-        await local.started.wait()
+        await _wait_signal(local.started, task)
         _assert_locks_held(context)
         local.release.set()
 
-        outcome = await asyncio.wait_for(task, 1)
+        outcome = await _result(task, timeout=1)
 
         assert outcome.reason == "clock_invalid"
         assert "cleanup state premise lost" in str(outcome.details)
@@ -213,7 +257,7 @@ async def test_clock_transition_stops_restricted_work_after_local_state_failure(
         assert restricted == [], "状态库前提失效后不能继续依赖它的必要停止或报告"
     finally:
         local.release.set()
-        await asyncio.gather(task, local.task, return_exceptions=True)
+        await _finish_tasks(task, local.task)
 
 
 @pytest.mark.asyncio
@@ -349,26 +393,30 @@ async def test_startup_outcome_preserves_scan_until_real_parent_cancel(environme
     context.local_work = context.logging_owner = owner
     context.startup_outcome = SessionOutcome(False, reason='state_db_error', details={'message': 'existing startup'})
     task = asyncio.create_task(run_session(context, None))
-    await started.wait()
-    if cancel:
-        task.cancel('first startup parent')
-        await _turns()
-        task.cancel('repeated startup parent')
-        await _turns()
-        assert calls == ['settle', 'stop', 'sweep'] and not task.done()
-    else:
-        assert calls == ['settle']
-    release.set()
-    if cancel:
-        with pytest.raises(asyncio.CancelledError) as caught:
-            await task
-        assert str(caught.value) == 'first startup parent'
-        assert 'startup stop error' in str(caught.value.__notes__)
-        assert 'startup sweep error' in str(caught.value.__notes__)
-    else:
-        outcome = await task
-        assert outcome is context.startup_outcome
-    assert calls.count('settle') == calls.count('settled') == 1
+    try:
+        await _wait_signal(started, task)
+        if cancel:
+            task.cancel('first startup parent')
+            await _turns()
+            task.cancel('repeated startup parent')
+            await _turns()
+            assert calls == ['settle', 'stop', 'sweep'] and not task.done()
+        else:
+            assert calls == ['settle']
+        release.set()
+        if cancel:
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await _result(task)
+            assert str(caught.value) == 'first startup parent'
+            assert 'startup stop error' in str(caught.value.__notes__)
+            assert 'startup sweep error' in str(caught.value.__notes__)
+        else:
+            outcome = await _result(task)
+            assert outcome is context.startup_outcome
+        assert calls.count('settle') == calls.count('settled') == 1
+    finally:
+        release.set()
+        await _finish_tasks(task)
 
 
 @pytest.mark.asyncio
@@ -417,26 +465,30 @@ async def test_clock_resumed_log_permission_has_one_independent_final_stop(envir
     context.restricted_flows = {'winddown': winddown}
     context.once_report = report
     task = asyncio.create_task(run_session(context, None))
-    await report_entered.wait()
-    assert calls[:5] == [('stop', 'ordinary'), ('stop', 'logging'), ('settle', 'ordinary'), ('winddown', 'required'), ('settle', 'logging')]
-    if cancel_report:
-        task.cancel('restricted report parent')
-        await _turns()
-        task.cancel('restricted report repeated')
-        await _turns()
-        assert not task.done()
-    release_report.set()
-    if cancel_report:
-        with pytest.raises(asyncio.CancelledError) as caught:
-            await task
-        assert str(caught.value) == 'restricted report parent'
-        assert calls.count(('sweep', 'logging')) == 1
-    else:
-        outcome = await task
-        assert outcome.reason == 'clock_invalid'
-    assert calls.count(('resume', 'logging')) == 1
-    assert calls.count(('stop', 'ordinary')) == 1
-    assert calls.count(('stop', 'logging')) == 2
+    try:
+        await _wait_signal(report_entered, task)
+        assert calls[:5] == [('stop', 'ordinary'), ('stop', 'logging'), ('settle', 'ordinary'), ('winddown', 'required'), ('settle', 'logging')]
+        if cancel_report:
+            task.cancel('restricted report parent')
+            await _turns()
+            task.cancel('restricted report repeated')
+            await _turns()
+            assert not task.done()
+        release_report.set()
+        if cancel_report:
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await _result(task)
+            assert str(caught.value) == 'restricted report parent'
+            assert calls.count(('sweep', 'logging')) == 1
+        else:
+            outcome = await _result(task)
+            assert outcome.reason == 'clock_invalid'
+        assert calls.count(('resume', 'logging')) == 1
+        assert calls.count(('stop', 'ordinary')) == 1
+        assert calls.count(('stop', 'logging')) == 2
+    finally:
+        release_report.set()
+        await _finish_tasks(task)
 
 
 @pytest.mark.asyncio
@@ -452,65 +504,72 @@ async def test_real_typed_stop_group_preserves_first_control_and_actual_settleme
     control.__cause__ = original_cause
     control.add_note('original typed note')
     lease = locks.acquire_session(home / 'stop-only.lock', backend=_FaultingLockBackend('unlock', control))
-    group = None
-    parents = []
-    class Owner:
-        def required_settlements(self):
-            return int(not release.is_set())
+    try:
+        group = None
+        parents = []
+        class Owner:
+            def required_settlements(self):
+                return int(not release.is_set())
 
-        def stop_new_work(self):
-            nonlocal group
-            calls.append('stop')
-            try:
-                lease.close()
-            except asyncio.CancelledError as error:
-                assert error is control and locks.lock_error_facts(error) is not None
-                group = BaseExceptionGroup('actual original stop group', [error, ValueError('group ordinary leaf')])
-                raise group
+            def stop_new_work(self):
+                nonlocal group
+                calls.append('stop')
+                try:
+                    lease.close()
+                except asyncio.CancelledError as error:
+                    assert error is control and locks.lock_error_facts(error) is not None
+                    group = BaseExceptionGroup('actual original stop group', [error, ValueError('group ordinary leaf')])
+                    raise group
 
-        def cancel_startup_sweep(self):
-            calls.append('sweep')
+            def cancel_startup_sweep(self):
+                calls.append('sweep')
 
-        async def settle(self):
-            calls.append('settle')
+            async def settle(self):
+                calls.append('settle')
+                entered.set()
+                await release.wait()
+                calls.append('settled')
+
+        context.local_work = context.logging_owner = Owner()
+        context.facts_query = lambda _connection: _facts(unfinished_actions=1)
+
+        async def flow(_context):
+            if control_first:
+                raise StateDbFailure('primary state failure')
             entered.set()
-            await release.wait()
-            calls.append('settled')
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError as error:
+                parents.append(error)
+                raise
 
-    context.local_work = context.logging_owner = Owner()
-    context.facts_query = lambda _connection: _facts(unfinished_actions=1)
-
-    async def flow(_context):
-        if control_first:
-            raise StateDbFailure('primary state failure')
-        entered.set()
+        context.flows = {'flow': flow}
+        task = asyncio.create_task(run_session(context, None))
         try:
-            await asyncio.Future()
-        except asyncio.CancelledError as error:
-            parents.append(error)
-            raise
-
-    context.flows = {'flow': flow}
-    task = asyncio.create_task(run_session(context, None))
-    await entered.wait()
-    if control_first:
-        assert calls == ['stop', 'settle']
-    task.cancel('original real parent')
-    await _turns()
-    task.cancel('repeated real parent')
-    await _turns()
-    assert not task.done()
-    release.set()
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await task
-    assert caught.value is (control if control_first else parents[0])
-    assert len(parents) == (0 if control_first else 1)
-    assert control.__cause__ is original_cause
-    assert control.__notes__[0] == 'original typed note'
-    assert calls.count('stop') == calls.count('sweep') == calls.count('settle') == calls.count('settled') == 1
-    assert group is not None and group.exceptions[0] is control
-    assert 'group ordinary leaf' in str(caught.value.__notes__)
-    assert 'original typed note' in str(caught.value.__notes__)
+            await _wait_signal(entered, task)
+            if control_first:
+                assert calls == ['stop', 'settle']
+            task.cancel('original real parent')
+            await _turns()
+            task.cancel('repeated real parent')
+            await _turns()
+            assert not task.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await _result(task)
+            assert caught.value is (control if control_first else parents[0])
+            assert len(parents) == (0 if control_first else 1)
+            assert control.__cause__ is original_cause
+            assert control.__notes__[0] == 'original typed note'
+            assert calls.count('stop') == calls.count('sweep') == calls.count('settle') == calls.count('settled') == 1
+            assert group is not None and group.exceptions[0] is control
+            assert 'group ordinary leaf' in str(caught.value.__notes__)
+            assert 'original typed note' in str(caught.value.__notes__)
+        finally:
+            release.set()
+            await _finish_tasks(task)
+    finally:
+        _close_extra_lease(lease, control)
 
 
 @pytest.mark.asyncio
@@ -564,44 +623,51 @@ async def test_typed_control_in_original_flow_group_precedes_later_parent_cancel
     if raw_group:
         control = BaseExceptionGroup('actual synchronous group', [control, ValueError('original group leaf')])
     lease = locks.acquire_session(home / 'flow-control.lock', backend=_FaultingLockBackend('unlock', control))
-    settling, release = asyncio.Event(), asyncio.Event()
-    calls = []
+    try:
+        settling, release = asyncio.Event(), asyncio.Event()
+        calls = []
 
-    class Owner:
-        def required_settlements(self):
-            return int(not release.is_set())
+        class Owner:
+            def required_settlements(self):
+                return int(not release.is_set())
 
-        def stop_new_work(self):
-            calls.append('stop')
+            def stop_new_work(self):
+                calls.append('stop')
 
-        async def settle(self):
-            settling.set()
-            await release.wait()
+            async def settle(self):
+                settling.set()
+                await release.wait()
 
-    async def flow(_context):
+        async def flow(_context):
+            try:
+                lease.close()
+            except BaseException as error:
+                if raw_group:
+                    raise
+                raise BaseExceptionGroup('original flow control group', [error, ValueError('original group leaf')])
+
+        context.local_work = Owner()
+        context.flows = {'flow': flow}
+        task = asyncio.create_task(run_session(context, None))
         try:
-            lease.close()
-        except BaseException as error:
+            await _wait_signal(settling, task)
+            task.cancel('later parent')
+            await _turns()
+            release.set()
+            with pytest.raises(type(control)) as caught:
+                await _result(task)
+            assert caught.value is control
+            assert calls == ['stop']
             if raw_group:
-                raise
-            raise BaseExceptionGroup('original flow control group', [error, ValueError('original group leaf')])
-
-    context.local_work = Owner()
-    context.flows = {'flow': flow}
-    task = asyncio.create_task(run_session(context, None))
-    await settling.wait()
-    task.cancel('later parent')
-    await _turns()
-    release.set()
-    with pytest.raises(type(control)) as caught:
-        await task
-    assert caught.value is control
-    assert calls == ['stop']
-    if raw_group:
-        assert str(control.exceptions[1]) == 'original group leaf'
-    else:
-        assert 'original group leaf' in str(control.__notes__)
-    assert 'later parent' in str(control.__notes__)
+                assert str(control.exceptions[1]) == 'original group leaf'
+            else:
+                assert 'original group leaf' in str(control.__notes__)
+            assert 'later parent' in str(control.__notes__)
+        finally:
+            release.set()
+            await _finish_tasks(task)
+    finally:
+        _close_extra_lease(lease, control)
 
 
 @pytest.mark.asyncio
@@ -615,80 +681,83 @@ async def test_observer_first_keeps_real_startup_sweep_control(environment, shap
     ordinary = ValueError('original sweep leaf')
     raw = BaseExceptionGroup('actual sweep group', [control, ordinary]) if shape == 'typed_group' else control
     lease = locks.acquire_session(home / 'sweep-control.lock', backend=_FaultingLockBackend('unlock', raw))
-    databases=[]
-    open_database=context.open_database
-    async def observed_open():
-        database=await open_database()
-        databases.append(database)
-        return database
-    context.open_database=observed_open
-    local = LocalWork(context)
-    calls, parents, actual_errors = [], [], []
-    swept = asyncio.Event()
-
-    class Owner:
-        def required_settlements(self):
-            return local.required_settlements()
-
-        def stop_new_work(self):
-            calls.append('stop')
-
-        async def settle(self):
-            calls.append('settle')
-            await local.settle()
-            calls.append('settled')
-
-    class Logging:
-        def cancel_startup_sweep(self):
-            calls.append('sweep')
-            swept.set()
-            try:
-                lease.close()
-            except BaseException as error:
-                assert error is raw and locks.lock_error_facts(error) is not None
-                actual = BaseExceptionGroup('original sweep wrapper', [error, ordinary]) if shape == 'wrapper' else error
-                actual_errors.append(actual)
-                raise actual
-
-    async def flow(_context):
-        local.start()
-        try:
-            await asyncio.Future()
-        except asyncio.CancelledError as error:
-            parents.append(error)
-            raise
-
-    context.local_work, context.logging_owner = Owner(), Logging()
-    context.facts_query = lambda _connection: _facts(unfinished_actions=1)
-    context.flows = {'flow': flow}
-    task = asyncio.create_task(run_session(context, None))
     try:
-        await local.started.wait()
-        task.cancel('observer before sweep')
-        await swept.wait()
-        await _turns()
-        assert not task.done() and not local.closed
-        _assert_locks_held(context)
-        task.cancel('repeated observer')
-        local.release.set()
-        with pytest.raises(asyncio.CancelledError) as caught:
-            await task
-        assert caught.value is parents[0]
-        assert caught.value.__cause__ is None
-        assert 'actual sweep lock control' in str(caught.value.__notes__)
-        if shape!='single':
-            assert 'original sweep leaf' in str(caught.value.__notes__)
-        assert calls == ['stop', 'sweep', 'settle', 'settled']
-        assert local.saved == 1 and local.closed
-        assert len(databases)==2
-        for database in databases:
-            await assert_database_closed(database)
-        assert probe_admission(context.paths.admission_lock).is_free
-        if shape != 'single':
-            assert actual_errors[0].exceptions == (control, ordinary)
+        databases=[]
+        open_database=context.open_database
+        async def observed_open():
+            database=await open_database()
+            databases.append(database)
+            return database
+        context.open_database=observed_open
+        local = LocalWork(context)
+        calls, parents, actual_errors = [], [], []
+        swept = asyncio.Event()
+
+        class Owner:
+            def required_settlements(self):
+                return local.required_settlements()
+
+            def stop_new_work(self):
+                calls.append('stop')
+
+            async def settle(self):
+                calls.append('settle')
+                await local.settle()
+                calls.append('settled')
+
+        class Logging:
+            def cancel_startup_sweep(self):
+                calls.append('sweep')
+                swept.set()
+                try:
+                    lease.close()
+                except BaseException as error:
+                    assert error is raw and locks.lock_error_facts(error) is not None
+                    actual = BaseExceptionGroup('original sweep wrapper', [error, ordinary]) if shape == 'wrapper' else error
+                    actual_errors.append(actual)
+                    raise actual
+
+        async def flow(_context):
+            local.start()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError as error:
+                parents.append(error)
+                raise
+
+        context.local_work, context.logging_owner = Owner(), Logging()
+        context.facts_query = lambda _connection: _facts(unfinished_actions=1)
+        context.flows = {'flow': flow}
+        task = asyncio.create_task(run_session(context, None))
+        try:
+            await _wait_signal(local.started, task)
+            task.cancel('observer before sweep')
+            await _wait_signal(swept, task)
+            await _turns()
+            assert not task.done() and not local.closed
+            _assert_locks_held(context)
+            task.cancel('repeated observer')
+            local.release.set()
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await _result(task)
+            assert caught.value is parents[0]
+            assert caught.value.__cause__ is None
+            assert 'actual sweep lock control' in str(caught.value.__notes__)
+            if shape!='single':
+                assert 'original sweep leaf' in str(caught.value.__notes__)
+            assert calls == ['stop', 'sweep', 'settle', 'settled']
+            assert local.saved == 1 and local.closed
+            assert len(databases)==2
+            for database in databases:
+                await assert_database_closed(database)
+            assert probe_admission(context.paths.admission_lock).is_free
+            if shape != 'single':
+                assert actual_errors[0].exceptions == (control, ordinary)
+        finally:
+            local.release.set()
+            await _finish_tasks(task, local.task)
     finally:
-        local.release.set()
-        await asyncio.gather(task, local.task, return_exceptions=True)
+        _close_extra_lease(lease, raw)
 
 
 @pytest.mark.asyncio
@@ -706,68 +775,71 @@ async def test_without_observer_cancel_delivers_original_typed_error_shape(envir
     raw.__cause__ = cause
     raw.add_note('original note')
     lease = locks.acquire_session(home / 'unobserved-control.lock', backend=_FaultingLockBackend('unlock', raw))
-    databases=[]
-    open_database=context.open_database
-    async def observed_open():
-        database=await open_database()
-        databases.append(database)
-        return database
-    context.open_database=observed_open
-    local = LocalWork(context)
-    errors, calls = [], []
-
-    def fail():
-        try:
-            lease.close()
-        except BaseException as error:
-            assert error is raw and locks.lock_error_facts(error) is not None
-            actual = BaseExceptionGroup('original wrapper', [error, ordinary]) if shape == 'wrapper' else error
-            errors.append(actual)
-            raise actual
-
-    class Owner:
-        def required_settlements(self):
-            return local.required_settlements()
-
-        def stop_new_work(self):
-            calls.append('stop')
-            if source == 'stop':
-                fail()
-
-        async def settle(self):
-            calls.append('settle')
-            await local.settle()
-            calls.append('settled')
-            if source == 'settle':
-                fail()
-
-    async def flow(_context):
-        local.start()
-        raise StateDbFailure('primary failure starts necessary local settlement')
-
-    context.local_work = Owner()
-    context.facts_query = lambda _connection: _facts(unfinished_actions=1)
-    context.flows = {'flow': flow}
-    task = asyncio.create_task(run_session(context, None))
     try:
-        await local.started.wait()
-        _assert_locks_held(context)
-        assert not task.done() and not local.closed
-        local.release.set()
-        with pytest.raises(type(raw)) as caught:
-            await task
-        assert caught.value is raw
-        assert raw.__cause__ is cause and raw.__notes__[0] == 'original note'
-        assert calls == ['stop', 'settle', 'settled']
-        assert local.saved == 1 and local.closed
-        assert len(databases)==2
-        for database in databases:
-            await assert_database_closed(database)
-        assert probe_admission(context.paths.admission_lock).is_free
-        if shape != 'single':
-            assert errors[0].exceptions == (control, ordinary)
-        if shape == 'wrapper':
-            assert 'original ordinary leaf' in str(raw.__notes__)
+        databases=[]
+        open_database=context.open_database
+        async def observed_open():
+            database=await open_database()
+            databases.append(database)
+            return database
+        context.open_database=observed_open
+        local = LocalWork(context)
+        errors, calls = [], []
+
+        def fail():
+            try:
+                lease.close()
+            except BaseException as error:
+                assert error is raw and locks.lock_error_facts(error) is not None
+                actual = BaseExceptionGroup('original wrapper', [error, ordinary]) if shape == 'wrapper' else error
+                errors.append(actual)
+                raise actual
+
+        class Owner:
+            def required_settlements(self):
+                return local.required_settlements()
+
+            def stop_new_work(self):
+                calls.append('stop')
+                if source == 'stop':
+                    fail()
+
+            async def settle(self):
+                calls.append('settle')
+                await local.settle()
+                calls.append('settled')
+                if source == 'settle':
+                    fail()
+
+        async def flow(_context):
+            local.start()
+            raise StateDbFailure('primary failure starts necessary local settlement')
+
+        context.local_work = Owner()
+        context.facts_query = lambda _connection: _facts(unfinished_actions=1)
+        context.flows = {'flow': flow}
+        task = asyncio.create_task(run_session(context, None))
+        try:
+            await _wait_signal(local.started, task)
+            _assert_locks_held(context)
+            assert not task.done() and not local.closed
+            local.release.set()
+            with pytest.raises(type(raw)) as caught:
+                await _result(task)
+            assert caught.value is raw
+            assert raw.__cause__ is cause and raw.__notes__[0] == 'original note'
+            assert calls == ['stop', 'settle', 'settled']
+            assert local.saved == 1 and local.closed
+            assert len(databases)==2
+            for database in databases:
+                await assert_database_closed(database)
+            assert probe_admission(context.paths.admission_lock).is_free
+            if shape != 'single':
+                assert errors[0].exceptions == (control, ordinary)
+            if shape == 'wrapper':
+                assert 'original ordinary leaf' in str(raw.__notes__)
+        finally:
+            local.release.set()
+            await _finish_tasks(task, local.task)
     finally:
-        local.release.set()
-        await asyncio.gather(task, local.task, return_exceptions=True)
+        _close_extra_lease(lease, raw)
