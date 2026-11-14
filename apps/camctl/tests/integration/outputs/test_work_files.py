@@ -599,6 +599,8 @@ async def test_same_run_reuses_first_attempt_for_same_file(public_file_env):
 async def test_action_owned_delete_failure_keeps_responsibility(
         tmp_path, capture_resources, monkeypatch):
     """真实录像输入删除失败后仍清理同库内的独立交付副本。"""
+    from types import SimpleNamespace
+
     world = await segment_input_case(tmp_path, capture_resources, monkeypatch, (60,),
                                      early_waiters=(120,), segment_size=4)
     try:
@@ -611,16 +613,18 @@ async def test_action_owned_delete_failure_keeps_responsibility(
         await world.advance_obtains(1)
         waiter, _ = world.early[0]
         delivery = _row(world.owned,
-            "SELECT f.id,f.relative_path,d.id FROM intermediate_files f"
+            "SELECT f.id,f.relative_path,d.id,c.id FROM intermediate_files f"
             " JOIN file_copies c ON c.target_file_id=f.id"
             " JOIN deliveries d ON d.id=c.delivery_id WHERE d.action_id=?", waiter)
         assert delivery is not None
-        delivery_file_id, relative_path, delivery_id = delivery
+        delivery_file_id, relative_path, delivery_id, copy_id = delivery
         delivery_path = Path(world.cfg.paths.staging) / relative_path
         assert file_id < delivery_file_id and delivery_path.is_file()
         delivery_bytes = delivery_path.read_bytes()
         assert delivery_bytes == _CONTENT
-        await world.cancel(waiter)
+        _cancel_public_delivery(world.owned, SimpleNamespace(
+            action_id=waiter, delivery_id=delivery_id, copy_id=copy_id), now=world.wall[0])
+        world.wall[0] += 1
         assert not world.executor.unfinished_files()
         assert target.read_bytes() == _CONTENT and delivery_path.read_bytes() == delivery_bytes
         repository = OutputsRepository()
@@ -678,7 +682,7 @@ async def public_file_env(public_work_env):
     return owned, roots, qualification
 
 
-def _cancel_public_delivery(owned, qualification):
+def _cancel_public_delivery(owned, qualification, *, now=_NOW + 10):
     """保存目标取回取消，发起者等待后续首次文件清理。"""
     from ..capture.result_consumer_fixtures import ResultCatalog
     from camctl.persistence.repositories.outputs import SettleCanceledObtain
@@ -688,14 +692,14 @@ def _cancel_public_delivery(owned, qualification):
             return super().action_types() | {"obtain_action_outputs"}
 
     action_id = qualification.action_id
-    prepare_cancel_target(owned, catalog=Catalog(), now=_NOW + 10,
+    prepare_cancel_target(owned, catalog=Catalog(), now=now,
                           action_id=action_id, request_id="4")
     members = tuple(row[0] for row in owned.connection.execute(
         "SELECT i.id FROM obtain_items i JOIN obtain_source_selections s ON s.id=i.selection_id"
         " JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=? ORDER BY i.id",
         (action_id,)))
     settled = OutputsRepository().settle_canceled_obtain(
-        SettleCanceledObtain(action_id, _NOW + 11, members), new_operation_key(), owned)
+        SettleCanceledObtain(action_id, now + 1, members), new_operation_key(), owned)
     assert settled.kind is DbOutcomeKind.COMPLETED and settled.value.complete, settled.error
     statuses = owned.connection.execute(
         "SELECT target.status, d.status, origin.status, ci.status"
