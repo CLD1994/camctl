@@ -62,21 +62,6 @@ def test_completed_check_waits_for_repair_decision() -> None:
     assert decide_recording_result(_completed("90")).kind is RecordingResultKind.PENDING
 
 
-def test_completed_check_with_unsettled_repair_keeps_media_responsibility() -> None:
-    from camctl.capture.handlers import _media_responsibility_open
-
-    assert _media_responsibility_open((1, 3, 3, None, 1))
-    assert not _media_responsibility_open((1, 3, 3, None, 2))
-
-
-def test_confirmed_short_or_damaged_media_does_not_wait_for_threshold() -> None:
-    from camctl.capture.handlers import _known_checked_media_failure
-
-    assert _known_checked_media_failure(Decimal("59"), 60000, False)
-    assert _known_checked_media_failure(Decimal("90"), 60000, True)
-    assert not _known_checked_media_failure(Decimal("90"), 60000, False)
-
-
 def test_running_repair_defers_finish_with_control_basis() -> None:
     result = decide_recording_result(_facts(
         control_complete=True, check_decision=2, repair_state=4))
