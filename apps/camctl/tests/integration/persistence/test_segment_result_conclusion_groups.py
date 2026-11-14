@@ -38,9 +38,10 @@ async def _partial_result_world(tmp_path,*,maximum=3,retained=False):
             (first.ref.ticket.run_id,)).fetchone()[0]
         _finish_scan(owned,runtime,first,retry_wait=True)
     else:
-        owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog())
+        owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),
+            runtime_options={'check_config':AttemptConfig(maximum,Decimal('1.25'),Decimal('2'))})
     try:
-        runtime.check_config=AttemptConfig(maximum,Decimal('1.25'),Decimal('2'))
+        assert runtime.check_config==AttemptConfig(maximum,Decimal('1.25'),Decimal('2'))
         ticket=begin_result_check(owned,runtime,action_id).ticket
         actual=_actual(ticket,entries=[],finalized=False)
         saved=_ok(runtime.capture.save_result_page(ResultPageSave(ticket,1,None,
@@ -196,9 +197,8 @@ async def test_kernel_rejects_incomplete_or_changed_result_decision_groups(tmp_p
 async def test_result_decision_unknown_restores_original_complete_group_from_fresh_connection(tmp_path,monkeypatch,bounded,cut):
     import sqlite3
     from pathlib import Path
-    from camctl.persistence.repositories import segment_check_conclusions as storage
     from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
-    from .test_segment_transaction_batches import ConnectionProbe,_fingerprint
+    from .test_segment_transaction_batches import ConnectionProbe,_complete_persisted_state,_original_history
     owned,runtime,repository,ref,run_id,result_event=await _partial_result_world(tmp_path)
     closed=False
     try:
@@ -214,18 +214,25 @@ async def test_result_decision_unknown_restores_original_complete_group_from_fre
         owned.connection.close();closed=True
         fresh=open_existing(path,DbOpenMode.EXISTING_RO,DbConfig())
         try:
-            before=_fingerprint(fresh.connection)
+            before=_complete_persisted_state(fresh)
             restored=repository.verify_result_check_conclusion(request,key,fresh)
             assert (restored is not None)==(cut=='after')
-            assert _fingerprint(fresh.connection)==before
+            history=_original_history(fresh,key) if cut=='after' else None
+            assert _complete_persisted_state(fresh)==before
         finally:fresh.connection.close()
         fresh=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
         try:
-            if cut=='after':
-                def forbidden(*args):raise AssertionError('原决定恢复不能重新分配身份')
-                monkeypatch.setattr(storage,'next_row_id',forbidden)
             saved=_ok(repository.conclude_result_check(request,key,fresh))
             assert cut=='before' or saved==restored
+            if cut=='after':
+                assert _original_history(fresh,key)==history
+                assert _complete_persisted_state(fresh)==before
+            else:
+                committed=_complete_persisted_state(fresh)
+                history=_original_history(fresh,key)
+                assert _ok(repository.conclude_result_check(request,key,fresh))==saved
+                assert _original_history(fresh,key)==history
+                assert _complete_persisted_state(fresh)==committed
             assert fresh.connection.execute('SELECT COUNT(*) FROM segment_check_conclusions').fetchone()==(1,)
             assert fresh.connection.execute('SELECT status FROM operation_runs WHERE id=?',(run_id,)).fetchone()==(6,)
             assert fresh.connection.execute('SELECT status FROM actions WHERE id=?',(ref.action_id,)).fetchone()==(2,)

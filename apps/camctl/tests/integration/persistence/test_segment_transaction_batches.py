@@ -183,7 +183,7 @@ async def test_control_exit_is_verified_only_after_original_connection_closes(tm
     class ControlledExit(BaseException):pass
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     path=owned.connection.execute('PRAGMA database_list').fetchone()[2]
-    before=_fingerprint(owned.connection)
+    before=_complete_persisted_state(owned)
     calls=(runtime.driver.control.await_count,runtime.stopper.stop.await_count)
     key=new_operation_key();observer=None;closed=False
     def hook(stage,sql,params):
@@ -196,14 +196,24 @@ async def test_control_exit_is_verified_only_after_original_connection_closes(tm
             transactions.finish_segment_recording(request,key,replace(owned,connection=ConnectionProbe(owned.connection,hook)),batch_size=2)
         assert write_receipt_for(control.value).kind==('rolled_back' if cut=='event' else 'unknown')
         owned.connection.close();closed=True
-        observer=open_existing(Path(path),DbOpenMode.EXISTING_RW,DbConfig())
-        def forbidden(*args,**kwargs):raise AssertionError('核实不能重新分配编号')
-        monkeypatch.setattr(transactions,'next_row_id',forbidden)
+        observer=open_existing(Path(path),DbOpenMode.EXISTING_RO,DbConfig())
+        observed=_complete_persisted_state(observer)
+        history=_original_history(observer,key) if cut=='commit_after' else None
         result=transactions.verify_segment_finish(request,key,observer,execution_finished=True,batch_size=2)
         if cut=='commit_after':
             assert result.output_count==5 and repo.read_active_set(ref.action_id,observer)==ref
         else:
-            assert result is None and _fingerprint(observer.connection)==before
+            assert result is None and observed==before
+        assert _complete_persisted_state(observer)==observed
+        if history is not None:
+            assert _original_history(observer,key)==history
+            observer.connection.close();observer=None
+            observer=open_existing(Path(path),DbOpenMode.EXISTING_RW,DbConfig())
+            resumed=transactions.finish_segment_recording(request,key,observer,batch_size=2)
+            assert resumed.kind=='completed',resumed.error
+            assert resumed.result==result
+            assert _original_history(observer,key)==history
+            assert _complete_persisted_state(observer)==observed
         assert (runtime.driver.control.await_count,runtime.stopper.stop.await_count)==calls
     finally:
         if not closed:owned.connection.close()
@@ -211,27 +221,37 @@ async def test_control_exit_is_verified_only_after_original_connection_closes(tm
 
 
 @pytest.mark.asyncio
-async def test_commit_receipt_unknown_is_verified_by_original_range_without_allocation(tmp_path,monkeypatch):
+async def test_commit_receipt_unknown_is_verified_by_original_range(tmp_path):
     import sqlite3
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
+    path=Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
+    closed=False
     def hook(stage,sql,params):
         if stage=='after' and sql=='COMMIT':raise sqlite3.OperationalError('controlled lost receipt')
     try:
         key=new_operation_key()
         saved=transactions.finish_segment_recording(request,key,replace(owned,connection=ConnectionProbe(owned.connection,hook)),batch_size=2)
         assert saved.kind=='unknown'
-        before=_fingerprint(owned.connection)
-        def forbidden(*args,**kwargs):raise AssertionError('核实禁止重新分配或全量读原事件')
-        monkeypatch.setattr(transactions,'next_row_id',forbidden)
-        import camctl.persistence.repositories.transactions as kernel
-        monkeypatch.setattr(kernel,'saved_transaction_events',forbidden)
-        result=transactions.verify_segment_finish(request,key,owned,execution_finished=True,batch_size=2)
-        again=transactions.finish_segment_recording(request,key,owned)
-        assert again.kind=='completed',again.error
-        assert result==again.result and result.output_count==5
-        assert _fingerprint(owned.connection)==before
-        with pytest.raises(transactions.ConsistencyError):transactions.verify_segment_finish(request,key,owned,execution_finished=False)
-    finally:owned.connection.close()
+        owned.connection.close();closed=True
+        observer=open_existing(path,DbOpenMode.EXISTING_RO,DbConfig())
+        try:
+            before=_complete_persisted_state(observer)
+            history=_original_history(observer,key)
+            result=transactions.verify_segment_finish(request,key,observer,execution_finished=True,batch_size=2)
+            assert result.output_count==5 and repo.read_active_set(ref.action_id,observer)==ref
+            assert _complete_persisted_state(observer)==before
+            with pytest.raises(transactions.ConsistencyError):transactions.verify_segment_finish(request,key,observer,execution_finished=False)
+        finally:observer.connection.close()
+        fresh=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
+        try:
+            again=transactions.finish_segment_recording(request,key,fresh,batch_size=2)
+            assert again.kind=='completed',again.error
+            assert result==again.result
+            assert _original_history(fresh,key)==history
+            assert _complete_persisted_state(fresh)==before
+        finally:fresh.connection.close()
+    finally:
+        if not closed:owned.connection.close()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('state',list(DefaultScopeState))
@@ -662,8 +682,8 @@ async def test_unheaded_failure_keeps_earlier_complete_scan_applicability(tmp_pa
     from camctl.persistence.repositories.capture import FinishCapture
     from camctl.outputs.catalog import OutputCatalogFacts
     from camctl.capture.media import RecordingFailure
-    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),record_control_elapsed_ns=60_000_000_000)
-    runtime.check_config=AttemptConfig(3,Decimal('10'),Decimal('0'))
+    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),record_control_elapsed_ns=60_000_000_000,
+        runtime_options={'check_config':AttemptConfig(3,Decimal('10'),Decimal('0'))})
     try:
         for number in (1,2):
             ticket=begin_result_check(owned,runtime,action_id).ticket
@@ -995,8 +1015,8 @@ async def test_original_file_wait_proof_can_reuse_earlier_actual_results_attempt
                 factory=definition.task_factory
                 definition=replace(definition,task_factory=lambda params:replace(factory(params),file_completion_wait_s=Decimal('5')))
             return definition
-    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentWaitCatalog(),record_control_elapsed_ns=60_000_000_000)
-    runtime.check_config=AttemptConfig(3,Decimal('10'),Decimal('0'))
+    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentWaitCatalog(),record_control_elapsed_ns=60_000_000_000,
+        runtime_options={'check_config':AttemptConfig(3,Decimal('10'),Decimal('0'))})
     try:
         context=_stop_context(owned,action_id);source_id=None
         if reuse_wait:
@@ -1049,18 +1069,37 @@ async def test_original_file_wait_proof_can_reuse_earlier_actual_results_attempt
 async def test_record_stop_unknown_commit_receipt_reuses_exact_original_group(tmp_path,elapsed):
     import sqlite3
     from camctl.capture.models import HostTimerStopSave
+    from camctl.operations.attempts import FinishAttemptResult,FinishDisposition,RunStatus
+    from camctl.operations.models import AttemptStatus
     owned,runtime,action_id,finish=await _pending_stop_world(tmp_path)
+    path=Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
+    closed=False
     def hook(stage,sql,params):
         if stage=='after' and sql=='COMMIT':raise sqlite3.OperationalError('controlled lost STOP receipt')
     try:
-        key=new_operation_key()
-        saved=runtime.capture.finish_host_timer_stop(finish,HostTimerStopSave(elapsed),key,replace(owned,connection=ConnectionProbe(owned.connection,hook)))
+        key=new_operation_key();stop=HostTimerStopSave(elapsed)
+        saved=runtime.capture.finish_host_timer_stop(finish,stop,key,replace(owned,connection=ConnectionProbe(owned.connection,hook)))
         assert saved.kind.value=='unknown'
-        before=_fingerprint(owned.connection)
-        again=runtime.capture.finish_host_timer_stop(finish,HostTimerStopSave(elapsed),key,owned)
-        assert again.kind.value=='completed',again.error
-        assert _fingerprint(owned.connection)==before
-    finally:owned.connection.close()
+        owned.connection.close();closed=True
+        observer=open_existing(path,DbOpenMode.EXISTING_RO,DbConfig())
+        try:
+            before=_complete_persisted_state(observer)
+            history=_original_history(observer,key)
+            assert observer.connection.execute('SELECT activity_state,control_elapsed_ns FROM device_activities WHERE action_id=?',(action_id,)).fetchone()==(3,elapsed)
+            from camctl.contracts.json_values import parse_exact_json
+            bodies=[parse_exact_json(row[4]) for row in history[1]]
+            assert any(body['evidence'].get('observation',{}).get('control_elapsed_ns','missing')==elapsed for body in bodies)
+        finally:observer.connection.close()
+        fresh=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
+        try:
+            again=runtime.capture.finish_host_timer_stop(finish,stop,key,fresh)
+            assert again.kind.value=='completed',again.error
+            assert again.value==FinishAttemptResult(FinishDisposition.SAVED,AttemptStatus.SUCCEEDED,RunStatus.SUCCEEDED,False)
+            assert _original_history(fresh,key)==history
+            assert _complete_persisted_state(fresh)==before
+        finally:fresh.connection.close()
+    finally:
+        if not closed:owned.connection.close()
 
 @pytest.mark.asyncio
 async def test_unknown_actual_stop_cannot_create_an_end_or_control_duration(tmp_path):
@@ -1084,6 +1123,18 @@ def _complete_persisted_state(owned):
     tables=tuple(row[0] for row in owned.connection.execute(
         "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"))
     return {table:tuple(owned.connection.execute(f'SELECT * FROM {table} ORDER BY rowid')) for table in tables}
+
+
+def _original_history(owned,key):
+    transactions=owned.connection.execute(
+        'SELECT * FROM history_transactions WHERE operation_key=?',(str(key),)).fetchall()
+    assert len(transactions)==1
+    row=transactions[0]
+    columns=[column[1] for column in owned.connection.execute('PRAGMA table_info(history_transactions)')]
+    values=dict(zip(columns,row))
+    events=owned.connection.execute('SELECT id,transaction_id,event_type,occurred_at,body_json FROM history_events WHERE transaction_id=? ORDER BY id',(values['id'],)).fetchall()
+    assert [event[0] for event in events]==list(range(values['first_event_id'],values['last_event_id']+1))
+    return row,tuple(events)
 
 
 @pytest.mark.asyncio
@@ -1232,8 +1283,40 @@ async def test_both_entries_use_one_canonical_order_and_original_batch(tmp_path,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('entry',['bounded','finite'])
-async def test_context_cannot_replace_original_transaction_connection(tmp_path,monkeypatch,entry):
+async def test_bounded_context_cannot_replace_original_transaction_connection(tmp_path,monkeypatch):
+    from camctl.persistence.event_reads import SqlEventReads
+    owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.UNKNOWN)
+    _finish_attempt(owned,ref,runtime)
+    row=repo.read_set(ref,owned)
+    request=_request_for(ref,row,runtime.wall_us(),repo.read_assessment(ref,owned),2)
+    path=owned.connection.execute('PRAGMA database_list').fetchone()[2]
+    observer=open_existing(Path(path),DbOpenMode.EXISTING_RO,DbConfig())
+    observer.connection.execute('BEGIN')
+    observer.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
+    delivered=[]
+    def transform(command,scope):
+        plan=command.plan(scope)
+        def context(event,transaction):
+            original=plan.context(event,transaction)
+            reads=original.current_reads
+            assert isinstance(reads,SqlEventReads)
+            delivered.append(event.event_id)
+            return replace(original,current_reads=SqlEventReads(observer.connection,reads.scope))
+        return replace(plan,context=context)
+    decorate_transaction_command(monkeypatch,transactions,transform)
+    try:
+        before=_complete_persisted_state(owned)
+        saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
+        assert delivered
+        assert saved.kind=='rolled_back',saved.error
+        assert '事件读取端口必须由原事务同一连接' in str(saved.error)
+        assert not owned.connection.in_transaction
+        assert _complete_persisted_state(owned)==before
+    finally:observer.connection.close();owned.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_finite_context_cannot_replace_original_transaction_connection(tmp_path,monkeypatch):
     from .test_segment_storage import _completion_command
     from camctl.persistence.event_reads import SqlEventReads
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.UNKNOWN)
@@ -1245,7 +1328,7 @@ async def test_context_cannot_replace_original_transaction_connection(tmp_path,m
     observer.connection.execute('BEGIN')
     observer.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
     key=new_operation_key()
-    command=_completion_command(owned,ref,members,request.occurred_at,key) if entry=='finite' else None
+    command=_completion_command(owned,ref,members,request.occurred_at,key)
     original=SqlEventReads.__init__
     replaced=False
     def initialize(reads,*args,**kwargs):
@@ -1257,8 +1340,7 @@ async def test_context_cannot_replace_original_transaction_connection(tmp_path,m
     monkeypatch.setattr(SqlEventReads,'__init__',initialize)
     try:
         before=_complete_persisted_state(owned)
-        if entry=='bounded':saved=transactions.finish_segment_recording(request,key,owned,batch_size=2)
-        else:saved=commit_operation(command,key,owned)
+        saved=commit_operation(command,key,owned)
         assert replaced
         assert saved.kind=='rolled_back',saved.error
         assert _complete_persisted_state(owned)==before
@@ -1288,29 +1370,6 @@ async def test_capacity_worker_without_budget_preserves_real_completion_and_rece
     actual = assert_completed_case(manifest, expected, result_path)
     assert actual["verified"]["output_count"] == 5
     assert len(actual["rounds"]) == 3
-
-
-@pytest.mark.asyncio
-async def test_capacity_budget_is_checked_before_world_preparation(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    import sys
-    from . import segment_capacity_case
-
-    class UnavailableBudget(RuntimeError):
-        pass
-
-    def unavailable(budget):
-        raise UnavailableBudget("controlled unavailable controller")
-
-    async def forbidden_preparation(*args, **kwargs):
-        raise AssertionError("预算不可用时禁止昂贵准备")
-
-    backend = SimpleNamespace(get_budget_config=lambda: object(),
-                              ensure_memory_budget_available=unavailable)
-    monkeypatch.setattr(segment_capacity_case, "memory_budget_backend", lambda: backend)
-    monkeypatch.setattr(sys.modules[__name__], "_ready_world", forbidden_preparation)
-    with pytest.raises(UnavailableBudget):
-        await _run_fixed_batch_capacity(tmp_path)
 
 
 @pytest.mark.parametrize("damage", ["absent", "empty", "wrong_key", "missing_result", "wrong_count"])

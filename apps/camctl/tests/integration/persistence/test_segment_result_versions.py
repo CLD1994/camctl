@@ -268,9 +268,8 @@ async def test_cancel_after_publication_returns_original_result_without_new_vers
 @pytest.mark.parametrize('cut',['before','after'])
 async def test_unknown_cancel_create_closes_original_and_reuses_same_request_key(tmp_path,monkeypatch,bounded,cut):
     import sqlite3
-    from camctl.persistence.repositories import segment_result_sets as storage
     from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
-    from .test_segment_transaction_batches import ConnectionProbe
+    from .test_segment_transaction_batches import ConnectionProbe,_complete_persisted_state,_original_history
     owned,runtime,repository,previous=await _two_scan_result(tmp_path)
     closed=False
     try:
@@ -296,17 +295,26 @@ async def test_unknown_cancel_create_closes_original_and_reuses_same_request_key
         owned.connection.close();closed=True
         fresh=open_existing(path,DbOpenMode.EXISTING_RO,DbConfig())
         try:
+            before=_complete_persisted_state(fresh)
             found=repository.find_canceled_result_ref(previous.action_id,previous.set_id,cancel,fresh)
             assert (found is not None)==(cut=='after')
+            history=_original_history(fresh,key) if cut=='after' else None
+            assert _complete_persisted_state(fresh)==before
         finally:
             fresh.connection.close()
         fresh=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
         try:
-            if cut=='after':
-                def no_new_id(*args):raise AssertionError('原键恢复不分配新版本或集合身份')
-                monkeypatch.setattr(storage,'next_row_id',no_new_id)
             ref=_ok(repository.create_result_set(request,key,fresh))
             assert cut=='before' or ref==found
+            if cut=='after':
+                assert _original_history(fresh,key)==history
+                assert _complete_persisted_state(fresh)==before
+            else:
+                committed=_complete_persisted_state(fresh)
+                history=_original_history(fresh,key)
+                assert _ok(repository.create_result_set(request,key,fresh))==ref
+                assert _original_history(fresh,key)==history
+                assert _complete_persisted_state(fresh)==committed
             assert ref.version==previous.version+1
             assert fresh.connection.execute('SELECT COUNT(*) FROM segment_sets').fetchone()==(2,)
             changed=repository.create_result_set(replace(request,occurred_at=request.occurred_at+1),key,fresh)

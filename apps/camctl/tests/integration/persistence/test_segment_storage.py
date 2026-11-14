@@ -215,26 +215,46 @@ from camctl.persistence.repositories.transactions import CommandPlan,commit_oper
 
 @pytest.mark.asyncio
 async def test_direct_event_cannot_forge_original_set_identity(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    from camctl.capture.segment_storage import document
+    from camctl.persistence.repositories import segments as segment_storage
+    from .transaction_fixtures import capture_operation_command
+    from .test_segment_transaction_batches import _complete_persisted_state
+
     owned,runtime,repo,ref,members=await _world(tmp_path)
+    copy=None
     try:
         other=replace(ref,version=2)
-        original=owned.connection.execute('SELECT id FROM segment_sets').fetchone()[0]
-        from camctl.persistence.repositories.transactions import row_facts
-        row=row_facts(owned.connection,'segment_sets',original)
-        values={k:v for k,v in row.items() if k!='id'}
-        values.update(version=2,target_duration_ms=1)
+        row=repo.read_set(ref,owned)
+        request=SegmentSetCreate(other,row['activity_id'],row['run_id'],row['target_duration_ms'],runtime.wall_us())
+        key=new_operation_key()
+        command=capture_operation_command(segment_storage,lambda: repo.create(request,key,owned))
+        path=tmp_path/'legal-copy.db'
+        with closing(sqlite3.connect(path)) as target:
+            owned.connection.backup(target)
+        copy=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
+        legal=commit_operation(command,key,copy)
+        assert legal.kind=='completed',legal.error
+        assert repo.read_set(other,copy)['target_duration_ms']==request.target_duration_ms
         class Forged:
             def plan(self,scope):
-                allocation=scope.allocate(1)
-                event_type=load_event_registry()['events']['SEGMENT_FACTS']
-                change=row_change('segment_sets',next_row_id(scope.connection,'segment_sets'),{**values,'created_event_id':allocation.first_event_id})
-                event=event_envelope(allocation.first_event_id,allocation.txn_id,event_type['id'],event_type['branches']['CREATE']['reason'],(change,),runtime.wall_us(),{'segment_request':{}})
-                return CommandPlan((event,),{('segment_sets',change.row_id):('action',ref.action_id)},
-                    {'actions':{ref.action_id:row_facts(scope.connection,'actions',ref.action_id)},'segment_sets':{}},segment_read_scope=SegmentReadScope(other))
-        saved=commit_operation(Forged(),new_operation_key(),owned)
+                plan=command.plan(scope)
+                event,=plan.events
+                change,=event.rows
+                altered=replace(change,after=replace(change.after,values={**change.after.values,'target_duration_ms':1}))
+                forged_request=replace(request,target_duration_ms=1)
+                evidence={'segment_request':{'ref':document(other),'input':document(forged_request)}}
+                return replace(plan,events=(replace(event,rows=(altered,),evidence=evidence),))
+        before=_complete_persisted_state(owned)
+        saved=commit_operation(Forged(),key,owned)
         assert saved.kind=='rolled_back'
-        assert owned.connection.execute('SELECT COUNT(*) FROM segment_sets').fetchone()==(1,)
-    finally:owned.connection.close()
+        assert '集合事件与原执行定义、活动和扫描不同' in str(saved.error)
+        assert not owned.connection.in_transaction
+        assert _complete_persisted_state(owned)==before
+    finally:
+        if copy is not None:copy.connection.close()
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
@@ -572,7 +592,7 @@ async def test_unknown_key_observations_page_without_fabricated_segment_cursor(t
 
 
 @pytest.mark.asyncio
-async def test_terminal_action_cannot_be_activated_later_or_again_with_new_key(tmp_path):
+async def test_incomplete_finish_and_standalone_activation_are_rejected(tmp_path):
     from camctl.persistence.repositories.capture import CaptureRepository,FinishCapture
     from camctl.outputs.catalog import OutputDraft,OutputKind,FileReference,OutputCatalogFacts
     from camctl.persistence.repositories.segments import segment_event,segment_activation_rows
