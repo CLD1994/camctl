@@ -1,9 +1,12 @@
 """真实 OSMO 合同、清理装配和共享主机文件任务的组合验证。"""
 
 from dataclasses import replace
+from contextlib import closing
 import json
 from pathlib import Path
 import shlex
+import shutil
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -76,9 +79,28 @@ class FileChannel(LocalAdbChannel):
 
 
 @pytest_asyncio.fixture
-async def world(tmp_path, request, capture_resources, isolated_driver_registries):
+async def world(request, capture_resources, isolated_driver_registries, cleanup_source_cache):
     """仅预置已登记源；清理受理、意图、结果及交接全部执行生产事务。"""
     binding = DeviceBinding("cam-1", getattr(request, "param", BINDING.driver_id))
+    cache = cleanup_source_cache["worlds"]
+    state = cache.get(binding.driver_id)
+    generation = 0 if state is None else state["generation"]
+    if state is not None and not state["closed"]:
+        pytest.skip("上次清理世界的实际资源未完成收场，保留原现场")
+    if state is not None and not state["call_passed"]:
+        # 保留断言失败的世界，在新路径重新生成合法来源。
+        generation += 1
+        state = None
+    root = cleanup_source_cache["root"] / f"{binding.driver_id}-{generation}"
+    tmp_path, baseline = root / "world", root / "baseline"
+    if state is not None:
+        state["closed"] = False
+        shutil.rmtree(tmp_path)
+        shutil.copytree(baseline, tmp_path)
+    else:
+        state = {"generation": generation, "closed": False, "call_passed": False}
+        cache[binding.driver_id] = state
+        tmp_path.mkdir(parents=True)
     cfg = load_config({
         "paths": {"state_db": str(tmp_path / "state.db"), "log_file": str(tmp_path / "log"),
                   **{name: str(tmp_path / name) for name in ("staging", "ready", "processing")}},
@@ -94,34 +116,65 @@ async def world(tmp_path, request, capture_resources, isolated_driver_registries
                     "product_id": 10, "output_storage": "device"}},
         }}, ConfigDefaults())
     from camctl.persistence.initialization import InitOutcome, initialize_state
-    assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+    from camctl.persistence.runtime import verify_directory_binding
+    if not baseline.exists():
+        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+        tools = None
+        try:
+            action, original_path, preview_path, _record_driver, tools = await prepare_recording(
+                cfg, owned, capture_resources, binding.driver_id, tmp_path)
+            rows = owned.connection.execute(
+                "SELECT id,kind FROM outputs WHERE source_action_id=? ORDER BY kind", (action,)).fetchall()
+            ids = {"original": next(identity for identity, kind in rows if kind == 1),
+                   "preview": next(identity for identity, kind in rows if kind == 3),
+                   "repaired": next(identity for identity, kind in rows if kind == 2)}
+            for role in ("preview", "repaired"):
+                assert owned.connection.execute(
+                    "SELECT original_output_id FROM output_origins WHERE output_id=?", (ids[role],)).fetchone() == (ids["original"],)
+            _, ids["host_original"], ids["host_preview"], _ = await prepare_photo(
+                cfg, owned, capture_resources, device_id="hb", request_id=10)
+            _, ids["hb_original"], ids["hb_preview"], _ = await prepare_photo(
+                cfg, owned, capture_resources, device_id="hb-device", request_id=11)
+            delivery_id, delivery_file_id, copy = await prepare_delivery(
+                cfg, owned, action, ids["original"], binding.driver_id)
+            paths = {ids["original"]: original_path, ids["preview"]: preview_path}
+            for role in ("host_original", "host_preview", "repaired"):
+                relative, = owned.connection.execute(
+                    "SELECT f.relative_path FROM outputs o JOIN intermediate_files f"
+                    " ON f.id=o.intermediate_file_id WHERE o.id=?", (ids[role],)).fetchone()
+                paths[ids[role]] = Path(cfg.paths.staging) / relative
+            contents = {identity: path.read_bytes() for identity, path in paths.items()}
+            verify_directory_binding(owned.metadata, *(str(getattr(cfg.paths, name))
+                                     for name in ("staging", "ready", "processing")))
+        finally:
+            try:
+                await capture_resources.close()
+            finally:
+                try:
+                    if tools is not None:
+                        await tools.close()
+                finally:
+                    owned.connection.close()
+        # 等所有连接和文件责任结束后，将已提交 WAL 合并到库文件。
+        with closing(sqlite3.connect(cfg.paths.state_db)) as connection:
+            assert connection.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+            busy, _, _ = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            assert busy == 0
+        wal = Path(str(cfg.paths.state_db) + "-wal")
+        assert not wal.exists() or wal.stat().st_size == 0
+        shutil.copytree(tmp_path, baseline)
+        state.update({"ids": ids, "paths": paths, "contents": contents, "copy": copy,
+                      "delivery_id": delivery_id, "delivery_file_id": delivery_file_id})
+        print(f"cleanup source generated: {binding.driver_id} (recording, host photo, device photo, delivery)")
+    ids, paths, contents = (state[name].copy() for name in ("ids", "paths", "contents"))
+    copy, delivery_id, delivery_file_id = state["copy"], state["delivery_id"], state["delivery_file_id"]
     owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
-    tools = None
     supervisor = None
     try:
-        action, original_path, preview_path, _record_driver, tools = await prepare_recording(
-            cfg, owned, capture_resources, binding.driver_id, tmp_path)
-        rows = owned.connection.execute(
-            "SELECT id,kind FROM outputs WHERE source_action_id=? ORDER BY kind", (action,)).fetchall()
-        ids = {"original": next(identity for identity, kind in rows if kind == 1),
-               "preview": next(identity for identity, kind in rows if kind == 3),
-               "repaired": next(identity for identity, kind in rows if kind == 2)}
-        for role in ("preview", "repaired"):
-            assert owned.connection.execute(
-                "SELECT original_output_id FROM output_origins WHERE output_id=?", (ids[role],)).fetchone() == (ids["original"],)
-        _, ids["host_original"], ids["host_preview"], _ = await prepare_photo(
-            cfg, owned, capture_resources, device_id="hb", request_id=10)
-        _, ids["hb_original"], ids["hb_preview"], hb_driver = await prepare_photo(
-            cfg, owned, capture_resources, device_id="hb-device", request_id=11)
-        delivery_id, delivery_file_id, copy = await prepare_delivery(
-            cfg, owned, action, ids["original"], binding.driver_id)
-        paths = {ids["original"]: original_path, ids["preview"]: preview_path}
-        for role in ("host_original", "host_preview", "repaired"):
-            relative, = owned.connection.execute(
-                "SELECT f.relative_path FROM outputs o JOIN intermediate_files f"
-                " ON f.id=o.intermediate_file_id WHERE o.id=?", (ids[role],)).fetchone()
-            paths[ids[role]] = Path(cfg.paths.staging) / relative
-        contents = {identity: path.read_bytes() for identity, path in paths.items()}
+        verify_directory_binding(owned.metadata, *(str(getattr(cfg.paths, name))
+                                 for name in ("staging", "ready", "processing")))
+        assert owned.connection.execute("PRAGMA journal_mode").fetchone() == ("wal",)
         register_builtin_camera_drivers(cfg)
         from camctl.devices.drivers.hasselblad.registration import register_builtin_hasselblad_driver
         register_builtin_hasselblad_driver(cfg)
@@ -136,7 +189,7 @@ async def world(tmp_path, request, capture_resources, isolated_driver_registries
         value = SimpleNamespace(cfg=cfg, owned=owned, registry=registry, entry=entry, channel=channel,
                                 binding=binding, paths=paths, contents=contents, ids=ids, copy=copy,
                                 delivery_id=delivery_id, delivery_file_id=delivery_file_id,
-                                hb_driver=hb_driver, executor=executor, context=context, resources=capture_resources)
+                                executor=executor, context=context, resources=capture_resources)
         with output_test_session():
             yield value
             assert not executor.unfinished_files()
@@ -148,13 +201,11 @@ async def world(tmp_path, request, capture_resources, isolated_driver_registries
                 assert not executor.unfinished_files()
         finally:
             try:
-                if tools is not None:
-                    await tools.close()
+                await capture_resources.close()
             finally:
-                try:
-                    await capture_resources.close()
-                finally:
-                    owned.connection.close()
+                owned.connection.close()
+        state["call_passed"] = getattr(request.node, "cleanup_call_passed", False)
+        state["closed"] = True
 
 
 def _factory(world, **kwargs):
