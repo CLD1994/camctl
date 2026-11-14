@@ -15,11 +15,12 @@ import time
 from pathlib import Path
 
 from camctl_fixtures import (
+    CliResult,
     Deployment,
-    future_schedule,
     photo_file,
     photo_plan,
     stub_driver_spec,
+    terminate_process_tree,
     timelapse_plan,
     video_file,
 )
@@ -62,12 +63,13 @@ def test_photo_keeps_completed_outputs(tmp_path: Path) -> None:
     完成的正式产物在取回与清理发生前保持事实不变；报告经客户端
     真实导入保存后，递交的 ACK 被受理接口吸收并推进累计确认。
     """
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
-    plan = deployment.write_plan(photo_plan("41", future_schedule(1)))
+    scheduled_at = deployment.schedule(1)
+    plan = deployment.write_plan(photo_plan("41", scheduled_at))
     spec = stub_driver_spec({"1": [photo_file("shot-1")]})
     submitted = deployment.camctl(
         "submit", str(plan), "--config", str(deployment.config_path),
@@ -76,8 +78,23 @@ def test_photo_keeps_completed_outputs(tmp_path: Path) -> None:
     assert submitted.message() == {
         "kind": "succeeded", "body": {"needs_run": True}}
 
-    run = deployment.camctl(
+    # 受理与进程准备不占用原启动窗口；实际 START 收场后恢复业务钟。
+    deployment.freeze_at(scheduled_at)
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
+    try:
+        _await_row(deployment.state_db,
+            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name=? AND r.responsibility_key='start/' || a.id"
+            " AND r.status IN (3,4)", ("shoot",),
+            timeout_s=min(30, max(0, deadline - time.monotonic())))
+        deployment.resume_clock()
+        stdout, stderr = process.communicate(timeout=max(0, deadline - time.monotonic()))
+        run = CliResult(process.returncode, stdout, stderr)
+    finally:
+        if process.poll() is None:
+            terminate_process_tree(process)
     assert run.exit_code == 0, run.stderr
     assert run.message() == {"kind": "succeeded"}
 
