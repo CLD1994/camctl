@@ -44,7 +44,8 @@ async def test_real_flow_resumes_original_phase_before_current_terminal(tmp_path
 
         monkeypatch.setattr(CancellationRepository, selected, save)
         flow = cancel_flow(staging=canonical_to_path(world.database.metadata.staging_path),
-            ready=tmp_path / "ready", processing=tmp_path / "processing")
+            ready=canonical_to_path(world.database.metadata.ready_path),
+            processing=canonical_to_path(world.database.metadata.processing_path))
         context = SimpleNamespace(database=world.database, clock=world.clock)
         with pytest.raises((StateDbFailure, ValueError, OSError)):
             await flow(context)
@@ -75,7 +76,8 @@ async def test_real_flow_resumes_original_phase_before_current_terminal(tmp_path
 
 
 async def test_flow_rejects_other_database_then_resumes_original_pending_finish(tmp_path, monkeypatch):
-    async with origin_world(tmp_path / "first") as world, origin_world(tmp_path / "second") as other:
+    async with origin_world(tmp_path / "first", directory_home=tmp_path) as world, \
+            origin_world(tmp_path / "second", directory_home=tmp_path) as other:
         actual = CancellationRepository.finish_origin_canceled
         calls = []
 
@@ -90,7 +92,8 @@ async def test_flow_rejects_other_database_then_resumes_original_pending_finish(
 
         monkeypatch.setattr(CancellationRepository, "finish_origin_canceled", save)
         flow = cancel_flow(staging=canonical_to_path(world.database.metadata.staging_path),
-            ready=tmp_path / "ready", processing=tmp_path / "processing")
+            ready=canonical_to_path(world.database.metadata.ready_path),
+            processing=canonical_to_path(world.database.metadata.processing_path))
         context = SimpleNamespace(database=world.database, clock=world.clock)
         with pytest.raises(ValueError):
             await flow(context)

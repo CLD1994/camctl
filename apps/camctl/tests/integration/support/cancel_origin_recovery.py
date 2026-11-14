@@ -12,7 +12,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import DbConfig, DbOpenMode, canonical_directory_binding, open_existing
 
 from .acceptance import accept_document
 from .database import business_database, create_test_database
@@ -22,10 +22,14 @@ NOW = int(to_utc_micros("2026-01-15 09:00:00"))
 
 
 @asynccontextmanager
-async def origin_world(home, *, fixed=False):
+async def origin_world(home, *, fixed=False, directory_home=None):
     home.mkdir(exist_ok=True)
     path = home / "state.db"
-    create_test_database(path)
+    directory_home = home if directory_home is None else directory_home
+    directories = tuple(directory_home / name for name in ("staging", "ready", "processing"))
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+    create_test_database(path, directories=tuple(map(canonical_directory_binding, directories)))
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     clock = SimpleNamespace(utc_micros=lambda: NOW)
 

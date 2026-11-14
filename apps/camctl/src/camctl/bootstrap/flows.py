@@ -718,18 +718,19 @@ def cancel_flow(
 
         nonlocal target_cursor, withdrawal_cursor, cursor_database
         database = context.database
+        if any(identity[0] != database.metadata.instance_id for identity in pending_origin_settlements):
+            raise StateDbFailure("原取消收场申请属于另一状态库")
+        if (cursor_database is not None and cursor_database != database.metadata.instance_id
+                and (pending_canceled_publications or pending_obtain_settlements)):
+            raise StateDbFailure("原取消发布保存责任属于另一状态库")
         from camctl.persistence.runtime import verify_directory_binding
         verify_directory_binding(database.metadata, str(staging), str(ready), str(processing))
         work_files.check_binding(database)
         if cursor_database != database.metadata.instance_id:
-            if cursor_database is not None and (pending_canceled_publications or pending_obtain_settlements):
-                raise StateDbFailure("原取消发布保存责任属于另一状态库")
             target_cursor = withdrawal_cursor = 0
             canceled_publication_scans.clear()
             canceled_publication_diagnostics.clear()
             cursor_database = database.metadata.instance_id
-        if any(identity[0] != database.metadata.instance_id for identity in pending_origin_settlements):
-            raise StateDbFailure("原取消收场申请属于另一状态库")
         await _resume_actual_file_facts(database, resume_file_observations, resume_media_results,
                                         resume_capture_completions=resume_capture_completions)
         repository = CancellationRepository()
