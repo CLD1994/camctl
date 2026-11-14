@@ -223,12 +223,18 @@ async def test_work_file_cleanup_does_not_restart_action(public_file_env, monkey
 async def test_release_requires_owner_terminal(work_env):
     """交付仍有效待发布：释放被拒绝，副本保留继续原发布流程。"""
     owned, roots, qualification = work_env
-    outcome = _release(owned, qualification.target_file_id)
-    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(outcome.error, ConsistencyError)
-    assert _file_state(owned, qualification.target_file_id)[:2] == (1, 1)
-    assert _work_path(
-        roots, owned, qualification.target_file_id).exists()
+    file_id = qualification.target_file_id
+    target = _work_path(roots, owned, file_id)
+    original = target.read_bytes()
+    async with business_database(database_path(owned)) as database:
+        outcome = _release(owned, file_id)
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(outcome.error, ConsistencyError)
+        result = await clean_one_work_file(file_id, _context(database, roots))
+        assert result.decision.action is WorkFileAction.KEEP_REQUIRED
+        assert result.outcome is WorkFileSingleOutcome.KEPT
+        assert _file_state(owned, file_id)[:2] == (1, 1)
+        assert target.read_bytes() == original
 
 
 @pytest.mark.asyncio
@@ -334,26 +340,6 @@ async def test_promoted_file_is_not_cleaned(tmp_path, media_cases):
         assert _row(owned, "SELECT original_output_id FROM output_origins WHERE output_id=?", output_id) == (original_id,)
     finally:
         owned.connection.close()
-
-
-@pytest.mark.asyncio
-async def test_released_candidate_with_active_owner_is_kept(work_env):
-    """候选已释放但归属又出现活跃事实（数据被外力改变）：保留不删。"""
-    owned, roots, qualification = work_env
-    async with business_database(database_path(owned)) as database:
-        file_id = qualification.target_file_id
-        _cancel_public_delivery(owned, qualification)
-        _release_ok(owned, file_id)
-        # 模拟外部修改使归属重新活跃；文件资格来自真实释放事务。
-        owned.connection.execute(
-            "UPDATE deliveries SET status=3 WHERE id=?", (qualification.delivery_id,))
-        owned.connection.commit()
-        result = (await clean_one_work_file(
-            file_id, _context(database, roots)))
-        assert result.decision.action is WorkFileAction.KEEP_REQUIRED
-        assert result.outcome is WorkFileSingleOutcome.KEPT
-        assert _work_path(roots, owned, file_id).exists()
-        assert _file_state(owned, file_id)[:2] == (2, 2)
 
 
 @pytest.mark.asyncio
@@ -463,28 +449,58 @@ async def test_history_scan_wraps_to_start_once(public_quota_env):
 
 
 @pytest.mark.asyncio
-async def test_kept_candidate_consumes_budget_and_advances(storage_work_env):
-    """不能安全删除的候选同样占用额度并推进游标，不阻挡后续记录。"""
-    owned, roots, qualification = storage_work_env
-    async with business_database(database_path(owned)) as database:
-        file_id = qualification.target_file_id
-        # 交付保持 PREPARED（归属活跃）：该候选保留。
-        owned.connection.execute(
-            "UPDATE intermediate_files SET retention_state=2, cleanup_state=2"
-            " WHERE id=?", (file_id,))
-        owned.connection.commit()
-        _seed_action_candidate(owned, roots, file_id=900)
-        result = (await clean_work_files(
-            _context(database, roots, batch=32, limit=1)))
-        assert (result.checked, result.cleaned, result.kept) == (1, 0, 1)
-        assert _work_path(roots, owned, file_id).exists()
-        assert _row(
-            owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] \
-            == file_id
-        following = (await clean_work_files(
-            _context(database, roots, batch=32, limit=1)))
-        assert (following.checked, following.cleaned) == (1, 1)
-        assert _file_state(owned, 900)[:2] == (2, 4)
+async def test_kept_candidate_consumes_budget_and_advances(public_quota_env):
+    """实际文件任务占用的候选消耗额度并推进游标，下一轮继续后续记录。"""
+    world = public_quota_env
+    owned = world.owned
+    first_id, second_id = (row[0] for row in world.files)
+    assert first_id < second_id
+    release_work_consumer(world, 0)
+    release_work_consumer(world, 1)
+    roots = BoundDirectories(staging=Path(world.cfg.paths.staging))
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
+    started, release = threading.Event(), threading.Event()
+
+    def hold_file(_stop):
+        assert world.paths[first_id].read_bytes() == b"bind"
+        started.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("文件任务等待释放超时")
+        return "actual file task ended"
+
+    class Owner:
+        async def take_over(self, task):
+            await task.pending.wait()
+
+    running = asyncio.create_task(executor.run_file_task(FileTask(
+        task_id=FileTaskId("media/quota-cleanup"), file_id=first_id,
+        stage="media", business="original file", body=hold_file), Owner()))
+    try:
+        assert await asyncio.to_thread(started.wait, 10)
+        async with business_database(world.path) as database:
+            context = replace(_context(database, roots, batch=32, limit=1), executor=executor)
+            result = await clean_work_files(context)
+            assert (result.checked, result.cleaned, result.kept) == (1, 0, 1)
+            assert world.paths[first_id].read_bytes() == b"bind"
+            assert world.paths[second_id].read_bytes() == b"bind"
+            assert _row(owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == first_id
+
+            next_context = replace(_context(database, roots, batch=32, limit=1), executor=executor)
+            following = await clean_work_files(next_context)
+            assert (following.checked, following.cleaned) == (1, 1)
+            assert _row(owned, "SELECT cleanup_cursor_file_id FROM runtime_state")[0] == second_id
+            assert _file_state(owned, second_id)[:2] == (2, 4)
+            assert not world.paths[second_id].exists()
+            assert world.paths[first_id].read_bytes() == b"bind"
+    finally:
+        release.set()
+        try:
+            finished = await asyncio.wait_for(running, timeout=10)
+            assert finished.ran and finished.value == "actual file task ended"
+        finally:
+            settled = await asyncio.wait_for(supervisor.drain_required(), timeout=10)
+            assert not settled.failed
 
 
 @pytest.mark.asyncio
