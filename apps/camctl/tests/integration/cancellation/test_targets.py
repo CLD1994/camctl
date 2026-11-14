@@ -285,17 +285,53 @@ class TestCancelTargetsGuard:
     """登记名 cancel 守卫的直接事件正反例。"""
 
     @staticmethod
-    def _state(owned):
-        from camctl.persistence.repositories.transactions import row_facts
+    def _state():
+        # 固定完整行事实，供正式事件校验核对寻址、归属与报告影响。
+        def action(identity, plan_id, index, name, kind, group, status):
+            capture = kind in (1, 2, 3)
+            return {
+                "id": identity, "plan_id": plan_id, "input_index": index,
+                "name": name, "type": kind, "device_id": "cam-1" if capture else None,
+                "scheduled_at": _NOW, "group_name": group,
+                "input_fields_json": {}, "effective_params_json": {} if capture else None,
+                "driver_id": "camctl-adb" if capture else None,
+                "max_delay_ms": 1000 if capture else None, "execution_spec_json": {},
+                "status": status, "execution_started": 1, "cancel_requested": 0,
+                "error_code": None, "error_details_json": None,
+                "first_window_observed_at": None, "expiration_reason": None,
+                "source_resolution_state": None, "resolved_source_plan_id": None,
+                "target_selection_state": None, "created_event_id": 1,
+                "last_event_id": 1, "change_count": 1,
+            }
 
-        tables = ("actions", "plans", "cancel_items", "auto_preview_links")
+        actions = {
+            identity: action(identity, plan_id, index, name, kind, group, status)
+            for identity, plan_id, index, name, kind, group, status in (
+                (11, 1, 0, "rec-a", 2, "g", 2),
+                (12, 1, 1, "rec-b", 2, "h", 3),
+                (21, 1, 2, "preview-a", 4, None, 2),
+                (13, 2, 0, "rec-c", 2, "g", 3),
+                (50, 2, 1, "cancel", 6, None, 2),
+            )
+        }
+        actions[50]["input_fields_json"] = {
+            "params": {"target": {"plan_instance_id": "1"}}}
+        actions[50]["target_selection_state"] = 1
         return {
-            table: {row[0]: row_facts(owned.connection, table, row[0])
-                    for row in owned.connection.execute(
-                        f"SELECT id FROM {table}").fetchall()}
-            for table in tables}
+            "actions": actions,
+            "plans": {
+                identity: {"id": identity, "request_id": request_id, "name": "seed",
+                           "created_at": _NOW, "status": 1, "created_event_id": 1,
+                           "last_event_id": 1, "change_count": 1}
+                for identity, request_id in ((1, 4242), (2, 4243))
+            },
+            "cancel_items": {},
+            "auto_preview_links": {61: {
+                "id": 61, "obtain_action_id": 21, "source_action_id": 11,
+                "preview_support": 1, "parameter_type": "timed", "is_valid": 1}},
+        }
 
-    def _cancel_event(self, owned, members, *, action_facts=None):
+    def _cancel_event(self, members):
         from dataclasses import replace
 
         from camctl.persistence.repositories.transactions import (
@@ -319,19 +355,15 @@ class TestCancelTargetsGuard:
             }
             rows += (row_change("cancel_items", item_id, full),)
             owners[("cancel_items", item_id)] = ("action", 50)
-        state = self._state(owned)
+        state = self._state()
         state["cancel_items"] = {
-            91 + index: dict(
-                {"action_id": 50, "outcome": None, "error_code": None,
-                 "error_details_json": None}, id=91 + index, **values)
-            for index, values in enumerate(members)}
-        if action_facts:
-            state["actions"][50].update(action_facts)
+            row.row_id: {"id": row.row_id, **row.after.values}
+            for row in rows if row.table == "cancel_items"}
         event = replace(
             event_envelope(2, 2, 4, 3, rows, _NOW), change_seq=2)
         return event, state, owners
 
-    def _validate(self, owned, event, state, owners):
+    def _validate(self, event, state, owners):
         from camctl.contracts.history_values import TransactionRange
         from camctl.history.validators import EventContext
         from camctl.persistence.repositories.validation import BusinessStorage
@@ -347,42 +379,35 @@ class TestCancelTargetsGuard:
                 ("auto_preview_links", "obtain_action_id"): frozenset(state["actions"]),
             })))
 
-    def test_linked_member_requires_valid_auto_link(self, pipeline):
-        owned = pipeline
+    def test_linked_member_requires_valid_auto_link(self):
         members = [{"target": 11, "basis": 1}, {"target": 21, "basis": 2}]
-        event, state, owners = self._cancel_event(owned, members)
+        event, state, owners = self._cancel_event(members)
         # 有效自动关联存在：通过。
-        self._validate(owned, event, state, owners)
-        broken, broken_state, broken_owners = self._cancel_event(
-            owned, members)
+        self._validate(event, state, owners)
+        broken, broken_state, broken_owners = self._cancel_event(members)
         broken_state["auto_preview_links"] = {}
         from camctl.history.validators import EventValidationError
 
-        import pytest as _pytest
-        with _pytest.raises(EventValidationError):
-            self._validate(owned, broken, broken_state, broken_owners)
+        with pytest.raises(EventValidationError):
+            self._validate(broken, broken_state, broken_owners)
 
-    def test_initial_values_must_be_pending_without_result(self, pipeline):
+    def test_initial_values_must_be_pending_without_result(self):
         from camctl.history.validators import EventValidationError
 
-        import pytest as _pytest
-        owned = pipeline
         for bad in ({"target": 11, "basis": 1, "status": 2},
                     {"target": 11, "basis": 1, "effect": 2}):
-            event, state, owners = self._cancel_event(owned, [bad])
-            with _pytest.raises(EventValidationError):
-                self._validate(owned, event, state, owners)
+            event, state, owners = self._cancel_event([bad])
+            with pytest.raises(EventValidationError):
+                self._validate(event, state, owners)
 
-    def test_fail_branch_rejects_members_and_foreign_error(self, pipeline):
+    def test_fail_branch_accepts_no_members_and_rejects_member(self):
         from dataclasses import replace
 
         from camctl.history.validators import EventValidationError
         from camctl.persistence.repositories.transactions import (
             event_envelope, row_change, update_change)
 
-        import pytest as _pytest
-        owned = pipeline
-        state = self._state(owned)
+        state = self._state()
         owners = {("actions", 50): ("action", 50)}
         fail = (update_change(
             "actions", 50,
@@ -391,16 +416,16 @@ class TestCancelTargetsGuard:
             {"target_selection_state": 3, "status": 4, "error_code": 25,
              "error_details_json": {"target": {}}}),)
         event = replace(event_envelope(2, 2, 4, 4, fail, _NOW), change_seq=2)
-        self._validate(owned, event, state, owners)
+        self._validate(event, state, owners)
         with_member = fail + (row_change("cancel_items", 91, {
             "action_id": 50, "target_action_id": 11, "selection_basis": 1,
             "status": 1, "cancellation_effect": 1, "outcome": None,
             "error_code": None, "error_details_json": None}),)
         event_with = replace(
             event_envelope(2, 2, 4, 4, with_member, _NOW), change_seq=2)
-        with _pytest.raises(EventValidationError):
+        with pytest.raises(EventValidationError):
             self._validate(
-                owned, event_with,
+                event_with,
                 {**state, "cancel_items": {
                     91: {"id": 91, "action_id": 50, "target_action_id": 11,
                          "selection_basis": 1, "status": 1,
