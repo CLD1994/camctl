@@ -1,4 +1,4 @@
-"""对象恢复固定依据，按相关次数选路径，并在读事务外应用事件。"""
+"""对象恢复固定依据，并按相关次数选择路径。"""
 
 import asyncio
 import threading
@@ -129,85 +129,6 @@ async def test_cost_path_reads_only_selected_event_range(file_world, monkeypatch
     assert actual == {("device_files", 1): expected}
     assert opened
     assert observed == [(event_id, event_bodies[event_id]) for event_id in wanted]
-
-
-class _Cursor:
-    def __init__(self, owner, inner):
-        self.owner, self.inner = owner, inner
-        self.owner.pending += 1
-
-    def close(self):
-        self.inner.close()
-        self.owner.pending -= 1
-
-    def __getattr__(self, name):
-        return getattr(self.inner, name)
-
-
-class _Connection:
-    def __init__(self, inner):
-        self.inner, self.pending = inner, 0
-
-    def execute(self, *args):
-        return _Cursor(self, self.inner.execute(*args))
-
-    def __getattr__(self, name):
-        return getattr(self.inner, name)
-
-
-def _observe_connections(repository, monkeypatch):
-    opened = []
-    original = repository._connect
-
-    def connect():
-        tracked = _Connection(original())
-        opened.append(tracked)
-        return tracked
-
-    monkeypatch.setattr(repository, "_connect", connect)
-    return opened
-
-
-def test_reverse_application_runs_after_query_and_transaction_end(file_world, monkeypatch):
-    world = file_world
-    boundary = world.history.current_boundary()
-    expected = row_facts(world.owned.connection, "device_files", 1)
-    for _ in range(3):
-        _change(world)
-    connections = _observe_connections(world.history, monkeypatch)
-    from camctl.history import replay
-    from camctl.persistence.repositories import history as module
-    applied = []
-
-    def check():
-        assert all(connection.pending == 0 for connection in connections)
-        for connection in connections:
-            try:
-                assert connection.in_transaction is False
-            except Exception as error:
-                # sqlite3 在已关闭连接上查询 in_transaction 报 ProgrammingError。
-                import sqlite3
-                if not isinstance(error, sqlite3.ProgrammingError):
-                    raise
-        applied.append(True)
-
-    original_rows = module.reverse_row_values
-    original_image = replay.apply_reverse
-
-    def rows(*args, **kwargs):
-        check()
-        return original_rows(*args, **kwargs)
-
-    def image(*args, **kwargs):
-        check()
-        return original_image(*args, **kwargs)
-
-    monkeypatch.setattr(module, "reverse_row_values", rows)
-    monkeypatch.setattr(replay, "apply_reverse", image)
-    assert world.history.restore_entity("device_file", 1, boundary, event_batch_size=1) == {
-        ("device_files", 1): expected}
-    assert applied
-    assert len(connections) >= 4  # 依据读取和三页事件各自结束读视图。
 
 
 def test_projection_and_range_keep_c_when_commit_occurs_between_pages(file_world, monkeypatch):

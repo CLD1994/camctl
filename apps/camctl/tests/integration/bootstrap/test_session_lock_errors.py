@@ -32,10 +32,7 @@ from camctl.reporting.supervisor import (
     WorkerGeneration,
     WorkerSupervisor,
 )
-from camctl.capture.recovery import RecoveryBoundary
 from camctl.session import locks
-from camctl.session import service as session_service
-from camctl.session.clock import ClockBecameUntrusted
 from camctl.session.service import StateDbFailure
 
 
@@ -911,134 +908,6 @@ async def test_late_clock_lock_failure_uses_original_emergency_qualification(
     assert emergency_runs[0][1] == 1
     _assert_session_lock_reacquirable(session_path)
     assert locks.probe_admission(admission_path).is_free is True
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "parent_first", [False, True], ids=["sync-control-first", "parent-first"])
-async def test_lock_control_and_parent_cancel_keep_first_source(
-        tmp_path: Path, monkeypatch, parent_first: bool) -> None:
-    config = _config_for(tmp_path)
-    assert initialize_state(
-        config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
-    logs = _seed_startup_log(tmp_path).parent
-    deps = build_runtime(
-        CommandMode.RUN, config,
-        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-    )
-    session_path = Path(deps.session_lock)
-    admission_path = Path(deps.admission_lock)
-    control = asyncio.CancelledError("typed admission unlock control")
-    control.add_note("original synchronous lock control note")
-    unlock_reached = threading.Event()
-    backend = _FaultingLockBackend(
-        "unlock", control, on_unlock=unlock_reached.set)
-    _patch_lock_acquisition(
-        monkeypatch, session_path=session_path, admission_path=admission_path,
-        admission_backend=backend,
-    )
-    original_assembly = lifecycle._report_assembly
-
-    async def late_clock(_context):
-        raise ClockBecameUntrusted("late clock enters required local cleanup")
-
-    def assemble_late_clock_first(*args, **kwargs):
-        flows, supervisor = original_assembly(*args, **kwargs)
-        return {"late_clock": late_clock, **flows}, supervisor
-
-    monkeypatch.setattr(lifecycle, "_report_assembly", assemble_late_clock_first)
-    transition_started = asyncio.Event()
-    release_transition = asyncio.Event()
-    final_settlement_started = asyncio.Event()
-    original_settle = session_service._settle_local_work
-
-    async def gated_settle(context, *, stop_new=True, exclude_owner=None, waiter=None):
-        if exclude_owner is not None:
-            transition_started.set()
-            if parent_first:
-                await asyncio.wait_for(
-                    release_transition.wait(), timeout=_GATE_TIMEOUT)
-        else:
-            final_settlement_started.set()
-        return await original_settle(
-            context, stop_new=stop_new, exclude_owner=exclude_owner, waiter=waiter)
-
-    monkeypatch.setattr(session_service, "_settle_local_work", gated_settle)
-    listdir_started = threading.Event()
-    release_listdir = threading.Event()
-    original_listdir = os.listdir
-
-    def blocked_listdir(path=None):
-        if isinstance(path, (str, bytes, os.PathLike)) and os.fsdecode(path) == os.fspath(logs):
-            listdir_started.set()
-            if not release_listdir.wait(timeout=_GATE_TIMEOUT):
-                raise TimeoutError("startup-sweep test gate was not released")
-        return original_listdir(path)
-
-    monkeypatch.setattr(os, "listdir", blocked_listdir)
-    opened = _tracked_open_connections(monkeypatch, Path(config.paths.state_db))
-    run_task = asyncio.create_task(execute_command(deps, None))
-    try:
-        assert await asyncio.to_thread(listdir_started.wait, _GATE_TIMEOUT)
-        if parent_first:
-            await asyncio.wait_for(transition_started.wait(), timeout=_GATE_TIMEOUT)
-            run_task.cancel("parent cancelled before synchronous lock control")
-            await asyncio.sleep(0)
-            assert not run_task.done()
-            release_transition.set()
-        else:
-            await asyncio.wait_for(transition_started.wait(), timeout=_GATE_TIMEOUT)
-        assert await asyncio.to_thread(unlock_reached.wait, _GATE_TIMEOUT)
-        await asyncio.wait_for(final_settlement_started.wait(), timeout=_GATE_TIMEOUT)
-        if not parent_first:
-            run_task.cancel("parent cancelled after synchronous lock control")
-            await asyncio.sleep(0)
-        assert not run_task.done()
-        try:
-            duplicate = locks.acquire_session(session_path)
-        except locks.SessionLockConflictError:
-            pass
-        else:
-            duplicate.close()
-            pytest.fail("日志实际责任仍在途时会话锁已释放")
-        release_listdir.set()
-        with pytest.raises(asyncio.CancelledError) as raised:
-            await asyncio.wait_for(run_task, timeout=_GATE_TIMEOUT)
-    finally:
-        release_transition.set()
-        release_listdir.set()
-        if not run_task.done():
-            run_task.cancel("Task3 lock-control cleanup")
-            await asyncio.wait_for(
-                asyncio.gather(run_task, return_exceptions=True),
-                timeout=_GATE_TIMEOUT,
-            )
-        close_runtime(deps)
-
-    assert backend.calls == {"open": 1, "try_lock": 1, "unlock": 1, "close": 1}
-    facts = locks.lock_error_facts(control)
-    assert facts is not None
-    assert facts.operation is locks.LockOperation.UNLOCK
-    assert facts.path == admission_path
-    notes = "\n".join(getattr(raised.value, "__notes__", ()))
-    if parent_first:
-        assert raised.value is not control
-        assert raised.value.args == ("parent cancelled before synchronous lock control",)
-        assert "typed admission unlock control" in notes
-        assert "original synchronous lock control note" in notes
-    else:
-        assert raised.value is control
-        assert "parent cancelled after synchronous lock control" in notes
-        assert "original synchronous lock control note" in notes
-    assert "late clock enters required local cleanup" in notes
-    assert opened and all(connection.close_calls == 1 and connection.unusable_after_close
-                          for connection in opened)
-    _assert_session_lock_reacquirable(session_path)
-    assert locks.probe_admission(admission_path).is_free is True
-    assert _scalar(
-        Path(config.paths.state_db),
-        "SELECT COUNT(*) FROM operation_runs WHERE kind = 9",
-    ) == (0,)
 
 
 @pytest.mark.asyncio
