@@ -22,7 +22,6 @@ from camctl.host_files.capture_sources import (
     archive_capture_file,
     prepare_capture_workspace,
     verify_capture_files,
-    workspace_path,
 )
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
 
@@ -60,18 +59,6 @@ def _target(roots: BoundDirectories, *, original: bool = True) -> FileRef:
 async def _prepared_workspace(tmp_path: Path) -> tuple[BoundDirectories, Path]:
     roots = _roots(tmp_path)
     return roots, await prepare_capture_workspace(roots, "42")
-
-
-async def test_workspace_path_requires_a_canonical_in_range_object_id(
-    tmp_path: Path,
-) -> None:
-    roots = _roots(tmp_path)
-
-    assert workspace_path(roots, "42") == roots.staging / "capture-work" / "42"
-
-    for activity_id in ("0", "01", "+1", "9223372036854775808", 42, True):
-        with pytest.raises(CaptureFileError):
-            workspace_path(roots, activity_id)
 
 
 async def test_workspace_creation_is_exclusive_and_preserves_existing_files(

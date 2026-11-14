@@ -2,8 +2,7 @@
 
 真实文件与各文件边界组合：对写入、同步、移动、删除注入错误或
 中断，断言每个边界返回的阶段事实与文件系统的实际观察一致；停
-止在块间生效并保留已确认字节。三类消费者按各自规则核对：普通
-交付的终局未知失败不自动重投，报告恢复按实际位置分类，日志副
+止在块间生效并保留已确认字节。报告恢复按实际位置分类，日志副
 本失败停止后续步骤并保留分类。文件身份的占用登记与积压测量只
 反映未结束任务，收场即释放。
 """
@@ -11,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import os
 import shutil
 import sys
@@ -49,13 +47,6 @@ from camctl.logging_runtime.copies import (
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogRecord
 from camctl.operations.models import AttemptTicket
-from camctl.outputs.handoff import (
-    DeliveryFacts,
-    DeliveryHandoffOutcome,
-    DeliveryLocations,
-    LocationObservation,
-    decide_handoff,
-)
 from camctl.reporting.models import FrozenReport
 from camctl.reporting.publication import (
     ReportDirectories,
@@ -199,20 +190,31 @@ class TestBoundaryEffects:
         )
         target_path = tmp_path / "target.bin"
         target_path.touch()
-        target = _TargetFile(target_path)
-        result = transfer_segment(
-            SegmentSpec("copy/9", 0, "copy.part", 0, 8000, 4000,
-                        threading.Event()),
-            session, target,
-        )
-        # 记录的效果：读取失败，已确认范围与写入范围已知。
-        assert result.error is SegmentFailure.READ_FAILED
-        assert result.processed_end == 4000
-        assert result.write_extent_known is True
-        # 观察的效果：目标文件恰好包含已确认字节。
-        observed = target_path.read_bytes()
-        assert len(observed) == result.processed_end
-        assert observed == payload[:4000]
+        target = None
+        try:
+            target = _TargetFile(target_path)
+            result = transfer_segment(
+                SegmentSpec("copy/9", 0, "copy.part", 0, 8000, 4000,
+                            threading.Event()),
+                session, target,
+            )
+            # 记录的效果：读取失败，已确认范围与写入范围已知。
+            assert result.error is SegmentFailure.READ_FAILED
+            assert isinstance(result.failure, OSError)
+            assert str(result.failure) == "injected source read failure"
+            assert result.processed_end == 4000
+            assert result.write_extent_known is True
+            # 观察的效果：目标文件恰好包含已确认字节。
+            observed = target_path.read_bytes()
+            assert len(observed) == result.processed_end
+            assert observed == payload[:4000]
+        finally:
+            try:
+                session.request_stop()
+                await asyncio.wait_for(session.wait_stopped(), 10)
+            finally:
+                if target is not None:
+                    target.close()
 
     async def test_sync_failure_preserves_completed_stage_facts(
             self, tmp_path: Path, monkeypatch) -> None:
@@ -332,64 +334,35 @@ class TestCancellationBoundary:
         target_path = tmp_path / "target.bin"
         target_path.touch()
         stop = threading.Event()
-        target = _StoppingTarget(_TargetFile(target_path), stop, after_writes=1)
-        result = transfer_segment(
-            SegmentSpec("copy/9", 0, "copy.part", 0, 8000, 2000, stop),
-            session, target,
-        )
-        assert result.error is SegmentFailure.STOPPED
-        assert result.processed_end == 2000
-        assert target_path.read_bytes() == payload[:2000]
+        target = None
+        try:
+            target = _StoppingTarget(_TargetFile(target_path), stop, after_writes=1)
+            result = transfer_segment(
+                SegmentSpec("copy/9", 0, "copy.part", 0, 8000, 2000, stop),
+                session, target,
+            )
+            assert result.error is SegmentFailure.STOPPED
+            assert result.processed_end == 2000
+            assert target_path.read_bytes() == payload[:2000]
 
-        # 停止保持时再次进入：已确认末尾不再推进，本次无新写入。
-        again = transfer_segment(
-            SegmentSpec("copy/9", 0, "copy.part", 2000, 8000, 2000, stop),
-            session, target,
-        )
-        assert again.error is SegmentFailure.STOPPED
-        assert again.processed_end == 2000
-        assert target_path.read_bytes() == payload[:2000]
+            # 停止保持时再次进入：已确认末尾不再推进，本次无新写入。
+            again = transfer_segment(
+                SegmentSpec("copy/9", 0, "copy.part", 2000, 8000, 2000, stop),
+                session, target,
+            )
+            assert again.error is SegmentFailure.STOPPED
+            assert again.processed_end == 2000
+            assert target_path.read_bytes() == payload[:2000]
+        finally:
+            try:
+                session.request_stop()
+                await asyncio.wait_for(session.wait_stopped(), 10)
+            finally:
+                if target is not None:
+                    target.close()
 
 
 class TestConsumerFileRules:
-    async def test_unconfirmed_delivery_is_final_and_not_republished(
-            self, tmp_path: Path) -> None:
-        """普通交付：三处均无副本时终局失败，不安排自动重投。"""
-        _, ready, _, _ = _handoff_dirs(tmp_path, None)
-        facts = DeliveryFacts(
-            delivery_id=7, status=3, prepared_size=7,
-            prepared_sha256="a" * 64,
-        )
-        absent = DeliveryLocations(
-            staging=LocationObservation(observed=True, present=False),
-            ready=LocationObservation(observed=True, present=False),
-            processing=LocationObservation(observed=True, present=False),
-        )
-        decision = decide_handoff(facts, absent)
-        assert decision.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL
-        assert decision.failure is not None
-        assert decision.failure.code == "delivery_handoff_unconfirmed"
-        assert decision.failure.details["delivery_id"] == "7"
-        assert decision.republishes == 0
-
-        # 对照：ready 中存在与准备记录一致的完整副本时补存本地事实。
-        content = b"payload"
-        (ready / "7.bin").write_bytes(content)
-        digest = hashlib.sha256(content).hexdigest()
-        matched = DeliveryFacts(
-            delivery_id=7, status=3, prepared_size=len(content),
-            prepared_sha256=digest,
-        )
-        present = DeliveryLocations(
-            staging=LocationObservation(observed=True, present=False),
-            ready=LocationObservation(
-                observed=True, present=True, length=len(content),
-                sha256=digest),
-            processing=LocationObservation(observed=True, present=False),
-        )
-        confirmed = decide_handoff(matched, present)
-        assert confirmed.outcome is DeliveryHandoffOutcome.DELIVERED_LOCALLY
-
     async def test_report_recovery_classifies_by_actual_locations(
             self, tmp_path: Path) -> None:
         """报告恢复按三处目录的实际观察分类，观察失败不当不存在。"""

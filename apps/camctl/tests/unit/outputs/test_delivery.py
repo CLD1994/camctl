@@ -58,11 +58,11 @@ def _facts(**overrides) -> DeliveryFacts:
 # ---- 三处均无副本的终局未知失败 ----
 
 
-@pytest.mark.parametrize("status", [3, 4])
-def test_missing_all_copies_is_final_unknown_failure(status):
+@pytest.mark.parametrize(("status", "size", "intent"), [(3, 7, None), (4, 10, 900)])
+def test_missing_all_copies_is_final_unknown_failure(status, size, intent):
     """无完成事实且可靠三处缺失：终局失败，不自动重投。"""
     decision = decide_handoff(
-        _facts(status=status),
+        _facts(status=status, prepared_size=size, publication_intent_event_id=intent),
         _locations(),
     )
     assert decision.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL
@@ -84,6 +84,18 @@ def test_observation_failure_is_not_missing_failure(place):
     assert decision.outcome is DeliveryHandoffOutcome.UNDECIDABLE
     assert decision.failure is None
     assert decision.republishes == 0
+
+
+def test_prepared_status_three_observed_ready_copy_confirms_delivery():
+    facts = DeliveryFacts(
+        delivery_id=7, status=3, prepared_size=7,
+        prepared_sha256="239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
+    )
+    ready = LocationObservation(
+        observed=True, present=True, length=7,
+        sha256="239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
+    )
+    assert decide_handoff(facts, _locations(ready=ready)).outcome is DeliveryHandoffOutcome.DELIVERED_LOCALLY
 
 
 # ---- staging 完整副本继续原身份 ----

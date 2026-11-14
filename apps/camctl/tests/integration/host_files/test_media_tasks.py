@@ -25,6 +25,19 @@ class Owner:
         self.tasks.append(task)
 
 
+async def _settle(executor, identity, supervisor, owner, waiting, received=None):
+    """等待原等待者或接手句柄实际结束，只消费一次接手结果。"""
+    executor.request_stop(identity)
+    async with asyncio.timeout(15):
+        if waiting is not None:
+            await asyncio.gather(waiting, return_exceptions=True)
+        await supervisor.drain_required()
+        if received is not None:
+            return await received
+        if owner.tasks:
+            return await owner.tasks[0].pending.wait()
+
+
 async def test_stop_during_observation_prevents_new_hash_and_sync(tmp_path, monkeypatch):
     input_ref, output_ref, roots, _, output_path = _setup(tmp_path)
     tool = _tool(tmp_path, "observe", _REPAIR_BODY)
@@ -45,10 +58,11 @@ async def test_stop_during_observation_prevents_new_hash_and_sync(tmp_path, monk
 
     monkeypatch.setattr(os, "stat", observe)
     monkeypatch.setattr(os, "open", open_file)
-    executor, identity = FileTaskExecutor(Supervisor()), FileTaskId("observe")
+    supervisor, owner = Supervisor(), Owner()
+    executor, identity = FileTaskExecutor(supervisor), FileTaskId("observe")
     waiting = asyncio.create_task(media.repair_media(
         input_ref, output_ref, roots, media.RepairRequest(ffmpeg=tool),
-        executor=executor, task_id=identity, owner=Owner(),
+        executor=executor, task_id=identity, owner=owner,
     ))
     try:
         assert await asyncio.to_thread(started.wait, 5)
@@ -56,6 +70,7 @@ async def test_stop_during_observation_prevents_new_hash_and_sync(tmp_path, monk
         assert executor.unfinished_files() == (11, 12)
     finally:
         release.set()
+        await _settle(executor, identity, supervisor, owner, waiting)
     result = await waiting
     assert result.error is None
     assert result.value.size_bytes == 259
@@ -95,6 +110,8 @@ async def test_queued_file_collection_keeps_ownership_after_waiter_cancel(tmp_pa
     monkeypatch.setattr(os, "open", open_file)
     supervisor, owner = Supervisor(), Owner()
     executor, identity = FileTaskExecutor(supervisor), FileTaskId("queued")
+    waiting = None
+    received = None
     with ObservedPool(max_workers=1) as pool:
         loop.set_default_executor(pool)
         blocker = loop.run_in_executor(None, occupy)
@@ -114,7 +131,8 @@ async def test_queued_file_collection_keeps_ownership_after_waiter_cancel(tmp_pa
                 handle.request_stop()
                 assert executor.unfinished_files() == (11, 12)
                 release.set()
-                result = await handle.wait()
+                received = asyncio.create_task(handle.wait())
+                result = await received
                 assert result.error is None
                 assert result.value.size_bytes == 259
                 assert result.value.postprocessing_stopped is True
@@ -122,6 +140,7 @@ async def test_queued_file_collection_keeps_ownership_after_waiter_cancel(tmp_pa
                 assert executor.unfinished_files() == ()
         finally:
             release.set()
+            await _settle(executor, identity, supervisor, owner, waiting, received)
             await blocker
 
 
@@ -174,6 +193,7 @@ async def test_cancel_during_file_work_keeps_lease_and_result(tmp_path, monkeypa
         input_ref, output_ref, roots, media.RepairRequest(ffmpeg=tool),
         executor=executor, task_id=identity, owner=owner,
     ))
+    received = None
     try:
         assert await asyncio.to_thread(started.wait, 5)
         assert thread_ids != [threading.get_ident()]
@@ -190,9 +210,12 @@ async def test_cancel_during_file_work_keeps_lease_and_result(tmp_path, monkeypa
         await supervisor.drain_required()
         handle = owner.tasks[0].pending
         handle.request_stop()
+        release.set()
+        received = asyncio.create_task(handle.wait())
+        actual = await received
     finally:
         release.set()
-    actual = await handle.wait()
+        await _settle(executor, identity, supervisor, owner, waiting, received)
     assert actual.ran is True and actual.error is None
     artifact = actual.value
     assert artifact.exists is True and artifact.size_bytes == 259
@@ -226,6 +249,7 @@ time.sleep(30)
                  if entry == "probe" else media.repair_media(
                      input_ref, output_ref, roots, media.RepairRequest(ffmpeg=tool), **kwargs))
     waiting = asyncio.create_task(operation)
+    received = None
     try:
         async with asyncio.timeout(5):
             while not (tmp_path / "waiting-tool.ready").exists():
@@ -237,14 +261,13 @@ time.sleep(30)
         await supervisor.drain_required()
         handle = owner.tasks[0].pending
         handle.request_stop()
-        actual = await handle.wait()
+        received = asyncio.create_task(handle.wait())
+        actual = await received
         assert actual.ran is True and actual.error is None
         assert "cancelled" in actual.value.error
         assert executor.unfinished_files() == ()
     finally:
-        executor.request_stop(identity)
-        if not waiting.done():
-            await waiting
+        await _settle(executor, identity, supervisor, owner, waiting, received)
 
 
 @pytest.mark.parametrize("entry", ["probe", "repair"])
@@ -336,11 +359,7 @@ sys.exit(7)
             assert input_path.read_bytes() == b"x" * 250
     finally:
         (tmp_path / "signal-errors.release").write_text("release")
-        async with asyncio.timeout(5):
-            if received is None:
-                await asyncio.gather(waiting, return_exceptions=True)
-            else:
-                actual = await received
+        actual = await _settle(executor, identity, supervisor, owner, waiting, received)
     assert child.returncode == 7
     assert input_path.read_bytes() == b"x" * 250
     assert actual.error is None

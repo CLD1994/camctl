@@ -1,6 +1,7 @@
 """拍摄文件说明和恢复字段的局部输入合同，不访问真实文件。"""
 
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -8,7 +9,20 @@ from camctl.host_files.capture_sources import (
     CaptureFileError,
     CaptureFileSpec,
     CapturedArtifact,
+    workspace_path,
 )
+
+from camctl.host_files.models import BoundDirectories
+
+
+def test_workspace_path_requires_a_canonical_in_range_object_id() -> None:
+    roots = BoundDirectories(staging=Path("/uncreated/staging"))
+
+    assert workspace_path(roots, "42") == roots.staging / "capture-work" / "42"
+    for activity_id in ("0", "01", "+1", "9223372036854775808", 42, True):
+        with pytest.raises(CaptureFileError):
+            workspace_path(roots, activity_id)
+
 
 _RAW = b"II*\x00" + b"3fr-payload"
 _RAW_SPEC = CaptureFileSpec("Hasselblad Original 1.3FR", len(_RAW), "image/x-hasselblad-3fr")
