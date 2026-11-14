@@ -1,11 +1,11 @@
-"""有界报告游标的固定身份与精确整数，不访问资源或数据库。"""
+"""报告游标的固定身份、精确编号与入选对象的父子关系。"""
 from dataclasses import replace
 
 import pytest
 
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ConsistencyError, ValueTypeError, ValueRangeError
-from camctl.history.queries import ReportEntityCursor
+from camctl.history.queries import ReportEntityCursor, build_report_scope
 
 
 def _cursor():
@@ -28,3 +28,23 @@ def test_cursor_advancement_preserves_complete_scope_identity():
     for field, value in [('parent_id', 11), ('entity', 'output'), ('boundary', HistoryBoundary(3, 5)),
                          ('from_wm', 4), ('to_wm', 10), ('instance_id', 'other')]:
         assert replace(cursor, **{field: value}).identity != cursor.identity
+
+
+class TestBuildReportScope:
+    def test_missing_parent_fact_is_consistency_error(self) -> None:
+        from camctl.contracts.values import ConsistencyError
+
+        with pytest.raises(ConsistencyError):
+            build_report_scope(
+                plans=(), actions=(), outputs=(9,), deliveries=(),
+                diagnostics=(), action_plan={}, output_action={}, delivery_action={},
+            )
+
+    def test_selected_action_completes_its_plan(self) -> None:
+        scope = build_report_scope(
+            plans=(2,), actions=(5,), outputs=(), deliveries=(),
+            diagnostics=(), action_plan={5: 2}, output_action={}, delivery_action={},
+        )
+        assert scope.plan_ids == (2,)
+        assert scope.action_ids_of(2) == (5,)
+        assert scope.output_ids_of(2, 5) == ()

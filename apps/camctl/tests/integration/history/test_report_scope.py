@@ -23,7 +23,7 @@ from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import new_operation_key
-from camctl.history.queries import ReportScopeRequest, build_report_scope
+from camctl.history.queries import ReportScopeRequest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.capture import CaptureRepository
@@ -326,23 +326,3 @@ class TestRestoreEntity:
         assert ("device_activities", 1) in action_rows
         plan_rows = repository.restore_entity("plan", 1, boundary)
         assert plan_rows[("plans", 1)]["status"] == 3
-
-
-class TestBuildReportScope:
-    def test_missing_parent_fact_is_consistency_error(self) -> None:
-        from camctl.contracts.values import ConsistencyError
-
-        with pytest.raises(ConsistencyError):
-            build_report_scope(
-                plans=(), actions=(), outputs=(9,), deliveries=(),
-                diagnostics=(), action_plan={}, output_action={}, delivery_action={},
-            )
-
-    def test_selected_action_completes_its_plan(self) -> None:
-        scope = build_report_scope(
-            plans=(2,), actions=(5,), outputs=(), deliveries=(),
-            diagnostics=(), action_plan={5: 2}, output_action={}, delivery_action={},
-        )
-        assert scope.plan_ids == (2,)
-        assert scope.action_ids_of(2) == (5,)
-        assert scope.output_ids_of(2, 5) == ()

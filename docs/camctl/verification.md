@@ -308,7 +308,7 @@ Linux 开发容器、Python 3.11.17 下，`test_pending_source_selections.py` **
 
 范围保存及释放接续提交 `d8f83839` 的安装记录核对了两个生产入口及事件登记在源码、wheel 和安装中一致，并确认当时 host 与 camctl 已停止。部署收据位于 `.local/deployments/20261026-scope-result-save/`。该次部署未初始化或迁移状态库，保留已保存的范围末页。
 
-范围责任的事件登记覆盖普通流程的建立、实际配置、结束，首次及后续尝试，以及重试等待的建立、完成和放弃。上述八处种类约束接受 `RESOLVE_OUTPUT_SCOPE=11`，原事件校验继续生效。Linux 开发容器、Python 3.11.17 下，内存登记替身与历史解码定向单元 **179 项通过，0.72 秒，退出 0**；新增单元分别验证创建种类和完整前态种类，不读取真实包资源。日志位于隔离工作区 `.local/verification/scope-event-registration/unit.log`。真实包资源的九项登记回归归入 `tests/integration/history/test_scope_event_registration.py`，本次未运行；这些单元结果不证明构建、安装内容或真机流程。
+范围责任的事件登记覆盖普通流程的建立、实际配置、结束，首次及后续尝试，以及重试等待的建立、完成和放弃。上述八处种类约束接受 `RESOLVE_OUTPUT_SCOPE=11`，原事件校验继续生效。Linux 开发容器、Python 3.11.17 下，内存登记替身与历史解码定向单元 **179 项通过，0.72 秒，退出 0**；新增单元分别验证创建种类和完整前态种类，不读取真实包资源。包内固定定义的九项登记检查现由[局部历史测试](../../apps/camctl/tests/unit/history/test_registered_history_values.py)承接；分类与后续验证见[重构记录](integration-test-refactor-2026-10-26.md)。它们验证固定登记及事件校验，不证明构建、安装内容或真机流程。
 
 事件登记修复 `097fce88` 的安装记录逐字节核对权威事件登记、wheel 内资源和实际安装资源一致，并核对上述八处声明均包含种类 11。部署收据见 `.local/deployments/20261026-scope-events/`，单元日志副本及安装核对见 `.local/verification/scope-events-20261026/`。该次部署未运行初始化、迁移或设备命令。
 

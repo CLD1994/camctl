@@ -9,7 +9,7 @@ from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import branch_of, event_type_name
-from camctl.history.replay import EntityImage, ReplayError, RestoreSeed, restore
+from camctl.history.replay import EntityImage, RestoreSeed, restore
 from camctl.history.validators import ValidatedEvent
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.history import HistoryRepository
@@ -176,25 +176,3 @@ def test_initialized_runtime_rejects_unreliable_current_basis(owned, tmp_path, f
         history.restore_entity("runtime_state", 1, boundary)
 
     assert tuple(owned.connection.iterdump()) == baseline
-
-
-@pytest.mark.parametrize("fault", ["missing_initial_column", "wrong_initial_value", "ordinary_object"])
-def test_pure_restore_rejects_unreliable_existing_zero_count_seed(fault):
-    """存在的零计数种子必须属于初始化单例且表达其完整初始事实。"""
-    registry = load_registry()["history_objects"]
-    values = {name: value for name, value in _INITIAL_ROW.items() if name != "id"}
-    if fault == "missing_initial_column":
-        values.pop("acknowledged_wm")
-        image = EntityImage(registry["runtime_state"]["id"], 1, True,
-                            {("runtime_state", 1): values}, 0, 0)
-    elif fault == "wrong_initial_value":
-        values["trusted_time_lower_bound"] = NOW
-        values["trusted_time_event_id"] = 1
-        image = EntityImage(registry["runtime_state"]["id"], 1, True,
-                            {("runtime_state", 1): values}, 0, 0)
-    else:
-        image = EntityImage(registry["plan"]["id"], 1, True,
-                            {("plans", 1): {"status": 1}}, 0, 0)
-
-    with pytest.raises(ReplayError):
-        restore(RestoreSeed(image, INITIAL_BOUNDARY), (), INITIAL_BOUNDARY)

@@ -1,7 +1,7 @@
 """内存登记下，范围责任仍须通过创建规格及完整前态的种类校验。
 
-真实登记文件的兼容性由 integration/history/test_scope_event_registration.py
-验证；本单元只验证正常校验入口，不读取包资源。
+实际固定定义由 test_registered_history_values.py 验证；
+本组通过内存登记验证正常校验入口的局部行为。
 """
 
 from unittest.mock import create_autospec

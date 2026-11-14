@@ -74,24 +74,37 @@ def _environment(tmp_path: Path):
     target = tmp_path / "state.db"
     _create_valid_database(target)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)",
-        ("f" * 32,),
-    )
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
-    )
-    _seed_plan(connection, 1)
-    _seed_action(connection, 11, action_type=2)
-    _seed_action(connection, 12, action_type=1)
-    connection.commit()
-    return owned, target
+    try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
+            " VALUES (1, ?, 1, 1)",
+            ("f" * 32,),
+        )
+        connection.execute(
+            "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
+            " occurred_at, clock_status, change_seq, body_json)"
+            " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
+            (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
+        )
+        _seed_plan(connection, 1)
+        _seed_action(connection, 11, action_type=2)
+        _seed_action(connection, 12, action_type=1)
+        connection.commit()
+        return owned, target
+    except BaseException:
+        owned.connection.close()
+        raise
+
+
+@pytest.fixture
+def file_environment(tmp_path):
+    owned, target = _environment(tmp_path)
+    try:
+        yield owned, target
+    finally:
+        owned.connection.close()
 
 
 def _seed_plan(connection, plan_id: int) -> None:
@@ -346,9 +359,9 @@ def _collect(repository: HistoryRepository, request: FileHistoryRequest):
 # ---- 候选扫描：同边界集合与继续位置 ----
 
 
-async def test_old_files_use_same_h(tmp_path: Path) -> None:
+async def test_old_files_use_same_h(tmp_path: Path, file_environment) -> None:
     """H 后归属补齐、在场转缺席与修复成品字节固定不改写 H 的集合。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     file_id = _observe(capture, owned, 11, "task-a/original.mp4")
@@ -382,9 +395,9 @@ async def test_old_files_use_same_h(tmp_path: Path) -> None:
 
 
 async def test_old_intermediate_keeps_registration_state_at_h(
-        tmp_path: Path) -> None:
+        tmp_path: Path, file_environment) -> None:
     """H 后修复输出取得完整字节：H 时仍是登记无字节的责任记录。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     source_id = _observe(capture, owned, 11, "task-a/original.mp4")
@@ -413,9 +426,9 @@ async def test_old_intermediate_keeps_registration_state_at_h(
     assert output_now["sha256"] == "b" * 64
 
 
-async def test_filtered_empty_page_continues(tmp_path: Path) -> None:
+async def test_filtered_empty_page_continues(tmp_path: Path, file_environment) -> None:
     """首页候选在 H 均无效：返回零项但未读完，后页仍返回有效文件。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     first = _observe(capture, owned, 11, "task-a/first.mp4")
@@ -442,9 +455,9 @@ async def test_filtered_empty_page_continues(tmp_path: Path) -> None:
     assert second_page.page.exhausted is True
 
 
-async def test_batch_limit_one_skips_invalid_candidates(tmp_path: Path) -> None:
+async def test_batch_limit_one_skips_invalid_candidates(tmp_path: Path, file_environment) -> None:
     """批次上限 1：无效候选页返回零项并推进，有效候选按升序返回。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     first = _observe(capture, owned, 11, "task-a/first.mp4")
@@ -462,9 +475,9 @@ async def test_batch_limit_one_skips_invalid_candidates(tmp_path: Path) -> None:
 
 
 async def test_exact_candidate_multiple_ends_with_empty_last_page(
-        tmp_path: Path) -> None:
+        tmp_path: Path, file_environment) -> None:
     """候选数恰为批次倍数时先返回满页，最后一页空且读完。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     first = _observe(capture, owned, 11, "task-a/first.mp4")
@@ -490,9 +503,9 @@ async def test_exact_candidate_multiple_ends_with_empty_last_page(
 
 
 async def test_fixed_upper_bound_excludes_files_created_after_first_page(
-        tmp_path: Path) -> None:
+        tmp_path: Path, file_environment) -> None:
     """首页之后新建的文件不进入本次扫描的固定上界。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     first = _observe(capture, owned, 11, "task-a/first.mp4")
@@ -516,9 +529,9 @@ async def test_fixed_upper_bound_excludes_files_created_after_first_page(
 
 
 async def test_commits_between_pages_do_not_change_h_membership(
-        tmp_path: Path) -> None:
+        tmp_path: Path, file_environment) -> None:
     """页间提交不改变 H 集合：越过的候选不回头，未过的按 H 事实判。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     passed = _observe(capture, owned, 11, "task-a/passed.mp4")
@@ -540,9 +553,9 @@ async def test_commits_between_pages_do_not_change_h_membership(
     assert [record.file_id for record in rest] == []
 
 
-async def test_owner_absent_at_h_is_explicit_result(tmp_path: Path) -> None:
+async def test_owner_absent_at_h_is_explicit_result(tmp_path: Path, file_environment) -> None:
     """主对象在 H 不存在与存在但集合为空分别表达。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     history = HistoryRepository(target)
 
     missing, owner_present = _collect(history, FileHistoryRequest(
@@ -560,9 +573,9 @@ async def test_owner_absent_at_h_is_explicit_result(tmp_path: Path) -> None:
 
 
 async def test_file_types_with_same_id_restore_independently(
-        tmp_path: Path) -> None:
+        tmp_path: Path, file_environment) -> None:
     """设备文件与主机文件同 ID 互不混淆，身份始终带类型。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     file_id = _observe(capture, owned, 11, "task-a/same-id.mp4")
@@ -593,9 +606,9 @@ async def test_file_types_with_same_id_restore_independently(
 # ---- 引用类查询：先恢复引用方再取文件 ----
 
 
-async def test_output_file_reference_uses_h_facts(tmp_path: Path) -> None:
+async def test_output_file_reference_uses_h_facts(tmp_path: Path, file_environment) -> None:
     """产物在 H 引用的设备文件按 H 事实返回；产物 H 后才登记则明确表达。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     first_file = _observe(capture, owned, 11, "task-a/original.mp4")
@@ -623,9 +636,9 @@ async def test_output_file_reference_uses_h_facts(tmp_path: Path) -> None:
 
 
 async def test_copy_files_reference_restores_source_and_target(
-        tmp_path: Path) -> None:
+        tmp_path: Path, file_environment) -> None:
     """拷贝在 H 的源与目标文件按同一 H 恢复（处理拷贝归动作子树）。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     # 受理建立生产动作：拷贝的引用方按动作子树恢复，动作必须可恢复。
@@ -648,9 +661,9 @@ async def test_copy_files_reference_restores_source_and_target(
     assert result.page.exhausted is True
 
 
-async def test_processing_file_references_at_h(tmp_path: Path) -> None:
+async def test_processing_file_references_at_h(tmp_path: Path, file_environment) -> None:
     """处理引用按 H 事实：修复输出 H 时未登记，成功固定后才引用。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     action_id = await _submit_plan(owned)
@@ -700,9 +713,9 @@ async def test_delivery_intermediate_files_restore_at_h(read_targets) -> None:
 
 
 async def test_required_reference_to_missing_file_is_consistency_error(
-        tmp_path: Path) -> None:
+        tmp_path: Path, file_environment) -> None:
     """H 已保存的必需引用指向不存在的文件按一致性错误处理。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     first_file = _observe(capture, owned, 11, "task-a/original.mp4")
@@ -725,9 +738,9 @@ async def test_required_reference_to_missing_file_is_consistency_error(
 
 
 async def test_restore_failure_is_not_an_empty_page(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, file_environment) -> None:
     """候选恢复失败按错误传播，不解释为空页或读完。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     file_id = _observe(capture, owned, 11, "task-a/original.mp4")
@@ -744,9 +757,9 @@ async def test_restore_failure_is_not_an_empty_page(
             action_id=11))
 
 
-async def test_cursor_identity_mismatch_is_rejected(tmp_path: Path) -> None:
+async def test_cursor_identity_mismatch_is_rejected(tmp_path: Path, file_environment) -> None:
     """继续位置绑定查询种类、H 与所属对象，不在不同集合间复用。"""
-    owned, target = _environment(tmp_path)
+    owned, target = file_environment
     capture = CaptureRepository()
     history = HistoryRepository(target)
     first = _observe(capture, owned, 11, "task-a/first.mp4")

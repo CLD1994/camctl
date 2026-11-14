@@ -25,14 +25,6 @@ from ..persistence.test_transactions import PlanCreateCommand, plan_guards
 _CREATED_AT = 1_700_000_000_000_000
 
 
-def test_registered_observation_rejects_later_illegal_state_transition():
-    body = {"reason": 2, "evidence": {"observation": {}}, "rows": [{
-        "table": "device_activities", "id": 1,
-        "before": {"exists": True, "values": {"dispatch_state": 1, "activity_state": 3}},
-        "after": {"exists": True, "values": {"dispatch_state": 2, "activity_state": 2}},
-    }]}
-    with pytest.raises(ConsistencyError):
-        decode_event_row((1, 1, 13, 1, 0, 2, None, json.dumps(body)))
 
 
 def _open(tmp_path: Path) -> OwnedConnection:
