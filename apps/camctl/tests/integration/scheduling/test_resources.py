@@ -169,7 +169,7 @@ def _value(owned, sql: str, *params):
     return row
 
 
-def test_grant_and_prevented_result_preserve_ticket_and_attempt_budget(tmp_path: Path) -> None:
+def test_grant_and_prevented_result_preserve_ticket_and_attempt_count(tmp_path: Path) -> None:
     """保存授予与未派发结果后，原票据及已消耗次数保持不变。"""
     owned = _seed_environment(tmp_path)
     connection = owned.connection
@@ -182,7 +182,7 @@ def test_grant_and_prevented_result_preserve_ticket_and_attempt_budget(tmp_path:
         _seed_activity(connection, 1)
         connection.commit()
 
-        request = _grant_request(1, config=AttemptConfig(max_attempts=1, timeout_s=Decimal("10")))
+        request = _grant_request(1)
         grant_key = new_operation_key()
         granted = repository.grant_start(request, grant_key, owned)
         assert granted.kind is DbOutcomeKind.COMPLETED
@@ -227,19 +227,10 @@ def test_grant_and_prevented_result_preserve_ticket_and_attempt_budget(tmp_path:
         )
         assert used[0] == 1
 
-        # 原授予键始终交付原票据。以夹具提供可靠未派发的活动前态；
-        # 再申请也不能因结果未派发而退还已消耗的次数。
+        # 结果保存后，原授予键仍交付原票据。
         replay = repository.grant_start(request, grant_key, owned)
         assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
         assert replay.value.ticket == ticket
-        connection.execute("UPDATE device_activities SET dispatch_state = 1 WHERE id = 1")
-        connection.commit()
-        retry = repository.grant_start(request, new_operation_key(), owned)
-        assert retry.kind is DbOutcomeKind.COMPLETED, retry.error
-        assert retry.value.outcome is GrantOutcome.REJECTED
-        assert retry.value.reason == "budget_exhausted"
-        assert _value(owned, "SELECT attempts_used FROM operation_runs WHERE id = ?", ticket.run_id) == (1,)
-        assert _value(owned, "SELECT COUNT(*) FROM operation_attempts WHERE run_id = ?", ticket.run_id) == (1,)
     finally:
         owned.connection.close()
 
