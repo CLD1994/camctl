@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import asyncio
 import threading
+import sys
 
 import pytest
 import pytest_asyncio
@@ -34,6 +35,8 @@ from camctl.persistence.repositories.history import HistoryRepository, SqliteSna
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+from ..support.history_cleanup import close_executor, finish_cleanup
 
 from ..outputs.test_qualification import (
     _seed_device_file,
@@ -330,15 +333,21 @@ async def test_enqueue_timeout_disables_session_and_business_continues(
         assert receipt.error is None
         assert receipt.value >= 1
     finally:
+        primary, errors = sys.exception(), []
         release.set()
-        try:
+        for pending in (holder, waiter):
+            if pending is not None:
+                try:
+                    await asyncio.wait_for(asyncio.shield(pending), 10)
+                except BaseException as error:
+                    errors.append(error)
+        if executor is not None:
             try:
-                if holder is not None:
-                    await asyncio.wait_for(asyncio.shield(holder), 10)
-                if waiter is not None:
-                    await asyncio.wait_for(asyncio.shield(waiter), 10)
-            finally:
-                if executor is not None:
-                    await executor.close()
-        finally:
+                await close_executor(executor)
+            except BaseException as error:
+                errors.append(error)
+        try:
             owned.connection.close()
+        except BaseException as error:
+            errors.append(error)
+        finish_cleanup(primary, errors)

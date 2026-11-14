@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import asyncio
 import json
 import sqlite3
+import sys
 
 import pytest
 import pytest_asyncio
@@ -45,6 +46,8 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.transactions import row_facts
+
+from ..support.history_cleanup import close_executor, finish_cleanup
 
 from .test_file_history import (
     _environment,
@@ -573,11 +576,17 @@ async def world(tmp_path: Path):
         )
         yield state
     finally:
+        primary, errors = sys.exception(), []
+        if executor is not None:
+            try:
+                await close_executor(executor)
+            except BaseException as error:
+                errors.append(error)
         try:
-            if executor is not None:
-                await executor.close()
-        finally:
             owned.connection.close()
+        except BaseException as error:
+            errors.append(error)
+        finish_cleanup(primary, errors)
 
 
 def _objects_in_library(

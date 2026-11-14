@@ -264,3 +264,98 @@ def _presence_change(world):
         FilePresenceSave(1, 3 if current == 2 else 2, NOW),
         new_operation_key(), world.owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+
+
+def test_file_candidate_pages_execute_observed_indexed_queries(tmp_path, monkeypatch):
+    """公开文件查询的两页按实际执行语句、参数和交付身份核对。"""
+    import os
+    from dataclasses import replace
+    from urllib.parse import parse_qs, urlsplit
+    from urllib.request import url2pathname
+
+    from camctl.history.queries import FileHistoryKind, FileHistoryRequest
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from .test_file_history import _confirm, _environment, _observe
+
+    started = time.perf_counter()
+    owned, path = _environment(tmp_path)
+    try:
+        capture = CaptureRepository()
+        files = [_observe(capture, owned, 11, f"candidate-{index}.mp4")
+                 for index in range(4)]
+        _confirm(capture, owned, files[2], 11)
+        history = HistoryRepository(path)
+        boundary = history.current_boundary()
+        _confirm(capture, owned, files[0], 11)
+        _confirm(capture, owned, files[1], 11)
+        # 新建的第五项在固定 H 之后，不能成为候选。
+        later = _observe(capture, owned, 11, "candidate-later.mp4")
+        _confirm(capture, owned, later, 11)
+        preparation = time.perf_counter() - started
+        observed = []
+        real_connect = sqlite3.connect
+
+        class ObservedConnection(sqlite3.Connection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._candidate_cursors = {}
+                def row_factory(cursor, row):
+                    if cursor in self._candidate_cursors:
+                        self._candidate_cursors[cursor]["rows"].append(tuple(row))
+                    return row
+                self.row_factory = row_factory
+
+            def execute(self, sql, parameters=(), /):
+                reads = set()
+                def authorize(operation, table, column, _database, _source):
+                    if operation == sqlite3.SQLITE_READ:
+                        reads.add((table, column))
+                    return sqlite3.SQLITE_OK
+                self.set_authorizer(authorize)
+                try:
+                    cursor = super().execute(sql, parameters)
+                finally:
+                    self.set_authorizer(None)
+                if (any(table == "device_files" for table, _ in reads)
+                        and [column[0] for column in cursor.description or ()] == ["id"]
+                        and len(parameters) == 5):
+                    record = {"sql": sql, "parameters": tuple(parameters), "rows": []}
+                    observed.append(record)
+                    self._candidate_cursors[cursor] = record
+                return cursor
+
+        def connect(database, *args, **kwargs):
+            if kwargs.get("uri") and os.fsdecode(database).startswith("file:"):
+                parts = urlsplit(os.fsdecode(database))
+                file_path = url2pathname(("//" + parts.netloc if parts.netloc else "") + parts.path)
+                if parse_qs(parts.query).get("mode") == ["ro"] and os.path.samefile(file_path, path):
+                    assert "factory" not in kwargs
+                    kwargs["factory"] = ObservedConnection
+            return real_connect(database, *args, **kwargs)
+
+        request = FileHistoryRequest(
+            boundary=boundary, kind=FileHistoryKind.CONFIRMED_SOURCE_FILES,
+            action_id=11, batch_size=2)
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, "connect", connect)
+            started = time.perf_counter()
+            first = history.read_files_at_h(request)
+            assert first.owner_present and first.page.items == ()
+            assert first.page.next_cursor is not None
+            second = history.read_files_at_h(replace(request, cursor=first.page.next_cursor))
+            reading = time.perf_counter() - started
+        assert second.owner_present and second.page.exhausted
+        assert [item.file_id for item in second.page.items] == [files[2]]
+        assert len(observed) == 2
+        assert [record["rows"] for record in observed] == [
+            [(files[0],), (files[1],)], [(files[2],)]]
+        assert [record["parameters"] for record in observed] == [
+            (11, 0, later, boundary.last_event_id, 2),
+            (11, files[1], later, boundary.last_event_id, 2)]
+        for record in observed:
+            detail = _query_plan(owned.connection, record["sql"], record["parameters"])
+            assert "device_files_source" in detail, detail
+            assert "SCAN device_files" not in detail, detail
+        print(f"\n文件候选两页：准备 {preparation:.3f}s，公开读取及观察 {reading:.3f}s")
+    finally:
+        owned.connection.close()

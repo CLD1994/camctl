@@ -18,7 +18,7 @@ import pytest
 
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.flows import cancel_flow, capture_flow
-from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+from camctl.bootstrap.lifecycle import build_runtime, execute_command
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
@@ -42,7 +42,7 @@ from camctl.persistence.transaction_data import json_columns
 from camctl.scheduling.rules import LaunchWindow
 
 from ..bootstrap.test_recording_stop import (
-    _RecordCatalog, _await_query, _cancel, _config_for, _future_schedule,
+    _RecordCatalog, _await_query, _close_session, _config_for, _future_schedule,
     _record_plan, _submit_plan,
 )
 from ..bootstrap.test_residual_winddown import (
@@ -343,10 +343,8 @@ async def test_stop_result_transaction_three_paths(tmp_path):
         _assert_three_paths(db, 1, [
             base, (before_boundary, before), (after_boundary, after)])
     finally:
-        try:
-            await _cancel(task)
-        finally:
-            close_runtime(deps)
+        stopper.release.set()
+        await _close_session(task, deps)
 
 
 async def test_query_conclude_transaction_three_paths(tmp_path):
@@ -388,10 +386,9 @@ async def test_query_conclude_transaction_three_paths(tmp_path):
         _assert_three_paths(db, 1, [
             base, (before_boundary, before), (after_boundary, after)])
     finally:
-        try:
-            await _cancel(task)
-        finally:
-            close_runtime(deps)
+        stopper.release.set()
+        query.release.set()
+        await _close_session(task, deps)
 
 
 async def test_residual_query_conclude_three_paths(tmp_path):
@@ -473,7 +470,5 @@ async def test_residual_query_conclude_three_paths(tmp_path):
             (trigger_before_boundary, trigger_before),
             (trigger_after_boundary, trigger_after)])
     finally:
-        try:
-            await _cancel(task)
-        finally:
-            close_runtime(deps)
+        query.release.set()
+        await _close_session(task, deps)
