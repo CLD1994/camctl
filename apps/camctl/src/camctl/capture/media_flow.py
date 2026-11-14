@@ -511,6 +511,14 @@ async def resume_media_saves(database, pending, executor=None, *, action_id=None
             if resolved_action != action_id:
                 continue
 
+        if held.file_ids:
+            await owner.wait_for_files(held.file_ids)
+            current = pending.get(identity)
+            if (current is None or current.stage_owner is not held.stage_owner
+                    or current.key != held.key):
+                continue
+            held = current
+
         async def save_original(_control=None, original=held, original_identity=identity):
             receipt = await original.stage_owner.run(
                 lambda: saves._submit_held(original_identity, original))

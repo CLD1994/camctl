@@ -1,6 +1,7 @@
 """媒体拥有者在异步数据库边界保留真实派发和保存责任。"""
 
 import asyncio
+from dataclasses import replace
 import sqlite3
 from decimal import Decimal
 from pathlib import Path
@@ -21,6 +22,56 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind, _attach_db_outco
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from support.business_database import inline_business_database
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", ["same_owner", "new_owner", "new_key"])
+async def test_media_resume_rechecks_original_owner_after_file_wait(replacement):
+    from camctl.capture.media_flow import (
+        MediaSaveStage, PendingMediaRequest, resume_media_saves,
+    )
+    from camctl.host_files.tasks import FileTaskExecutor
+
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.write.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED)
+    executor = create_autospec(FileTaskExecutor, instance=True)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def wait(file_ids):
+        assert file_ids == (60,)
+        entered.set()
+        await release.wait()
+
+    async def run(task):
+        return await task.body(None)
+
+    executor.wait_for_files.side_effect = wait
+    executor.run_owned_async_file_task.side_effect = run
+    command = CheckResultSave(1, MediaObservation(CheckPhase.RUNNING), 100)
+    held = PendingMediaRequest(MediaSaveStage.CHECK, command, "original-key", 21, (60,))
+    identity = (held.stage, 1)
+    pending = {identity: held}
+    task = asyncio.create_task(resume_media_saves(database, pending, executor, action_id=21))
+    try:
+        await entered.wait()
+        if replacement == "same_owner":
+            pending[identity] = replace(held, save_error=ValueError("original error"))
+        elif replacement == "new_key":
+            pending[identity] = replace(held, key="new-key")
+        else:
+            pending[identity] = PendingMediaRequest(held.stage, command, "new-key", 21, (60,))
+        release.set()
+        await task
+        if replacement == "same_owner":
+            assert not pending
+            assert database.write.call_args.kwargs["key"] == held.key
+        else:
+            assert pending[identity].key == "new-key"
+            database.write.assert_not_called()
+            executor.run_owned_async_file_task.assert_not_awaited()
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio
