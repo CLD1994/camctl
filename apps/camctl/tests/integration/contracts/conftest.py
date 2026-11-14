@@ -11,8 +11,8 @@ import pytest
 
 @pytest.fixture(scope="session")
 def source_inspection():
-    from .test_dependencies import _imported_modules
-    from .test_external_boundaries import (
+    from support.dependency_layers import _imported_modules
+    from support.external_boundaries import (
         _bare_excepts, _file_entries, _network_dependencies, _subprocess_creations,
     )
 
