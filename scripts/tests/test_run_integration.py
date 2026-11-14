@@ -317,6 +317,33 @@ class IntegrationRunnerTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertIn(str(directory), result.stderr)
 
+    def test_duplicate_timing_columns_and_keys_are_rejected(self):
+        file_headers = {'camctl-files.csv': 'name,total_s',
+                        'cross-component-files.csv': 'name,total_s',
+                        'cross-component-cases.csv': 'nodeid,status,total_s'}
+        cases = []
+        for name, header in file_headers.items():
+            for field in header.split(','):
+                cases.append((name, header + ',' + field + '\n', None))
+        for name in ('camctl-files.csv', 'cross-component-files.csv'):
+            cases.append((name, 'name,total_s\ntest.py,1\ntest.py,2\n', None))
+        cases.append(('cross-component-cases.csv',
+                      'nodeid,status,total_s\ntest.py::test_a,passed,1\ntest.py::test_a,failed,2\n', None))
+        cases.append(('cross-component-files.csv', 'name,total_s\ntest.py,2\n',
+                      ('camctl-files.csv', 'name,total_s\ntest.py,1\n')))
+        for name, content, additional in cases:
+            with self.subTest(name=name, content=content, additional=additional), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                for file, header in file_headers.items():
+                    (directory / file).write_text(header + '\n')
+                (directory / name).write_text(content)
+                if additional:
+                    (directory / additional[0]).write_text(additional[1])
+                result = subprocess.run([sys.executable, str(RUNNER), '--list',
+                    '--timing-history', str(directory)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn(str(directory / name), result.stderr)
+
     def test_local_timing_files_are_not_copied_into_source_snapshot(self):
         with tempfile.TemporaryDirectory() as temporary:
             root, source = Path(temporary), Path(temporary) / 'input'

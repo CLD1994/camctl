@@ -99,6 +99,8 @@ def load_timing_history(directory):
             reader = csv.DictReader(stream)
             if not reader.fieldnames or not required.issubset(reader.fieldnames):
                 raise ValueError(f'计时历史列缺失: {path}')
+            if any(reader.fieldnames.count(field) > 1 for field in required):
+                raise ValueError(f'计时历史必要列重复: {path}')
             for line, row in enumerate(reader, start=2):
                 key = row['nodeid'] if name == 'cross-component-cases.csv' else row['name']
                 try:
@@ -107,6 +109,9 @@ def load_timing_history(directory):
                     raise ValueError(f'计时历史耗时无效: {path}:{line}') from error
                 if not key or not math.isfinite(seconds) or seconds < 0:
                     raise ValueError(f'计时历史记录无效: {path}:{line}')
+                target = cases if name == 'cross-component-cases.csv' else costs
+                if key in target:
+                    raise ValueError(f'计时历史记录重复: {path}:{line}: {key}')
                 if name == 'cross-component-cases.csv':
                     if not row['status']:
                         raise ValueError(f'计时历史状态无效: {path}:{line}')
