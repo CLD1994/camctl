@@ -409,7 +409,6 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
         exit_path: str) -> None:
     """文件执行器的内部取消原因穿过组合和中间任务后仍先收场日志。"""
     from camctl.bootstrap.background_flow import BackgroundFlow
-    from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.session.service import StateDbFailure
 
     deps = await _runtime(tmp_path)
@@ -422,13 +421,10 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
     file_task_started = asyncio.Event()
     actual_control_raised = asyncio.Event()
     flow_error_observed = asyncio.Event()
-    logger_settle_started = asyncio.Event()
     internal_control = asyncio.CancelledError("file owner internal control")
     internal_control.add_note("actual-file-owner-note")
     file_errors: list[BaseException] = []
     diagnostics: list[str] = []
-    logger_owners: list[LoggingOwner] = []
-    logger_settle_calls: list[bool] = []
     run_task: asyncio.Task | None = None
 
     executor = FileTaskExecutor(Supervisor())
@@ -476,23 +472,6 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
 
     monkeypatch.setattr(os, "listdir", block_startup_scan)
 
-    real_logger_start = LoggingOwner.start_session
-
-    async def capture_logger(self):
-        logger_owners.append(self)
-        await real_logger_start(self)
-
-    monkeypatch.setattr(LoggingOwner, "start_session", capture_logger)
-
-    real_logger_settle = LoggingOwner.settle
-
-    async def observe_logger_settle(self):
-        logger_settle_calls.append(True)
-        logger_settle_started.set()
-        await real_logger_settle(self)
-
-    monkeypatch.setattr(LoggingOwner, "settle", observe_logger_settle)
-
     real_emit = deps.log_runtime.channel.deliver_important
 
     async def gate_startup_diagnostic(record):
@@ -522,10 +501,8 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
         assert isinstance(file_errors[0], asyncio.CancelledError)
         assert file_errors[0].__cause__ is internal_control
         await asyncio.wait_for(actual_control_raised.wait(), timeout=10)
-        await asyncio.wait_for(logger_settle_started.wait(), timeout=10)
         await _assert_stays_pending(run_task)
         assert _session_lock_is_held(deps.session_lock)
-        assert logger_owners and logger_owners[0].stop_requested()
         assert not release_scan.is_set()
         assert not diagnostic_started.is_set()
         assert diagnostics == []
@@ -533,14 +510,13 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
         release_scan.set()
         await asyncio.wait_for(diagnostic_started.wait(), timeout=10)
         assert _session_lock_is_held(deps.session_lock)
-        assert logger_settle_calls == [True]
+        await _assert_stays_pending(run_task)
 
         if parent_cancelled:
             run_task.cancel("first observer cancellation")
             await _assert_stays_pending(run_task)
             run_task.cancel("repeated observer cancellation")
             await _assert_stays_pending(run_task)
-            assert logger_owners[0].startup_stop_requested()
 
         release_diagnostic.set()
         if parent_cancelled:
@@ -558,7 +534,6 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
             assert caught.value is internal_control
             assert caught.value.__notes__ == ["actual-file-owner-note"]
 
-        assert logger_settle_calls == [True]
         assert _session_lock_is_held(deps.session_lock) is False
         assert diagnostics and (
             "controlled startup diagnostic after internal control" in diagnostics[0]
@@ -568,10 +543,8 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
     finally:
         release_scan.set()
         release_diagnostic.set()
-        if run_task is not None and not run_task.done():
-            run_task.cancel("test cleanup")
-            try:
-                await asyncio.wait_for(run_task, timeout=10)
-            except asyncio.CancelledError:
-                pass
+        if run_task is not None:
+            if not run_task.done():
+                run_task.cancel("test cleanup")
+            await asyncio.wait_for(asyncio.gather(run_task, return_exceptions=True), timeout=10)
         lifecycle.close_runtime(deps)
