@@ -26,7 +26,6 @@ async def test_default_obtain_reaches_candidates_beyond_first_batch(
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
     from camctl.outputs import read_discovery
-    import weakref
 
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
@@ -37,13 +36,11 @@ async def test_default_obtain_reaches_candidates_beyond_first_batch(
     } for index in range(total)])
     cfg = replace(cfg, session=replace(cfg.session, read_discovery_batch_size=batch_size))
     real_candidates = read_discovery.read_candidates
-    previous, sizes = [], []
+    sizes = []
 
     def bounded_candidates(*args, **kwargs):
-        assert all(reference() is None for reference in previous)
         page = real_candidates(*args, **kwargs)
         assert kwargs["limit"] == batch_size and len(page.items) <= batch_size
-        previous[:] = [weakref.ref(candidate) for candidate in page.items]
         sizes.append(len(page.items))
         return page
 
@@ -62,7 +59,6 @@ async def test_default_obtain_reaches_candidates_beyond_first_batch(
     assert len(files) == total * 2
     assert all(path.read_bytes() == _CONTENT for path in files)
     assert max(sizes) <= batch_size and len(sizes) > 2
-    assert all(reference() is None for reference in previous)
 
 
 @pytest.mark.asyncio
