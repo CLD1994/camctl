@@ -92,7 +92,9 @@ async def test_real_file_offset_and_short_read(tmp_path: Path) -> None:
         chunk = await asyncio.to_thread(session.read_chunk, 5)
         assert chunk.data == b"789"
         assert chunk.eof is True
-    assert stream.closed
+        end = await asyncio.wait_for(session.wait_stopped(), 5)
+        assert end.stopped and end.error is None
+        assert stream.closed
 
 
 async def test_cancel_while_waiting_and_recording_stop_still_runs(tmp_path: Path) -> None:
@@ -139,4 +141,6 @@ async def test_no_data_timeout_with_real_clock(tmp_path: Path) -> None:
         chunk = await asyncio.to_thread(session.read_chunk, 8)
         assert chunk.error == "no_data"
         assert time.monotonic() - start >= 0.1
-    assert stream.closed
+        end = await asyncio.wait_for(session.wait_stopped(), 5)
+        assert end.stopped and end.error == "no_data"
+        assert stream.closed
