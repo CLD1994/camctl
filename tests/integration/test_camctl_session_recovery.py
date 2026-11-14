@@ -583,7 +583,7 @@ def test_report_failure_preserves_device_work_and_redelivers(
 def test_late_result_preserves_terminal_decision(tmp_path: Path) -> None:
     """设备定义改变与迟到文件不改写已确定结果：集合核实失败的动作
     保持终态与无产物事实。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -593,21 +593,33 @@ def test_late_result_preserves_terminal_decision(tmp_path: Path) -> None:
     empty_spec = stub_driver_spec({"1": []}, timelapse_duration_s=3.0)
     deployment.install_client_capabilities(empty_spec)
 
+    shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
-        timelapse_plan("0", future_schedule(1)))
+        timelapse_plan("0", shoot_at))
     submitted = deployment.camctl(
         "submit", str(plan_path), "--config", str(deployment.config_path),
         driver=empty_spec)
     assert submitted.exit_code == 0, submitted.stderr
 
-    first = deployment.camctl(
+    deployment.freeze_at(shoot_at)
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=empty_spec)
+    first = _resume_after_capture_start(
+        deployment, process, "timelapse", deadline=deadline)
     assert first.exit_code == 0, first.stderr
     state_db = deployment.state_db
     assert _query(
         state_db, "SELECT status FROM actions WHERE name = 'timelapse'"
     ) == [(4,)]
     assert _query(state_db, "SELECT COUNT(*) FROM outputs") == [(0,)]
+    first_report = _ready_report(deployment)
+    first_action = next(
+        action for plan in first_report["plans"] for action in plan["actions"]
+        if action["name"] == "timelapse")
+    assert first_action["status"] == "failed"
+    assert first_action["error"]["code"] == "capture_failed"
+    assert first_action["error"]["details"]["reason"] == "no_outputs"
 
     # 设备绑定改变：新剧本在收场后报告视频文件（迟到结果）。
     late_spec = stub_driver_spec(
@@ -630,3 +642,8 @@ def test_late_result_preserves_terminal_decision(tmp_path: Path) -> None:
         action["name"]: action["status"]
         for plan in report["plans"] for action in plan["actions"]}
     assert statuses == {"timelapse": "failed"}
+    action = next(
+        action for plan in report["plans"] for action in plan["actions"]
+        if action["name"] == "timelapse")
+    assert action["error"]["code"] == "capture_failed"
+    assert action["error"]["details"]["reason"] == "no_outputs"
