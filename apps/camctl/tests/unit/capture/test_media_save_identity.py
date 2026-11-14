@@ -61,6 +61,85 @@ async def test_pending_media_same_request_uses_original_key_and_releases_after_c
     assert not saves.pending
 
 
+async def test_pending_check_threshold_keeps_original_request_and_key(monkeypatch):
+    from decimal import Decimal
+    from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
+
+    saves, repository = _saves(monkeypatch)
+    repository.save_check_decision.return_value = DbOutcome(kind=DbOutcomeKind.UNKNOWN)
+    command = CheckDecisionSave(1, CheckDecisionChoice.REQUIRED,
+        CheckBasis(CheckReason.INSUFFICIENT_TIMING, 60000, threshold_s=Decimal("70")), 100)
+    assert (await saves.save_check_decision(command)).disposition is SaveDisposition.UNKNOWN
+    key = repository.save_check_decision.call_args.args[1]
+    repository.save_check_decision.reset_mock()
+    with pytest.raises(ConsistencyError):
+        await saves.save_check_decision(replace(command, basis=replace(command.basis, threshold_s=Decimal("71"))))
+    repository.save_check_decision.assert_not_called()
+    repository.save_check_decision.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED)
+    assert (await saves.save_check_decision(command)).disposition is SaveDisposition.SAVED
+    assert repository.save_check_decision.call_args.args[1] == key
+
+
+async def test_canceled_pending_threshold_retires_original_key(monkeypatch):
+    from decimal import Decimal
+    from camctl.capture.media_flow import resume_media_saves
+    from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
+    from camctl.persistence.repositories.capture import CheckDecisionRetired
+
+    saves, repository = _saves(monkeypatch)
+    repository.save_check_decision.return_value = DbOutcome(kind=DbOutcomeKind.UNKNOWN)
+    command = CheckDecisionSave(1, CheckDecisionChoice.REQUIRED,
+        CheckBasis(CheckReason.INSUFFICIENT_TIMING, 60000, threshold_s=Decimal("70")), 100)
+    assert (await saves.save_check_decision(command)).disposition is SaveDisposition.UNKNOWN
+    key = repository.save_check_decision.call_args.args[1]
+    repository.save_check_decision.return_value = DbOutcome(
+        kind=DbOutcomeKind.COMPLETED, value=CheckDecisionRetired(1, 1))
+    assert await resume_media_saves(saves.database, saves.pending, action_id=1) is True
+    assert repository.save_check_decision.call_args.args[1] == key
+    assert not saves.pending
+
+
+async def test_pending_threshold_repeated_unknown_keeps_original_error_and_key(monkeypatch):
+    from decimal import Decimal
+    from camctl.capture.media_flow import resume_media_saves
+    from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
+
+    saves, repository = _saves(monkeypatch)
+    original_error = sqlite3.OperationalError("保存结果未知")
+    repository.save_check_decision.return_value = DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=original_error)
+    command = CheckDecisionSave(1, CheckDecisionChoice.REQUIRED,
+        CheckBasis(CheckReason.INSUFFICIENT_TIMING, 60000, threshold_s=Decimal("70")), 100)
+    await saves.save_check_decision(command)
+    key = repository.save_check_decision.call_args.args[1]
+    with pytest.raises(ConsistencyError) as caught:
+        await resume_media_saves(saves.database, saves.pending, action_id=1)
+    assert caught.value.__cause__ is original_error
+    assert repository.save_check_decision.call_args.args[1] == key
+    assert saves.pending
+
+
+async def test_canceled_threshold_stops_before_media_or_read(monkeypatch):
+    from decimal import Decimal
+    from types import SimpleNamespace
+    from camctl.capture.input_copy import InputPhase
+    from camctl.capture.media_flow import run_recording_media
+    from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
+    from camctl.persistence.repositories.capture import CheckDecisionRetired
+
+    saves, repository = _saves(monkeypatch)
+    repository.save_check_decision.return_value = DbOutcome(kind=DbOutcomeKind.UNKNOWN)
+    command = CheckDecisionSave(1, CheckDecisionChoice.REQUIRED,
+        CheckBasis(CheckReason.INSUFFICIENT_TIMING, 60000, threshold_s=Decimal("70")), 100)
+    await saves.save_check_decision(command)
+    repository.save_check_decision.return_value = DbOutcome(
+        kind=DbOutcomeKind.COMPLETED, value=CheckDecisionRetired(1, 1))
+    flow = SimpleNamespace(database=saves.database, pending_media_results=saves.pending, file_executor=None)
+    result = await run_recording_media(flow, 1, 1, 1)
+    assert result.phase is InputPhase.OWNER_SKIPPED
+    assert result.reason == "canceled"
+    assert not saves.pending
+
+
 async def test_pending_media_keeps_original_stream_probe_when_save_is_unknown(monkeypatch):
     from decimal import Decimal
     from camctl.host_files.media import MediaProbe, MediaStream

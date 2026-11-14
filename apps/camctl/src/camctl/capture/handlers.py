@@ -988,6 +988,7 @@ class CaptureRuntime(_FileObservationSaves):
     stopper: DeviceStopPort | None = None
     #: 录像媒体链端口；未装配时需要检查的录像不推进，等待装配会话。
     media: MediaFlow | None = None
+    local_media: Any = None
     #: 异常多录修复门槛的本次余量秒数（configuration.md#配置归属）。
     repair_margin_s: Decimal = Decimal("10")
     #: 录像启动使用本次设备配置；正常与恢复保持原责任累计次数。
@@ -4149,6 +4150,9 @@ async def _resume_internal_read_results(runtime):
 
 
 async def _record_handler(action_id: int, context: CaptureRuntime) -> HandlerOutcome | None:
+    from camctl.capture.media_flow import MediaSaveStage, resume_media_saves
+    await resume_media_saves(context.database, context.pending_media_results, context.file_executor,
+                             action_id=action_id, stage=MediaSaveStage.CHECK_DECISION)
     pending_at_entry = any((
         action_id in context.pending_result_closes, action_id in context.pending_capture_completions,
         action_id in context.pending_baselines, action_id in context.pending_segment_writes,
@@ -4379,6 +4383,16 @@ async def _save_not_needed_decision(
         raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
 
 
+async def _save_required_check(runtime, processing_id, basis):
+    from camctl.capture.media import SaveDisposition
+    from camctl.capture.media_flow import CaptureProcessingSaves
+
+    request = CheckDecisionSave(processing_id, CheckDecisionChoice.REQUIRED, basis, runtime.wall_us())
+    receipt = await CaptureProcessingSaves(runtime.database, runtime.pending_media_results).save_check_decision(request)
+    if receipt.disposition is not SaveDisposition.SAVED:
+        raise ConsistencyError("原录像检查决定未可靠保存") from receipt.error
+
+
 async def _save_excess_decisions(
     runtime: CaptureRuntime, processing_id: int, target_duration_ms: int,
     control: RecoveredControlDecision) -> None:
@@ -4424,8 +4438,15 @@ def _media_responsibility_open(row) -> bool:
     return ((row[1] == int(_CHECK_DECISION.REQUIRED)
              and row[2] in (int(_CHECK_STATE.NOT_PERFORMED),
                             int(_CHECK_STATE.RUNNING)))
+            or (row[1] == int(_CHECK_DECISION.REQUIRED)
+                and row[2] == int(_CHECK_STATE.COMPLETED)
+                and row[4] == int(_REPAIR_STATE.UNDETERMINED))
             or row[4] in (int(_REPAIR_STATE.PENDING),
                           int(_REPAIR_STATE.RUNNING)))
+
+
+def _known_checked_media_failure(duration, target_ms, issues):
+    return bool(issues) or (duration is not None and duration < Decimal(target_ms) / 1000)
 
 
 async def _recording_confirmation_at(runtime: CaptureRuntime, action_id: int) -> int | None:
@@ -4690,17 +4711,8 @@ async def _save_winddown_progress(
         # 尚无写完的完整原片可归属：不能用等待阶段代替文件证据。
         return False
     if row[1] == int(_CHECK_DECISION.UNDETERMINED):
-        _save_inputs = (CheckDecisionSave(
-                processing_id=int(row[0]),
-                decision=CheckDecisionChoice.REQUIRED,
-                basis=CheckBasis(
-                    reason=CheckReason.INSUFFICIENT_TIMING,
-                    target_duration_ms=_target_duration_ms(action)),
-                occurred_at=runtime.wall_us()), new_operation_key())
-        _save_options = dict()
-        receipt = (await runtime.database.write(lambda owned: runtime.capture.save_check_decision(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-        if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
+        await _save_required_check(runtime, int(row[0]), CheckBasis(
+            reason=CheckReason.INSUFFICIENT_TIMING, target_duration_ms=_target_duration_ms(action)))
     if row[6] is None:
         (await _save_source_file(runtime, int(row[0]), source_file_id))
     return True
@@ -4721,6 +4733,9 @@ async def advance_winddown(
     已确认时不重复停止：取消则收终态，否则保存等待阶段；启动未
     确认、在途停止、预算耗尽及本会话锚点分别归各自责任链。
     """
+    from camctl.capture.media_flow import MediaSaveStage, resume_media_saves
+    await resume_media_saves(context.database, context.pending_media_results, context.file_executor,
+                             action_id=action_id, stage=MediaSaveStage.CHECK_DECISION)
     (await context.resume_result_check_closes(action_id))
     (await context.resume_capture_completions(action_id))
     (await context.resume_file_observations(action_id))
@@ -4845,14 +4860,9 @@ async def _advance_recording_outcome(
         if control.reason is RecoveredControlReason.EXCESS_DURATION:
             (await _save_excess_decisions(context, int(row[0]), target_ms, control))
         elif control.reason is RecoveredControlReason.DURATION_UNCERTAIN:
-            _save_inputs = (CheckDecisionSave(
-                processing_id=int(row[0]), decision=CheckDecisionChoice.REQUIRED,
-                basis=CheckBasis(reason=CheckReason.INSUFFICIENT_TIMING,
-                    target_duration_ms=target_ms), occurred_at=context.wall_us()), new_operation_key())
-            _save_options = dict()
-            receipt = (await context.database.write(lambda owned: context.capture.save_check_decision(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-            if receipt.kind is not DbOutcomeKind.COMPLETED:
-                raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
+            await _save_required_check(context, int(row[0]), CheckBasis(
+                reason=CheckReason.INSUFFICIENT_TIMING, target_duration_ms=target_ms,
+                threshold_s=Decimal(target_ms) / 1000 + context.repair_margin_s))
         else:
             (await _save_not_needed_decision(context, int(row[0]), target_ms))
         row = (await _load_processing_row(context, action_id))
@@ -4921,6 +4931,14 @@ async def _advance_recording_outcome(
     files = (await assess_registered_files(registered, _product_requirements(action, FileKind.VIDEO), set_finalized=_listing_finalized(listing)))
     media_source = await _record_media_source(registered, entries, source_file_id=row[6])
     source_file_id = None if media_source is None else media_source[0]
+    media_json = parse_exact_json(row[3]) if row[3] else None
+    check_issues = bool(media_json and media_json.get("issues")) or bool(
+        await context.database.read(lambda owned, inputs=(int(row[0]), _target_duration_ms(action)):
+            saved_osv_input_issues(owned.connection, *inputs), description="读取拍摄直接事实"))
+    check_duration = (saved_check_duration(media_json)
+                      if row[2] == int(_CHECK_STATE.COMPLETED) else None)
+    known_media_failure = (row[4] == int(_REPAIR_STATE.UNDETERMINED)
+        and _known_checked_media_failure(check_duration, _target_duration_ms(action), check_issues))
     if cached is None and files.is_complete and context.listing_cache is not None and (
             row[6] is not None or source_file_id is not None):
         # 完整原片已归属且媒体链推进中：已保存观察足以继续装载，等
@@ -4931,12 +4949,16 @@ async def _advance_recording_outcome(
         # 等待装配会话。已归属原片沿用归属事实，未归属时以本次观
         # 察的完整原片首次关联。
         source = row[6] if row[6] is not None else source_file_id
-        if source is not None and context.media is not None:
+        if (not known_media_failure and source is not None
+                and (context.media is not None or context.local_media is not None)):
             if row[6] is None:
                 (await _save_source_file(context, int(row[0]), source))
-            await run_recording_media(
-                context.media, action_id, int(row[0]), source,
-                target_extension="osv" if media_source is not None and media_source[1] == "osv" else "mp4")
+            extension = "osv" if media_source is not None and media_source[1] == "osv" else "mp4"
+            if context.media is not None:
+                await run_recording_media(context.media, action_id, int(row[0]), source, target_extension=extension)
+            else:
+                from camctl.capture.media_flow import run_local_recording_media
+                await run_local_recording_media(context.local_media, action_id, int(row[0]), source, target_extension=extension)
             row = (await _load_processing_row(context, action_id))
             action = (await context.action(action_id))
             if action["cancel_requested"]:
@@ -4952,7 +4974,8 @@ async def _advance_recording_outcome(
         check_duration_s=(saved_check_duration(media_json)
                           if row[2] == int(_CHECK_STATE.COMPLETED) else None),
         check_issues=(bool(media_json.get("issues")) if media_json else False) or bool(
-            (await context.database.read(lambda owned, inputs=(int(row[0]), _target_duration_ms(action)): saved_osv_input_issues(owned.connection, *inputs), description="读取拍摄直接事实"))),
+            await context.database.read(lambda owned, inputs=(int(row[0]), _target_duration_ms(action)):
+                saved_osv_input_issues(owned.connection, *inputs), description="读取拍摄直接事实")),
         input_unavailable=(
             _media_responsibility_open(row) and row[6] is None
             and source_file_id is None),

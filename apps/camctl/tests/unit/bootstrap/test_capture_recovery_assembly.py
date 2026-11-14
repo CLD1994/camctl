@@ -39,6 +39,18 @@ def _entry(identity, *, recovery_enabled=False):
         status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_missing_device_assembles_only_enabled_local_media(enabled):
+    factory = session_capture_assembly(
+        devices={}, drivers=DriverRegistry(()), staging=Path("/staging"),
+        wait_config=execution_wait_config, media_enabled=enabled)
+    runtime = await factory(_business_database(), "cam-1")
+
+    assert runtime.driver is None
+    assert runtime.media is None
+    assert (runtime.local_media is not None) is enabled
+
+
 @pytest.mark.parametrize("current", ["missing", "mismatch"])
 async def test_capture_factory_passes_fixed_session_recovery_boundary(current):
     original = _entry("original")

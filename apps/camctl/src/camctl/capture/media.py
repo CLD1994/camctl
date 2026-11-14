@@ -289,6 +289,7 @@ class ProcessingStatus:
     repair_output_path: str | None
     source_probe: MediaProbe | None = None
     check_issues: tuple[ProcessingError, ...] = ()
+    repair_threshold_s: Decimal | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.processing_id)
@@ -381,7 +382,7 @@ class CheckContext:
 
     processing: ProcessingStatus
     input_file: FileRef
-    policy: MediaPolicy
+    policy: MediaPolicy | None
     tools: MediaTools
     saves: ProcessingSaves
     occurred_at: int
@@ -824,14 +825,20 @@ def decide_recording_result(facts: RecordingOutcomeFacts) -> RecordingResult:
         int(_REPAIR_STATE.PENDING), int(_REPAIR_STATE.RUNNING))
     if check_open or repair_open:
         return RecordingResult(RecordingResultKind.PENDING)
+    if (facts.check_state == int(_CHECK_STATE.COMPLETED)
+            and facts.check_duration_s is not None
+            and facts.check_duration_s < Decimal(facts.target_duration_ms) / 1000):
+        return RecordingResult(
+            RecordingResultKind.FAILED,
+            failure=RecordingFailure(code="recording_too_short", details={"processing_id": processing_id}))
+    decision_open = (facts.check_decision == int(_CHECK_DECISION.REQUIRED)
+        and facts.check_state == int(_CHECK_STATE.COMPLETED)
+        and facts.check_duration_s is not None
+        and facts.repair_state == int(_REPAIR_STATE.UNDETERMINED))
+    if decision_open:
+        return RecordingResult(RecordingResultKind.PENDING)
     if facts.check_state == int(_CHECK_STATE.COMPLETED):
         duration = facts.check_duration_s
-        if duration is not None and duration < Decimal(facts.target_duration_ms) / 1000:
-            return RecordingResult(
-                RecordingResultKind.FAILED,
-                failure=RecordingFailure(
-                    code="recording_too_short",
-                    details={"processing_id": processing_id}))
         if facts.control_complete:
             return RecordingResult(
                 RecordingResultKind.SUCCEEDED, basis="control_complete")

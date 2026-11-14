@@ -329,6 +329,51 @@ def _check_context(status: ProcessingStatus, saves: _Saves, tools: _Tools) -> Ch
         tools=tools, saves=saves, occurred_at=_NOW)
 
 
+@pytest.mark.asyncio
+async def test_saved_check_threshold_controls_resumed_repair_decision():
+    from types import SimpleNamespace
+    from camctl.capture.media_flow import _run_ready_media
+
+    original = _status(check_state=3, check_duration_s=Decimal("65"),
+                       repair_threshold_s=Decimal("70"))
+    settled = _status(check_state=3, check_duration_s=Decimal("65"),
+                      repair_state=2, repair_threshold_s=Decimal("70"))
+    states = iter((original, settled))
+
+    class Database:
+        async def read(self, callback, **kwargs):
+            return next(states)
+
+    saves = _Saves()
+    flow = SimpleNamespace(database=Database(), tools=_Tools(None, None),
+        policy=MediaPolicy(Decimal("0")), saves=lambda **kwargs: saves,
+        occurred_at=lambda: _NOW, file_executor=None, repair_extension=None)
+    await _run_ready_media(flow, 1, _input_ref(), "mp4")
+    decision = saves.calls[0][1]
+    assert decision.decision is RepairDecisionChoice.NOT_NEEDED
+    assert decision.basis.threshold_s == Decimal("70")
+
+
+@pytest.mark.asyncio
+async def test_existing_repair_decision_does_not_require_missing_check_threshold():
+    from types import SimpleNamespace
+    from camctl.capture.media_flow import _run_ready_media
+
+    status = _status(check_state=3, check_duration_s=Decimal("65"), repair_state=2)
+
+    class Database:
+        async def read(self, callback, **kwargs):
+            return status
+
+    saves = _Saves()
+    flow = SimpleNamespace(database=Database(), tools=_Tools(None, None),
+        saves=lambda **kwargs: saves, occurred_at=lambda: _NOW,
+        file_executor=None, repair_extension=None)
+    result = await _run_ready_media(flow, 1, _input_ref(), "mp4")
+    assert result.phase is CheckExecutionPhase.ALREADY_FINISHED
+    assert saves.calls == []
+
+
 def _repair_context(status: ProcessingStatus, saves: _Saves, tools: _Tools,
                     extension: str | None = "mp4") -> RepairContext:
     return RepairContext(

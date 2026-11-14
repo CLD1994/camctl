@@ -47,6 +47,7 @@ from camctl.capture.media import (
     require_saved_media_result,
 )
 from camctl.capture.processing import (
+    CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason,
     CheckResultSave, ProcessingError, RepairDecisionSave, RepairOutputFile, RepairResultSave,
     RepairStart, RepairSuccess, saved_check_duration, saved_target_duration_ms,
 )
@@ -86,7 +87,7 @@ from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import db_failure, db_outcome_errors, DbOutcomeKind as _DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.capture.save_stage import RequiredSaveStage
-from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.capture import CaptureRepository, CheckDecisionRetired
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.runtime import OwnedConnection
@@ -287,6 +288,7 @@ class MediaSaveStage(Enum):
     """原媒体申请所属的仓储操作。"""
 
     CHECK = "save_check_result"
+    CHECK_DECISION = "save_check_decision"
     DECISION = "save_repair_decision"
     REPAIR = "save_repair_result"
     START = "start_repair_output"
@@ -298,7 +300,7 @@ class PendingMediaRequest:
     """已取得的原申请；action_id 为空时只表示拥有者尚待数据库解析。"""
 
     stage: MediaSaveStage
-    command: CheckResultSave | RepairDecisionSave | RepairResultSave | RepairStart | RepairSuccess
+    command: CheckDecisionSave | CheckResultSave | RepairDecisionSave | RepairResultSave | RepairStart | RepairSuccess
     key: OperationKey
     action_id: int | None
     file_ids: tuple[int, ...]
@@ -310,7 +312,9 @@ class PendingMediaRequest:
 def _media_request_values(command):
     """沿类型化申请的业务编码核实完整原输入，区分 JSON 布尔与数字。"""
     values = {"processing_id": command.processing_id, "occurred_at": command.occurred_at}
-    if isinstance(command, CheckResultSave):
+    if isinstance(command, CheckDecisionSave):
+        values.update(decision=command.decision.value, basis=command.basis.as_json())
+    elif isinstance(command, CheckResultSave):
         values["media"] = command.media.as_json()
     elif isinstance(command, RepairDecisionSave):
         values.update(decision=command.decision.value, basis=command.basis.as_json())
@@ -355,6 +359,9 @@ class CaptureProcessingSaves:
 
     async def save_check_result(self, command):
         return await self._save(MediaSaveStage.CHECK, command)
+
+    async def save_check_decision(self, command):
+        return await self._save(MediaSaveStage.CHECK_DECISION, command)
 
     async def save_repair_decision(self, command):
         return await self._save(MediaSaveStage.DECISION, command)
@@ -486,11 +493,14 @@ class CaptureProcessingSaves:
             self.pending[identity] = replace(held, save_error=receipt.error)
 
 
-async def resume_media_saves(database, pending, executor=None, *, action_id=None):
+async def resume_media_saves(database, pending, executor=None, *, action_id=None, stage=None):
     """只核实已经取得的原申请；不启动工具、读取或重算决定。"""
     saves = CaptureProcessingSaves(database, pending)
     owner = executor if executor is not None else FileTaskExecutor(Supervisor())
+    retired = False
     for held in tuple(pending.values()):
+        if stage is not None and held.stage is not stage:
+            continue
         identity = (held.stage, held.command.processing_id)
         current = pending.get(identity)
         if current is None or current.stage_owner is not held.stage_owner:
@@ -520,12 +530,15 @@ async def resume_media_saves(database, pending, executor=None, *, action_id=None
             held = current
 
         async def save_original(_control=None, original=held, original_identity=identity):
+            nonlocal retired
             receipt = await original.stage_owner.run(
                 lambda: saves._submit_held(original_identity, original))
             if receipt is None:
                 return None
             if receipt.disposition is not SaveDisposition.SAVED:
-                raise db_failure(ConsistencyError, f"原媒体结果未可靠保存: {receipt.error}", receipt)
+                raise ConsistencyError("原媒体结果未可靠保存") from receipt.error
+            if isinstance(receipt.value, CheckDecisionRetired):
+                retired = True
             return receipt
 
         if held.file_ids:
@@ -534,6 +547,7 @@ async def resume_media_saves(database, pending, executor=None, *, action_id=None
                 "原媒体申请与原操作键核实", save_original, resources=("state_db",)))
         else:
             await save_original()
+    return retired
 
 
 def load_processing_status(owned: OwnedConnection, processing_id: int) -> ProcessingStatus:
@@ -552,7 +566,15 @@ def load_processing_status(owned: OwnedConnection, processing_id: int) -> Proces
     duration = (
         saved_check_duration(media)
         if check_state == 3 else None)
-    target = saved_target_duration_ms(parse_exact_json(basis_raw))
+    basis = parse_exact_json(basis_raw)
+    target = saved_target_duration_ms(basis)
+    threshold = basis.get("threshold_s")
+    if threshold is not None:
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, Decimal)):
+            raise ConsistencyError("已保存的修复门槛不是精确数值")
+        threshold = Decimal(threshold)
+        if not threshold.is_finite() or threshold < Decimal(target) / 1000:
+            raise ConsistencyError("已保存的修复门槛无效")
     if output_id is None and repair_state == 4:
         with closing(owned.connection.execute(
             "SELECT id FROM intermediate_files"
@@ -585,6 +607,7 @@ def load_processing_status(owned: OwnedConnection, processing_id: int) -> Proces
         source_probe=saved_source_probe(owned.connection, processing_id),
         check_issues=tuple(ProcessingError(item["code"], item["stage"], item["details"])
             for item in media.get("issues", ())),
+        repair_threshold_s=threshold,
     )
 
 
@@ -648,6 +671,43 @@ class MediaFlow:
             read_discovery_batch_size=self.read_discovery_batch_size)
 
 
+@dataclass
+class LocalMediaFlow:
+    """只对已经可靠完成的本地输入执行媒体处理。"""
+
+    database: BusinessDatabase
+    roots: BoundDirectories
+    tools: MediaTools
+    occurred_at: Callable[[], int]
+    file_executor: FileTaskExecutor
+    pending_media_results: dict
+    repair_extension: str | None = None
+
+    def saves(self, *, file_ids=()):
+        return CaptureProcessingSaves(self.database, self.pending_media_results, file_ids=file_ids)
+
+
+async def run_local_recording_media(flow, action_id, processing_id, source_device_file_id, *, target_extension):
+    """仅复用可靠读取和校验后的同一原输入，不取得设备读取资格。"""
+    from camctl.contracts.enums import enum_for
+    from camctl.host_files.models import FileRef
+
+    if await resume_media_saves(flow.database, flow.pending_media_results, flow.file_executor, action_id=action_id):
+        return None
+    row = await _read_one(flow.database,
+        "SELECT c.id FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
+        " WHERE c.processing_id=? AND c.source_device_file_id=? AND r.action_id=? AND r.kind=? AND r.status=?",
+        (processing_id, source_device_file_id, action_id,
+         int(enum_for("operation_runs.kind").READ_FILE), int(enum_for("operation_runs.status").SUCCEEDED)))
+    if row is None:
+        return None
+    facts = await flow.database.read(lambda owned: OutputsRepository().load_copy_state(row[0], owned))
+    if facts.verification_state not in (3, 5) or facts.target_sha256 is None:
+        return None
+    file = FileRef(facts.target.file_id, facts.target.purpose, facts.target.relative_path, flow.roots.staging)
+    return await _run_ready_media(flow, processing_id, file, target_extension)
+
+
 async def _ensure_checksum_support(
     flow: MediaFlow, source_device_file_id: int) -> None:
     """按绑定声明固定来源文件的摘要能力；已决定的能力不重复声明。"""
@@ -662,6 +722,12 @@ async def _ensure_checksum_support(
     from camctl.outputs.read_attempts import save_read_business
     await save_read_business(flow, source_device_file_id, "source_checksum_support",
         request, CaptureRepository().save_file_checksum)
+
+
+def _needs_check_threshold(status):
+    return (status.check_decision == 3 and status.repair_state == 1
+            and (status.check_state in (1, 2)
+                 or status.check_state == 3 and status.check_duration_s is not None))
 
 
 async def _exhaust_unknown_read_before_slot(
@@ -716,7 +782,8 @@ async def run_recording_media(
     """
     from camctl.outputs.read_attempts import retry_read_business, retry_read_ends
 
-    await resume_media_saves(flow.database, flow.pending_media_results, flow.file_executor, action_id=action_id)
+    if await resume_media_saves(flow.database, flow.pending_media_results, flow.file_executor, action_id=action_id):
+        return InputStep(InputPhase.OWNER_SKIPPED, reason="canceled")
     await retry_read_business(flow)
     for pending in tuple(flow.pending_read_results.values()):
         await _save_internal_read_and_settle(flow, pending, retry=True)
@@ -732,6 +799,22 @@ async def run_recording_media(
     await _ensure_checksum_support(flow, source_device_file_id)
     status = await flow.database.read(
         lambda owned: load_processing_status(owned, processing_id), description="录像处理状态")
+    if _needs_check_threshold(status) and status.repair_threshold_s is None:
+        row = await _read_one(flow.database,
+            "SELECT check_basis_json FROM recording_processing WHERE id=?", (processing_id,))
+        basis = parse_exact_json(row[0])
+        request = CheckDecisionSave(processing_id, CheckDecisionChoice.REQUIRED,
+            CheckBasis(reason=CheckReason(basis["reason"]), target_duration_ms=basis["target_duration_ms"],
+                control_elapsed_ns=basis.get("control_elapsed_ns"),
+                continuity_evidence=(None if basis.get("continuity_evidence") is None
+                                     else tuple(basis["continuity_evidence"])),
+                threshold_s=Decimal(status.target_duration_ms) / 1000 + flow.policy.repair_margin_s),
+            flow.occurred_at())
+        receipt = await flow.saves().save_check_decision(request)
+        if receipt.disposition is not SaveDisposition.SAVED:
+            raise ConsistencyError("原录像检查门槛未可靠保存") from receipt.error
+        if isinstance(receipt.value, CheckDecisionRetired):
+            return InputStep(InputPhase.OWNER_SKIPPED, reason="canceled")
     digest = (await flow.digest_for(source_device_file_id)
               if flow.digest_for is not None else flow.digest)
     copies = flow.copies()
@@ -854,12 +937,24 @@ async def run_recording_media(
         flow.retry_gate.cleared(wait_key)
     if input_step.input_file is None:
         return input_step
+    return await _run_ready_media(flow, processing_id, input_step.input_file, target_extension)
+
+
+async def _run_ready_media(flow, processing_id, input_file, target_extension):
+    """使用已可靠就绪的原输入推进检查与修复。"""
+    status = await flow.database.read(
+        lambda owned: load_processing_status(owned, processing_id), description="录像处理状态")
+    policy = None
+    if _needs_check_threshold(status):
+        if status.repair_threshold_s is None:
+            raise ConsistencyError("原录像检查缺少可靠保存的修复门槛")
+        policy = MediaPolicy(status.repair_threshold_s - Decimal(status.target_duration_ms) / 1000)
     check = await execute_check(CheckContext(
         processing=status,
-        input_file=input_step.input_file,
-        policy=flow.policy,
+        input_file=input_file,
+        policy=policy,
         tools=flow.tools,
-        saves=flow.saves(file_ids=(input_step.input_file.file_id,)),
+        saves=flow.saves(file_ids=(input_file.file_id,)),
         occurred_at=flow.occurred_at(),
         executor=flow.file_executor,
     ))
@@ -874,12 +969,12 @@ async def run_recording_media(
         lambda owned: load_processing_status(owned, processing_id), description="录像处理状态")
     if status.repair_state not in (3, 4):
         return check
-    repair_files = (input_step.input_file.file_id,)
+    repair_files = (input_file.file_id,)
     if status.repair_output_file_id is not None:
         repair_files = tuple(dict.fromkeys((*repair_files, status.repair_output_file_id)))
     repair = await execute_repair(RepairContext(
         processing=status,
-        input_file=input_step.input_file,
+        input_file=input_file,
         # OSV 由修复入口固定独立 MP4；其他来源继续原扩展名规则。
         extension=(flow.repair_extension
                    if flow.repair_extension is not None

@@ -913,6 +913,8 @@ def session_capture_assembly(
 
     def binding_only_runtime(database: Any) -> CaptureRuntime:
         """缺少设备声明仍装配局部失败责任，不取得设备端口。"""
+        from camctl.capture.media_flow import LocalMediaFlow
+
         return CaptureRuntime(
             database=database,
             scheduling=SchedulingRepository(),
@@ -952,6 +954,8 @@ def session_capture_assembly(
             on_recovery_diagnostic=on_recovery_diagnostic,
             pending_media_results=media_results,
             file_executor=executor,
+            local_media=(LocalMediaFlow(database, roots, tools, wall, executor, media_results)
+                         if media_enabled else None),
             binding_check=lambda saved: check_binding(saved, current_config),
         )
 
