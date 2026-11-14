@@ -106,6 +106,11 @@ async def pipeline(tmp_path):
         world.owned.connection.close()
 
 
+@pytest.fixture
+def consumer_world(request, consumer):
+    return request.getfixturevalue("environment" if consumer == "obtain" else "pipeline")
+
+
 async def _internal_flow(pipeline, *, fail=False, maximum=7, checksum_support=3,
         reader=None, max_recopies=2, digest_value=None, file_executor=None,
         recovery_boundary=RecoveryBoundary.UNCONFIRMED, recovery_max_event_id=None):
@@ -232,18 +237,16 @@ async def test_internal_actual_read_result_is_retained_before_check(tmp_path, mo
 
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
-async def test_actual_read_call_carries_current_idle_threshold(request, environment, pipeline, consumer):
-    fixture = request.getfixturevalue("environment" if consumer == "obtain" else "pipeline")
-    _owned, driver = await (_ordinary(fixture) if consumer == "obtain" else _internal(fixture))
+async def test_actual_read_call_carries_current_idle_threshold(consumer_world, consumer):
+    _owned, driver = await (_ordinary(consumer_world) if consumer == "obtain" else _internal(consumer_world))
 
     assert driver.requests
     assert all(request[1] == Decimal("1.25") for request in driver.requests)
 
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
-async def test_actual_read_call_has_committed_original_ticket_and_current_budget(request, environment, pipeline, consumer):
-    fixture = request.getfixturevalue("environment" if consumer == "obtain" else "pipeline")
-    owned, driver = await (_ordinary(fixture) if consumer == "obtain" else _internal(fixture))
+async def test_actual_read_call_has_committed_original_ticket_and_current_budget(consumer_world, consumer):
+    owned, driver = await (_ordinary(consumer_world) if consumer == "obtain" else _internal(consumer_world))
 
     assert driver.requests
     for ticket, _idle, snapshot, _offset in driver.requests:
@@ -419,13 +422,12 @@ async def _assert_cancelled_read_owned(fixture, consumer):
                 pass
 
 
-async def _mismatching_reader(request, consumer, maximum):
+async def _mismatching_reader(consumer_world, consumer, maximum):
     if consumer == "media":
-        fixture = request.getfixturevalue("pipeline")
-        flow, driver = await _internal_flow(fixture, checksum_support=2,
+        flow, driver = await _internal_flow(consumer_world, checksum_support=2,
             max_recopies=maximum, digest_value="0" * 64)
         return flow.owned, flow, driver, lambda: run_recording_media(flow.media, 1, 1, flow.source_id)
-    cfg, owned, context, capture_driver = request.getfixturevalue("environment")
+    cfg, owned, context, capture_driver = consumer_world
     await _save_photos(cfg, owned, context, capture_driver)
     await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00", "params": {
@@ -438,10 +440,10 @@ async def _mismatching_reader(request, consumer, maximum):
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
 @pytest.mark.parametrize("maximum", [0, 1, 2])
-async def test_real_checksum_mismatch_uses_separate_recopy_budget_and_original_attempt(request, environment, pipeline, consumer, maximum):
+async def test_real_checksum_mismatch_uses_separate_recopy_budget_and_original_attempt(consumer_world, consumer, maximum):
     import json
 
-    owned, _runtime, driver, advance = await _mismatching_reader(request, consumer, maximum)
+    owned, _runtime, driver, advance = await _mismatching_reader(consumer_world, consumer, maximum)
     for _ in range(maximum + 1):
         await advance()
     copies = owned.connection.execute("SELECT id,recopies_used,round,slot_device_id FROM file_copies").fetchall()
@@ -464,22 +466,22 @@ async def test_real_checksum_mismatch_uses_separate_recopy_budget_and_original_a
 
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
-async def test_registered_recopy_continues_when_later_budget_is_lower(request, environment, pipeline, consumer):
+async def test_registered_recopy_continues_when_later_budget_is_lower(consumer_world, consumer):
     from dataclasses import replace
 
-    owned, runtime, driver, advance = await _mismatching_reader(request, consumer, 2)
+    owned, runtime, driver, advance = await _mismatching_reader(consumer_world, consumer, 2)
     await advance()
     before = owned.connection.execute("SELECT id,recopies_used,round FROM file_copies").fetchall()
     assert all((used, copy_round) == (1, 2) for _copy, used, copy_round in before)
     horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
     if consumer == "media":
-        runtime, _unused = await _internal_flow(request.getfixturevalue("pipeline"),
+        runtime, _unused = await _internal_flow(consumer_world,
             checksum_support=2, reader=driver, max_recopies=0,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)
         advance = lambda: run_recording_media(runtime.media, 1, 1, runtime.source_id)
     else:
-        cfg, _owned, context, _capture = request.getfixturevalue("environment")
+        cfg, _owned, context, _capture = consumer_world
         runtime = _configured_factory(cfg, driver, maximum=7, max_recopies=0,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)(context.database)
@@ -546,11 +548,11 @@ async def test_internal_binding_failure_preserves_running_read_and_reports_reaso
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
 @pytest.mark.parametrize("stopped,error", [(False, None), (True, "failed")])
-async def test_read_end_cannot_announce_success_without_confirmed_clean_end(request, environment, pipeline, consumer, stopped, error):
+async def test_read_end_cannot_announce_success_without_confirmed_clean_end(consumer_world, consumer, stopped, error):
     from camctl.contracts.values import ConsistencyError
     from camctl.devices.read_session import ReadEnd
 
-    owned, runtime, driver, advance = await _mismatching_reader(request, consumer, 1)
+    owned, runtime, driver, advance = await _mismatching_reader(consumer_world, consumer, 1)
     original = driver.open_read
 
     class EndObservation:

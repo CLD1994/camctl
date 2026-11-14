@@ -505,7 +505,8 @@ def test_installed_and_checkout_cli_have_same_camera_catalog(installed, model):
         assert "camctl/devices/drivers/adb_cameras/driver.py" in archive.namelist()
 
 
-def _demo_generator(installed):
+@pytest.fixture(scope="module")
+def demo_generator(installed):
     target = installed.deploy / "prepare-plan.py"
     _probe(installed, f"from pathlib import Path; from camctl.resources import resource_bytes; "
            f"Path({str(target)!r}).write_bytes(resource_bytes('examples/camera-demo/prepare-plan.py'))")
@@ -533,9 +534,8 @@ runpy.run_path(generator, run_name="__main__")
 """
 
 
-def _run_installed_generator(installed, stem, capabilities, output, *, sample_path=None,
+def _run_installed_generator(installed, generator, stem, capabilities, output, *, sample_path=None,
                              device_id=None):
-    generator = _demo_generator(installed)
     command = [str(installed.python)]
     if sample_path is None:
         command.extend([str(generator), stem])
@@ -585,7 +585,7 @@ def _installed_timelapse_capabilities(installed_camera_capabilities, tmp_path, s
 
 @pytest.mark.parametrize("stem", ["action6-record", "action6-timelapse", "osmo360ii-record", "osmo360ii-timelapse"])
 def test_installed_camera_sample_is_accepted_from_actual_describe(
-        installed, installed_camera_capabilities, tmp_path, stem):
+        installed, installed_camera_capabilities, demo_generator, tmp_path, stem):
     """安装后的样例消费实际能力说明，经正式受理保存原参数。"""
     sys.path.insert(0, str(_CROSS_DIR))
     from camctl_fixtures import Deployment
@@ -634,7 +634,7 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(
     capabilities = tmp_path / "capabilities.json"
     capabilities.write_text(installed_camera_capabilities[model], encoding="utf-8")
     plan_path = tmp_path / "sample-plan.json"
-    generator = _demo_generator(installed)
+    generator = demo_generator
     _run([str(installed.python), str(generator), stem, "--capabilities", str(capabilities),
           "--device-id", "camera", "--output", str(plan_path)],
          cwd=installed.deploy, env=_clean_environment())
@@ -669,8 +669,8 @@ def test_installed_osmo_camera_config_is_single_device_default_config(installed)
     assert device["software_recovery"]["enabled"] is True
 
 
-def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, tmp_path):
-    generator = _demo_generator(installed)
+def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, demo_generator, tmp_path):
+    generator = demo_generator
     maximum = "9223372036854775807"
     for stem, extra in (("obtain", ["--source-action-id", maximum]),
                         ("obtain-preview", ["--source-action-id", maximum]),
@@ -691,7 +691,7 @@ def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, tmp_path
                f"parse_exact_json(Path({str(target)!r}).read_text()))")
 
 
-def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tmp_path):
+def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, demo_generator, tmp_path):
     """安装物的 Hasselblad 配置与样例经真实 describe 和 submit 组合运行。"""
     resource_names = (
         "examples/camera-demo/hasselblad-config.toml",
@@ -752,7 +752,7 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
     assert photo_schema["additionalProperties"] is False
     assert set(photo_schema["properties"]) == set(photo_schema["required"])
 
-    generator = _demo_generator(installed)
+    generator = demo_generator
     capability_path = tmp_path / "capabilities.json"
     capability_path.write_text(described.stdout, encoding="utf-8")
     plan_path = tmp_path / "hasselblad-photo-plan.json"
@@ -842,7 +842,7 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
 @pytest.mark.skipif(os.name == "nt", reason="受管工具替身使用 POSIX 可执行脚本")
 @pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
 def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
-        installed, tmp_path, capture_format):
+        installed, demo_generator, tmp_path, capture_format):
     """安装版 CLI 完成两种主机格式拍摄、原图/预览交付及离线重复取回。"""
     resource_names = (
         "examples/camera-demo/hasselblad-config.toml",
@@ -901,7 +901,7 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
     assert [parameter["type"] for parameter in photo_actions[0]["parameter_types"]] == [
         "hasselblad_photo"]
 
-    generator = _demo_generator(installed)
+    generator = demo_generator
     capability_path = tmp_path / "hasselblad-capabilities.json"
     capability_path.write_text(described.stdout, encoding="utf-8")
     generated_plan_path = tmp_path / "hasselblad-photo-generated.json"
@@ -1213,7 +1213,7 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
     ("action6-timelapse", "dji-action6", "action6"),
     ("osmo360ii-timelapse", "dji-osmo360-ii", "osmo360ii"),
 ])
-def test_installed_sample_rejects_missing_matching_capability_before_plan(installed, tmp_path,
+def test_installed_sample_rejects_missing_matching_capability_before_plan(installed, demo_generator, tmp_path,
                                                                            stem, driver_id, device_id):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.repositories.transactions import encode_json_value
@@ -1228,14 +1228,14 @@ def test_installed_sample_rejects_missing_matching_capability_before_plan(instal
     document["devices"][0]["actions"] = []
     capabilities.write_text(encode_json_value(document), encoding="utf-8")
     target = tmp_path / "plan.json"
-    refused = _run_installed_generator(installed, stem, capabilities, target)
+    refused = _run_installed_generator(installed, demo_generator, stem, capabilities, target)
     assert refused.returncode != 0
     assert not target.exists()
 
 
 @pytest.mark.parametrize("stem", ["action6-timelapse", "osmo360ii-timelapse"])
 def test_installed_generator_rejects_duplicate_matching_parameter_type(
-        installed, installed_camera_capabilities, tmp_path, stem):
+        installed, installed_camera_capabilities, demo_generator, tmp_path, stem):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.repositories.transactions import encode_json_value
 
@@ -1250,7 +1250,7 @@ def test_installed_generator_rejects_duplicate_matching_parameter_type(
     action["parameter_types"].append(deepcopy(matching[0]))
     capabilities_path.write_text(encode_json_value(capabilities), encoding="utf-8")
     target = tmp_path / "duplicate-plan.json"
-    refused = _run_installed_generator(installed, stem, capabilities_path, target,
+    refused = _run_installed_generator(installed, demo_generator, stem, capabilities_path, target,
                                        device_id="camera")
     assert refused.returncode != 0
     assert not target.exists()
@@ -1270,7 +1270,7 @@ def test_installed_generator_rejects_duplicate_matching_parameter_type(
 ], ids=["equal", "reverse", "boolean-interval", "string-duration",
         "neighboring-decimal", "out-of-domain-interval", "out-of-domain-duration"])
 def test_installed_generator_rejects_invalid_timelapse_time_before_plan(
-        installed, installed_camera_capabilities, tmp_path, stem, case, interval_s, duration_s):
+        installed, installed_camera_capabilities, demo_generator, tmp_path, stem, case, interval_s, duration_s):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.repositories.transactions import encode_json_value
 
@@ -1284,7 +1284,7 @@ def test_installed_generator_rejects_invalid_timelapse_time_before_plan(
     modified_sample = tmp_path / f"{stem}-{case}.json"
     modified_sample.write_text(encode_json_value(sample), encoding="utf-8")
     target = tmp_path / "invalid-plan.json"
-    refused = _run_installed_generator(installed, stem, capabilities_path, target,
+    refused = _run_installed_generator(installed, demo_generator, stem, capabilities_path, target,
                                        sample_path=modified_sample, device_id="camera")
     assert refused.returncode != 0
     assert not target.exists()
@@ -1294,9 +1294,9 @@ def test_installed_generator_rejects_invalid_timelapse_time_before_plan(
 
 @pytest.mark.parametrize("stem,args", [("obtain", []), ("obtain", ["--source-action-id", "01"]),
                                       ("report-ack", []), ("report-ack", ["--last-report-id", "0"])])
-def test_installed_sample_requires_valid_source_and_ack_ids(installed, tmp_path, stem, args):
+def test_installed_sample_requires_valid_source_and_ack_ids(installed, demo_generator, tmp_path, stem, args):
     target = tmp_path / "plan.json"
-    refused = subprocess.run([str(installed.python), str(_demo_generator(installed)), stem,
+    refused = subprocess.run([str(installed.python), str(demo_generator), stem,
         *args, "--output", str(target)], cwd=installed.deploy, env=_clean_environment(),
         capture_output=True, text=True, timeout=30)
     assert refused.returncode != 0
