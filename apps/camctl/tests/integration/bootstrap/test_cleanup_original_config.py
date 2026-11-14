@@ -53,8 +53,8 @@ async def test_old_device_result_keeps_original_config_and_authorizes_new_ticket
         (ticket.run_id, ticket.attempt_id)).fetchone()
     _configure(world, interval=Decimal("0"), timeout=Decimal("17.375"))
     fresh = world.context.open_connection()
-    await world.resources.restart_database(fresh)
     try:
+        await world.resources.restart_database(fresh)
         factory = _factory(world, max_delete_attempts=5, max_query_attempts=4,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, recovery_max_event_id=horizon)
         await advance_cleanup(await factory(fresh))
@@ -119,8 +119,8 @@ async def test_host_original_preview_repaired_recovery_preserves_null_config_and
     action_id, item_id = _start_cleanup(world.owned, output_id, "2")
     item_id, ticket, horizon = _lost_intent(world, operation, output_id=output_id, item_id=item_id)
     fresh = world.context.open_connection()
-    await world.resources.restart_database(fresh)
     try:
+        await world.resources.restart_database(fresh)
         def forbidden_ports(*args):
             raise AssertionError("主机历史不能解析当前设备端口")
         monkeypatch.setattr(cleanup_assembly, "port_for", forbidden_ports)
@@ -161,8 +161,8 @@ async def test_already_saved_missing_wait_is_diagnosed_without_rewriting_or_repl
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     row = world.owned.connection.execute("SELECT * FROM operation_attempts WHERE run_id=? AND attempt_no=?", (ticket.run_id, ticket.attempt_id)).fetchone()
     fresh = world.context.open_connection()
-    await world.resources.restart_database(fresh)
     try:
+        await world.resources.restart_database(fresh)
         factory = _factory(world)
         with pytest.raises(ConsistencyError, match="后续尝试要求先建立重试等待"):
             for _ in range(6):

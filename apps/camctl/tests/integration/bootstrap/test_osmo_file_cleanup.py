@@ -171,6 +171,7 @@ async def world(request, capture_resources, isolated_driver_registries, cleanup_
     copy, delivery_id, delivery_file_id = state["copy"], state["delivery_id"], state["delivery_file_id"]
     owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
     supervisor = None
+    consumer_checked = False
     try:
         verify_directory_binding(owned.metadata, *(str(getattr(cfg.paths, name))
                                  for name in ("staging", "ready", "processing")))
@@ -193,6 +194,7 @@ async def world(request, capture_resources, isolated_driver_registries, cleanup_
         with output_test_session():
             yield value
             assert not executor.unfinished_files()
+            consumer_checked = True
     finally:
         try:
             if supervisor is not None:
@@ -204,7 +206,7 @@ async def world(request, capture_resources, isolated_driver_registries, cleanup_
                 await capture_resources.close()
             finally:
                 owned.connection.close()
-        state["call_passed"] = getattr(request.node, "cleanup_call_passed", False)
+        state["call_passed"] = consumer_checked and getattr(request.node, "cleanup_call_passed", False)
         state["closed"] = True
 
 
