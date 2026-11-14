@@ -5,13 +5,13 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from ..support.capture import capture_database
+from ..support.capture import capture_database, capture_factory
 from ..support.result_cases import CaseClock
 
 from camctl.capture.baseline_models import BaselineFixSave
 from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import new_operation_key
-from camctl.devices.bindings import check_binding
+from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.ports import DeviceCallResult, StopDriver
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import ErrorValue
@@ -65,19 +65,20 @@ async def test_action6_baseline_failure_publishes_no_results_source(tmp_path):
     from camctl.devices.directory import DirectoryRead
     from .test_baseline_prepare import Directory
 
+    directory = Directory([
+        lambda request: DirectoryRead(
+            None,
+            ErrorValue("adb_directory_failed", "device_file_access", {
+                "reason": "injected_baseline_failure",
+            }),
+            None,
+        )
+    ])
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=Action6RecordCatalog(), start=False
+        tmp_path, "record", catalog=Action6RecordCatalog(), start=False,
+        runtime_options={"directory": directory},
     )
     try:
-        runtime.baseline_directory = Directory([
-            lambda request: DirectoryRead(
-                None,
-                ErrorValue("adb_directory_failed", "device_file_access", {
-                    "reason": "injected_baseline_failure",
-                }),
-                None,
-            )
-        ])
         await capture_handler(handler)(action_id, runtime)
 
         assert (await runtime.action(action_id))["status"] == 4
@@ -107,13 +108,12 @@ async def test_action6_start_no_effect_failure_publishes_no_results_source(
         if consumer == "record"
         else Action6NativeCatalog(0)
     )
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, consumer, catalog=catalog, start=False
-    )
     driver = StartDriver(_result(no_effect=True, error=ErrorValue(
         "device_start_failed", "execution", {"operation_run_id": "1"},
     )))
-    runtime.driver = driver
+    owned, runtime, action_id, handler = await consumer_world(
+        tmp_path, consumer, catalog=catalog, start=False, control=driver,
+    )
     try:
         await capture_handler(handler)(action_id, runtime)
 
@@ -146,7 +146,8 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
     task_catalog.duration_s = Decimal("60")
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=task_catalog, start=False, clock=clock,
-        runtime_options={"stopper": stopper},
+        runtime_options={"stopper": stopper,
+                         "stop_config": AttemptConfig(1, Decimal("1"), Decimal(0))},
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -163,7 +164,6 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
             "action6_video_segments_v1"
         )
 
-        runtime.stop_config = AttemptConfig(1, Decimal("1"), Decimal(0))
         clock.wall = _NOW + 75_000_000
         clock.monotonic = 80_000_000_000
         await capture_handler(handler)(action_id, runtime)
@@ -182,6 +182,7 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
             (f"stop/{action_id}",),
         ).fetchone()
         assert run_status == 6
+        stopper.stop.assert_awaited_once()
         ref = SegmentRepository().read_active_set(action_id, owned)
         assert ref is not None
         assert owned.connection.execute(
@@ -193,18 +194,59 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
 
 
 async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path, monkeypatch):
-    from types import SimpleNamespace
+    from .result_consumer_fixtures import _prepare_through_handler
 
-    owned, runtime, action_id, _handler, _tools, result_port, evidence = await _overrun_recording(
-        tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22"))
+    wall, mono = [_NOW], [5_000_000_000]
+    stopper = create_autospec(StopDriver, instance=True)
+    stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
+        returned("stop", "stop_confirmed", request.ticket.target_id))
+    result_port, evidence = _result_setup()
+    tools = _ProbeTools((Decimal("18"), Decimal("27"), Decimal("22")), monkeypatch)
+    factory = None
+
+    async def build_runtime(owned, *, driver):
+        nonlocal factory
+        options = dict(tools.assembly_options)
+        check = options.pop("check_config")
+        options["devices"]["cam-1"]["result_check"] = {
+            "max_attempts": check.max_attempts,
+            "call_timeout_s": check.timeout_s,
+            "retry_interval_s": check.retry_interval_s,
+        }
+        factory = await capture_factory(owned, driver=driver, **options)
+        return await factory(owned)
+
+    catalog = Action6RecordCatalog()
+    catalog.duration_s = Decimal("60")
+    owned, runtime, action_id, handler = await consumer_world(
+        tmp_path, "record", catalog=catalog, start=False,
+        runtime_factory=build_runtime,
+        runtime_options=_media_options(tools, results=result_port, evidence=evidence,
+            wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0], stopper=stopper),
     )
     try:
-        runtime.binding_check = lambda binding: check_binding(
-            binding, SimpleNamespace(devices={})
-        )
+        (activity_id,) = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
+        ).fetchone()
+        fixed = runtime.capture.fix_baseline(
+            BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned)
+        assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+        await capture_handler(handler)(action_id, runtime)
+        wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
+        await _prepare_through_handler(runtime, action_id, handler, "conclude")
+        assert owned.connection.execute(
+            "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
+        ).fetchone() == (75_000_000_000,)
+        wall[0], mono[0] = _NOW + 80_000_000, 85_000_000_000
+        del tools.assembly_options["devices"]["cam-1"]
+        runtime = await factory(owned)
         await capture_handler("camera_record")(action_id, runtime)
 
         assert (await runtime.action(action_id))["status"] == 4
+        assert owned.connection.execute(
+            "SELECT error_code,json_extract(error_details_json,'$.reason')"
+            " FROM actions WHERE id=?", (action_id,)
+        ).fetchone() == (registered_error("device_binding_unavailable")["action_error_id"], "missing")
         assert owned.connection.execute(
             "SELECT published_event_id IS NOT NULL FROM segment_sets"
         ).fetchone() == (1,)
@@ -224,10 +266,19 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
     result_port, evidence = _result_setup()
     clock = CaseClock(_NOW, 5_000_000_000)
     tools = _ProbeTools((60, 60, 31, 20), monkeypatch)
+    from camctl.bootstrap.capture_assembly import execution_wait_config
+    from camctl.capture.timelapse import CaptureWaitConfig
+
+    wait_override = [None]
+
+    def wait_config(action):
+        return execution_wait_config(action) if wait_override[0] is None else wait_override[0]
+
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "timelapse", catalog=_Action6Native151Catalog(0), start=False, clock=clock,
         runtime_options=_media_options(tools, results=result_port, evidence=evidence,
-            wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
+            wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns,
+            wait_config=wait_config)
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -238,11 +289,10 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
         )
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
-        from camctl.capture.timelapse import CaptureWaitConfig
         from .test_result_page_history import _actual
 
         await capture_handler(handler)(action_id, runtime)
-        runtime.wait_config = lambda action: CaptureWaitConfig(300_000, 200, 0, 0)
+        wait_override[0] = CaptureWaitConfig(300_000, 200, 0, 0)
         await capture_handler(handler)(action_id, runtime)
 
         async def read(request, batch):

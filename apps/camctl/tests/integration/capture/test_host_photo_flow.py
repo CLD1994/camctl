@@ -21,7 +21,7 @@ from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
 
 from support.repository_ports import repository_port
 
-from ..support.capture import capture_database, capture_runtime
+from ..support.capture import capture_database, capture_factory, capture_runtime
 
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.ports import ParameterDefinition
@@ -42,7 +42,7 @@ from camctl.capture.handlers import ListedResult, capture_handler
 from camctl.contracts.enums import enum_for
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding
+from camctl.devices.bindings import DeviceBinding
 from camctl.devices.catalog import DriverDefinitions, build_catalog
 from camctl.devices.drivers.hasselblad.configuration import read_camera_config
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
@@ -384,7 +384,8 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
                  cancel_action: bool = False, legacy: bool = False,
                  wall: list[int] | None = None, results=None, evidence=None,
                  driver_factory=None, storage="host", capture_format="raw",
-                 extra_actions=(), photo_group=None, photo_focus=None, start_first=True, catalog_factory=None):
+                 extra_actions=(), photo_group=None, photo_focus=None, start_first=True, catalog_factory=None,
+                 factory_out=None):
     cfg = _config(tmp_path, storage=storage)
     state_db = Path(cfg.paths.state_db)
     initialized = initialize_state(cfg, state_db)
@@ -434,11 +435,17 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
             raise AssertionError(receipt.error)
     clock = wall if wall is not None else [_NOW]
     registry = DriverRegistry((_entry(selected_driver, evidence),))
-    runtime = await capture_runtime(database, driver=selected_driver,
-        evidence=_entry(selected_driver, evidence).evidence,
-        devices=cfg.devices, drivers=registry, results=results,
+    devices = cfg.devices if factory_out is None else dict(cfg.devices)
+    options = dict(driver=selected_driver, evidence=_entry(selected_driver, evidence).evidence,
+        devices=devices, drivers=registry, results=results,
         staging=Path(cfg.paths.staging), wait_config=lambda _action: None,
         wall_us=lambda: clock[0], monotonic_ns=lambda: 9_000_000_000)
+    if factory_out is None:
+        runtime = await capture_runtime(database, **options)
+    else:
+        factory = await capture_factory(database, **options)
+        factory_out.append((factory, devices))
+        runtime = await factory(database)
     return cfg, owned, selected_driver, runtime, clock
 
 
@@ -810,7 +817,8 @@ async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_captu
 
 async def test_host_photo_resumes_after_original_archive_and_ignores_later_binding_failure(
         tmp_path, monkeypatch):
-    cfg, owned, driver, runtime, _clock = await _world(tmp_path)
+    factory_out = []
+    cfg, owned, driver, runtime, _clock = await _world(tmp_path, factory_out=factory_out)
     from camctl.capture import host_photo
 
     archive = host_photo.archive_capture_file
@@ -830,8 +838,9 @@ async def test_host_photo_resumes_after_original_archive_and_ignores_later_bindi
         assert len(driver.requests) == 1
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
         monkeypatch.setattr(host_photo, "archive_capture_file", archive)
-        runtime.binding_check = lambda saved: BindingResult(
-            BindingStatus.DEVICE_MISSING, saved, None)
+        factory, devices = factory_out[0]
+        del devices["cam-1"]
+        runtime = await factory(owned)
 
         await capture_handler("camera_take_photo")(1, runtime)
 
