@@ -29,12 +29,29 @@ def _photo_factory(results, controls, *, now=None):
     return factory
 
 
-async def test_accepted_photo_registers_file_through_session_assembly(tmp_path):
+async def test_accepted_photo_registers_file_through_session_assembly(tmp_path, monkeypatch):
+    from camctl.devices.drivers.registry import CapabilityNotDeclaredError, port_for
+    from ..support import capture as support
+
+    assembled = []
+    production_assembly = support.session_capture_assembly
+
+    def inspect_assembly(**options):
+        assembled.append(options)
+        return production_assembly(**options)
+
+    monkeypatch.setattr(support, "session_capture_assembly", inspect_assembly)
     results = ResultsDouble({1: (_entry("photo", kind=FileKind.PHOTO),)})
     controls = []
     owned, runtime, action_id, handler = await consumer_world(tmp_path, "photo", start=False,
         runtime_factory=_photo_factory(results, controls))
     try:
+        options, = assembled
+        entry = options["drivers"].entry("camctl-adb")
+        assert entry.declaration.result_supported is False
+        with pytest.raises(CapabilityNotDeclaredError):
+            port_for(entry, "result")
+        assert options["results"] is results
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3,)
         assert owned.connection.execute(
@@ -42,6 +59,7 @@ async def test_accepted_photo_registers_file_through_session_assembly(tmp_path):
         ).fetchone() == (action_id, 3, 4096)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (1,)
         assert controls[0].control.await_count == 1
+        assert results.calls == [action_id]
     finally:
         owned.connection.close()
 
@@ -87,28 +105,3 @@ async def test_reopened_photo_keeps_start_and_recovers_incomplete_results(tmp_pa
             assert controls[0].control.await_count == 1
         finally:
             owned.connection.close()
-
-
-async def test_injected_results_are_independent_of_driver_capability(tmp_path, monkeypatch):
-    from unittest.mock import create_autospec
-    from camctl.devices.ports import ControlDriver
-    from camctl.devices.drivers.registry import CapabilityNotDeclaredError, port_for
-    from ..support import capture as support
-
-    assembled = []
-    production_assembly = support.session_capture_assembly
-
-    def inspect_assembly(**options):
-        assembled.append(options)
-        return production_assembly(**options)
-
-    monkeypatch.setattr(support, "session_capture_assembly", inspect_assembly)
-    results = ResultsDouble({})
-    support.capture_assembly(driver=create_autospec(ControlDriver, instance=True),
-        evidence=_PAGE_EVIDENCE, staging=tmp_path, results=results)
-    options, = assembled
-    entry = options["drivers"].entry("camctl-adb")
-    assert entry.declaration.result_supported is False
-    with pytest.raises(CapabilityNotDeclaredError):
-        port_for(entry, "result")
-    assert options["results"] is results

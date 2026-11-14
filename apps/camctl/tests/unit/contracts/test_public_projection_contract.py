@@ -1,4 +1,4 @@
-"""K4 公开投影与真实协议登记的集成测试。
+"""K4 公开投影基于固定字段定义计算内存事实。
 
 期望独立来自报告字段依赖登记：公开字段从已保存事实计算，不查
 询设备或当前库；内部变化不产生公开变化；缺事实为规则错误。
@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from functools import lru_cache
 
 import pytest
 
+from camctl import resources
+from camctl.contracts import public_projection, schemas, workflow_errors
 from camctl.contracts.public_projection import (
     OMIT,
     ProjectionInput,
@@ -17,6 +20,16 @@ from camctl.contracts.public_projection import (
     project_public,
     public_changed,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def fixed_definitions():
+    """固定定义按名称首次加载，投影过程中的后续读取使用同一份内容。"""
+    read_once = lru_cache(maxsize=None)(resources.resource_bytes)
+    with pytest.MonkeyPatch.context() as patch:
+        for module in (public_projection, schemas, workflow_errors):
+            patch.setattr(module, "resource_bytes", read_once)
+        yield
 
 
 def _plan_facts(plan_id: int = 1, **columns) -> ProjectionInput:
