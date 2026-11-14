@@ -64,9 +64,14 @@ def api(monkeypatch):
     definitions.DRIVER_ID = "hasselblad_cfv100c"
     for stub in (enums, history, json_values, values, requests, validators, facts, transaction, reuse, capture, pages, definitions, source_transactions):
         monkeypatch.setitem(sys.modules, stub.__name__, stub)
-    path = Path(__file__).parents[3] / "src/camctl/outputs/photo_cache_reuse.py"
-    name = "camctl.outputs._isolated_photo_cache_reuse"
-    spec = importlib.util.spec_from_file_location(name, path)
+    root = Path(__file__).parents[3] / "src/camctl"
+    rules_name = "camctl.outputs.photo_cache_reuse"
+    rules_spec = importlib.util.spec_from_file_location(rules_name, root / "outputs/photo_cache_reuse.py")
+    rules = importlib.util.module_from_spec(rules_spec)
+    monkeypatch.setitem(sys.modules, rules_name, rules)
+    rules_spec.loader.exec_module(rules)
+    name = "camctl.persistence.repositories._isolated_photo_cache_reuse"
+    spec = importlib.util.spec_from_file_location(name, root / "persistence/repositories/photo_cache_reuse.py")
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, name, module)
     spec.loader.exec_module(module)
@@ -142,3 +147,20 @@ def test_photo_h_uses_whole_transaction_when_output_event_is_inside_it(api):
     module._selection_is_bound_at_boundary = lambda **kwargs: (kwargs["boundary"], False)
     assert module.read_bound_photo_cache(output_id=4, obtain_action_id=5, selection_id=6,
                                         owned=SimpleNamespace(connection=Connection())) is None
+
+
+def test_saved_binding_failure_uses_original_result_boundary(api, monkeypatch):
+    module, states, _records, _seen = api
+    states[("file_copies", 9)] = {"id": 9}
+    transaction = sys.modules["camctl.persistence.repositories.transactions"]
+    transaction.saved_transaction_events = lambda connection, key: [{"event_id": 101}] if key == "original-key" else None
+    calls = []
+    def verify(connection, copy, *, before_event_id, historical):
+        calls.append((connection, copy["id"], before_event_id, historical))
+        return 15
+    monkeypatch.setattr(module, "verify_photo_cache_binding_failure", verify)
+    connection = object()
+    assert module.load_saved_photo_binding_failure_source(9, "original-key", SimpleNamespace(connection=connection)) == 15
+    assert calls == [(connection, 9, 101, True)]
+    with pytest.raises(ValueError, match="缺少拷贝或读取结果事务"):
+        module.load_saved_photo_binding_failure_source(9, "other-key", SimpleNamespace(connection=connection))

@@ -186,23 +186,20 @@ class PublicationFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((action, copy, value), (4, 9, error))
             return ("original-key", None, 17)
         binding.load_saved_binding_read_failure = load_failure
-        transaction = ModuleType('camctl.persistence.repositories.transactions')
-        transaction.row_facts = lambda connection, table, identity: {"id": identity, "source_intermediate_file_id": 23}
-        def saved_events(connection, key):
-            self.assertEqual(key, "original-key")
-            return [dict(event_id=101)]
-        transaction.saved_transaction_events = saved_events
-        photo = ModuleType('camctl.outputs.photo_cache_reuse')
         invalid = [False]
-        def verify(connection, copy, *, before_event_id, historical):
-            self.assertEqual((copy["id"], before_event_id, historical), (9, 101, True))
+        def load_source(copy_id, key, owned):
+            self.assertEqual((copy_id, key, owned.connection), (9, "original-key", runtime.database))
             if invalid[0]:
                 raise ConsistencyError("非照片来源或原关联不符")
             return 15
-        photo.verify_photo_cache_binding_failure = verify
-        modules.update({m.__name__: m for m in (binding, transaction, photo)})
+        modules[binding.__name__] = binding
+        batches = ModuleType('camctl.outputs.batches')
+        async def release_batches(*args, **kwargs): pass
+        batches.release_finished_batches = release_batches
+        modules[batches.__name__] = batches
         runtime = SimpleNamespace(database=Database(), discovery=Discovery(), occurred_at=lambda: 90,
-            outputs=SimpleNamespace(fail_read_binding=object()))
+            pending_file_batches={},
+            outputs=SimpleNamespace(fail_read_binding=object(), load_saved_photo_binding_failure_source=load_source))
         with patch.dict(sys.modules, modules):
             for reason in ("missing", "mismatch"):
                 error["details"]["reason"] = reason

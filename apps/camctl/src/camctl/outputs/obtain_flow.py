@@ -439,33 +439,8 @@ async def _delivery_candidate(
         output_id: int, selection_id: int, now: int,
 ) -> FileCandidate:
     """从产物事实构造交付建档候选；来源与可读名称由产物行推导。"""
-    def inputs(owned):
-        connection = owned.connection
-        with closing(connection.execute(
-            "SELECT o.source_action_id,o.device_file_id,o.intermediate_file_id,"
-            "o.original_name,a.name,p.name FROM outputs o"
-            " JOIN actions a ON a.id=o.source_action_id"
-            " JOIN plans p ON p.id=a.plan_id WHERE o.id=?", (output_id,))) as cursor:
-            row = cursor.fetchone()
-        if row is None:
-            raise ConsistencyError(f"取回条目的产物或来源动作缺失: {output_id}")
-        source_action_id, device_file_id = row[:2]
-        bound = None
-        photo_bound = None
-        if device_file_id is not None:
-            from camctl.persistence.repositories.segment_selections import is_segmented_source
-            from camctl.outputs.segment_copy_reuse import read_bound_check_copy
-            if is_segmented_source(connection, int(source_action_id)):
-                bound = read_bound_check_copy(
-                    source_action_id=int(source_action_id),
-                    source_device_file_id=int(device_file_id),
-                    obtain_action_id=int(action["id"]), selection_id=selection_id, owned=owned)
-            else:
-                from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
-                photo_bound = read_bound_photo_cache(output_id=output_id,
-                    obtain_action_id=int(action["id"]), selection_id=selection_id, owned=owned)
-        return row, bound, photo_bound
-    row, bound, photo_bound = await runtime.database.read(inputs)
+    row, bound, photo_bound = await runtime.database.read(lambda owned:
+        runtime.outputs.load_delivery_candidate_sources(output_id, action["id"], selection_id, owned))
     (source_action_id, device_file_id, intermediate_file_id, original_name,
      source_action_name, plan_name) = row
 
@@ -1239,18 +1214,8 @@ async def _settle_saved_read_binding_failure(runtime, copy_id, error):
         owned.connection, facts["action_id"], copy_id, error))
     source_id = facts["source_device_file_id"]
     if source_id is None:
-        from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
-        from camctl.persistence.repositories.transactions import row_facts, saved_transaction_events
-
-        def photo_source(owned):
-            copy = row_facts(owned.connection, "file_copies", copy_id)
-            events = saved_transaction_events(owned.connection, key)
-            if copy is None or not events:
-                raise ConsistencyError("原绑定失败缺少拷贝或读取结果事务")
-            return verify_photo_cache_binding_failure(owned.connection, copy,
-                before_event_id=events[0]["event_id"], historical=True)
-
-        source_id = await runtime.database.read(photo_source)
+        source_id = await runtime.database.read(lambda owned:
+            runtime.outputs.load_saved_photo_binding_failure_source(copy_id, key, owned))
     details = error.get("details")
     if not isinstance(details, Mapping):
         raise ConsistencyError("原绑定失败缺少保存的详情")

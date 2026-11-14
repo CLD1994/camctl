@@ -1849,7 +1849,7 @@ class _GrantFileCommand:
             ):
                 raise ConsistencyError("分段检查副本的保存责任与正式来源不一致")
         elif reuse_photo_cache:
-            from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+            from camctl.persistence.repositories.photo_cache_reuse import read_bound_photo_cache
             bound = read_bound_photo_cache(output_id=output["id"], obtain_action_id=command.action_id,
                                            selection_id=selection["id"], owned=SimpleNamespace(connection=connection))
             if (bound is None or bound.result_page_event_id != command.reuse_photo_page_event_id
@@ -4254,7 +4254,7 @@ class _ReadSourceFallbackCommand:
             connection, "intermediate_files", current_file_id)
         source = self._required(connection, "device_files", int(output["device_file_id"]))
         if photo:
-            from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+            from camctl.persistence.repositories.photo_cache_reuse import read_bound_photo_cache
             bound = read_bound_photo_cache(output_id=output["id"], obtain_action_id=action["id"],
                                            selection_id=selection["id"], owned=self._owned)
             expected_role = (int(_DEVICE_FILE_ROLE.ORIGINAL) if output["kind"] == int(_OUTPUT_KIND.ORIGINAL)
@@ -4620,7 +4620,7 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
               and action["status"] in (2, 6)):
             disposition = FailureSaveDisposition.RETIRED
         if copy["source_device_file_id"] is None:
-            from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+            from camctl.persistence.repositories.photo_cache_reuse import verify_photo_cache_binding_failure
             historical = self._command.read_result_key is not None and disposition is not None
             before_event_id = scope.max_event_id + 1
             if historical:
@@ -4730,7 +4730,7 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
             raise TransactionError("原 H 的读取绑定组归属和原责任不符")
         source = self._state["device_files"][self._command.source_device_file_id]
         if copy["source_device_file_id"] is None:
-            from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+            from camctl.persistence.repositories.photo_cache_reuse import verify_photo_cache_binding_failure
             if verify_photo_cache_binding_failure(scope.connection, copy, before_event_id=transaction.first_event_id,
                                                    historical=True) != source["id"]:
                 raise TransactionError("原绑定失败改变照片缓存的原设备来源")
@@ -5155,7 +5155,7 @@ class _RetentionReleaseCommand(_WorkFileMixin):
             raise ConsistencyError(
                 f"归属尚未进入允许释放的终态: {owner['status']!r}")
         if table == "actions":
-            from camctl.outputs.photo_cache_reuse import photo_cache_waiters_settled
+            from camctl.persistence.repositories.photo_cache_reuse import photo_cache_waiters_settled
             if not photo_cache_waiters_settled(file["id"], SimpleNamespace(connection=connection)):
                 raise ConsistencyError("照片角色缓存仍被 H 时固定的取回使用")
         self._require_stopped_operations(connection, file)
@@ -5458,7 +5458,7 @@ def _load_work_file_facts(owned: OwnedConnection, file_id: int) -> WorkFileFacts
                 f"中间文件的归属动作缺失: {file['owner_action_id']}")
         owner_finished = action["status"] in _WorkFileMixin._TERMINAL_ACTIONS
         if owner_finished and file["purpose"] in (int(_PURPOSE.CAPTURE_ORIGINAL), int(_PURPOSE.CAPTURE_PREVIEW)):
-            from camctl.outputs.photo_cache_reuse import photo_cache_waiters_settled
+            from camctl.persistence.repositories.photo_cache_reuse import photo_cache_waiters_settled
             owner_finished = photo_cache_waiters_settled(file_id, owned)
         if file["purpose"] == int(_PURPOSE.RECORDING_INPUT):
             with closing(connection.execute(
@@ -5725,7 +5725,7 @@ class _SettleCanceledObtainCommand:
                     photo_cache = False
                     if (output["device_file_id"] is not None and copy["source_device_file_id"] is None
                             and copy["source_intermediate_file_id"] is not None):
-                        from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+                        from camctl.persistence.repositories.photo_cache_reuse import read_bound_photo_cache
                         bound = read_bound_photo_cache(output_id=output["id"], obtain_action_id=action_id,
                             selection_id=selection_id, owned=SimpleNamespace(connection=connection),
                             allow_released=True, historical=True)
@@ -6304,6 +6304,37 @@ class OutputsRepository:
         receipt = self._commit_operation(_SlotChangeCommand(request, _SLOT_RELEASE, key), key, owned)
         return _outcome_of(receipt)
 
+    def load_delivery_candidate_sources(self, output_id, obtain_action_id, selection_id, owned):
+        """读取候选产物和原 H 上可复用的检查或照片角色副本。"""
+        connection = owned.connection
+        with closing(connection.execute(
+            "SELECT o.source_action_id,o.device_file_id,o.intermediate_file_id,"
+            "o.original_name,a.name,p.name FROM outputs o"
+            " JOIN actions a ON a.id=o.source_action_id"
+            " JOIN plans p ON p.id=a.plan_id WHERE o.id=?", (output_id,))) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            raise ConsistencyError(f"取回条目的产物或来源动作缺失: {output_id}")
+        source_action_id, device_file_id = row[:2]
+        bound = photo_bound = None
+        if device_file_id is not None:
+            from .segment_selections import is_segmented_source
+            from camctl.outputs.segment_copy_reuse import read_bound_check_copy
+            if is_segmented_source(connection, int(source_action_id)):
+                bound = read_bound_check_copy(source_action_id=int(source_action_id),
+                    source_device_file_id=int(device_file_id), obtain_action_id=int(obtain_action_id),
+                    selection_id=selection_id, owned=owned)
+            else:
+                from .photo_cache_reuse import read_bound_photo_cache
+                photo_bound = read_bound_photo_cache(output_id=output_id,
+                    obtain_action_id=int(obtain_action_id), selection_id=selection_id, owned=owned)
+        return row, bound, photo_bound
+
+    def load_saved_photo_binding_failure_source(self, copy_id, key, owned):
+        """读取原保存绑定失败所对应的照片设备源。"""
+        from .photo_cache_reuse import load_saved_photo_binding_failure_source
+        return load_saved_photo_binding_failure_source(copy_id, key, owned)
+
     def load_copy_state(self, copy_id: int, owned: OwnedConnection) -> CopyStateFacts:
         return _load_copy_state_facts(owned.connection, copy_id)
 
@@ -6776,7 +6807,7 @@ def _intermediate_guard(event, context) -> None:
                     reads = context.photo_result_reads
                     if reads is None:
                         raise EventValidationError("照片缓存释放缺少独立原事务读取")
-                    from camctl.outputs.photo_cache_reuse import photo_cache_waiters_settled
+                    from camctl.persistence.repositories.photo_cache_reuse import photo_cache_waiters_settled
                     if not photo_cache_waiters_settled(row.row_id, SimpleNamespace(connection=reads.connection)):
                         raise EventValidationError("照片缓存仍被 H 时固定的取回使用")
                     if _running_file_operations(reads.connection, row.row_id):
@@ -6977,7 +7008,7 @@ def _delivery_guard(event, context) -> None:
                     reads = context.current_reads
                     if reads is None:
                         raise EventValidationError("照片缓存绑定失败缺少原事务事实")
-                    from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+                    from camctl.persistence.repositories.photo_cache_reuse import verify_photo_cache_binding_failure
                     source_id = verify_photo_cache_binding_failure(reads.connection, copies[0], before_event_id=event.event_id)
                     source = row_facts(reads.connection, "device_files", source_id)
                     observer = None if source is None else row_facts(reads.connection, "actions", source["observer_action_id"])
@@ -7358,7 +7389,7 @@ def _copy_guard(event, context) -> None:
         if (original_action is not None and original_action.get("driver_id") == DRIVER_ID
                 and original_action.get("type") == int(_ACTION_TYPE.CAMERA_TAKE_PHOTO)
                 and original_action.get("execution_spec_json", {}).get("output_storage") == "device"):
-            from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+            from camctl.persistence.repositories.photo_cache_reuse import read_bound_photo_cache
             if context.current_reads is None:
                 raise EventValidationError("照片读取换源缺少独立原事务读取")
             try:
@@ -7569,7 +7600,7 @@ def _copy_guard(event, context) -> None:
                            if item.get("delivery_id") == values["delivery_id"]]
                 if len(members) != 1 or context.current_reads is None:
                     raise EventValidationError("照片缓存交付缺少原取回项及独立事务读取")
-                from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+                from camctl.persistence.repositories.photo_cache_reuse import read_bound_photo_cache
                 try:
                     bound = read_bound_photo_cache(output_id=output["id"],
                         obtain_action_id=parent["action_id"], selection_id=members[0]["selection_id"],

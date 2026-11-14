@@ -252,7 +252,7 @@ class CancelSettlementTests(unittest.TestCase):
             self.assertEqual((key, action, copy, error, identity), ('read-key', 7, 21,
                 {'code': 'device_binding_unavailable', 'stage': 'execution', 'details': {'reason': 'missing'}}, None))
         binding.saved_binding_read_failure = saved_failure
-        cache = ModuleType('camctl.outputs.photo_cache_reuse')
+        cache = ModuleType('camctl.persistence.repositories.photo_cache_reuse')
         source = [30]
         def verify(connection, copy, *, before_event_id, historical=False):
             if not historical:
@@ -344,7 +344,7 @@ class CancelSettlementTests(unittest.TestCase):
                     repo.CommandPlan = lambda **kwargs: SimpleNamespace(**kwargs)
                     repo.commit_operation = lambda command, key, owned: command.plan(owned)
                     repo._outcome_of = lambda outcome: outcome
-                    cache = ModuleType('camctl.outputs.photo_cache_reuse')
+                    cache = ModuleType('camctl.persistence.repositories.photo_cache_reuse')
                     def read_bound(**kwargs):
                         # 已清理的缓存仍有历史身份，但不能再授予读取资格。
                         if not (kwargs.get('allow_released') and kwargs.get('historical')):

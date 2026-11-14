@@ -2286,7 +2286,7 @@ def _operation_finish_guard(event, context) -> None:
                 from .read_end import load_read_end
                 photo_cache = copy.get("source_device_file_id") is None and copy.get("source_intermediate_file_id") is not None
                 if photo_cache:
-                    from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+                    from camctl.persistence.repositories.photo_cache_reuse import verify_photo_cache_binding_failure
                     source_id = verify_photo_cache_binding_failure(reads.connection, copy, before_event_id=event.event_id)
                     source = row_facts(reads.connection, "device_files", source_id)
                     observer = None if source is None else row_facts(reads.connection, "actions", source["observer_action_id"])
