@@ -10,10 +10,13 @@ C 模块为 POSIX 实现，在 Linux 或 WSL x86 Linux 构建当前工作区；
 from __future__ import annotations
 
 import os
+import queue
 import re
+import select
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -31,6 +34,29 @@ _NATIVE_POSIX = os.name == "posix"
 
 #: camctl 启动桥：读 CAMCTL_TEST_DRIVER_SPEC 登记替身后进入生产 CLI。
 _BRIDGE = _REPO / "tests" / "integration" / "_camctl_stub_entry.py"
+
+
+def _readable_pipes(pipes, timeout):
+    if os.name == "posix":
+        return select.select(pipes, [], [], timeout)[0]
+    # Windows 的 select 不支持匿名管道；只在有数据时调用 os.read。
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    peek = ctypes.windll.kernel32.PeekNamedPipe
+    peek.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                     wintypes.LPVOID, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    peek.restype = wintypes.BOOL
+    ready = []
+    for pipe in pipes:
+        available = wintypes.DWORD()
+        if not peek(msvcrt.get_osfhandle(pipe.fileno()), None, 0, None,
+                    ctypes.byref(available), None) or available.value:
+            ready.append(pipe)
+    if not ready:
+        time.sleep(timeout)
+    return ready
 
 
 def to_wsl(path: Path) -> str:
@@ -184,7 +210,8 @@ class HostDemo:
     """真实 host-demo 主程序的子进程会话（终端命令协议）。"""
 
     def __init__(self, deployment, demo_path: str,
-                 launcher: str | None = None, *, launcher_is_camctl: bool = True) -> None:
+                 launcher: str | None = None, *, launcher_is_camctl: bool = True,
+                 reply_timeout_s: float = 600) -> None:
         self.deployment = deployment
         self.log_path = deployment.root / "module.log"
         self._demo_path = demo_path
@@ -192,8 +219,17 @@ class HostDemo:
         self._launcher_is_camctl = launcher_is_camctl
         self.proc: subprocess.Popen | None = None
         self._host_pid: int | None = None
+        self._reply_timeout_s = reply_timeout_s
+        self._replies = queue.Queue()
+        self._stderr = bytearray()
+        self._reader_stop = threading.Event()
+        self._reader = None
 
     def start(self, *, env: dict[str, str] | None = None, use_default_paths: bool = False) -> None:
+        self._replies = queue.Queue()
+        self._stderr = bytearray()
+        self._reader_stop.clear()
+        self._host_pid = None
         if use_default_paths:
             # 默认 CLI 路径由用例在部署目录中生成受限 launcher；保留 C 的默认路径补齐。
             command = [self._demo_path]
@@ -215,20 +251,61 @@ class HostDemo:
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
+        self._reader = threading.Thread(target=self._read_output, daemon=True)
+        self._reader.start()
         self._host_pid = self.proc.pid if _NATIVE_POSIX else int(self._reply())
         prompt = self._reply()
         assert all(command in prompt for command in ("submit <", "claim", "logs", "help")), prompt
 
     def _reply(self) -> str:
         assert self.proc is not None
-        line = self.proc.stdout.readline().strip()
-        if not line and self.proc.poll() is not None:
-            self.fail("host-demo 提前退出")
-        return line
+        deadline = time.monotonic() + self._reply_timeout_s
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.fail("等待 host-demo 完整回复超时")
+            try:
+                line = self._replies.get(timeout=min(remaining, 0.05))
+            except queue.Empty:
+                continue
+            if isinstance(line, Exception):
+                raise AssertionError(f"读取 host-demo 输出失败: {line}") from line
+            if line is None:
+                self.fail(f"host-demo 输出结束或提前退出，退出码 {self.proc.poll()}")
+            return line.decode("utf-8").strip()
+
+    def _read_output(self) -> None:
+        assert self.proc is not None
+        stdout, stderr = self.proc.stdout, self.proc.stderr
+        pipes = [stdout, stderr]
+        pending = bytearray()
+        try:
+            while pipes and not self._reader_stop.is_set():
+                stdout_closed = False
+                for pipe in _readable_pipes(pipes, 0.05):
+                    data = os.read(pipe.fileno(), 4096)
+                    if not data:
+                        pipes.remove(pipe)
+                        if pipe is stdout:
+                            stdout_closed = True
+                    elif pipe is stderr:
+                        self._stderr.extend(data[:max(0, 400 - len(self._stderr))])
+                    else:
+                        pending.extend(data)
+                        while b"\n" in pending:
+                            line, _, remainder = pending.partition(b"\n")
+                            pending = bytearray(remainder)
+                            self._replies.put(line)
+                if stdout_closed or self.proc.poll() is not None:
+                    self._replies.put(None)
+                    if self.proc.poll() is not None:
+                        break
+        except OSError as error:
+            self._replies.put(error)
 
     def fail(self, message: str) -> None:
         assert self.proc is not None
-        raise AssertionError(f"{message}: {self.proc.stderr.read()[:400]}")
+        raise AssertionError(f"{message}: {self._stderr.decode('utf-8', errors='replace')}")
 
     def submit(self, plan: Path) -> None:
         assert self.proc is not None
@@ -298,9 +375,10 @@ class HostDemo:
         # 先冻结主程序，避免清理旧 run 时自动补起新 run；再终止它
         # 创建的具体执行组及主程序。该操作只用于测试进程收场。
         cleanup = "\n".join([
-            "import os, signal, time",
+            "import os, signal, sys, time",
             "from pathlib import Path",
-            f"os.kill({self._host_pid}, signal.SIGSTOP)",
+            f"try: os.kill({self._host_pid}, signal.SIGSTOP)",
+            "except ProcessLookupError: sys.exit(0)",
             f"root = Path('/proc/{self._host_pid}/task')",
             "groups = set()",
             "if root.exists():",
@@ -315,16 +393,19 @@ class HostDemo:
             "for group in groups:",
             "    try: os.killpg(group, signal.SIGKILL)",
             "    except ProcessLookupError: pass",
-            f"os.kill({self._host_pid}, signal.SIGTERM)",
-            f"os.kill({self._host_pid}, signal.SIGCONT)",
+            "try:",
+            f"    os.kill({self._host_pid}, signal.SIGTERM)",
+            f"    os.kill({self._host_pid}, signal.SIGCONT)",
+            "except ProcessLookupError: pass",
             "deadline = time.monotonic() + 3",
             "while any(Path(f'/proc/{pid}').exists() for pid in groups) and time.monotonic() < deadline:",
             "    time.sleep(.01)",
         ])
-        cleanup_python = to_wsl(Path(sys.executable)) if _NATIVE_POSIX else _wsl_python()
-        result = run_wsl(f"{shlex.quote(cleanup_python)} -c {shlex.quote(cleanup)}", timeout_s=15)
-        assert result.returncode == 0, result.stderr
-        if not _NATIVE_POSIX:
+        if self.proc.poll() is None and self._host_pid is not None:
+            cleanup_python = to_wsl(Path(sys.executable)) if _NATIVE_POSIX else _wsl_python()
+            result = run_wsl(f"{shlex.quote(cleanup_python)} -c {shlex.quote(cleanup)}", timeout_s=15)
+            assert result.returncode == 0, result.stderr
+        if not _NATIVE_POSIX and self.proc.poll() is None and self._host_pid is not None:
             # cleanup 已对主程序发出 SIGTERM；到这一步通常已退出，
             # 仅在仍存活时补一次 TERM，不把已退出当作失败。
             result = run_wsl(
@@ -338,4 +419,9 @@ class HostDemo:
         except subprocess.TimeoutExpired:
             self.proc.kill()
             self.proc.wait(timeout=15)
+        self._reader_stop.set()
+        self._reader.join(timeout=1)
+        assert not self._reader.is_alive(), "host-demo 输出读取未结束"
+        self.proc.stdout.close()
+        self.proc.stderr.close()
         self.proc = None

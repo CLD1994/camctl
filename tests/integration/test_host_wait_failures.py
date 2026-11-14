@@ -6,6 +6,8 @@ import json
 import os
 import shlex
 import sqlite3
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +24,86 @@ def _deployment(root):
         root=root, ready=ready, processing=processing, config_path=None,
         state_db=root / "state.db",
     )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="测试进程使用 POSIX 可执行脚本")
+@pytest.mark.parametrize("operation,output", [
+    ("start", ""), ("start", "partial"),
+    ("submit", ""), ("claim", "partial"),
+])
+def test_host_reply_requires_a_complete_line_within_deadline(tmp_path, operation, output):
+    deployment = _deployment(tmp_path)
+    host = tmp_path / "host"
+    host.write_text(
+        f"#!{sys.executable}\n"
+        "import sys, time\n"
+        + ("print('submit < claim logs help', flush=True)\nsys.stdin.readline()\n"
+           if operation != "start" else "")
+        + f"sys.stdout.write({output!r}); sys.stdout.flush()\n"
+        "sys.stderr.write('reply diagnostic'); sys.stderr.flush()\n"
+        "time.sleep(30)\n", encoding="utf-8")
+    host.chmod(0o700)
+    demo = HostDemo(deployment, str(host), launcher_is_camctl=False, reply_timeout_s=0.5)
+    started = time.monotonic()
+    try:
+        if operation != "start":
+            demo.start()
+        with pytest.raises(AssertionError) as failure:
+            if operation == "start":
+                demo.start()
+            elif operation == "submit":
+                demo.submit(tmp_path / "plan")
+            else:
+                demo.claim()
+        assert "超时" in str(failure.value)
+        assert "reply diagnostic" in str(failure.value)
+        assert time.monotonic() - started < 5
+    finally:
+        demo.stop()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="测试进程使用 POSIX 可执行脚本")
+@pytest.mark.parametrize("hold_stdout", [False, True])
+def test_host_exit_does_not_wait_for_descendant_to_close_output(tmp_path, hold_stdout):
+    deployment = _deployment(tmp_path)
+    host = tmp_path / "host"
+    host.write_text(
+        f"#!{sys.executable}\n"
+        "import subprocess, sys\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2)'], "
+        f"stdin=subprocess.DEVNULL, stdout={'None' if hold_stdout else 'subprocess.DEVNULL'})\n"
+        "sys.stderr.write('original error'); sys.stderr.flush()\n"
+        "sys.exit(7)\n", encoding="utf-8")
+    host.chmod(0o700)
+    demo = HostDemo(deployment, str(host), launcher_is_camctl=False, reply_timeout_s=1)
+    started = time.monotonic()
+    try:
+        with pytest.raises(AssertionError) as failure:
+            demo.start()
+        assert "提前退出" in str(failure.value)
+        assert "original error" in str(failure.value)
+        assert time.monotonic() - started < 1.5
+    finally:
+        demo.stop()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="测试进程使用 POSIX 可执行脚本")
+def test_host_reply_drains_stderr_before_accepting_complete_line(tmp_path):
+    deployment = _deployment(tmp_path)
+    host = tmp_path / "host"
+    host.write_text(
+        f"#!{sys.executable}\n"
+        "import sys, time\n"
+        "sys.stderr.write('x' * 200000); sys.stderr.flush()\n"
+        "print('submit < claim logs help', flush=True)\n"
+        "time.sleep(30)\n", encoding="utf-8")
+    host.chmod(0o700)
+    demo = HostDemo(deployment, str(host), launcher_is_camctl=False, reply_timeout_s=2)
+    try:
+        demo.start()
+        assert demo.proc.poll() is None
+    finally:
+        demo.stop()
 
 
 @pytest.mark.skipif(os.name != "posix", reason="真实 POSIX host 观察器")
