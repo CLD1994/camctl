@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import os
+from pathlib import Path
 import sys
 import threading
 import time
@@ -65,81 +67,76 @@ class RealFileStream:
             os.close(self._fd)
 
 
-async def test_real_file_offset_and_short_read() -> None:
-    path = _temp_file(b"0123456789")
-    stream = RealFileStream(path, start=7)
-    session = await open_read(
-        SourceFile(file_id="9", locator={}, size_bytes=10),
-        7,
-        _TICKET,
-        stream=stream,
-        no_data_timeout_s=Decimal("5"),
-    )
-    chunk = await asyncio.to_thread(session.read_chunk, 5)
-    assert chunk.data == b"789"
-    assert chunk.eof is True
-    await session.wait_stopped()
+@asynccontextmanager
+async def _read_session(stream, *, size, offset, timeout):
+    try:
+        session = await open_read(
+            SourceFile(file_id="9", locator={}, size_bytes=size), offset, _TICKET,
+            stream=stream, no_data_timeout_s=timeout,
+        )
+    except BaseException:
+        stream.close()
+        raise
+    try:
+        yield session
+    finally:
+        session.request_stop()
+        await asyncio.wait_for(session.wait_stopped(), 5)
+
+
+async def test_real_file_offset_and_short_read(tmp_path: Path) -> None:
+    path = tmp_path / "source"
+    path.write_bytes(b"0123456789")
+    stream = RealFileStream(str(path), start=7)
+    async with _read_session(stream, size=10, offset=7, timeout=Decimal("5")) as session:
+        chunk = await asyncio.to_thread(session.read_chunk, 5)
+        assert chunk.data == b"789"
+        assert chunk.eof is True
     assert stream.closed
 
 
-async def test_cancel_while_waiting_and_recording_stop_still_runs() -> None:
-    path = _temp_file(b"abcdef")
-    stream = RealFileStream(path, delay_before_first=30.0)
-    session = await open_read(
-        SourceFile(file_id="9", locator={}, size_bytes=6),
-        0,
-        _TICKET,
-        stream=stream,
-        no_data_timeout_s=Decimal("30"),
-    )
-    reading = asyncio.ensure_future(asyncio.to_thread(session.read_chunk, 4))
-    await asyncio.sleep(0.05)
-    # 读取线程在真实等待源数据时，事件循环执行真实受管的必要控制。
-    class _Never:
-        async def requested(self) -> None:
-            await asyncio.Future()
+async def test_cancel_while_waiting_and_recording_stop_still_runs(tmp_path: Path) -> None:
+    path = tmp_path / "source"
+    path.write_bytes(b"abcdef")
+    stream = RealFileStream(str(path), delay_before_first=30.0)
+    async with _read_session(stream, size=6, offset=0, timeout=Decimal("30")) as session:
+        reading = asyncio.create_task(asyncio.to_thread(session.read_chunk, 4))
+        try:
+            await asyncio.sleep(0.05)
+            # 读取线程在真实等待源数据时，事件循环执行真实受管的必要控制。
+            class _Never:
+                async def requested(self) -> None:
+                    await asyncio.Future()
 
-    control = await execute_tool(
-        ToolSpec(
-            argv=(sys.executable, "-c", "print('control-ok')"),
-            timeout_s=Decimal("5"),
-            terminate_grace_s=Decimal("1"),
-        ),
-        stop=_Never(),
-    )
-    assert control.exit is not None
-    assert control.exit.exit_code == 0
-    session.request_stop()
-    chunk = await reading
-    assert chunk.error == "stopped"
-    end = await session.wait_stopped()
-    assert end.stopped is True
+            control = await execute_tool(
+                ToolSpec(
+                    argv=(sys.executable, "-c", "print('control-ok')"),
+                    timeout_s=Decimal("5"),
+                    terminate_grace_s=Decimal("1"),
+                ),
+                stop=_Never(),
+            )
+            assert control.exit is not None
+            assert control.exit.exit_code == 0
+            session.request_stop()
+            chunk = await asyncio.wait_for(reading, 5)
+            assert chunk.error == "stopped"
+            end = await asyncio.wait_for(session.wait_stopped(), 5)
+            assert end.stopped is True
+        finally:
+            session.request_stop()
+            await asyncio.wait_for(asyncio.gather(reading, return_exceptions=True), 5)
     assert stream.cancelled == 1
     assert stream.closed
 
 
-async def test_no_data_timeout_with_real_clock() -> None:
-    path = _temp_file(b"xy")
-    stream = RealFileStream(path, start=2)
-    session = await open_read(
-        SourceFile(file_id="9", locator={}, size_bytes=100),
-        2,
-        _TICKET,
-        stream=stream,
-        no_data_timeout_s=Decimal("0.1"),
-    )
-    start = time.monotonic()
-    chunk = await asyncio.to_thread(session.read_chunk, 8)
-    assert chunk.error == "no_data"
-    assert time.monotonic() - start >= 0.1
-    await session.wait_stopped()
+async def test_no_data_timeout_with_real_clock(tmp_path: Path) -> None:
+    path = tmp_path / "source"
+    path.write_bytes(b"xy")
+    stream = RealFileStream(str(path), start=2)
+    async with _read_session(stream, size=100, offset=2, timeout=Decimal("0.1")) as session:
+        start = time.monotonic()
+        chunk = await asyncio.to_thread(session.read_chunk, 8)
+        assert chunk.error == "no_data"
+        assert time.monotonic() - start >= 0.1
     assert stream.closed
-
-
-def _temp_file(content: bytes) -> str:
-    import tempfile
-
-    handle, path = tempfile.mkstemp()
-    with os.fdopen(handle, "wb") as writer:
-        writer.write(content)
-    return path

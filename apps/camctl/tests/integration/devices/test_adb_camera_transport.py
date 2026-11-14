@@ -62,7 +62,6 @@ class LocalAdbChannel:
     """保留具体适配生成的远端 shell，替换指定 serial 的 ADB 通道。"""
     def __init__(self):
         self.calls = []
-        self._tmp = Path(tempfile.mkdtemp(prefix="adb-channel-"))
 
     async def run(self, spec, stop):
         return await self._run(spec, stop)
@@ -76,10 +75,11 @@ class LocalAdbChannel:
         remote = shlex.split(spec.argv[5])
         assert remote[:2] == ["sh", "-c"] and len(remote) == 3
         # 相机已核实的 sh 支持 read -d；容器 dash 不支持，以已有 Bash 执行原脚本。
-        local = replace(spec, argv=_local_bash_argv(remote[2], self._tmp))
-        if stdout_sink is not None:
-            return await AdbTransport().run_stream(local, stop, stdout_sink)
-        return await AdbTransport().run(local, stop)
+        with tempfile.TemporaryDirectory(prefix="adb-channel-") as directory:
+            local = replace(spec, argv=_local_bash_argv(remote[2], Path(directory)))
+            if stdout_sink is not None:
+                return await AdbTransport().run_stream(local, stop, stdout_sink)
+            return await AdbTransport().run(local, stop)
 
 
 def _filesystem(transport=None):
@@ -336,13 +336,16 @@ async def test_concrete_driver_file_ports_preserve_original_identity_and_content
     session = await driver.open_read(source, 65535,
         AttemptTicket(1, "read", "9", "copy/9", 1), idle_timeout_s=Decimal("5"))
     chunks = bytearray()
-    while True:
-        chunk = await asyncio.to_thread(session.read_chunk, 65536)
-        assert chunk.error is None
-        chunks.extend(chunk.data or b"")
-        if chunk.eof:
-            break
-    end = await session.wait_stopped()
+    try:
+        while True:
+            chunk = await asyncio.to_thread(session.read_chunk, 65536)
+            assert chunk.error is None
+            chunks.extend(chunk.data or b"")
+            if chunk.eof:
+                break
+    finally:
+        session.request_stop()
+        end = await asyncio.wait_for(session.wait_stopped(), 5)
     assert end.stopped and end.error is None and chunks == content[65535:]
     assert path.read_bytes() == content
     deleted = await driver.delete(ControlRequest("delete_file", BINDING, {"identity_key": source.file_id, "locator": locator},
@@ -388,14 +391,17 @@ async def test_read_session_preserves_unaligned_offset_and_actual_end(tmp_path):
     ticket = AttemptTicket(1, "read", "9", "copy/9", 1)
     session = await fs.open_read(source, 65535, ticket, idle_timeout_s=Decimal("5"))
     result = bytearray()
-    while True:
-        chunk = await asyncio.to_thread(session.read_chunk, 65536)
-        assert chunk.error is None
-        result.extend(chunk.data or b"")
-        if chunk.eof:
-            break
-    assert result == content[65535:]
-    end = await session.wait_stopped()
+    try:
+        while True:
+            chunk = await asyncio.to_thread(session.read_chunk, 65536)
+            assert chunk.error is None
+            result.extend(chunk.data or b"")
+            if chunk.eof:
+                break
+        assert result == content[65535:]
+    finally:
+        session.request_stop()
+        end = await asyncio.wait_for(session.wait_stopped(), 5)
     assert end.stopped and end.error is None and end.bytes_read == len(content) - 65535
     assert path.read_bytes() == content
 
@@ -407,11 +413,14 @@ async def test_read_shorter_than_fixed_source_is_a_failure(tmp_path):
     fs = _filesystem()
     source = _source(path, 20)
     session = await fs.open_read(source, 0, AttemptTicket(1, "read", "9", "copy/9", 1), idle_timeout_s=Decimal("5"))
-    first = await asyncio.to_thread(session.read_chunk, 20)
-    assert first.data == b"short" and not first.eof
-    with pytest.raises(OSError):
-        await asyncio.to_thread(session.read_chunk, 20)
-    end = await session.wait_stopped()
+    try:
+        first = await asyncio.to_thread(session.read_chunk, 20)
+        assert first.data == b"short" and not first.eof
+        with pytest.raises(OSError):
+            await asyncio.to_thread(session.read_chunk, 20)
+    finally:
+        session.request_stop()
+        end = await asyncio.wait_for(session.wait_stopped(), 5)
     assert end.error == "failed" and end.bytes_read == 5
 
 
@@ -453,5 +462,7 @@ async def test_stop_request_waits_for_actual_read_call_return(tmp_path):
         assert chunk.error == end.error == "stopped"
         assert end.bytes_read == 0 and end.stopped
     finally:
+        session.request_stop()
         transport.release.set()
         await asyncio.wait_for(asyncio.gather(reading, return_exceptions=True), 5)
+        await asyncio.wait_for(session.wait_stopped(), 5)
