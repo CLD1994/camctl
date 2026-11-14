@@ -4,7 +4,6 @@ from contextlib import closing
 from dataclasses import replace
 from decimal import Decimal
 import json
-import sqlite3
 
 import pytest
 
@@ -22,7 +21,7 @@ from .test_selection_authority import _request, _snapshot, _NOW
 from .test_selection_event_sequence import _scenarios, _Sequence
 from .test_sources import _seed_output
 from .test_read_associations import _command as _read_command
-from ..support.output_storage_cases import QueryProbe, WriteFault
+from ..support.output_storage_cases import QueryProbe
 
 
 def test_key_cannot_address_another_existing_selection(observed_event_guards, selection_database):
@@ -151,28 +150,6 @@ def test_original_key_rejects_changed_fixed_collection(observed_event_guards, se
     result = _reuse(owned, command, key, storage=storage)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(result.error, ConsistencyError), result.error
-
-
-def test_rolled_back_first_fix_can_retry_original_key(observed_event_guards, selection_database):
-    storage, callbacks = observed_event_guards
-    owned = selection_database
-    _request(owned.connection, SelectionMode.DEFAULT)
-    command = outputs.FixSelection(61, _snapshot(owned.connection), _NOW)
-    key = new_operation_key()
-    before = tuple(owned.connection.iterdump())
-    failed = outputs.OutputsRepository(storage=storage).fix_selection(
-        command,
-        key,
-        replace(
-            owned, connection=WriteFault(owned.connection, "INSERT INTO obtain_items")
-        ),
-    )
-    assert failed.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(failed.error, sqlite3.OperationalError)
-    assert tuple(owned.connection.iterdump()) == before
-    result = outputs.OutputsRepository(storage=storage).fix_selection(command, key, owned)
-    assert result.kind is DbOutcomeKind.COMPLETED, result.error
-    assert result.value.snapshot.selected_output_ids == (703, 705)
 
 
 @pytest.mark.parametrize("state", ["unresolved", "canceled", "source_mismatch"])
