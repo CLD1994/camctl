@@ -42,7 +42,7 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import EventValidationError
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import capture as capture_module
-from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.capture import CaptureRepository, CheckDecisionRetired
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.transaction_fixtures import decorate_transaction_command
@@ -720,3 +720,75 @@ def test_check_threshold_rejects_actual_read_facts(environment, copy_state):
     _seed_empty_check_copy(owned, **{copy_state: True})
     _assert_rolled_back(_save(owned, _threshold_request()))
     assert "threshold_s" not in _json_column(owned, "check_basis_json")
+
+
+def test_uncommitted_threshold_is_retired_after_cancel(environment):
+    owned = environment
+    _assert_saved(_save(owned, _check_required()))
+    owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
+    owned.connection.commit()
+    key = new_operation_key()
+    before = _total_events(owned)
+    outcome = _save(owned, _threshold_request(), key=key)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    assert outcome.value == CheckDecisionRetired(action_id=1, processing_id=1)
+    assert _total_events(owned) == before
+    assert "threshold_s" not in _json_column(owned, "check_basis_json")
+    assert _row(owned, "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", str(key)) == (0,)
+    _assert_rolled_back(_save(owned, _threshold_request(target_duration_ms=61_000)))
+
+
+@pytest.mark.parametrize("has_threshold", [False, True])
+def test_first_check_decision_after_cancel_is_saved_not_retired(environment, has_threshold):
+    owned = environment
+    owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
+    owned.connection.commit()
+    key = new_operation_key()
+    request = _threshold_request(occurred_at=_NOW + 1) if has_threshold else _check_required()
+    _assert_saved(_save(owned, request, key=key))
+    replay = _save(owned, request, key=key)
+    assert replay.kind is DbOutcomeKind.COMPLETED
+    assert replay.value.disposition is ProcessingDisposition.ALREADY
+
+
+def test_threshold_cannot_retire_on_failed_original_key_read(environment):
+    import sqlite3
+
+    owned = environment
+    _assert_saved(_save(owned, _check_required()))
+    owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
+    owned.connection.commit()
+    def deny_history_read(action, table, column, database, trigger):
+        if action == sqlite3.SQLITE_READ and table == "history_transactions":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    owned.connection.set_authorizer(deny_history_read)
+    try:
+        outcome = _save(owned, _threshold_request())
+    finally:
+        owned.connection.set_authorizer(None)
+    assert outcome.kind is not DbOutcomeKind.COMPLETED
+    assert not isinstance(outcome.value, CheckDecisionRetired)
+
+
+@pytest.mark.parametrize("operation", ["BEGIN", "ROLLBACK"])
+def test_threshold_cannot_retire_when_transaction_boundary_fails(environment, operation):
+    import sqlite3
+
+    owned = environment
+    _assert_saved(_save(owned, _check_required()))
+    owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
+    owned.connection.commit()
+    def deny_boundary(action, argument, column, database, trigger):
+        if action == sqlite3.SQLITE_TRANSACTION and argument == operation:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    owned.connection.set_authorizer(deny_boundary)
+    try:
+        outcome = _save(owned, _threshold_request())
+    finally:
+        owned.connection.set_authorizer(None)
+        if owned.connection.in_transaction:
+            owned.connection.rollback()
+    assert outcome.kind is not DbOutcomeKind.COMPLETED
+    assert not isinstance(outcome.value, CheckDecisionRetired)

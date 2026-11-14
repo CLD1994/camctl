@@ -432,6 +432,14 @@ class FinishDisposition(Enum):
 
 
 @dataclass(frozen=True)
+class CheckDecisionRetired:
+    """原检查门槛申请未提交，所属动作已取消，可结束该申请责任。"""
+
+    action_id: int
+    processing_id: int
+
+
+@dataclass(frozen=True)
 class CaptureResult:
     """完成登记的已保存事实。"""
 
@@ -1704,9 +1712,13 @@ class _CheckDecisionCommand(_MediaProcessingCommand):
         processing = self._load_processing(connection, request.processing_id)
         self._claim(processing)
         specs = self._specs(processing)
-        plan = self._save_specs(scope, specs)
         if processing["check_decision"] == 3:
             action = self._load_row(connection, "actions", processing["action_id"])
+            if action["status"] in (2, 6) and action["cancel_requested"] == 1:
+                return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True, result=CheckDecisionRetired(action["id"], processing["id"]))
+        plan = self._save_specs(scope, specs)
+        if processing["check_decision"] == 3:
             plan = replace(plan, plan_read_scope=PlanReadScope(action["plan_id"], 128))
         return plan
 
@@ -2525,7 +2537,8 @@ class CaptureRepository:
 
     def save_check_decision(
         self, command: CheckDecisionSave, key: OperationKey, owned: OwnedConnection
-    ) -> DbOutcome[ProcessingOutcome]:
+    ) -> DbOutcome[ProcessingOutcome | CheckDecisionRetired]:
+        """保存或核实检查决定；未提交的门槛补写在原动作取消后可靠退役。"""
         receipt = commit_operation(_CheckDecisionCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
