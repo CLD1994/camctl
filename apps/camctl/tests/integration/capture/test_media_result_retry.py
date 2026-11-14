@@ -50,10 +50,8 @@ class _ActualTools:
     async def repair(self, input, output, *, trim_s):
         self.repairs += 1
         identity = FileTaskId(f"repair-{self.repairs}")
-        if self.branch == "check":
-            return FileTaskResult(identity, ran=False)
         path = Path(output.root) / output.relative_path
-        if self.branch in ("decision", "repair_failed"):
+        if self.branch in ("check", "decision", "repair_failed"):
             return FileTaskResult(identity, ran=True, value=MediaArtifact(
                 f"original repair diagnostic {self.repairs}",
                 FileObservation(FileObservationKind.MISSING, path),
@@ -111,7 +109,7 @@ async def test_media_actual_result_keeps_original_request_and_key_on_reconstruct
     original_request, original_key = inputs[0]
 
     # 原实际结果由同一会话保留；新连接与新运行时必须先核原申请。
-    # 后续时刻及余量改变只可用于尚未计算的决定，不能替换已持有决定。
+    # 后续时刻及余量改变不能替换原检查门槛或已持有决定。
     owned.connection.close()
     reopened = open_existing(roots.staging.parent / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
     try:
@@ -126,14 +124,17 @@ async def test_media_actual_result_keeps_original_request_and_key_on_reconstruct
         assert inputs[1] == (original_request, original_key)
         assert outcomes[1].kind is DbOutcomeKind.COMPLETED, outcomes[1].error
         assert tools.probes == 1, "原观察保存失败后不能再 probe"
-        assert tools.repairs == (0 if branch == "check" else 1), "原工具结果保存失败后不能再 repair"
+        assert tools.repairs == 1, "原检查结果恢复后只可按原门槛执行一次修复"
         assert len(driver.opens) == 1
         state = reopened.connection.execute(
             "SELECT check_state,media_json,repair_state,repair_basis_json,repair_error_json,repair_output_file_id"
             " FROM recording_processing WHERE id=1").fetchone()
         assert state[0] == 3
         assert parse_exact_json(state[1])["duration"]["seconds"] == Decimal("75.125")
-        if branch == "decision":
+        if branch == "check":
+            assert state[2] == 6
+            assert parse_exact_json(state[3])["threshold_s"] == Decimal("62")
+        elif branch == "decision":
             # 原决定仍需修复，后续实际工具失败不改变其原门槛。
             assert state[2] == 6
             assert parse_exact_json(state[3]) == original_request.basis.as_json()
@@ -149,6 +150,6 @@ async def test_media_actual_result_keeps_original_request_and_key_on_reconstruct
         await run_recording_media(current, 1, 1, source_id)
         assert tuple(reopened.connection.iterdump()) == before
         assert len(inputs) == 2 and tools.probes == 1
-        assert tools.repairs == (0 if branch == "check" else 1)
+        assert tools.repairs == 1
     finally:
         reopened.connection.close()
