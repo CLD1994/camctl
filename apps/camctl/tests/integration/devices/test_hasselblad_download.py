@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,7 +23,7 @@ from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
 from camctl.devices.read_session import SourceFile
 from camctl.host_files.models import BoundDirectories
 from camctl.operations.models import AttemptTicket
-from camctl.operations.process import LocalExit, RawToolOutcome
+from camctl.operations.process import LocalExit, RawToolOutcome, execute_tool
 
 
 RAW = b"II*\x00fixed camera original content"
@@ -67,13 +68,13 @@ class DownloadTransport:
         return RawToolOutcome(LocalExit(exit_code=0), output, None, None)
 
 
-def harness(tmp_path, **kwargs):
+def harness(tmp_path, *, monotonic_ns=time.monotonic_ns, transport=None, **kwargs):
     staging = tmp_path / "staging"
     staging.mkdir()
-    transport = DownloadTransport(**kwargs)
+    transport = DownloadTransport(**kwargs) if transport is None else transport
     driver = HasselbladDriver({"camera-1": {"kind": "camera", "driver": DRIVER_ID,
         "hasselblad": {"executable": "/tool/hb_cli", "serial": "SERIAL", "product_id": 10}}},
-        BoundDirectories(staging), monotonic_ns=time.monotonic_ns, transport=transport)
+        BoundDirectories(staging), monotonic_ns=monotonic_ns, transport=transport)
     return driver, transport, staging
 
 
@@ -81,7 +82,16 @@ def harness(tmp_path, **kwargs):
 @pytest.mark.parametrize("variant,payload", [("original", RAW), ("thumbnail", PREVIEW)])
 @pytest.mark.parametrize("offset", [0, 7, "end"])
 async def test_fixed_download_reads_requested_offset_and_removes_owned_copy(tmp_path, variant, payload, offset):
-    driver, transport, staging = harness(tmp_path)
+    clock = [0]
+    class TimedDownloadTransport(DownloadTransport):
+        async def run(self, spec, stop):
+            result = await super().run(spec, stop)
+            if spec.argv[3] in ("list", "info"):
+                clock[0] += 7_000_000_000
+            return result
+
+    driver, transport, staging = harness(tmp_path, monotonic_ns=lambda: clock[0],
+                                         transport=TimedDownloadTransport())
     assert callable(getattr(driver, "open_read", None)), "驱动应提供受管相机读取"
     offset = len(payload) if offset == "end" else offset
     session = await driver.open_read(source(variant), offset, TICKET, idle_timeout_s=Decimal("10"))
@@ -97,6 +107,7 @@ async def test_fixed_download_reads_requested_offset_and_removes_owned_copy(tmp_
     assert end.stopped and end.error is None
     assert not (staging / "read-downloads" / "31-1").exists()
     assert [spec.argv[3] for spec in transport.calls] == ["list", "info", "download"]
+    assert [spec.timeout_s for spec in transport.calls] == [Decimal("180"), Decimal("173"), Decimal("166")]
 
 
 @pytest.mark.asyncio
@@ -223,7 +234,7 @@ async def test_cleanup_error_is_not_a_successful_read_end_and_can_be_recovered(t
     assert not (staging / "read-downloads" / "31-1").exists()
 
 
-def managed_harness(tmp_path, *, sleep=False, exit_code=0):
+def managed_harness(tmp_path, *, sleep=False, exit_code=0, transport=None):
     driver, _transport, staging = harness(tmp_path)
     script = tmp_path / "hb_cli"
     marker = tmp_path / "download-pid"
@@ -241,7 +252,7 @@ def managed_harness(tmp_path, *, sleep=False, exit_code=0):
     script.chmod(0o700)
     driver.devices["camera-1"]["hasselblad"]["executable"] = str(script)
     driver = HasselbladDriver(driver.devices, driver.roots, monotonic_ns=time.monotonic_ns,
-                              terminate_grace_s=Decimal("0.05"))
+                              terminate_grace_s=Decimal("0.05"), transport=transport)
     return driver, staging, marker
 
 
@@ -338,10 +349,25 @@ async def test_capture_artifacts_and_both_download_variants_have_identical_bytes
 @pytest.mark.skipif(os.name == "nt", reason="目标部署使用 POSIX 可执行脚本")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel", [False, True])
-async def test_real_timeout_or_cancel_waits_for_process_exit_before_removing_partial(tmp_path, monkeypatch, cancel):
-    from camctl.devices.drivers.hasselblad import driver as module
-    driver, staging, marker = managed_harness(tmp_path, sleep=True)
-    monkeypatch.setattr(module, "READ_PREPARATION_TIMEOUT_S", Decimal("0.4"))
+async def test_real_timeout_or_cancel_waits_for_process_exit_before_removing_partial(tmp_path, cancel):
+    from camctl.devices.drivers.hasselblad.driver import CameraReadError
+
+    class DownloadTimeoutTransport:
+        def __init__(self):
+            self.specs = []
+            self.download_result = None
+
+        async def run(self, spec, stop):
+            self.specs.append(spec)
+            if spec.argv[3] == "download":
+                # 注入受管工具超时；不表示驱动的 180 秒准备期限已耗尽。
+                result = await execute_tool(replace(spec, timeout_s=Decimal("0.4")), stop=stop)
+                self.download_result = result
+                return result
+            return await execute_tool(spec, stop=stop)
+
+    transport = None if cancel else DownloadTimeoutTransport()
+    driver, staging, marker = managed_harness(tmp_path, sleep=True, transport=transport)
     task = asyncio.create_task(driver.open_read(source(), 0, TICKET, idle_timeout_s=Decimal("10")))
     try:
         if cancel:
@@ -353,7 +379,7 @@ async def test_real_timeout_or_cancel_waits_for_process_exit_before_removing_par
                         break
             assert marker.exists()
             task.cancel()
-        with pytest.raises(asyncio.CancelledError if cancel else (TimeoutError, ValueError)):
+        with pytest.raises(asyncio.CancelledError if cancel else CameraReadError) as failure:
             await task
     finally:
         if not task.done():
@@ -368,3 +394,11 @@ async def test_real_timeout_or_cancel_waits_for_process_exit_before_removing_par
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
     assert not (staging / "read-downloads" / "31-1").exists()
+    if not cancel:
+        assert failure.value.reason == "timeout"
+        assert [spec.argv[3] for spec in transport.specs] == ["list", "info", "download"]
+        budgets = [spec.timeout_s for spec in transport.specs]
+        assert Decimal(0) < budgets[2] <= budgets[1] <= budgets[0] <= Decimal(180)
+        assert transport.download_result.error == "timeout"
+        assert transport.download_result.exit is not None
+        assert failure.value.steps[-1]["transport_error"] == "timeout"
