@@ -851,6 +851,7 @@ async def test_deferred_photo_obtain_downloads_each_role_and_records_delivery_by
 
     supervisor = Supervisor()
     executor = FileTaskExecutor(supervisor)
+    availability = None
     try:
         if timing in ("after", "redownload", "read_end"):
             await capture_handler("camera_take_photo")(1, runtime)
@@ -1012,10 +1013,37 @@ async def test_deferred_photo_obtain_downloads_each_role_and_records_delivery_by
         assert owned.connection.execute("SELECT size_bytes,sha256 FROM device_files ORDER BY id").fetchall() == [(None, None)] * 2
         assert len(capture_driver.requests) == 1
     finally:
-        settled = await supervisor.drain_required()
-        assert not settled.failed
-        assert not executor.unfinished_files()
-        owned.connection.close()
+        import sys
+
+        original_error = sys.exception()
+        errors = []
+        if availability is not None:
+            try:
+                availability.stop_new_work()
+            except BaseException as error:
+                errors.append(error)
+            try:
+                await availability.settle()
+            except BaseException as error:
+                errors.append(error)
+            try:
+                availability.check_completed()
+            except BaseException as error:
+                errors.append(error)
+        try:
+            settled = await supervisor.drain_required()
+            assert not settled.failed
+            assert not executor.unfinished_files()
+        except BaseException as error:
+            errors.append(error)
+        try:
+            owned.connection.close()
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            if original_error is not None:
+                errors.insert(0, original_error)
+            raise BaseExceptionGroup("照片取回及资源收场失败", errors)
 
 
 @pytest.mark.parametrize("missing", ["preview", "pair"])
