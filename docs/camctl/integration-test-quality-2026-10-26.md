@@ -50,7 +50,6 @@ Action6 的清理等待按[每文件每次正常运行一次机会](../architect
 
 最终 Action6 的 80 个、OSMO 的 132 个 CLI 进程树均实际采用内存与交换空间合计 2GiB 上限，最大合计峰值分别为 155,082,752 和 123,322,368 字节。原始预算收据无 OOM 或触限事件，全部专属组、委派与已登记进程收场。预算覆盖每次 CLI 及其全部后代；pytest、客户端和 C host 在组外。这些场景的通过不等于任意数据规模的容量证明，严格无交换能力继续单独验证。
 
-当前命令、原始 XML、日志、源码目录身份、20 项精确节点核对及预算收据集中在[证据索引](verification-data/2026-10-26-integration-quality/evidence-index.json)的 `repair/` 下。[最终节点及生产身份核对](verification-data/2026-10-26-integration-quality/repair/latest-final-verification.json)、[Action6 收据](verification-data/2026-10-26-integration-quality/repair/final-action6/after-latest-d896d4b2/final-acceptance.json)、[OSMO 收据](verification-data/2026-10-26-integration-quality/repair/final-osmo/after-latest-d896d4b2-receipt.json)、[历史收据](verification-data/2026-10-26-integration-quality/repair/final-history-after-latest/summary.json)和[合并专项](verification-data/2026-10-26-integration-quality/repair/latest-merge-review/review.json)分别保留实际验证边界。
 
 尚未取得整组客户端复用改造的同源码成功路径前后对照，因此不发布整组提速比例。其余旧共享夹具及仓库全量回归不在本轮通过声明内。以下章节保留各历史基线的诊断与测量，不能代替当前最终结果。
 
@@ -73,7 +72,7 @@ Action6 的清理等待按[每文件每次正常运行一次机会](../architect
 
 该基线上游已经补齐 `preparation.py` 三处异步等待，包括目录准备失败、设备准备失败及恢复判断；相关单元范围通过。Action6 越过上一轮启动前阻塞，但当时的生产保存与退出问题仍未解决。以下现场作为本次修复前证据。
 
-最新命令、日志、XML、源码身份、数据库事实及进程与预算收据归档在[证据索引](verification-data/2026-10-26-integration-quality/evidence-index.json)的 `sync8db/` 下。跨组件 CLI 使用内存与交换空间合计 2GiB 的进程树预算；Action6、OSMO 各六个组全部收场，最大合计峰值分别为 378,114,048 和 282,722,304 字节，没有 OOM。两组客户端、host、CLI 及专属委派均已收场。业务失败不能计作容量验收通过，普通组件和单元测试也不能据此声明整个程序已通过容量验收。
+跨组件 CLI 使用内存与交换空间合计 2GiB 的进程树预算；Action6、OSMO 各六个组全部收场，最大合计峰值分别为 378,114,048 和 282,722,304 字节，没有 OOM。两组客户端、host、CLI 及专属委派均已收场。业务失败不能计作容量验收通过，普通组件和单元测试也不能据此声明整个程序已通过容量验收。
 
 ## 生产阻塞的修复前证据与处理要求
 
@@ -132,7 +131,6 @@ Action6 和 OSMO 测试用于记录数据库调用的包装，仍符合实际接
 
 最后同步解决了 `lifecycle.py`、`work_file_assembly.py` 和 `media_flow.py` 的冲突，并去除 `capture_assembly.py` 自动合并产生的重复接线。保留取回终态后重新发现来源文件、合法检查副本完整归属校验、独立检查收场及同一待保存结果字典；数据库读写和原申请核实改用上游异步端口。四个文件经过独立合并评审，96 个受影响 Python 文件编译通过。原检查 READ 回归的夹具迁移仍是后续验证缺口，不将静态评审等同于该路径已通过。
 
-最终基线的原始记录分别见 [OSMO 验证说明](verification-data/2026-10-26-integration-quality/osmo/latest83-validation.md)、[Action6 结果](verification-data/2026-10-26-integration-quality/action6/latest83-native/result-summary.json)、[启动发现复验](verification-data/2026-10-26-integration-quality/history/fixture83-final-bootstrap-recheck.md)和[合并检查命令与退出码](verification-data/2026-10-26-integration-quality/merge83-checks/results.json)。
 
 ## 中间基线的复验结果
 
@@ -156,7 +154,7 @@ Action6 和 OSMO 测试用于记录数据库调用的包装，仍符合实际接
 2. 驱动把启动前的 `dispatch_check` 改为需要等待的回调，但 `preparation.py` 和 `handlers.py` 的生产请求仍提供同步函数，正常结果为 `None`。两端接口不兼容已确定；它与现场附带的 `await None` 错误吻合，但日志没有具体 Python 堆栈，因此现场具体 await 位置仍是沿调用链的归因。修复需要接通真实异步资格查询，保留派发前检查及错误传播。
 3. 结果读取端已按异步迭代接口消费 `prior_result_entries`，生产 `capture_assembly._prior_result_entries` 仍返回同步迭代器。此项由代码核对确定，尚未作为本轮现场首错触发；后续修复应同时覆盖首页空历史和后续页。
 
-Action6 与 OSMO 代表的启动等待现在能够立即报告当前 run 的明确错误。Action6 还在辅助函数未成功交回 host 时主动停止它，收场失败与原错误一起保留；原业务 SQL、身份和结果断言保持不变。两组实测均确认客户端、host／run 与专属预算组已收场。生产实现没有在本轮另外修改；新增生产变化来自用户要求同步的实现分支。三个生产接缝的具体证据、建议和归因限制见[异步装配缺口记录](verification-data/2026-10-26-integration-quality/review/async-assembly-gaps.md)。
+Action6 与 OSMO 代表的启动等待现在能够立即报告当前 run 的明确错误。Action6 还在辅助函数未成功交回 host 时主动停止它，收场失败与原错误一起保留；原业务 SQL、身份和结果断言保持不变。两组实测均确认客户端、host／run 与专属预算组已收场。生产实现没有在本轮另外修改；新增生产变化来自用户要求同步的实现分支。
 
 ## 首轮基线与局部改造结果
 
@@ -177,7 +175,7 @@ Action6 的修改仅在两处主报告等待中接入已经创建的执行错误
 
 ## 20 项目标与冗余审计
 
-完整节点和选择依据由 [selection.json](verification-data/2026-10-26-integration-quality/selection.json) 维护。下表归纳覆盖差异，不另建节点清单。
+下表归纳覆盖差异，不另建节点清单。
 
 | 组别 | 保留的独立责任 | 审计结论 |
 | --- | --- | --- |
@@ -187,7 +185,7 @@ Action6 的修改仅在两处主报告等待中接入已经创建的执行错误
 | 候选分页，1 项 | 每批返回和保留的候选受批次限制，消费后详情释放 | 可以降低垃圾回收的观察开销，保留原规模和检查。 |
 | 启动发现，1 项 | 初次真实读取过程中受理时间更早的新计划，最终四个取回动作均成功、实际读取 8 次 | 同步点和预期独立，尚未发现需要删除的重复准备。 |
 
-本次保留全部节点、失败分区、目标容量规模及成功预算；历史候选窗口只减少与其容量目标无关的照片准备。完整审计分别保存在证据目录的 `action6/coverage-map.md`、`osmo/audit.md`、`history/audit-notes.md` 和 `outputs/audit.json`。
+本次保留全部节点、失败分区、目标容量规模及成功预算；历史候选窗口只减少与其容量目标无关的照片准备。
 
 ## 历史测试真正花时间的位置
 
@@ -225,7 +223,7 @@ Action6 和 OSMO 的原代表用例均在真实 CLI 保存集合成员时回滚�
 
 近期单元用例只比较编号数值，`ObjectId(872) == 872` 会通过；其他用例从已经保存的成员开始，未验证“读取新成员输入→编码保存申请”的接缝。真实失败库的 8 项成员中，原片和预览均出现此类型；仅对内存副本转换编号后，原编码器全部接受。这个只读诊断不等于保存事务或交付流程已经通过。
 
-生产端在实现分支的 `f3b8f1c3` 恢复了读取适配末尾的普通整数返回，保留范围与来源检查，并补上 Action6／OSMO 的真实返回模型编码单元检查；该修复已同步。测试没有在真实 CLI 外替换此返回值、绕过成员保存或放宽成功预期。本轮未另行修改生产实现；完整调用、版本对照与只读诊断见 [production-regression.md](verification-data/2026-10-26-integration-quality/review/production-regression.md)。
+生产端在实现分支的 `f3b8f1c3` 恢复了读取适配末尾的普通整数返回，保留范围与来源检查，并补上 Action6／OSMO 的真实返回模型编码单元检查；该修复已同步。测试没有在真实 CLI 外替换此返回值、绕过成员保存或放宽成功预期。本轮未另行修改生产实现。
 
 ## 恢复检查与历史准备的调整
 
@@ -235,10 +233,10 @@ OSMO `native-tail` 已改为在重启后、首批新字节流出前保持读取�
 
 Action6 与 OSMO 已让同一世界的计划导出、报告导入及媒体上传共用真实客户端；跨世界和专门验证重开的步骤继续隔离。接入采用原 Application／Files 路径、原完整参数、独立回执和原 120 秒命令预算。首轮基线被上述生产问题阻塞，其失败耗时不能用来计算成功路径收益；修复后另在相同生产代码上对照原版与改造版测试。
 
-公共辅助已经接通原 `export`、`import`、`import-media` 函数。独立真实客户端验证完成连续导出、报告导入、媒体上传和 ACK，记录为一个 Node、一个 Application、一个 Files，HTTP 服务和浏览器启动数均为零；既有 Hasselblad 浏览器签名与上下文切换验证通过。严格 TypeScript 检查、客户端构建、原独立命令、错误存储目录和未知命令的拒绝、0.5 秒启动／调用／关闭超时收场均通过。该窄验证不代表相机业务世界通过，证据见 [verification.json](verification-data/2026-10-26-integration-quality/client-session/verification.json)。
+公共辅助已经接通原 `export`、`import`、`import-media` 函数。独立真实客户端验证完成连续导出、报告导入、媒体上传和 ACK，记录为一个 Node、一个 Application、一个 Files，HTTP 服务和浏览器启动数均为零；既有 Hasselblad 浏览器签名与上下文切换验证通过。严格 TypeScript 检查、客户端构建、原独立命令、错误存储目录和未知命令的拒绝、0.5 秒启动／调用／关闭超时收场均通过。该窄验证不代表相机业务世界通过。
 
 ## 环境与证据
 
 解释器为 CPython 3.11.17，SQLite 为 3.53.1。各任务使用独立工作区和临时根；history 与 bootstrap 按目录分进程执行。同一工作区没有并发构建、资源同步或集成测试。需要实际 CLI 的代表用例由既有启动器配置 2GiB 内存与交换空间合计预算，失败不记作业务验收通过。严格无交换能力单独验证。
 
-[证据索引](verification-data/2026-10-26-integration-quality/evidence-index.json)登记原始命令、日志、XML、阶段观察、退出码及 SHA-256。原文件按字节保存，较大日志使用无损 gzip 压缩并另记原始字节数和 SHA-256；诊断包装的代码与统计另列，大型临时运行数据库和依赖缓存不纳入仓库。准备、目标操作、pytest 总时间和入口墙钟按各自口径说明，不将各进程相加当作整轮墙钟。
+准备、目标操作、pytest 总时间和入口墙钟按各自口径说明，不将各进程相加当作整轮墙钟。

@@ -4,7 +4,7 @@
 
 本阶段完成了可直接删除内容的清理。审计中有 **270 个文件仍需重构**；这些文件保留了独立功能、失败或恢复目标，不能仅因旧接口使其失败就删除。部分已删减文件也仍有目标需要迁移。本次没有执行完整集成回归，既有大面积准备失败尚未解决。
 
-逐文件决定、删除理由、具体保留测试及验证记录由[完整审计](verification-data/2026-10-26-integration-pruning/audit.json)维护；原始收集清单、日志和检查工具见[证据目录](verification-data/2026-10-26-integration-pruning/README.md)。后续重构进度统一见[工作记录](integration-test-refactor-2026-10-26.md)。
+后续重构进度统一见[工作记录](integration-test-refactor-2026-10-26.md)。
 
 ## 删除内容与覆盖承接
 

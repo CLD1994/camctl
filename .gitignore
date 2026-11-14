@@ -15,3 +15,6 @@ playwright-report/
 *.tsbuildinfo
 
 .pnpm-store
+
+# 历史验证档案属于临时调试材料。
+docs/camctl/verification-data/

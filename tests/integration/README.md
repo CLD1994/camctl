@@ -140,7 +140,7 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_ti
 
 `test_hasselblad_photo_roundtrip.py` 的网页定向用例把实际安装 wheel 的能力交给当前构建首页，在真实控件选择三个短快门，保存预设后重建 Application、Files、HTTP 和浏览器，再重开原草稿并将预设应用到独立草稿，最终保留网页下载原请求。上传定向用例从权威正常报告派生小型图片映射，实际执行 `Files.createBatch/upload/idle`，分别观察报告先到和媒体先到的等待与核验，以及网页导出自动累计 ACK；这两组定向证据不代表已经执行相机拍摄或 C host 交付。
 
-正常链矩阵把 RAW/JPEG、host/device 与三个精确短快门组合为十二个独立软件世界，每个世界只有一次 capture。六个世界保留完整网页选值、预设保存、关闭重开、应用到独立草稿和下载；它们覆盖两种格式与三组曝光／白平衡／对焦参数，并包含全部四种格式×来源组合。同参数的另一来源世界通过真实 `Application.createDraft/exportDraft/downloadRequest` 保存并导出计划。每次照片导出在提交前核对实际草稿和请求的完整参数及精确词元，回执按真实路径区分 `browser` 与 `application`。代表选择与逐条承接见[覆盖映射](../../docs/camctl/verification-data/2026-10-25-integration-optimization-round2/s6-coverage-map.md)。原三个定向网页用例继续独立执行。
+正常链矩阵把 RAW/JPEG、host/device 与三个精确短快门组合为十二个独立软件世界，每个世界只有一次 capture。六个世界保留完整网页选值、预设保存、关闭重开、应用到独立草稿和下载；它们覆盖两种格式与三组曝光／白平衡／对焦参数，并包含全部四种格式×来源组合。同参数的另一来源世界通过真实 `Application.createDraft/exportDraft/downloadRequest` 保存并导出计划。每次照片导出在提交前核对实际草稿和请求的完整参数及精确词元，回执按真实路径区分 `browser` 与 `application`。原三个定向网页用例继续独立执行。
 
 每个拍摄世界独占一个 Node 客户端会话及存储目录，后续网页计划、文件上传和网页累计 ACK 复用同一真实 Application、Files、HTTP 和浏览器；完整预设路径仍实际关闭并重建这些协作者。所有十二组计划继续经当前 C host-demo、仓库外 wheel 安装 CLI 和受 hb_cli 契约约束的进程替身，核对 SQLite、生效参数、固定 H 历史、报告和实际 argv。原图与预览各经两份新请求取回；host 工具离线后仍从正式源交付，device 等生产回收工作副本后按原 camera basename 和 original/thumbnail 下载。JPEG 同内容双角色也分别保留身份。报告与媒体随后实际上传，分别覆盖报告先到、媒体先到和缺预览三种顺序，再由网页自动导出累计 ACK，经 C host 核实原水位持久化。此链仍是软件证据，不连接物理相机。
 

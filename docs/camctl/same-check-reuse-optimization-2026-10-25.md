@@ -23,7 +23,7 @@
 
 八档返回结果相同，保存后的完整数据库逻辑摘要也相同。最大单次取行均为 128，完成组整体计数均为 1。内存跟踪下，写入峰值从 2,194,778 字节变为 2,217,797 字节，核对峰值从 1,926,813 字节变为 1,940,746 字节。该结果表明没有通过扩大常驻缓存换取提速，但单个规模不能证明完整增长边界，仍须运行原容量测试。
 
-证据入口：[原始结果](verification-data/2026-10-25-same-check-reuse/results.json)、[执行记录](verification-data/2026-10-25-same-check-reuse/execution.json)、[输入与环境](verification-data/2026-10-25-same-check-reuse/metadata.json)、[实验函数差异](verification-data/2026-10-25-same-check-reuse/candidate-preview.patch)。实验差异仅供审查，没有应用到生产源码。
+实验差异仅供审查，没有应用到生产源码。
 
 ## 原页检查：把已经取得的数据留在本次函数里
 
@@ -85,7 +85,7 @@
 
 该范围包含真实预览和跨页来源、有限与有界入口的事件篡改、独立检查拒绝、晚失败整体回滚、默认范围三态及身份错误、原保存范围完整性、混合新旧文件、创建关系损坏、零差集和 APPEND／INDEX 顺序。原 20／200／400、批量 4 的容量测试也通过，原有取行、计数、索引访问和四个内存增长断言均执行；该节点 call 约 150.84 秒。通过用例的标准输出未被该次 pytest 配置保存，因此不声称取得了三档具体峰值。该耗时不是严格前后对照，也不据此宣称容量用例已稳定提速。
 
-证据：[验证摘要](verification-data/2026-10-25-same-check-reuse/validation/summary.json)、[命令与退出码](verification-data/2026-10-25-same-check-reuse/validation/execution.json)、[JUnit 用例结果](verification-data/2026-10-25-same-check-reuse/validation/junit.xml)、[完整日志](verification-data/2026-10-25-same-check-reuse/validation/pytest.log)。这仍是外部函数替换试验，没有运行本次候选的全量集成回归。提交未知后的原键重开等完整恢复验收仍在正式落地门禁内；本次没有单独覆盖“后页才出现预览”和“预览计数谎报”两项新增分区，正式实施时需先审计承接用例，再补足最窄行为测试。
+这仍是外部函数替换试验，没有运行本次候选的全量集成回归。提交未知后的原键重开等完整恢复验收仍在正式落地门禁内；本次没有单独覆盖“后页才出现预览”和“预览计数谎报”两项新增分区，正式实施时需先审计承接用例，再补足最窄行为测试。
 
 ## 建议实施顺序
 

@@ -6,7 +6,7 @@
 
 现有业务及结构实验的生产源码为 `b173ae1272ccba466cb2a2b7fbbbe380c83b2c95`。独立 doctor 接口的实验源码为 `670871aa`，该分支提供底层检查接口，尚未接入本文设计的检查责任、调度和占用释放。安装版缺失 START 实验只在隔离测试副本中调整了旧 host 启动文案，生产源码未因此修改。
 
-本次收据存放于[验证数据目录](verification-data/2026-10-28-hasselblad-availability/receipts.json)。目录内保存原始文本日志及其 SHA-256，收据列出原日志位置与归档文件。短日志只包含结果汇总时，不据此补造没有记录的完整命令或进程环境；下文列出实际测试目标和已核对的关键分区。
+短日志只包含结果汇总时，不据此补造没有记录的完整命令或进程环境；下文列出实际测试目标和已核对的关键分区。
 
 ## 已取得的证据
 
@@ -43,7 +43,7 @@ apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_real_tim
 
 `tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays` 没有完成目标恢复。第一次执行受旧 host 启动提示文案阻挡；隔离副本只校正该提示后，已经进入真实故障门，工具替身执行了一次拍摄并形成两份文件。重启时，测试恢复包装访问已删除的 `CaptureRuntime.owned`，引发 `AttributeError`；实际目标恢复没有运行，最终为 1 failed。
 
-该失败能够定位到过时测试包装，不能据此判定生产恢复存在相同缺陷。它也没有证明生产恢复正确。尤其不能将已经出现两份文件、旧进程结束或异常捕获解释为未知 START 已经可靠收场。原始失败日志保留在收据目录的 `missing-start-adjusted.log`。
+该失败能够定位到过时测试包装，不能据此判定生产恢复存在相同缺陷。它也没有证明生产恢复正确。尤其不能将已经出现两份文件、旧进程结束或异常捕获解释为未知 START 已经可靠收场。
 
 另三组既有测试分别有 8、6、6 项在目标行为之前因 `CaptureRuntime(..., owned=...)` 装配失败。它们没有取得预期的释放、恢复或报告生成证据；完整失败摘要分别保留在 `legacy-capture.log`、`legacy-start-release.log` 和 `legacy-report.log`。本次没有删除用例、放宽断言或恢复私有运行时接口来制造通过。
 

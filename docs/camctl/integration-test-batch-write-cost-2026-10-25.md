@@ -2,7 +2,7 @@
 
 这项测试慢，主要有两个原因叠加：程序反复读取、解释并核对同一批文件的来源和历史；测试又追踪了这些处理过程中每次 Python 内存分配，进一步放大对象密集处理的成本。固定批量限制一次保留的数据量，不会自动减少这些检查的总次数。
 
-本轮使用 `98d3b28da5751e1e8c733f2712180cd5e0e119aa` 的独立源码副本。它与上次 `fc310442` 样本的生产及测试源码相同。只运行诊断脚本，没有修改生产代码、现有测试或配置，也没有重新运行全量回归。记录、脚本和源码摘要见[本轮证据目录](verification-data/2026-10-25-integration-batch-write-analysis/)。
+本轮使用 `98d3b28da5751e1e8c733f2712180cd5e0e119aa` 的独立源码副本。它与上次 `fc310442` 样本的生产及测试源码相同。只运行诊断脚本，没有修改生产代码、现有测试或配置，也没有重新运行全量回归。
 
 ## 测试实际上做了什么
 
@@ -33,7 +33,6 @@ SQL 计数包装直接从原测试的局部类定义读取，没有重新实现�
 
 本轮只对 200 份输入做了开关对照，不能把倍数直接套用到上轮 400 份输入的 107 秒写入时间，也不能据此推算整个容量测试或全量回归的提速。
 
-证据：[四档结果](verification-data/2026-10-25-integration-batch-write-analysis/factor-results.json)、[对照汇总](verification-data/2026-10-25-integration-batch-write-analysis/factor-summary.json)、[冻结输入及模式](verification-data/2026-10-25-integration-batch-write-analysis/metadata.json)、[执行记录](verification-data/2026-10-25-integration-batch-write-analysis/execution.json)。
 
 ## 不开内存跟踪时，时间花在哪里
 
@@ -54,7 +53,7 @@ SQL 计数包装直接从原测试的局部类定义读取，没有重新实现�
 
 再次核对结果在原测试计数包装下另有 12509 次 SQL，写入与核对合计 72227 次，与上轮相同规模的记录一致。它会根据原申请重新生成预期事件，并逐项比较已保存完整组，因此也有自己的读取和解释成本。
 
-证据：[现有阶段计量结果](verification-data/2026-10-25-integration-batch-write-analysis/write-stages-no-profile.json)。该观察本身仍有开销，不能视为目标主机的性能验收。
+该观察本身仍有开销，不能视为目标主机的性能验收。
 
 ## 为什么同一批数据会被处理这么多次
 
@@ -84,7 +83,7 @@ SQL 计数包装直接从原测试的局部类定义读取，没有重新实现�
 
 固定文件读取入口另被调用 3842 次，其中真正加载 3742 次；从该入口看，只有 100 次被复用。`device_files` 全行查询总计 15289 次。它们分布在多个阶段，不能据此认定这些检查都可以删除。
 
-代码入口包括[分段完成事务](../../apps/camctl/src/camctl/persistence/repositories/segment_transactions.py)、[成员读取](../../apps/camctl/src/camctl/persistence/repositories/segments.py)、[原发现页的完整关系核对](../../apps/camctl/src/camctl/persistence/repositories/result_pages.py)及[命中后仍重新解码的路径](../../apps/camctl/src/camctl/persistence/repositories/result_pages.py)。逐阶段推导和调用方数据见[路径分析](verification-data/2026-10-25-integration-batch-write-analysis/path-analysis.json)、[函数计数](verification-data/2026-10-25-integration-batch-write-analysis/selected-function-counts.json)及[按阶段汇总的 SQL](verification-data/2026-10-25-integration-batch-write-analysis/write-sql-groups.json)。
+代码入口包括[分段完成事务](../../apps/camctl/src/camctl/persistence/repositories/segment_transactions.py)、[成员读取](../../apps/camctl/src/camctl/persistence/repositories/segments.py)、[原发现页的完整关系核对](../../apps/camctl/src/camctl/persistence/repositories/result_pages.py)及[命中后仍重新解码的路径](../../apps/camctl/src/camctl/persistence/repositories/result_pages.py)。
 
 ## 已有缓存为什么没有消除这些成本
 
@@ -101,7 +100,7 @@ SQL 计数包装直接从原测试的局部类定义读取，没有重新实现�
 
 ## 哪些解释已经可以排除
 
-上轮测试的六次主动完整内存回收合计只有 0.317 秒；索引查询计划和逐虚拟机指令回调在写入、核对和内存测量结束后执行，不能解释两个主要慢段。详见[测量窗口审计](verification-data/2026-10-25-integration-batch-write-analysis/measurement-window-audit.json)。
+上轮测试的六次主动完整内存回收合计只有 0.317 秒；索引查询计划和逐虚拟机指令回调在写入、核对和内存测量结束后执行，不能解释两个主要慢段。
 
 当前完整完成组的首尾和数量核对，在写入阶段计数为 0、再次核对结果时为 1。诊断中另有数千次针对既有小历史事务的范围检查，不能把它们说成反复扫描当前完整完成组。固定文件已使用自身最后历史边界，产物查找也已使用唯一索引；这些既有优化仍在生效。
 

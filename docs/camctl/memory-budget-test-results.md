@@ -37,7 +37,6 @@
 
 当前样本中，首次写入占业务进程时间约 62%；原操作的核实与重试也有可见开销。这个分阶段计时没有细分 SQL、解析或对象构造，不能据此将全部时间归因给数据库调用。容量用例已移出逐次对象分配追踪，但本轮没有同规模、同环境的改造前对照，因此不计算提速比例。
 
-[资源收据](verification-data/2026-10-25-memory-swap-budget/capacity/memory-budget.json)记录实际两个限额均为 2,147,483,648 字节、合计峰值 36,081,664 字节、内存不足及两个触限计数均为 0，进程退出 0 且叶组已删除。[阶段计时](verification-data/2026-10-25-memory-swap-budget/capacity/capacity-timing.json)和[完整业务结果](verification-data/2026-10-25-memory-swap-budget/capacity/capacity-result.json)保留实际运行值。
 
 ## 定向验证结果
 
@@ -63,7 +62,7 @@
 
 ## 证据与验收边界
 
-[归档汇总](verification-data/2026-10-25-memory-swap-budget/summary.json)保存命令范围、主用例与子检查计数、阶段耗时、资源结果及清理状态；[逐项耗时](verification-data/2026-10-25-memory-swap-budget/test-times.csv)来自各轮 JUnit 主用例。[源码身份](verification-data/2026-10-25-memory-swap-budget/source-identity.json)、[环境](verification-data/2026-10-25-memory-swap-budget/environment.json)和[文件摘要清单](verification-data/2026-10-25-memory-swap-budget/archive-manifest.json)一并保存。命令记录保留各自实际源码身份、环境、UTC 时间、日志和退出码。
+实际两个限额均为 2,147,483,648 字节，合计峰值 36,081,664 字节，内存不足及两个触限计数均为 0；进程退出 0，叶组已删除。
 
 归档也保留两次未进入负载的入口错误：一次测试文件名错误，一次组件插件未加载。前者由正确目标验证替代，后者已修复并核验；它们不计为已执行容量失败，也不计入通过数。此前环境受限的历史记录保持原样，本页当前结论以本轮真实资源证据为准。
 

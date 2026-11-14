@@ -1,6 +1,6 @@
 # 集成测试耗时与精简评估（2026-10-25）
 
-camctl 组件与根目录跨组件测试均已完成逐项计时。**最终有效结果为 10,394 项，其中 10,351 项通过、38 项失败、5 项跳过**，另有 342 个通过的嵌套子检查。四项受采集环境干扰的首轮结果已由纠偏补测替换，原始记录仍保留；补测方法见下文。
+camctl 组件与根目录跨组件测试均已完成逐项计时。**最终有效结果为 10,394 项，其中 10,351 项通过、38 项失败、5 项跳过**，另有 342 个通过的嵌套子检查。四项受采集环境干扰的首轮结果已由纠偏补测替换；补测方法见下文。
 
 首轮 18 组命令的进程墙钟合计 **8,773.415 秒，即 146 分 13.4 秒**；主 runner 从启动到导出完成的 UTC 起止跨度为 150.2 分钟，包含阶段间汇总等间隔。四项纠偏补测分成两组并行，各约 96 秒，另行记录，不伪装成同一次连续计时。
 
@@ -12,45 +12,9 @@ camctl 组件与根目录跨组件测试均已完成逐项计时。**最终有�
 
 ## 数据与计时口径
 
-以下数据保存在版本控制内，不依赖开发容器中的临时日志才能查阅：
+环境为 Linux x86_64 开发容器、CPython 3.11.17、SQLite 3.53.1，使用 `apps/camctl/.venv311/bin/python`。每个目录独立启动一次 pytest，使用 `--durations=0` 并采集 setup、call 和 teardown 的阶段耗时。同一工作区只有一个集成 pytest 进程，遵守[组件测试隔离要求](../../apps/camctl/tests/AGENTS.md#运行边界与结果记录)。参数实例只测量一次，这些数字不是多轮中位数。342 个嵌套子检查的耗时已包含在父用例 call 中，不能再次累加；采集时未记录子检查上下文标签。
 
-| 数据 | 内容 |
-| --- | --- |
-| [逐项耗时](verification-data/2026-10-25-integration-timing/camctl-cases.csv) | 全部 10,018 个参数实例的完整 nodeid、源码位置、结果、setup／call／teardown 及合计秒数；按合计降序排列。 |
-| [按测试函数汇总](verification-data/2026-10-25-integration-timing/camctl-functions.csv) | 将同一函数的参数实例聚合，保留数量、结果与各阶段耗时。 |
-| [按测试文件汇总](verification-data/2026-10-25-integration-timing/camctl-files.csv) | 按模块聚合，便于定位重复准备所在文件。 |
-| [运行元数据](verification-data/2026-10-25-integration-timing/measurement.json) | 环境、实际 UTC、逐目录命令、退出码、墙钟时间与 CSV 摘要。 |
-| [本轮计时采集器](verification-data/2026-10-25-integration-timing/timing_plugin.py) | 原样保存的 pytest 观测插件，便于在新环境复核采集口径。 |
-| [跨组件逐项耗时](verification-data/2026-10-25-integration-timing/cross-component-cases.csv) | 根 pytest 258 项与 Node 118 项的有效结果；`measurement_attempt` 指明首轮或纠偏组。 |
-| [跨组件函数汇总](verification-data/2026-10-25-integration-timing/cross-component-functions.csv)及[文件汇总](verification-data/2026-10-25-integration-timing/cross-component-files.csv) | 对有效逐项记录聚合，Node 不提供阶段耗时。 |
-| [跨组件运行元数据](verification-data/2026-10-25-integration-timing/cross-component-measurement.json) | 首轮回执、两组纠偏回执与对应实例、采集器摘要。 |
-| [首轮跨组件记录](verification-data/2026-10-25-integration-timing/cross-component-first-pass-cases.csv) | 保留替换前的完整记录，不作为最终失败清单。 |
-| [342 个子检查](verification-data/2026-10-25-integration-timing/cross-component-subchecks.csv) | 以父 nodeid 和执行序号保存；其耗时已包含在父 call 中，不能再次累加。采集器未记录子检查的上下文标签。 |
-| [总览](verification-data/2026-10-25-integration-timing/overall-summary.json)及[最终失败清单](verification-data/2026-10-25-integration-timing/failed-cases.csv) | 全范围有效数量、首轮耗时、纠偏说明与 38 个失败实例。 |
-| [native 单例诊断](verification-data/2026-10-25-integration-timing/native-diagnostic.json)及[调用栈采样](verification-data/2026-10-25-integration-timing/native-profile.json) | 独立工作区并行执行的补充诊断，不计入串行基线的数量与耗时。 |
-
-环境为 Linux x86_64 开发容器、CPython 3.11.17、SQLite 3.53.1，使用 `apps/camctl/.venv311/bin/python`。实际执行日期以元数据中的 UTC 时间为准。每个目录独立启动一次 pytest，命令形态如下，具体目标与环境变量见元数据：
-
-```sh
-apps/camctl/.venv311/bin/python -m pytest \
-  apps/camctl/tests/integration/<目录> -q --durations=0 -p timing_plugin
-```
-
-同一工作区只有一个集成 pytest 进程，遵守[组件测试隔离要求](../../apps/camctl/tests/AGENTS.md#运行边界与结果记录)。参数实例只测量一次，这些数字不是多轮中位数。
-
-在新环境重新采集单个目录时，使用[隔离配置的采集器](verification-data/2026-10-25-integration-timing/timing_plugin_isolated.py)。它在 pytest 配置阶段消费并移除两个计时环境变量，后续子进程不会继承它们。例如，从仓库根目录执行以下命令会把 acceptance 的新证据写入独立目录；该命令仅用于后续复现，本轮没有因此重复运行已完成的组件目录。
-
-```sh
-PYTHONPATH="$PWD/docs/camctl/verification-data/2026-10-25-integration-timing:$PWD/apps/camctl/src" \
-  CAMCTL_TIMING_REPO="$PWD" \
-  CAMCTL_TIMING_DATA="$PWD/.local/verification/integration-timing-rerun/acceptance" \
-  apps/camctl/.venv311/bin/python -m pytest \
-  apps/camctl/tests/integration/acceptance -q --durations=0 -p timing_plugin_isolated
-```
-
-`total_s` 为 pytest 的 setup、call、teardown 之和。模块级或 session 级 fixture 的成本计入首次／末次消费者；测试函数或辅助函数内部的建库、拍摄准备及报告生成计入 call，不能把 call 全部解释为目标业务操作耗时。目录墙钟还包含启动与收集，camctl 全部实例的阶段耗时合计为 4,786.297 秒。耗时采用 pytest／单调时钟读数，UTC 用于定位执行区间，不替换单调耗时。失败只测量到实际失败位置；跳过原因保留在 CSV 中。
-
-完整命令回执、phase 事件、fixture 计时及原始输出位于本地 `.local/verification/integration-timing-20261024T181943Z/`，目录名使用本轮实际 UTC。
+`total_s` 为 pytest 的 setup、call、teardown 之和。模块级或 session 级 fixture 的成本计入首次／末次消费者；测试函数或辅助函数内部的建库、拍摄准备及报告生成计入 call，不能把 call 全部解释为目标业务操作耗时。目录墙钟还包含启动与收集，camctl 全部实例的阶段耗时合计为 4,786.297 秒。耗时采用 pytest／单调时钟读数，UTC 用于定位执行区间，不替换单调耗时。失败只测量到实际失败位置。
 
 ## camctl 组件目录结果
 
@@ -212,7 +176,7 @@ history 大规模测试执行中进行了 15 秒、20 Hz 的非阻塞采样，�
 
 ## 失败与跳过
 
-最终 38 个失败实例均保留在[失败清单](verification-data/2026-10-25-integration-timing/failed-cases.csv)中，没有因为失败或耗时而移除；本轮也没有据失败位置推断新容器是根因。camctl 的 16 项分布如下：
+最终 38 个失败实例没有因失败或耗时而移除；不能据失败位置推断新容器是根因。camctl 的 16 项分布如下：
 
 | 文件 | 数量 | 失败范围 |
 | --- | ---: | --- |

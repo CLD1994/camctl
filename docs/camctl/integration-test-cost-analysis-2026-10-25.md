@@ -2,7 +2,7 @@
 
 当前最值得继续优化的是少数完整业务流程中重复启动客户端，以及部分测试自身的检查开销。最近一次完整回归仍是旧源码上的四路约 47 分钟；修复后源码还没有完整计时，不能把 47 分钟当作当前全量耗时。
 
-本轮读取并重算已有逐项记录，并在 `fc3104424fd8ce64152cbdd6f1b4899d38e011e1` 的三个独立源码副本中各测一个现有用例。三项均通过。本轮只新增分析文档和测量材料，生产代码、现有测试及运行配置均未修改。原始记录、外部计时插件和重算脚本保存在[本轮数据目录](verification-data/2026-10-25-integration-cost-analysis/)。
+本轮读取并重算已有逐项记录，并在 `fc3104424fd8ce64152cbdd6f1b4899d38e011e1` 的三个独立源码副本中各测一个现有用例。三项均通过。本轮只新增分析文档和测量材料，生产代码、现有测试及运行配置均未修改。
 
 ## 有哪些可用的耗时记录
 
@@ -17,7 +17,6 @@
 | 浏览器最终补测，单路 | `3f126175` | 52.579 秒 | 上述两项通过。这是另一批测试，不能与前一行拼成一次全部通过的组合。 |
 | 本轮三个分阶段样本 | `fc310442` | 分别见下文 | 三项各自通过；只用于定位成本，不代表完整回归。 |
 
-历史来源分别是[完整回归清单](verification-data/2026-10-25-integration-optimization/final-run-manifest.json)、[第二轮对照](verification-data/2026-10-25-integration-optimization-round2/comparison.json)和[修复记录](integration-test-repairs-2026-10-25.md)。本轮[历史汇总](verification-data/2026-10-25-integration-cost-analysis/historical-summary.json)保存输入摘要及重算结果。
 
 完整回归中另有 342 个嵌套子检查，它们已经包含在父测试耗时内，不再加时。44 个失败实例合计占 pytest 阶段时间的 10.01%，且只运行到失败处；修复后完成全部流程的成本可能不同。
 
@@ -58,7 +57,6 @@
 
 可以研究减少完整回收的次数，并继续逐页检查弱引用是否失效。实施时必须保留 120 个新消费者、批量上限 1 和 3、全部候选数量、游标数量、查询计划及扫描前后数据库不变的断言。是否能够完全取消逐页回收，仍需由改造后的原断言验证；本轮尚未实施。
 
-证据：[执行记录](verification-data/2026-10-25-integration-cost-analysis/current-outputs/command.json)、[阶段及调用计数](verification-data/2026-10-25-integration-cost-analysis/current-outputs/stage-result.json)、[日志](verification-data/2026-10-25-integration-cost-analysis/current-outputs/pytest.log)。
 
 ### Action6：一次业务流程启动客户端 11 次
 
@@ -79,7 +77,6 @@
 
 OSMO 的相似装配方式也值得检查；本轮只测了 Action6 这一个实例，不把同一比例推广到 OSMO 或其他 Action6 参数。
 
-证据：[执行环境与命令](verification-data/2026-10-25-integration-cost-analysis/current-action6/measurement.json)、[分阶段汇总](verification-data/2026-10-25-integration-cost-analysis/current-action6/analysis.json)、[完整事件](verification-data/2026-10-25-integration-cost-analysis/current-action6/helper-events.jsonl)、[日志](verification-data/2026-10-25-integration-cost-analysis/current-action6/output.log)。
 
 ### 固定批量写入：主要成本在完成事务及其测量窗口
 
@@ -100,7 +97,6 @@ OSMO 的相似装配方式也值得检查；本轮只测了 Action6 这一个实
 
 后续已完成同一冻结 200 份输入的开关对照：不开内存跟踪时写入与核对约 9～10 秒，开启后约 38～48 秒；另一个仅开启现有阶段计量的样本确认，9.292 秒写入主要用于事件生成、校验依据构造及独立检查，SQL 写入阶段约 0.052 秒。原页重复解释及测量边界见[固定批量写入深入分析](integration-test-batch-write-cost-2026-10-25.md)。三个规模、真实完整事务、固定批量、原结果核实及内存增长断言仍须保留；本轮没有改动该实现。
 
-证据：[执行记录](verification-data/2026-10-25-integration-cost-analysis/current-persistence/execution.json)、[逐次计时](verification-data/2026-10-25-integration-cost-analysis/current-persistence/phases.json)、[累计占比](verification-data/2026-10-25-integration-cost-analysis/current-persistence/totals.json)、[原始 SQL 与内存记录](verification-data/2026-10-25-integration-cost-analysis/current-persistence/pytest.log)。
 
 ## 为什么增加并行数不一定解决问题
 
@@ -146,17 +142,6 @@ OSMO 的相似装配方式也值得检查；本轮只测了 Action6 这一个实
 
 Hasselblad 会话复用及网页代表分组、清理只读来源共享、取消矩阵合并、outputs 六次来源拍摄减少为三次、220 成员历史世界合并、协议解析复用和安装命令共享等均已落地。本轮不把它们再次计入未来收益。当前没有足够证据把其他用例直接删除，也不把未执行的容量覆盖算作优化后的通过。
 
-## 如何复核
-
-逐项全量 CSV 仍由[原计时与优化记录](integration-test-optimization-2026-10-25.md)维护。本轮只保存派生分析及新样本，不另建一套测试身份清单。
-
-历史数据可从仓库任意目录只读重算，输出路径须显式指定：
-
-```bash
-python docs/camctl/verification-data/2026-10-25-integration-cost-analysis/recompute.py \
-  --output /tmp/camctl-integration-cost-summary.json
-```
-
-命令应从仓库根运行；在其他目录使用脚本的绝对路径。脚本按自身位置查找仓库，也支持 `--repo-root`。三个当前样本的命令、当时工作目录、环境、日志和外部插件均已归档。原记录中的临时路径只说明当时的执行位置，阅读证据不依赖这些临时目录仍然存在。
+## 计时边界
 
 全量与修复组合的 UTC 起止跨度和原单调计时分别相差 16.270 秒、33.705 秒，原因尚未查明。本文入口耗时、累计耗时和槽位占用计算均使用原单调值；不把 UTC 差额解释为已知的环境故障或额外执行成本。

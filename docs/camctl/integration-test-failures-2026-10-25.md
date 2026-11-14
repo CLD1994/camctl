@@ -15,11 +15,11 @@
 | 本轮集中诊断复测 | 从 `implement_camctl` 固定 `1973dc05c0d517a890b92e5dcfc1ee32da9266dd`，使用独立源码副本；只选其余 30 个原失败身份；4 个任务槽、根测试按文件分组 | 2 通过、28 失败，退出码 1；入口墙钟 **186.908 秒**。通过的是 ID19、ID42。 |
 | ID30 唯一历史窄复现 | 独立临时副本，以原 `48d2ee64` 加诊断记录钩子运行同一身份一次 | 63.553 秒，退出码 1；本次先发生 `window_missed`，没有 START 尝试，未重现原 `state_db_error`。 |
 
-本轮复测使用 Python 3.11.17、SQLite 3.53.1、pytest 9.1.1、Node v24.22.1。详细命令和环境见[调用收据](verification-data/2026-10-25-integration-failure-diagnosis/current/invocation.json)、[集中运行结果](verification-data/2026-10-25-integration-failure-diagnosis/current/summary.json)与[源码快照清单](verification-data/2026-10-25-integration-failure-diagnosis/current/source.json)。
+本轮复测使用 Python 3.11.17、SQLite 3.53.1、pytest 9.1.1、Node v24.22.1。
 
 历史 14 项通过和本轮 2 项通过来自不同源码、不同阶段，不能相加后宣称在当前源码一次运行了全部 44 项，也不能替代新的全量通过结果。本报告所称“本轮源码”始终指固定的 `1973dc05`；报告所在工作树基于 `100738f7`，诊断复测没有追随主分支后续变化。后续设计契约复核另比对了 `implement_camctl` 的 `a543720c`，比对范围和证据见下文。
 
-44 项的完整路径、历史首因、逐阶段结果、责任归属和原始收据统一保存在[逐项清单 JSON](verification-data/2026-10-25-integration-failure-diagnosis/case-ledger.json)，便于筛选的版本为[逐项清单 CSV](verification-data/2026-10-25-integration-failure-diagnosis/case-ledger.csv)。本报告的 ID 按原完整回归失败清单顺序固定，不是错误码。
+本报告的 ID 按原完整回归失败清单顺序固定，不是错误码。
 
 ## 首因分类
 
@@ -42,7 +42,7 @@
 
 ### 启动窗口：准备耗时进入了业务有效期
 
-16 项中，12 项已有此前同身份通过证据；本轮仍失败的是 ID18、26、29、40。数据库中的过期原因、真实 START 次数及来源／取回状态见[时钟组证据](verification-data/2026-10-25-integration-failure-diagnosis/groups/clock/findings.json)和[进程组证据](verification-data/2026-10-25-integration-failure-diagnosis/groups/process/findings.json)。
+16 项中，12 项已有此前同身份通过证据；本轮仍失败的是 ID18、26、29、40。
 
 - ID17 在真实网页预设、重开、应用和导出上耗时 93.153 秒，但排期仍取准备开始时刻，窗口为 60 秒；受理时已晚于截止约 34.274 秒。浏览器步骤成功，拍摄没有 START。
 - ID18 三种拍摄共用一台相机和同一 5 秒窗口。照片已经成功，后两项已在窗口内保存观察并进入 RUNNING，但尚未派发 START 就保存 `window_exhausted`。本轮仍是这一结果。
@@ -59,7 +59,7 @@
 
 本轮目录扫描改为 `run_stream()` 后，替身无条件交付 `b"part"` 并返回退出码 7 和 `source interrupted`，首错前移为 `adb_directory_failed / call_failed`。ID13 的合法新 RESULTS 目录票据还会触发替身的“原 READ 不能重开源流”断言。ID15 在关闭数据库前已保存失败结论；恢复沿用同一结论、且没有新增设备调用，不能要求它将已有失败改成成功。
 
-证据见[11 项逐例记录](verification-data/2026-10-25-integration-failure-diagnosis/groups/osmo/findings.json)、[数据库摘录](verification-data/2026-10-25-integration-failure-diagnosis/groups/osmo/db-evidence.json)和[独立协议探针](verification-data/2026-10-25-integration-failure-diagnosis/groups/osmo/probe.json)。这 11 项在优化前计时基线已经失败。
+这 11 项在优化前计时基线已经失败。
 
 修复应先让共享替身区分目录流、批量／单路径元数据与源 READ，按真实帧和对应票据返回结果，再建立无错误的 partial／terminal 前置事实。当前目录流是完整扫描快照；需要测试分页时，应真实跨过当前页边界或使用明确的已保存结果页接缝，并保留真实页面生产端口的组合见证。随后重跑各原身份，核对原票据与可靠进度、不重放旧调用、拒绝场景不变、原预算不重置。ID15 应先证明保存的是成功结论，再验证重开后唯一结论与原集合原样发布。修正前置夹具后是否还有下一层业务问题尚未验证。
 
@@ -69,7 +69,7 @@
 
 历史和本轮均保存了该自动安装过程。本轮 task005 改写 worker1 的依赖，task012 随后复用 worker1；ID21、41、43、44 都在 Chromium 启动时缺少 1248。ID21 的 108 个已注册 Vitest 用例未执行，后续 `undefined.close` 是清理阶段的次生噪声。ID42 在 worker0 保持 1.63.0／1243，本轮完成全部 56 项参数比较及安装版受理，结果通过。
 
-原始证据见[依赖变更时间线](verification-data/2026-10-25-integration-failure-diagnosis/groups/browser/dependency-timeline.txt)、[构建命令收据](verification-data/2026-10-25-integration-failure-diagnosis/current/browser-build-command.json)与[五项逐例记录](verification-data/2026-10-25-integration-failure-diagnosis/groups/browser/findings.json)。这说明失败与任务安排和之前执行的构建有关，不宜只笼统归为缓存缺失。
+这说明失败与任务安排和之前执行的构建有关，不宜只笼统归为缓存缺失。
 
 后续应统一权威锁文件及其配套浏览器，让网页构建消费已经准备的依赖，并核验构建前后实际解析身份。验收按“能力网页构建在先、Hasselblad 和两种延时参数在后”的顺序执行，确认同槽后续任务依赖保持一致；保留全部网页、三端校验、安装受理、重载与重启断言。现有四项浏览器未启动的结果不能证明其网页行为通过。
 
@@ -83,11 +83,11 @@
 | 32、33 | `_owned(environment)` 把真实有效连接重新包装为 `metadata=None`；`_initialize_recovery()` 按格式决定是否读取 `software_recoveries`，访问其 `format_version` 时失败。 | 保留真实元信息或使用符合连接契约的夹具；两型号完整核对打开会话复位设置、目录只读操作不复位及原调用顺序。 |
 | 36、39 | 原连续子串为 `call=3 command=run operation=spawn`；实际为 `call=3 attempt=3 command=run operation=spawn`。日志和进程跟踪均证明旧组先回收、新 run 后启动。 | 按字段边界与 PID 识别日志，保留先后关系、退出码 0/7 和真实 SIGKILL／扫描门。另核对后续同类断言；不能删除回收先于启动的约束。 |
 
-前四组的数据库、资源与源码对照见[组件逐例证据](verification-data/2026-10-25-integration-failure-diagnosis/groups/components/findings.json)；进程两项见[进程逐例证据](verification-data/2026-10-25-integration-failure-diagnosis/groups/process/findings.json)。进程测试还存在输入计划缺少 `created_at` 的独立装配观察：submit 保存了输入诊断，`needs_run=1` 合法产生，但不能把它描述为已经接纳业务计划；这不是本次 `StopIteration` 的首因。
+进程测试还存在输入计划缺少 `created_at` 的独立装配观察：submit 保存了输入诊断，`needs_run=1` 合法产生，但不能把它描述为已经接纳业务计划；这不是本次 `StopIteration` 的首因。
 
 ## 两项 Action6 生产缺口
 
-直接责任文件在优化前 `ea52a0d0`、历史 `48d2ee64` 和本轮 `1973dc05` 中字节相同：`bootstrap/work_file_assembly.py`、`capture/media_flow.py`、`capture/segment_inspections.py`、`outputs/work_files.py`。清理用途判定所在的 `persistence/repositories/outputs.py` 另有读取机会资格变化，但不改变本次遗漏的等待者关联发现及 READ 归属查询。因此这两处属于原有实现缺口。字节对照、四个测试世界的查询、生命周期事件与日志见[Action6 证据](verification-data/2026-10-25-integration-failure-diagnosis/groups/action6/findings.json)。
+直接责任文件在优化前 `ea52a0d0`、历史 `48d2ee64` 和本轮 `1973dc05` 中字节相同：`bootstrap/work_file_assembly.py`、`capture/media_flow.py`、`capture/segment_inspections.py`、`outputs/work_files.py`。清理用途判定所在的 `persistence/repositories/outputs.py` 另有读取机会资格变化，但不改变本次遗漏的等待者关联发现及 READ 归属查询。因此这两处属于原有实现缺口。
 
 ### ID19：绑定取回结束后漏掉来源输入的首次清理机会
 
@@ -121,9 +121,9 @@
 
 这一要求受“每文件每次 run 最多一次实际检查和清理尝试”约束，但本案的早期资格初筛不构成该尝试：`_add_owned_files()` 只读取事实，资格未成立时没有进入实际维护，也没有记录 `processed` 或清理继续位置。新输入亦在启动后创建，不属于固定历史范围。因此，历史额度耗尽、已经实际检查过或仍有 worker 活动，都不能解释历史运行正常收场后的三份残留。测试的 180 秒只是观察上限，不是从设计中推导出的清理时限。
 
-[清理探针结果](verification-data/2026-10-25-integration-failure-diagnosis/contracts/cleanup-probe.json)以原库真实发布截点 H=174 为已消费游标，显式建立“当时等待者未结束、尚未实际清理、历史上界为 0”这一合法调度条件。真实 `_discover()` 扫描后续事件直到 263，首次集合仍为空，`processed={}`；同一原库的真实用途分类却认定 files 1、2、3 均可删除、操作已收场。显式按来源动作重新发现后，三份文件立即进入首次集合。这证明遗漏的是等待者终态到来源输入的关联发现。它没有还原历史进程的实际游标。
+清理探针以原库真实发布截点 H=174 为已消费游标，显式建立“当时等待者未结束、尚未实际清理、历史上界为 0”这一合法调度条件。真实 `_discover()` 扫描后续事件直到 263，首次集合仍为空，`processed={}`；同一原库的真实用途分类却认定 files 1、2、3 均可删除、操作已收场。显式按来源动作重新发现后，三份文件立即进入首次集合。这证明遗漏的是等待者终态到来源输入的关联发现。它没有还原历史进程的实际游标。
 
-还应按副本分别核对用途：第三份输入的检查结果为 `UNCONFIRMED`，不在默认范围，也未被四份绑定交付使用。原检查结束、来源可靠提交且实际操作收场后，它不应等待无关消费者。本项修复需同时检查逐副本用途判断，不能只补一次全局扫描。详细依据、原世界事实与源码对照见[清理复核记录](verification-data/2026-10-25-integration-failure-diagnosis/contracts/cleanup-audit.json)。
+还应按副本分别核对用途：第三份输入的检查结果为 `UNCONFIRMED`，不在默认范围，也未被四份绑定交付使用。原检查结束、来源可靠提交且实际操作收场后，它不应等待无关消费者。本项修复需同时检查逐副本用途判断，不能只补一次全局扫描。
 
 ### ID20：检查副本及其实际 READ 结束事实都合法
 
@@ -131,7 +131,7 @@
 
 [实际读取结束规则](../architecture/file-copy.md)要求拥有者先保留干净 ReadEnd，再完成本地完整性核验及原结果保存。检查流程确实通过生产 `hold_read_end()` 持有该事实，并保留自己的续接回调。随后主机 hash 和源摘要查询会异步让出执行，普通／残留事实入口可以在这个窗口合法看到共享集合；并不要求先发生重启或绑定失效。消费者却在状态和绑定判断之前，用只支持 processing 的关联解释所有成员，误将 inspection 判为状态库损坏。
 
-[读取探针结果](verification-data/2026-10-25-integration-failure-diagnosis/contracts/read-probe.json)核对原库三份检查副本的 member、source、action、observer 和 ticket 关系，外键检查无异常。再用生产函数按真实身份构造 HeldReadEnd，分别调用原消费者，三份都在绑定检查前得到同一 `ConsistencyError`；绑定检查调用数和数据库改动数均为 0。探针使用的是最终已终态的数据库和新构造的内存标记，只证明无条件查询排除这一分支，不能当作原运行交错重放。原会话错误由原日志独立证明，合法交错的可达性由生产调用链独立证明；原触发 copy 仍未知。完整核验与修复边界见[读取复核记录](verification-data/2026-10-25-integration-failure-diagnosis/contracts/read-audit.json)。
+读取探针核对原库三份检查副本的 member、source、action、observer 和 ticket 关系，外键检查无异常。再用生产函数按真实身份构造 HeldReadEnd，分别调用原消费者，三份都在绑定检查前得到同一 `ConsistencyError`；绑定检查调用数和数据库改动数均为 0。探针使用的是最终已终态的数据库和新构造的内存标记，只证明无条件查询排除这一分支，不能当作原运行交错重放。原会话错误由原日志独立证明，合法交错的可达性由生产调用链独立证明；原触发 copy 仍未知。
 
 ### 测试装配、文档差异与源码范围
 
@@ -139,7 +139,7 @@
 
 发现一处需要同步的文档差异：[字段页](database/file-fields.md#文件拷贝)第 150、174 行仍只描述 delivery／processing 两类，遗漏 inspection。正式分段规格、专门存储设计、V6 计划、SQL 和独立守卫对三类归属一致，因此将其登记为字段说明漏同步；不能用这段旧说明把正式检查流程产生的记录判为非法。后续修复应同步该页，并保持唯一归属模型；本次只记录差异。
 
-本次还将固定诊断源 `1973dc05` 与 `implement_camctl` 的 `a543720ceb427312125a329b4323f404f8fb32c6` 比对：维护发现、READ 消费者、检查生产者、清理实现、仓储文件、原测试及相关契约页在所列范围内均无差异。报告工作树 `100738f7` 的仓储文件整体有其他资格变化，但本案用途分类及候选函数内容相同；没有把整文件误记为一致。具体文件摘要、契约摘录、已确认范围和未知事项统一保存在[复核来源记录](verification-data/2026-10-25-integration-failure-diagnosis/contracts/source-contract-references.json)。后续实施仍需分别建立确定性交错反例；本次复核不构成修复后通过或全量回归结论。
+本次还将固定诊断源 `1973dc05` 与 `implement_camctl` 的 `a543720ceb427312125a329b4323f404f8fb32c6` 比对：维护发现、READ 消费者、检查生产者、清理实现、仓储文件、原测试及相关契约页在所列范围内均无差异。报告工作树 `100738f7` 的仓储文件整体有其他资格变化，但本案用途分类及候选函数内容相同；没有把整文件误记为一致。后续实施仍需分别建立确定性交错反例；本次复核不构成修复后通过或全量回归结论。
 
 ## ID30：历史异常仍有证据缺口，当前另有确定的断言错误
 
@@ -155,8 +155,6 @@
 
 控制计时依据使用 `control_elapsed_ns`；`actual_duration_s` 用于媒体探测得到的时长。当前可确认的测试修复是按纳秒精确换算并比较原门槛，保留这两类事实的语义区别，随后继续修复成品、编码、交付及报告断言。历史异常另保留为未闭合项；以后重现时必须保存完整底层异常链和本次进程输出，不能用修正字段后的通过覆盖它。
 
-相关证据见[ID30 逐例记录](verification-data/2026-10-25-integration-failure-diagnosis/groups/clock/findings.json)、[当前原始失败输出](verification-data/2026-10-25-integration-failure-diagnosis/current/tasks/006-root-test_camctl_media_roundtrip/output.log)、[历史窄复现收据](verification-data/2026-10-25-integration-failure-diagnosis/groups/clock/id30-once/receipt.json)及其诊断差异与原始输出。
-
 ## 后续安排建议
 
 1. 先处理依赖一致性和共享替身，分别复核 5 个浏览器身份与 11 个 OSMO 身份，确保真正进入目标分支。
@@ -168,9 +166,9 @@
 
 ## 44 项逐项对照
 
-下表由逐项清单生成，不单独维护；身份省略目录前缀。完整 nodeid、每例根因、已执行／未执行阶段与验收条件以[逐项清单](verification-data/2026-10-25-integration-failure-diagnosis/case-ledger.json)及其引用的分组证据为准。
+下表归纳 44 项历史失败的身份与首因；身份省略目录前缀。
 
-| ID | 测试身份（目录前缀见逐项清单） | 历史首因分类 | 后续证据 |
+| ID | 测试身份（省略目录前缀） | 历史首因分类 | 后续证据 |
 | --- | --- | --- | --- |
 | 1 | `test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw]` | 硬编码格式断言过时 | 本轮失败：同类首因 |
 | 2 | `test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg]` | 硬编码格式断言过时 | 本轮失败：同类首因 |
@@ -217,8 +215,4 @@
 | 43 | `test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]` | Playwright与浏览器不匹配 | 本轮失败：同类首因 |
 | 44 | `test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]` | Playwright与浏览器不匹配 | 本轮失败：同类首因 |
 
-## 证据归档
-
-[原始文件归档清单](verification-data/2026-10-25-integration-failure-diagnosis/archive-manifest.json)记录来源路径、归档路径、字节数与 SHA-256；[源码片段](verification-data/2026-10-25-integration-failure-diagnosis/source-excerpts.json)保留所用行号与完整文件摘要。来源路径只作溯源标识，阅读本报告不依赖临时目录存活。数据库保留结构化只读摘录，未把整个测试数据库或设备媒体加入仓库。
-
-完整回归的全量身份与计时仍以[原优化报告](integration-test-optimization-2026-10-25.md)及其既有 CSV／收据为权威来源；本目录只补充本次 44 项失败的原因和定向复测证据。
+完整回归与计时结果见[原优化报告](integration-test-optimization-2026-10-25.md)；本文记录本次 44 项失败的原因和定向复测结果。
