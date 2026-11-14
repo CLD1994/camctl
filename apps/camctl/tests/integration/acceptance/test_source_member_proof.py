@@ -1,5 +1,7 @@
 """受理成员只消费本组实际新建的 FIXED owner 和完整原输入。"""
+from copy import deepcopy
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -59,8 +61,25 @@ def _proposal(body, owned):
         source_read_scope=AdmissionSourceReadScope(result.plan_id, 128))
 
 
-def _commit(body, owned, *, edit=None, bounded=False, edit_context=None):
-    proposal = _proposal(body, owned)
+@pytest.fixture(scope="module")
+def proposal_for():
+    """每份完整输入生成一次真实提案，事务各持有独立的可变数据。"""
+    templates = {}
+
+    def prepare(body, owned):
+        key = json.dumps(body, sort_keys=True, ensure_ascii=False)
+        if key not in templates:
+            templates[key] = _proposal(body, owned)
+        template = templates[key]
+        return CommandPlan(deepcopy(template.events), deepcopy(template.owners),
+            deepcopy(template.state_rows), deepcopy(template.result),
+            source_read_scope=template.source_read_scope)
+
+    return prepare
+
+
+def _commit(body, owned, proposal_for, *, edit=None, bounded=False, edit_context=None):
+    proposal = proposal_for(body, owned)
 
     class Command:
         def plan(self, scope):
@@ -82,8 +101,8 @@ def _commit(body, owned, *, edit=None, bounded=False, edit_context=None):
 
 
 @pytest.mark.parametrize("bounded", [False, True])
-@pytest.mark.parametrize("mutation", ["missing_member","wrong_group","future_owner","missing_port"])
-def test_actual_admission_rejects_partial_or_wrong_original_members(tmp_path,mutation,bounded):
+@pytest.mark.parametrize("mutation", ["missing_member","wrong_group","future_owner"])
+def test_actual_admission_rejects_partial_or_wrong_original_members(tmp_path,mutation,bounded,proposal_for):
     path = tmp_path/"state.db"
     _create_valid_database(path)
     owned = open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
@@ -100,23 +119,23 @@ def test_actual_admission_rejects_partial_or_wrong_original_members(tmp_path,mut
             owner_index=next(i for i,e in enumerate(events) if any(r.table=="actions" and r.row_id==4 for r in e.rows))
             events[owner_index],events[index]=events[index],events[owner_index]
             events=[replace(e,event_id=result.events[0].event_id+i) for i,e in enumerate(events)]
-        result = replace(result,events=tuple(events),source_read_scope=None if mutation=="missing_port" else result.source_read_scope)
+        result = replace(result,events=tuple(events))
         return result
     try:
         before=tuple(owned.connection.iterdump())
-        outcome=_commit(_body(),owned,edit=plan,bounded=bounded)
+        outcome=_commit(_body(),owned,proposal_for,edit=plan,bounded=bounded)
         assert outcome.kind == "rolled_back", outcome
         assert tuple(owned.connection.iterdump()) == before
     finally:
         owned.connection.close()
 
 
-def test_existing_fixed_owner_cannot_append_by_admission_branch_and_fake_dictionary(tmp_path):
+def test_existing_fixed_owner_cannot_append_by_admission_branch_and_fake_dictionary(tmp_path, proposal_for):
     path=tmp_path/"state.db"
     _create_valid_database(path)
     owned=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
     try:
-        accepted=_commit(_body(),owned)
+        accepted=_commit(_body(),owned,proposal_for)
         assert accepted.kind == "completed", accepted.error
         before=tuple(owned.connection.iterdump())
         class Append:
@@ -151,10 +170,14 @@ def _bounded_admission(plan, connection):
     return BoundedCommandPlan(iter(plan.events), context, plan.result, lambda db: None)
 
 
-@pytest.mark.parametrize("owner_count", [1, 2])
 @pytest.mark.parametrize("bounded", [False, True])
-@pytest.mark.parametrize("mutation", ["control", "omit_all", "omit_one", "late_match", "late_unrelated", "split_members", "other_event_last"])
-def test_admission_final_seal_covers_every_actual_new_fixed_owner(tmp_path, bounded, mutation, owner_count):
+@pytest.mark.parametrize("owner_count,mutation", [
+    (1, "control"), (1, "omit_all"), (1, "late_match"),
+    (1, "late_unrelated"), (1, "split_members"),
+    (2, "control"), (2, "omit_all"), (2, "omit_one"),
+    (2, "late_match"), (2, "late_unrelated"), (2, "split_members"),
+])
+def test_admission_final_seal_covers_every_actual_new_fixed_owner(tmp_path, bounded, mutation, owner_count, proposal_for):
     path = tmp_path / "complete.db"
     _create_valid_database(path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -181,13 +204,10 @@ def test_admission_final_seal_covers_every_actual_new_fixed_owner(tmp_path, boun
             index = indices[0]
             event = templates[index]
             templates[index:index+1] = [replace(event, rows=event.rows[:1]), replace(event, rows=event.rows[1:])]
-        elif mutation == "other_event_last":
-            # 成员事件仍存在，但不完整；后接合法计划事件不能逃过最后封口。
-            templates.pop(indices[-1])
         return replace(result, events=tuple(templates))
     try:
         before = tuple(owned.connection.iterdump())
-        result = _commit(body, owned, edit=edited, bounded=bounded)
+        result = _commit(body, owned, proposal_for, edit=edited, bounded=bounded)
         if mutation in ("control", "late_unrelated"):
             assert result.kind == "completed", result.error
             assert tuple(owned.connection.execute("SELECT action_id,depends_on_action_id FROM action_dependencies ORDER BY id")) == (((4,1),(4,2)) if owner_count == 1 else ((4,1),(4,2),(5,1),(5,2)))
@@ -201,7 +221,7 @@ def test_admission_final_seal_covers_every_actual_new_fixed_owner(tmp_path, boun
 @pytest.mark.parametrize("bounded", [False, True])
 @pytest.mark.parametrize("source", [{"group":"chosen"}, {"action_name":"shot-0"}, {"current_plan":True}])
 @pytest.mark.parametrize("delete", [False, True])
-def test_admission_real_local_forms_share_final_seal(tmp_path, bounded, source, delete):
+def test_admission_real_local_forms_share_final_seal(tmp_path, bounded, source, delete, proposal_for):
     path = tmp_path / "forms.db"
     _create_valid_database(path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -211,7 +231,7 @@ def test_admission_real_local_forms_share_final_seal(tmp_path, bounded, source, 
         body["actions"][-1]["type"] = "delete_action_outputs"
         del body["actions"][-1]["params"]["purpose"]
     try:
-        result = _commit(body, owned, bounded=bounded)
+        result = _commit(body, owned, proposal_for, bounded=bounded)
         assert result.kind == "completed", result.error
         expected = () if delete and "group" in source else (1,) if "action_name" in source else (1,2) if "group" in source else (1,2,3)
         if delete and "group" in source:
@@ -223,7 +243,7 @@ def test_admission_real_local_forms_share_final_seal(tmp_path, bounded, source, 
 
 
 @pytest.mark.parametrize("bounded", [False, True])
-def test_admission_reliable_zero_needs_no_empty_members_event(tmp_path, bounded):
+def test_admission_reliable_zero_needs_no_empty_members_event(tmp_path, bounded, proposal_for):
     path = tmp_path / "zero.db"
     _create_valid_database(path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -231,7 +251,7 @@ def test_admission_reliable_zero_needs_no_empty_members_event(tmp_path, bounded)
     body["actions"] = [body["actions"][-1]]
     body["actions"][0]["params"]["source"] = {"current_plan":True}
     try:
-        result = _commit(body, owned, bounded=bounded)
+        result = _commit(body, owned, proposal_for, bounded=bounded)
         assert result.kind == "completed", result.error
         assert owned.connection.execute("SELECT source_resolution_state FROM actions").fetchone() == (2,)
         assert owned.connection.execute("SELECT COUNT(*) FROM action_dependencies").fetchone() == (0,)
@@ -242,7 +262,7 @@ def test_admission_reliable_zero_needs_no_empty_members_event(tmp_path, bounded)
 
 @pytest.mark.parametrize("bounded", [False, True])
 @pytest.mark.parametrize("mutation", ["missing", "wrong_plan", "wrong_scope"])
-def test_admission_f_binding_cannot_be_omitted_or_replaced(tmp_path,bounded,mutation):
+def test_admission_f_binding_cannot_be_omitted_or_replaced(tmp_path,bounded,mutation,proposal_for):
     from camctl.history.reads import PlanReadScope
     path=tmp_path/"scope.db"
     _create_valid_database(path)
@@ -253,7 +273,7 @@ def test_admission_f_binding_cannot_be_omitted_or_replaced(tmp_path,bounded,muta
         return result
     try:
         before=tuple(owned.connection.iterdump())
-        result=_commit(_body(),owned,edit=planned,bounded=bounded)
+        result=_commit(_body(),owned,proposal_for,edit=planned,bounded=bounded)
         assert result.kind == "rolled_back",result
         assert tuple(owned.connection.iterdump())==before
     finally:
@@ -261,7 +281,7 @@ def test_admission_f_binding_cannot_be_omitted_or_replaced(tmp_path,bounded,muta
 
 
 @pytest.mark.parametrize("mutation", ["late_scope", "swap_scope", "fake_reads", "other_connection", "clear_progress"])
-def test_bounded_admission_keeps_kernel_f_binding_through_actual_stream(tmp_path,mutation):
+def test_bounded_admission_keeps_kernel_f_binding_through_actual_stream(tmp_path,mutation,proposal_for):
     from camctl.persistence.event_reads import SqlEventReads
     path=tmp_path/"stream.db"
     _create_valid_database(path)
@@ -289,7 +309,7 @@ def test_bounded_admission_keeps_kernel_f_binding_through_actual_stream(tmp_path
         return actual
     try:
         before=tuple(owned.connection.iterdump())
-        result=_commit(_body(),owned,edit=edit,bounded=True,edit_context=changed)
+        result=_commit(_body(),owned,proposal_for,edit=edit,bounded=True,edit_context=changed)
         assert result.kind == "rolled_back",result
         if mutation == "clear_progress":
             from camctl.contracts.values import ConsistencyError
@@ -302,8 +322,7 @@ def test_bounded_admission_keeps_kernel_f_binding_through_actual_stream(tmp_path
 
 @pytest.mark.parametrize("bounded", [False, True])
 @pytest.mark.parametrize("source", [{"group":"missing"}, {"action_name":"missing"}, {"action_name":"fetch"}, {"group":"only-obtain"}])
-def test_final_admission_zero_requires_a_reliably_valid_source(tmp_path,bounded,source):
-    from copy import deepcopy
+def test_final_admission_zero_requires_a_reliably_valid_source(tmp_path,bounded,source,proposal_for):
     path=tmp_path/"invalid-zero.db"
     _create_valid_database(path)
     owned=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
@@ -327,7 +346,7 @@ def test_final_admission_zero_requires_a_reliably_valid_source(tmp_path,bounded,
         return replace(result, events=tuple(actual))
     try:
         before=tuple(owned.connection.iterdump())
-        result=_commit(body,owned,edit=changed,bounded=bounded)
+        result=_commit(body,owned,proposal_for,edit=changed,bounded=bounded)
         assert result.kind == "rolled_back",result
         assert tuple(owned.connection.iterdump())==before
     finally:
