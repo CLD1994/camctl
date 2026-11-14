@@ -199,12 +199,19 @@ class CheckBasis:
     target_duration_ms: int
     control_elapsed_ns: int | None = None
     continuity_evidence: tuple[str, ...] | None = None
+    threshold_s: Decimal | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.reason, CheckReason):
             raise TypeError(f"检查依据必须是 CheckReason: {self.reason!r}")
         _positive_int("目标时长毫秒", self.target_duration_ms)
         _optional_non_negative_int("控制耗时纳秒", self.control_elapsed_ns)
+        if self.threshold_s is not None:
+            if isinstance(self.threshold_s, bool):
+                raise TypeError("修复门槛秒数不能是布尔值")
+            threshold = _seconds("修复门槛秒数", self.threshold_s)
+            if self.reason is not CheckReason.INSUFFICIENT_TIMING or threshold < Decimal(self.target_duration_ms) / 1000:
+                raise ValueError("修复门槛须用于待检查录像且不低于目标时长")
         evidence = self.continuity_evidence
         if evidence is not None:
             if not isinstance(evidence, tuple):
@@ -224,6 +231,8 @@ class CheckBasis:
             document["control_elapsed_ns"] = self.control_elapsed_ns
         if self.continuity_evidence is not None:
             document["continuity_evidence"] = list(self.continuity_evidence)
+        if self.threshold_s is not None:
+            document["threshold_s"] = self.threshold_s
         return document
 
 

@@ -200,6 +200,15 @@ class TestProcessingError:
 
 
 class TestCheckBasis:
+    async def test_saved_threshold_is_exact_and_bound_to_required_check(self) -> None:
+        assert _basis(threshold_s=Decimal("70.25")).as_json()["threshold_s"] == Decimal("70.25")
+        with pytest.raises(ValueError):
+            _basis(threshold_s=Decimal("59.99"))
+        with pytest.raises(ValueError):
+            _basis(reason=CheckReason.CONTINUOUS_CONTROL_COMPLETE, threshold_s=Decimal("70"))
+        with pytest.raises(TypeError):
+            _basis(threshold_s=True)
+
     async def test_rejects_invalid_numbers_and_flags(self) -> None:
         with pytest.raises(ValueError):
             _basis(target_duration_ms=0)
