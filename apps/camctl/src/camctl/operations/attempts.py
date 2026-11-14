@@ -244,9 +244,9 @@ class AttemptIntent:
         elif self.copy_round is not None:
             raise AttemptConfigError("只有读取尝试保存 copy_round")
         if self.capture_selection is not None:
-            from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+            from camctl.operations.capture_selection import CaptureSelectionRequest
             if (self.kind is not OperationKind.READ_FILE
-                    or not isinstance(self.capture_selection, CaptureSelectionInput)
+                    or not isinstance(self.capture_selection, CaptureSelectionRequest)
                     or self.capture_selection.trusted_wall_now != self.occurred_at):
                 raise AttemptConfigError("拍摄选择输入必须属于同一读取意图及事实时刻")
         if self.kind is OperationKind.RESOLVE_OUTPUT_SCOPE and (

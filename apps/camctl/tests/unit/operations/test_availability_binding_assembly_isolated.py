@@ -69,10 +69,8 @@ def test_saved_conflict_keeps_original_identity_even_if_current_configuration_ch
 @pytest.mark.parametrize("reason", ["missing", "mismatch"])
 def test_missing_current_identity_still_discovers_prior_failed_photo_check(assembly_module, monkeypatch, reason):
     module, _, _ = assembly_module
-    availability = sys.modules["camctl.operations.availability"]
-    async def pages(database, request):
-        yield (9, 7, None)
-    availability._binding_check_pages = pages
+    monkeypatch.setattr(module, "read_binding_checks_page",
+                        lambda owned, request, *, after=0: SimpleNamespace(entries=((9, 7, None),), next_after=None))
     transaction = sys.modules["camctl.persistence.repositories.transactions"]
     transaction.row_facts = lambda connection, table, ident: {"expected_identity_json": {"serial": "old", "product_id": 10}}
     monkeypatch.setattr(module, "row_facts", transaction.row_facts)
@@ -91,3 +89,51 @@ def test_missing_current_identity_still_discovers_prior_failed_photo_check(assem
     assert not asyncio.run(assembly.finish_capture_binding(runtime, action, details))
     request = coordinator.finish_binding.await_args.args[1]
     assert (request.identity.serial, request.identity.product_id) == ("old", 10)
+
+
+def test_session_shares_one_owner_and_adapts_driver_cancellation(assembly_module, monkeypatch):
+    module, _, _ = assembly_module
+    availability = sys.modules["camctl.operations.availability"]
+    owners = []
+
+    class Coordinator:
+        def __init__(self, **kwargs):
+            self.options = kwargs
+            owners.append(self)
+
+        def pending(self, action_id):
+            return action_id == 8
+
+        def required_settlements(self):
+            return 1
+
+        def stop_new_work(self):
+            self.stopped = True
+
+        async def settle(self):
+            self.settled = True
+
+    availability.AvailabilityCoordinator = Coordinator
+    driver = ModuleType("camctl.devices.drivers.hasselblad.driver")
+
+    class AvailabilityCancelled(asyncio.CancelledError):
+        def __init__(self, result):
+            self.result = result
+
+    driver.AvailabilityCancelled = AvailabilityCancelled
+    monkeypatch.setitem(sys.modules, driver.__name__, driver)
+    storage = ModuleType("camctl.persistence.repositories.availability_storage")
+    storage.AvailabilityStorage = lambda: object()
+    monkeypatch.setitem(sys.modules, storage.__name__, storage)
+    registry = SimpleNamespace(entry=lambda name: SimpleNamespace(driver=SimpleNamespace(default_prepare_lead_s=3)))
+    session = module.AvailabilitySession({"camera": {"driver": "hb"}}, registry,
+        monotonic_ns=lambda: 0, occurred_at=lambda: 1, recovery_boundary=None, recovery_max_event_id=None)
+    assert owners == [session.coordinator]
+    assert session.preparation_leads == {"camera": 3}
+    assert session.pending(8) and session.required_settlements() == 1
+    result = object()
+    assert session.coordinator.options["cancelled_result"](AvailabilityCancelled(result)) is result
+    assert session.coordinator.options["cancelled_result"](asyncio.CancelledError()) is None
+    session.stop_new_work()
+    asyncio.run(session.settle())
+    assert session.coordinator.stopped and session.coordinator.settled

@@ -872,19 +872,10 @@ def _report_assembly(
     ready = Path(deps.config.paths.ready)
     processing = Path(deps.config.paths.processing)
     drivers = current_registry()
-    from camctl.bootstrap.availability_assembly import AvailabilityAssembly
-    from camctl.operations.availability import AvailabilityCoordinator
-    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
-    availability_owner = AvailabilityCoordinator(
+    from camctl.bootstrap.availability_assembly import AvailabilitySession
+    availability = AvailabilitySession(deps.config.devices, drivers,
         monotonic_ns=time.monotonic_ns, occurred_at=lambda: int(time.time() * 1_000_000),
         recovery_boundary=deps.recovery_boundary, recovery_max_event_id=lambda: deps.recovery_max_event_id)
-    preparation_leads = {}
-    for device_id, declaration in deps.config.devices.items():
-        if declaration.get("driver") == HASSELBLAD_DRIVER_ID:
-            entry = drivers.entry(HASSELBLAD_DRIVER_ID)
-            preparation_leads[device_id] = declaration.get("connection", {}).get(
-                "prepare_lead_s", entry.driver.default_prepare_lead_s)
-    availability = AvailabilityAssembly(availability_owner, deps.config.devices, drivers, preparation_leads)
     from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.bootstrap.download_cleanup import ReadDownloadCleanup
     from camctl.bootstrap.photo_work_cleanup import DownloadCleanupChain, HostCaptureWorkCleanup, PhotoWorkCleanup
@@ -946,7 +937,7 @@ def _report_assembly(
             resume_capture_completions=partial(_resume_capture_requests, deps),
             cleanup_pending=partial(_cleanup_pending_for_action, deps),
             preparation_pending=deps.capture_preparations.pending,
-            availability_owner=availability_owner,
+            availability_owner=availability,
             read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
         ),
         "motor": motor_flow(writer, deps.motor_permits),
@@ -1079,7 +1070,7 @@ def _report_assembly(
     capture_owner = flows["scheduling"]
     flows["report"] = ReportBackgroundFlow(flows["report"])
     flows["obtain"] = BackgroundFlow(flows["obtain"])
-    deps.background_flows = (flows["report"], capture_owner, flows["obtain"], availability_owner)
+    deps.background_flows = (flows["report"], capture_owner, flows["obtain"], availability)
     return flows, supervisor
 
 

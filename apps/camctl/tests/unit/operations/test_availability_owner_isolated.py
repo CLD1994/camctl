@@ -79,6 +79,26 @@ async def test_cancel_delivers_result_before_propagating(owner_type):
 
 
 @pytest.mark.asyncio
+async def test_cancel_without_result_keeps_original_failure_for_settlement(owner_type):
+    started = asyncio.Event()
+    original = asyncio.CancelledError("设备调用没有交付结果")
+
+    async def invoke():
+        started.set()
+        raise original
+
+    save = AsyncMock()
+    owner = owner_type("ticket", invoke, save, lambda error: None)
+    with pytest.raises(asyncio.CancelledError):
+        await owner.advance()
+    assert started.is_set() and not owner.saved and owner.actual is None
+    with pytest.raises(asyncio.CancelledError) as settled:
+        await owner.settle()
+    assert settled.value is original
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_stop_before_task_entry_keeps_original_dispatch_recheck(owner_type):
     actual = object()
     invoke, save = AsyncMock(return_value=actual), AsyncMock()

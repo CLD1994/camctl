@@ -291,7 +291,7 @@ class AvailabilityResultSaveTests(unittest.IsolatedAsyncioTestCase):
         save = namespace["availability_result_saver"](ticket=ticket, request=request,
             config=SimpleNamespace(max_attempts=2), evidence=object(), binding=SimpleNamespace(device_id="camera"),
             check_id=31, database=Database(), write=write, finish_availability=object(), finish_attempt=object(),
-            occurred_at=lambda: 20, monotonic_ns=lambda: 30, retry_gate=gate)
+            occurred_at=lambda: 20, monotonic_ns=lambda: 30, retry_gate=gate, read_action=lambda owned, action_id: None)
         unsettled = SimpleNamespace(settled=False, reason="transport_failed",
             calls=(SimpleNamespace(error=original_error),), tool_diagnostics=lambda: "original streams")
         with self.assertRaisesRegex(RuntimeError, "尚未确认"):

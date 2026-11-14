@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import closing
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
-from camctl.contracts.values import ConsistencyError, ObjectId, new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_availability_error, record_call_outcome, record_error
 from camctl.operations.attempts import (
     AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RetryWaitGate,
@@ -21,7 +20,7 @@ from camctl.operations.models import (
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.business import SharedSave
 from camctl.persistence.models import DbOutcomeKind, db_failure, db_outcome_for
-from camctl.persistence.repositories.operations import OperationRepository
+
 
 
 class AvailabilityProgress(Enum):
@@ -48,7 +47,7 @@ class _Write:
 
 def availability_result_saver(*, ticket, request, config, evidence, binding, check_id,
                               database, write, finish_availability, finish_attempt,
-                              occurred_at, monotonic_ns, retry_gate):
+                              occurred_at, monotonic_ns, retry_gate, read_action):
     """持有一次检查结果的固定保存申请及诊断责任。"""
     finish_holder = {}
 
@@ -72,7 +71,7 @@ def availability_result_saver(*, ticket, request, config, evidence, binding, che
             if outcome.status is AttemptStatus.SUCCEEDED:
                 finish = AttemptFinish(ticket, validated, occurred_at(), run_finish=RunFinish(RunOutcome.SUCCEEDED))
             else:
-                action = await database.read(lambda owned: _action_facts(owned, request.action_id))
+                action = await database.read(lambda owned: read_action(owned, request.action_id))
                 if action["cancel_requested"] or action["status"] == 6:
                     finish = AttemptFinish(ticket, validated, occurred_at(), run_finish=RunFinish(RunOutcome.CANCELED))
                 elif request.trigger_copy_id is None and (action["status"] == 5 or
@@ -104,13 +103,14 @@ class AvailabilityCoordinator:
     """拍摄及设备读取共享固定检查、原调用和未交付事务。"""
 
     def __init__(self, *, monotonic_ns, occurred_at, recovery_boundary,
-                 recovery_max_event_id, wake=None):
+                 recovery_max_event_id, storage, wake=None, cancelled_result=None):
         self.monotonic_ns = monotonic_ns
         self.occurred_at = occurred_at
         self.recovery_boundary = recovery_boundary
         self.recovery_max_event_id = recovery_max_event_id
         self.wake = wake
-        self.operations = OperationRepository()
+        self.cancelled_result = cancelled_result or (lambda error: None)
+        self.storage = storage
         self.retry_gate = RetryWaitGate()
         self.writes: dict[tuple, _Write] = {}
         self.calls: dict[int, AvailabilityAttemptOwner] = {}
@@ -179,7 +179,7 @@ class AvailabilityCoordinator:
 
     def check_completed(self):
         for identity, result in tuple(self.results.items()):
-            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+            if isinstance(result, BaseException):
                 del self.results[identity]
                 raise result
 
@@ -199,6 +199,10 @@ class AvailabilityCoordinator:
         for owner in tuple(self.calls.values()):
             try:
                 await owner.settle()
+            except asyncio.CancelledError as error:
+                if asyncio.current_task().cancelling():
+                    raise
+                failures.append(error)
             except Exception as error:
                 failures.append(error)
         for identity, pending in tuple(self.writes.items()):
@@ -207,7 +211,7 @@ class AvailabilityCoordinator:
             except Exception as error:
                 failures.append(error)
         if failures:
-            raise ExceptionGroup("设备检查责任收场失败", failures)
+            raise BaseExceptionGroup("设备检查责任收场失败", failures)
 
     async def request(self, database, request, config, driver, evidence, binding):
         """安排检查推进，长工具调用不阻塞本地文件或其他设备。"""
@@ -228,7 +232,11 @@ class AvailabilityCoordinator:
             self.tasks.pop(identity, None)
             try:
                 result = actual.result()
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as error:
+                pending = next((owner for owner in self.calls.values()
+                                if getattr(owner, "action_id", None) == identity[0] and not owner.saved), None)
+                if pending is not None:
+                    self.results[identity] = getattr(pending, "interrupted", None) or error
                 self._notify()
                 return
             except BaseException as error:
@@ -243,103 +251,110 @@ class AvailabilityCoordinator:
     async def finish_binding(self, database, request, config, evidence, binding, details, current_identity,
                              *, has_read_copy=True):
         """先收场原检查及实际调用，再结束不能继续的检查责任。"""
-        from camctl.persistence.repositories.availability_release import ResolveDisposition, finish_if_resolved
-        from camctl.persistence.repositories.availability_wait_finish import (
-            WaitingBindingResult, WaitingFinishDisposition, finish_waiting_availability,
-        )
+        storage = self.storage
+        ResolveDisposition = storage.ResolveDisposition
+        WaitingBindingResult = storage.WaitingBindingResult
+        WaitingFinishDisposition = storage.WaitingFinishDisposition
         identity = (request.action_id, request.trigger_copy_id)
         write_identity = (request.action_id, ("item", request.trigger_copy_id)) if not has_read_copy else identity
         lock = self._locks.setdefault(write_identity, asyncio.Lock())
         async with lock:
-            async for check_id, run_id, copy_id in _binding_check_pages(database, request):
-                owner = self.calls.get(run_id)
-                if owner is not None:
-                    if not owner.saved:
-                        await owner.advance()
-                    if not owner.saved:
-                        return False
-                    self.calls.pop(run_id, None)
-                run = await database.read(lambda owned: _run_facts(owned, run_id))
-                if run["running_attempt"] is not None:
-                    await self._recover_attempt(database, run, check_id,
-                        replace(request, trigger_copy_id=copy_id), evidence, binding, None)
-                    run = await database.read(lambda owned: _run_facts(owned, run_id))
+            after = 0
+            while True:
+                page = await database.read(lambda owned: self.storage.read_binding_checks_page(owned, request, after=after))
+                for check_id, run_id, copy_id in page.entries:
+                    owner = self.calls.get(run_id)
+                    if owner is not None:
+                        if not owner.saved:
+                            await owner.advance()
+                        if not owner.saved:
+                            return False
+                        self.calls.pop(run_id, None)
+                    run = await database.read(lambda owned: self.storage.read_run_facts(owned, run_id))
                     if run["running_attempt"] is not None:
-                        return False
-                resolved = await self._write(database, (*write_identity, "resolve", check_id),
-                    (check_id, self.occurred_at()),
-                    lambda args, key, owned: finish_if_resolved(*args, key, owned))
-                if resolved is ResolveDisposition.SUCCEEDED:
-                    continue
-                if resolved is ResolveDisposition.TERMINAL:
-                    terminal = await database.read(lambda owned: _run_facts(owned, run_id))
-                    if terminal["status"] == 3:
+                        await self._recover_attempt(database, run, check_id,
+                            replace(request, trigger_copy_id=copy_id), evidence, binding, None)
+                        run = await database.read(lambda owned: self.storage.read_run_facts(owned, run_id))
+                        if run["running_attempt"] is not None:
+                            return False
+                    resolved = await self._write(database, (*write_identity, "resolve", check_id),
+                        (check_id, self.occurred_at()),
+                        lambda args, key, owned: self.storage.finish_if_resolved(*args, key, owned))
+                    if resolved is ResolveDisposition.SUCCEEDED:
                         continue
-                    error = terminal.get("error_json")
-                    if terminal["status"] in (4, 6) and isinstance(error, dict):
-                        if error.get("code") == "device_binding_unavailable":
-                            state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
-                            self.binding_diagnostics_by_request[write_identity] = state
+                    if resolved is ResolveDisposition.TERMINAL:
+                        terminal = await database.read(lambda owned: self.storage.read_run_facts(owned, run_id))
+                        if terminal["status"] == 3:
                             continue
-                        if request.trigger_copy_id is not None and not has_read_copy:
-                            continue
-                        await self._deliver_failure(database, identity, check_id)
-                    return False
-                now = self.occurred_at()
-                result = await self._write(database, (*write_identity, "binding-finish", check_id),
-                    (check_id, now, now, None if config is None else config.max_attempts, details, current_identity),
-                    lambda args, key, owned: finish_waiting_availability(
-                        *args[:4], key, owned, binding_details=args[4], current_identity=args[5]))
-                if isinstance(result, WaitingBindingResult):
-                    if result.error is None:
+                        error = terminal.get("error_json")
+                        if terminal["status"] in (4, 6) and isinstance(error, dict):
+                            if error.get("code") == "device_binding_unavailable":
+                                state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
+                                self.binding_diagnostics_by_request[write_identity] = state
+                                continue
+                            if request.trigger_copy_id is not None and not has_read_copy:
+                                continue
+                            await self._deliver_failure(database, identity, check_id)
                         return False
-                    if result.error.get("code") != "device_binding_unavailable":
-                        raise ConsistencyError("绑定收场返回了其他检查错误")
-                    state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
-                    error = result.error
-                    record_error(ErrorValue(error["code"], error["stage"], error["details"]),
-                        stage=error["stage"], context={"action_id": request.action_id,
-                        "check_id": check_id, "run_id": run_id}, state=state,
-                        details={"current_identity": current_identity})
-                    self.binding_diagnostics_by_request[write_identity] = state
-                    result = WaitingFinishDisposition.FINISHED
-                if result is WaitingFinishDisposition.RESOLVED:
-                    return False
-                if result is WaitingFinishDisposition.TERMINAL:
-                    terminal = await database.read(lambda owned: _run_facts(owned, run_id))
-                    if terminal["status"] == 3:
-                        continue
-                    error = terminal.get("error_json")
-                    if terminal["status"] in (4, 6) and isinstance(error, dict):
-                        if error.get("code") == "device_binding_unavailable":
-                            state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
-                            self.binding_diagnostics_by_request[write_identity] = state
+                    now = self.occurred_at()
+                    result = await self._write(database, (*write_identity, "binding-finish", check_id),
+                        (check_id, now, now, None if config is None else config.max_attempts, details, current_identity),
+                        lambda args, key, owned: self.storage.finish_waiting_availability(
+                            *args[:4], key, owned, binding_details=args[4], current_identity=args[5]))
+                    if isinstance(result, WaitingBindingResult):
+                        if result.error is None:
+                            return False
+                        if result.error.get("code") != "device_binding_unavailable":
+                            raise ConsistencyError("绑定收场返回了其他检查错误")
+                        state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
+                        error = result.error
+                        record_error(ErrorValue(error["code"], error["stage"], error["details"]),
+                            stage=error["stage"], context={"action_id": request.action_id,
+                            "check_id": check_id, "run_id": run_id}, state=state,
+                            details={"current_identity": current_identity})
+                        self.binding_diagnostics_by_request[write_identity] = state
+                        result = WaitingFinishDisposition.FINISHED
+                    if result is WaitingFinishDisposition.RESOLVED:
+                        return False
+                    if result is WaitingFinishDisposition.TERMINAL:
+                        terminal = await database.read(lambda owned: self.storage.read_run_facts(owned, run_id))
+                        if terminal["status"] == 3:
                             continue
-                        if request.trigger_copy_id is not None and not has_read_copy:
-                            continue
-                        await self._deliver_failure(database, identity, check_id)
-                    return False
-                if result is not WaitingFinishDisposition.FINISHED:
-                    return False
-                self._deadlines.pop(check_id, None)
-                self.retry_gate.cleared(f"availability/{check_id}")
+                        error = terminal.get("error_json")
+                        if terminal["status"] in (4, 6) and isinstance(error, dict):
+                            if error.get("code") == "device_binding_unavailable":
+                                state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
+                                self.binding_diagnostics_by_request[write_identity] = state
+                                continue
+                            if request.trigger_copy_id is not None and not has_read_copy:
+                                continue
+                            await self._deliver_failure(database, identity, check_id)
+                        return False
+                    if result is not WaitingFinishDisposition.FINISHED:
+                        return False
+                    self._deadlines.pop(check_id, None)
+                    self.retry_gate.cleared(f"availability/{check_id}")
+                if page.next_after is None:
+                    break
+                after = page.next_after
             return True
 
     async def advance(self, database, request, config, driver, evidence, binding):
         """推进已具普通资格的触发工作；READY 后由原调度重新判断。"""
-        from camctl.persistence.repositories.availability_create import CreateDisposition, ensure_check
-        from camctl.persistence.repositories.availability_release import ResolveDisposition, finish_if_resolved
+        storage = self.storage
+        CreateDisposition = storage.CreateDisposition
+        ResolveDisposition = storage.ResolveDisposition
 
         identity = (request.action_id, request.trigger_copy_id)
         lock = self._locks.setdefault(identity, asyncio.Lock())
         async with lock:
             if self._stopping:
                 return AvailabilityProgress.WAIT
-            existing = await database.read(lambda owned: _open_check(owned, request))
+            existing = await database.read(lambda owned: self.storage.read_open_check(owned, request))
             if existing == ("identity_mismatch",):
                 return AvailabilityProgress.IDENTITY_MISMATCH
             if existing is None:
-                created = await self._write(database, (*identity, "create"), request, ensure_check)
+                created = await self._write(database, (*identity, "create"), request, self.storage.ensure_check)
                 if created.disposition is CreateDisposition.NOT_REQUIRED:
                     return AvailabilityProgress.READY
                 if created.disposition is CreateDisposition.IDENTITY_MISMATCH:
@@ -359,11 +374,11 @@ class AvailabilityCoordinator:
                     self._notify()
             resolved = await self._write(database, (*identity, "resolve"),
                 (check_id, self.occurred_at()),
-                lambda args, key, owned: finish_if_resolved(*args, key, owned))
+                lambda args, key, owned: self.storage.finish_if_resolved(*args, key, owned))
             if resolved is ResolveDisposition.SUCCEEDED:
                 self._deadlines.pop(check_id, None)
                 return AvailabilityProgress.READY
-            run = await database.read(lambda owned: _run_facts(owned, run_id))
+            run = await database.read(lambda owned: self.storage.read_run_facts(owned, run_id))
             if resolved is ResolveDisposition.TERMINAL:
                 self._deadlines.pop(check_id, None)
                 if run["status"] == 3:
@@ -377,13 +392,11 @@ class AvailabilityCoordinator:
             if run["running_attempt"] is not None:
                 await self._recover_attempt(database, run, check_id, request, evidence, binding, config)
                 return AvailabilityProgress.WAIT
-            from camctl.persistence.repositories.availability_wait_finish import (
-                WaitingFinishDisposition, finish_waiting_availability,
-            )
+            WaitingFinishDisposition = storage.WaitingFinishDisposition
             now = self.occurred_at()
             waiting = await self._write(database, (*identity, "finish-wait"),
                 (check_id, now, now, config.max_attempts),
-                lambda args, key, owned: finish_waiting_availability(*args, key, owned))
+                lambda args, key, owned: self.storage.finish_waiting_availability(*args, key, owned))
             if waiting in (WaitingFinishDisposition.FINISHED, WaitingFinishDisposition.TERMINAL,
                            WaitingFinishDisposition.RESOLVED):
                 self._notify()
@@ -401,10 +414,9 @@ class AvailabilityCoordinator:
                         self._deadlines[check_id] = target
                         self._notify()
                     return AvailabilityProgress.WAIT
-                from camctl.persistence.repositories.availability_retry import complete_availability_retry_wait
                 await self._write(database, (*identity, "retry"),
                     (run_id, run["last_attempt_id"], self.occurred_at()),
-                    lambda args, key, owned: complete_availability_retry_wait(*args, key, owned))
+                    lambda args, key, owned: self.storage.complete_availability_retry_wait(*args, key, owned))
                 self.retry_gate.cleared(f"availability/{check_id}")
                 self._deadlines.pop(check_id, None)
             if self._stopping:
@@ -414,7 +426,7 @@ class AvailabilityCoordinator:
             intent = AttemptIntent("availability", request.action_id, OperationKind.CHECK_DEVICE_AVAILABILITY,
                                    AttemptTarget(availability_check_id=check_id), None, config, now)
             begun = await self._write(database, (*identity, "intent"), (intent, current),
-                lambda args, key, owned: self.operations.begin_availability_attempt(*args, key, owned))
+                lambda args, key, owned: self.storage.begin_availability_attempt(*args, key, owned))
             if begun.ticket is None:
                 if begun.reason == "availability_identity_mismatch":
                     return AvailabilityProgress.IDENTITY_MISMATCH
@@ -429,25 +441,21 @@ class AvailabilityCoordinator:
             return AvailabilityProgress.WAIT
 
     async def _deliver_failure(self, database, identity, check_id):
-        from camctl.persistence.repositories.availability_failure import (
-            FailureDisposition, fail_photo_availability, fail_read_availability,
-        )
+        storage = self.storage
+        FailureDisposition = storage.FailureDisposition
         action_id, copy_id = identity
         now = self.occurred_at()
         if copy_id is None:
             request = (check_id, now, now)
-            callback = lambda args, key, owned: fail_photo_availability(*args, key, owned)
+            callback = lambda args, key, owned: self.storage.fail_photo_availability(*args, key, owned)
         else:
             request = (check_id, copy_id, now)
-            callback = lambda args, key, owned: fail_read_availability(*args, key, owned)
+            callback = lambda args, key, owned: self.storage.fail_read_availability(*args, key, owned)
         result = await self._write(database, (*identity, "deliver", check_id), request, callback)
         if result is FailureDisposition.FAILED:
             self._notify()
 
     def _attempt_owner(self, database, ticket, request, config, driver, evidence, binding, check_id):
-        from camctl.devices.drivers.hasselblad.driver import AvailabilityCancelled
-        from camctl.persistence.repositories.availability_intent import recheck_availability_dispatch
-        from camctl.persistence.repositories.availability_release import finish_availability
 
         async def invoke():
             if self._stopping:
@@ -458,7 +466,7 @@ class AvailabilityCoordinator:
             now = self.occurred_at()
             current = replace(request, occurred_at=now, trusted_wall_now=now)
             try:
-                decision = await database.read(lambda owned: recheck_availability_dispatch(owned.connection, ticket, current))
+                decision = await database.read(lambda owned: self.storage.read_dispatch_decision(owned, ticket, current))
             except asyncio.CancelledError as error:
                 outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
                     error=ErrorValue("canceled", "dispatch"),
@@ -477,11 +485,12 @@ class AvailabilityCoordinator:
 
         save = availability_result_saver(ticket=ticket, request=request, config=config,
             evidence=evidence, binding=binding, check_id=check_id, database=database, write=self._write,
-            finish_availability=finish_availability, finish_attempt=self.operations.finish_attempt,
-            occurred_at=self.occurred_at, monotonic_ns=self.monotonic_ns, retry_gate=self.retry_gate)
+            finish_availability=self.storage.finish_availability, finish_attempt=self.storage.finish_attempt,
+            occurred_at=self.occurred_at, monotonic_ns=self.monotonic_ns, retry_gate=self.retry_gate,
+            read_action=self.storage.read_action_facts)
 
         return AvailabilityAttemptOwner(ticket, invoke, save,
-            lambda error: error.result if isinstance(error, (AvailabilityCancelled, _DispatchCancelled)) else None)
+            lambda error: error.result if isinstance(error, _DispatchCancelled) else self.cancelled_result(error))
 
     async def _recover_attempt(self, database, run, check_id, request, evidence, binding, config):
         from camctl.operations.recovery import RecoveryBoundary
@@ -502,126 +511,19 @@ class AvailabilityCoordinator:
         record_call_outcome(outcome, ticket=ticket,
                             context={"action_id": request.action_id}, state=diagnostic)
         await self._write(database, (request.action_id, request.trigger_copy_id, "recover", run["id"]),
-                          finish, self.operations.finish_attempt)
+                          finish, self.storage.finish_attempt)
         if active:
             self.retry_gate.established(ticket.responsibility_key, self.monotonic_ns())
-            action = await database.read(lambda owned: _action_facts(owned, request.action_id))
+            action = await database.read(lambda owned: self.storage.read_action_facts(owned, request.action_id))
             now = self.occurred_at()
             terminal_trigger = (action["cancel_requested"] or action["status"] in (5, 6)
                 or request.trigger_copy_id is None and now > action["scheduled_at"] + action["max_delay_ms"] * 1000)
             if config is not None or terminal_trigger:
-                from camctl.persistence.repositories.availability_wait_finish import (
-                    WaitingFinishDisposition, finish_waiting_availability,
-                )
+                WaitingFinishDisposition = self.storage.WaitingFinishDisposition
                 maximum = config.max_attempts if config is not None else run["max_attempts_used"]
                 result = await self._write(database, (request.action_id, request.trigger_copy_id, "finish-wait"),
                     (check_id, now, now, maximum),
-                    lambda args, key, owned: finish_waiting_availability(*args, key, owned))
+                    lambda args, key, owned: self.storage.finish_waiting_availability(*args, key, owned))
                 if result in (WaitingFinishDisposition.FINISHED, WaitingFinishDisposition.TERMINAL):
                     self.retry_gate.cleared(ticket.responsibility_key)
         self._notify()
-
-
-def _run_facts(owned, run_id):
-    from camctl.persistence.repositories.transactions import row_facts
-    run = row_facts(owned.connection, "operation_runs", run_id)
-    if run is None:
-        raise ConsistencyError("设备检查流程不存在")
-    row = owned.connection.execute(
-        "SELECT id,status,result_event_id,intent_event_id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
-        (run_id,)).fetchone()
-    run["last_attempt_id"] = None if row is None else row[0]
-    run["running_attempt"] = None if row is None or row[1] != 1 and row[2] is not None else row[0]
-    run["intent_event_id"] = None if row is None else row[3]
-    return run
-
-
-def _open_check(owned, request):
-    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-    from camctl.persistence.repositories.transactions import row_facts
-    rows = owned.connection.execute(
-        "SELECT c.id,r.id,c.trigger_copy_id FROM device_availability_checks c"
-        " JOIN operation_runs r ON r.availability_check_id=c.id"
-        " WHERE c.action_id=? AND c.resource_key=? AND r.status IN (1,2) ORDER BY c.id LIMIT 2",
-        (request.action_id, request.identity.resource_key),
-    ).fetchall()
-    if len(rows) > 1:
-        raise ConsistencyError("同一动作与机身存在多个开放检查")
-    if not rows:
-        return None
-    check = row_facts(owned.connection, "device_availability_checks", rows[0][0])
-    try:
-        if check is None:
-            raise ValueError("缺少固定检查")
-        fixed = CameraIdentity(**check["expected_identity_json"])
-        if check["resource_key"] != fixed.resource_key:
-            raise ValueError("固定检查资源键不符")
-    except (KeyError, TypeError, ValueError) as error:
-        raise ConsistencyError("开放检查缺少可靠固定机身身份") from error
-    return ("identity_mismatch",) if fixed != request.identity else tuple(rows[0])
-
-
-def _action_binding_checks(owned, request, *, after=0):
-    """读取一页当前仍需消费的检查，保留原始页的继续位置。"""
-    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-    from camctl.persistence.repositories.transactions import row_facts
-    if request.trigger_copy_id is None:
-        condition, params = "c.trigger_copy_id IS NULL", (request.action_id,)
-    else:
-        condition, params = "c.trigger_copy_id IS NOT NULL AND c.resource_key=?", (request.action_id, request.identity.resource_key)
-    if after != 0:
-        ObjectId(after)
-    matching = []
-    with closing(owned.connection.execute(
-        "SELECT c.id,r.id,c.trigger_copy_id,r.status FROM device_availability_checks c"
-        " JOIN operation_runs r ON r.availability_check_id=c.id"
-        " WHERE c.action_id=? AND " + condition + " AND r.status IN (1,2,4,6) AND c.id>? ORDER BY c.id LIMIT 128",
-        (*params, after),
-    )) as cursor:
-        rows = cursor.fetchall()
-    ids = tuple(ObjectId(row[0]) for row in rows)
-    if any(left >= right for left, right in zip((after, *ids), ids)):
-        raise ConsistencyError("检查读取页不是严格递增的唯一身份")
-    for check_id, run_id, copy_id, status in rows:
-        check = row_facts(owned.connection, "device_availability_checks", check_id)
-        try:
-            if check is None:
-                raise ValueError("缺少固定检查")
-            fixed = CameraIdentity(**check["expected_identity_json"])
-            if check["resource_key"] != fixed.resource_key:
-                raise ValueError("固定检查资源键不符")
-        except (KeyError, TypeError, ValueError) as error:
-            raise ConsistencyError("检查缺少可靠固定机身身份") from error
-        if request.trigger_copy_id is not None and fixed != request.identity:
-            continue
-        if status in (4, 6):
-            run = row_facts(owned.connection, "operation_runs", run_id)
-            if run is None:
-                raise ConsistencyError("终态检查缺少原流程")
-            error = run.get("error_json")
-            if not isinstance(error, dict) or error.get("code") != "device_binding_unavailable":
-                from camctl.persistence.repositories.availability_failure import failure_basis
-                if failure_basis(owned.connection, check_id, request.action_id) is None:
-                    continue
-        matching.append((check_id, run_id, copy_id))
-    return tuple(matching), rows[-1][0] if len(rows) == 128 else None
-
-
-async def _binding_check_pages(database, request):
-    """逐页交付匹配项，不在事务连接之外保留游标。"""
-    after = 0
-    while True:
-        page, next_after = await database.read(lambda owned: _action_binding_checks(owned, request, after=after))
-        for entry in page:
-            yield entry
-        if next_after is None:
-            return
-        after = next_after
-
-
-def _action_facts(owned, action_id):
-    from camctl.persistence.repositories.transactions import row_facts
-    action = row_facts(owned.connection, "actions", action_id)
-    if action is None:
-        raise ConsistencyError("设备检查触发动作不存在")
-    return action

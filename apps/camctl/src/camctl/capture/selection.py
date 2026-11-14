@@ -5,10 +5,11 @@ from decimal import Decimal
 
 from camctl.contracts.values import ConsistencyError, UtcMicros
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+from camctl.operations.capture_selection import CaptureSelectionRequest
 
 
 @dataclass(frozen=True)
-class CaptureSelectionInput:
+class CaptureSelectionInput(CaptureSelectionRequest):
     """本次会话的设备绑定、机身、实际提前量及可信时刻。"""
 
     device_id: str

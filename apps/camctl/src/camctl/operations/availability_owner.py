@@ -23,6 +23,7 @@ class AvailabilityAttemptOwner:
     entered: bool = False
     saved: bool = False
     task: asyncio.Task | None = None
+    interrupted: asyncio.CancelledError | None = None
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState)
     result_save: SharedSave = field(default_factory=SharedSave)
 
@@ -45,6 +46,7 @@ class AvailabilityAttemptOwner:
         try:
             self.actual = await self.invoke()
         except asyncio.CancelledError as error:
+            self.interrupted = error
             self.actual = self.cancelled_result(error)
             interrupted = error
         if self.actual is not None:
@@ -76,5 +78,7 @@ class AvailabilityAttemptOwner:
                 failure = error
         if self.actual is not None and not self.saved:
             await self.save_actual(retry=True)
+        if self.actual is None and self.interrupted is not None:
+            raise self.interrupted
         if failure is not None and not isinstance(failure, asyncio.CancelledError):
             raise failure

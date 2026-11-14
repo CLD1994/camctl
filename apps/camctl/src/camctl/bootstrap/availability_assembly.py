@@ -9,6 +9,7 @@ from camctl.devices.drivers.hasselblad.files import camera_file_identity_from_so
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.operations.availability import AvailabilityProgress
 from camctl.persistence.repositories.availability_create import CreateAvailabilityCheck
+from camctl.persistence.repositories.availability_reads import read_binding_checks_page, read_run_facts
 from camctl.persistence.repositories.transactions import row_facts
 
 
@@ -30,7 +31,7 @@ class AvailabilityAssembly:
         declaration = self.devices.get(device_id)
         if declaration is None or declaration.get("driver") != DRIVER_ID:
             return None
-        from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+        from camctl.capture.selection import CaptureSelectionInput
         return CaptureSelectionInput(device_id, DRIVER_ID, _hasselblad_identity(declaration),
                                      self.preparation_leads[device_id], now)
 
@@ -53,8 +54,7 @@ class AvailabilityAssembly:
             if run_id in self.coordinator.calls:
                 continue
             def facts(owned):
-                from camctl.operations.availability import _run_facts
-                return _run_facts(owned, run_id), row_facts(owned.connection, "device_availability_checks", check_id)
+                return read_run_facts(owned, run_id), row_facts(owned.connection, "device_availability_checks", check_id)
             run, check = await context.database.read(facts)
             identity = CameraIdentity(**check["expected_identity_json"])
             entry = self.drivers.entry(check["driver_id"])
@@ -125,18 +125,22 @@ class AvailabilityAssembly:
         identity = runtime.fixed_camera_identity
         if identity is None:
             from types import SimpleNamespace
-            from camctl.operations.availability import _binding_check_pages
-            async for check_id, _, _ in _binding_check_pages(
-                    runtime.database, SimpleNamespace(action_id=action["id"], trigger_copy_id=None)):
-                found = await runtime.database.read(lambda owned: row_facts(
-                    owned.connection, "device_availability_checks", check_id))
-                if found is None:
-                    from camctl.contracts.values import ConsistencyError
-                    raise ConsistencyError("开放检查缺少固定事实")
-                identity = CameraIdentity(**found["expected_identity_json"])
-                break
-            else:
-                return True
+            request = SimpleNamespace(action_id=action["id"], trigger_copy_id=None)
+            after = 0
+            while True:
+                page = await runtime.database.read(lambda owned: read_binding_checks_page(owned, request, after=after))
+                if page.entries:
+                    check_id = page.entries[0][0]
+                    found = await runtime.database.read(lambda owned: row_facts(
+                        owned.connection, "device_availability_checks", check_id))
+                    if found is None:
+                        from camctl.contracts.values import ConsistencyError
+                        raise ConsistencyError("开放检查缺少固定事实")
+                    identity = CameraIdentity(**found["expected_identity_json"])
+                    break
+                if page.next_after is None:
+                    return True
+                after = page.next_after
         request = CreateAvailabilityCheck(action["id"], identity, now,
             effective_preparation_lead_s(runtime, action), now)
         entry = self.drivers.entry(DRIVER_ID)
@@ -202,3 +206,49 @@ class AvailabilityAssembly:
                 current = {"serial": configured.serial, "product_id": configured.product_id}
         return await self.coordinator.finish_binding(runtime.database, request, config, entry.evidence,
             fixed.binding, details, current, has_read_copy=getattr(candidate, "has_read_copy", True))
+
+
+class AvailabilitySession(AvailabilityAssembly):
+    """一个 run 会话共享设备检查、恢复以及结果和资源收场责任。"""
+
+    def __init__(self, devices, drivers, *, monotonic_ns, occurred_at,
+                 recovery_boundary, recovery_max_event_id):
+        from camctl.devices.drivers.hasselblad.driver import AvailabilityCancelled
+        from camctl.operations.availability import AvailabilityCoordinator
+        from camctl.persistence.repositories.availability_storage import AvailabilityStorage
+
+        def cancelled_result(error):
+            return error.result if isinstance(error, AvailabilityCancelled) else None
+
+        coordinator = AvailabilityCoordinator(
+            monotonic_ns=monotonic_ns, occurred_at=occurred_at,
+            recovery_boundary=recovery_boundary, recovery_max_event_id=recovery_max_event_id,
+            storage=AvailabilityStorage(), cancelled_result=cancelled_result)
+        leads = {}
+        for device_id, declaration in devices.items():
+            if declaration.get("driver") == DRIVER_ID:
+                entry = drivers.entry(DRIVER_ID)
+                leads[device_id] = declaration.get("connection", {}).get(
+                    "prepare_lead_s", entry.driver.default_prepare_lead_s)
+        super().__init__(coordinator, devices, drivers, leads)
+
+    def pending(self, action_id):
+        return self.coordinator.pending(action_id)
+
+    def cancel_action(self, action_id):
+        self.coordinator.cancel_action(action_id)
+
+    def stop_new_work(self):
+        self.coordinator.stop_new_work()
+
+    def check_completed(self):
+        self.coordinator.check_completed()
+
+    def required_settlements(self):
+        return self.coordinator.required_settlements()
+
+    def next_wakeup_at(self, now, margin_s):
+        return self.coordinator.next_wakeup_at(now, margin_s)
+
+    async def settle(self):
+        await self.coordinator.settle()
