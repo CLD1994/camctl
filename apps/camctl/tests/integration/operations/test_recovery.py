@@ -1,8 +1,7 @@
 """O5 原尝试恢复与取消接手的组件集成测试。
 
-真实 SQLite 与 O2 结果事务组合：取消后到达的可靠退出事实仍按原
-尝试保存为未知结果；只登记意图的尝试在恢复分类后核实原责任、不
-重发；已终态尝试的迟到结果保留原事实。
+真实 SQLite 与 O2 结果事务组合：给定取消结果按原尝试保存；只登记
+意图时保留原身份与预算并拒绝新尝试；迟到结果不覆盖已保存的事实。
 """
 
 from __future__ import annotations
@@ -21,24 +20,18 @@ from camctl.operations.attempts import (
     AttemptIntent,
     AttemptTarget,
     BeginDisposition,
+    FinishDisposition,
     OperationKind,
 )
 from camctl.operations.models import (
     AttemptStatus,
+    CallInfo,
     CallOutcome,
     EffectState,
     ErrorValue,
     EvidenceValue,
     Settlement,
     SettlementBasis,
-)
-from camctl.operations.recovery import (
-    CancelOutcome,
-    RecoveryClass,
-    RecoveryFacts,
-    RecoveryOutcome,
-    recover_attempt,
-    settle_cancelled_call,
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
@@ -133,20 +126,13 @@ def _value(owned, sql: str, *params):
 pytestmark = pytest.mark.asyncio
 
 
-async def test_cancelled_call_result_is_saved_on_original_attempt(tmp_path: Path) -> None:
-    """取消触发的终止取得可靠退出：按原尝试保存未知结果。"""
+async def test_given_cancel_result_is_saved_on_original_attempt(tmp_path: Path) -> None:
+    """给定取消结束结果，仓储按原票据保存完整未知结果。"""
     owned = _environment(tmp_path)
     repository = OperationRepository()
     try:
         granted = repository.begin_attempt(_intent(), new_operation_key(), owned)
         ticket = granted.value.ticket
-
-        # 等待者取消，调用随后被 SIGKILL 终止并确认退出。
-        settled = await settle_cancelled_call(
-            CancelOutcome(cancelled=True, final_outcome=RecoveryOutcome(local_signal=9))
-        )
-        assert settled.saved is True
-        assert settled.outcome is not None and settled.outcome.local_signal == 9
 
         outcome = validate_outcome(
             ticket,
@@ -161,6 +147,7 @@ async def test_cancelled_call_result_is_saved_on_original_attempt(tmp_path: Path
                     ),
                 ),
                 observations=(),
+                call_info=CallInfo(local_signal=9),
             ),
             _CONTRACTS,
         )
@@ -169,37 +156,43 @@ async def test_cancelled_call_result_is_saved_on_original_attempt(tmp_path: Path
             new_operation_key(),
             owned,
         )
-        assert finish.kind is DbOutcomeKind.COMPLETED
+        assert finish.kind is DbOutcomeKind.COMPLETED, finish.error
+        assert finish.value.disposition is FinishDisposition.SAVED
         saved = _value(
             owned,
-            "SELECT status, error_json FROM operation_attempts"
+            "SELECT status, error_json, result_json, effect_state, intent_event_id, result_event_id FROM operation_attempts"
             " WHERE run_id = ? AND attempt_no = 1",
             ticket.run_id,
         )
         assert saved[0] == 4  # UNKNOWN
-        assert json.loads(saved[1])["code"] == "canceled_terminated"
+        assert json.loads(saved[1]) == {"code": "canceled_terminated", "stage": "dispatch", "details": {}}
+        assert json.loads(saved[2]) == {
+            "format_version": 1,
+            "settlement": {"basis": "observed", "evidence": {
+                "type": "operation_returned", "version": 1, "data": {}}},
+            "observations": [], "call_info": {"local_exit": {"signal": 9}},
+        }
+        assert saved[3] == 1  # UNKNOWN
+        assert saved[4] is not None and saved[5] is not None
     finally:
         owned.connection.close()
 
 
-async def test_intent_only_attempt_recovers_without_redispatch(tmp_path: Path) -> None:
-    """只有意图且主机收场完成：分类为待核实，不重发。"""
+async def test_intent_only_attempt_reuses_key_and_rejects_new_attempt(tmp_path: Path) -> None:
+    """只登记意图时，同键保留原票据，新尝试被拒绝且预算不变。"""
     owned = _environment(tmp_path)
     repository = OperationRepository()
     try:
-        granted = repository.begin_attempt(_intent(), new_operation_key(), owned)
+        key = new_operation_key()
+        granted = repository.begin_attempt(_intent(), key, owned)
         ticket = granted.value.ticket
         assert granted.value.disposition is BeginDisposition.GRANTED
 
-        decision = recover_attempt(
-            RecoveryFacts(
-                has_intent=True,
-                has_saved_result=False,
-                host_settlement_complete=True,
-            )
-        )
-        assert decision.recovery is RecoveryClass.UNKNOWN_NEEDS_VERIFICATION
-        assert decision.redispatch is False
+        original = tuple(owned.connection.iterdump())
+        repeated = repository.begin_attempt(_intent(), key, owned)
+        assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
+        assert repeated.value == granted.value
+        assert tuple(owned.connection.iterdump()) == original
 
         # 未核实前不新增尝试：重试协议违规被整组回滚。
         again = repository.begin_attempt(_intent(), new_operation_key(), owned)
@@ -210,12 +203,13 @@ async def test_intent_only_attempt_recovers_without_redispatch(tmp_path: Path) -
             ticket.run_id,
         )
         assert used[0] == 1
+        assert tuple(owned.connection.iterdump()) == original
     finally:
         owned.connection.close()
 
 
 async def test_settled_attempt_keeps_original_result(tmp_path: Path) -> None:
-    """已保存失败的尝试：恢复分类为已终，迟到结果不覆盖。"""
+    """尝试已失败且流程仍活跃时，迟到成功不覆盖原结果或历史。"""
     owned = _environment(tmp_path)
     repository = OperationRepository()
     try:
@@ -237,30 +231,36 @@ async def test_settled_attempt_keeps_original_result(tmp_path: Path) -> None:
             ),
             _CONTRACTS,
         )
-        repository.finish_attempt(
+        initial = repository.finish_attempt(
             AttemptFinish(ticket=ticket, outcome=failed, occurred_at=_NOW),
             new_operation_key(),
             owned,
         )
-        decision = recover_attempt(
-            RecoveryFacts(
-                has_intent=True,
-                has_saved_result=True,
-                host_settlement_complete=True,
-            )
+        assert initial.kind is DbOutcomeKind.COMPLETED, initial.error
+        assert initial.value.disposition is FinishDisposition.SAVED
+        assert _value(owned, "SELECT status FROM operation_runs WHERE id = ?", ticket.run_id) == (2,)
+        original = _value(owned, "SELECT status, error_json, result_json FROM operation_attempts"
+                          " WHERE run_id = ? AND attempt_no = 1", ticket.run_id)
+        assert original[0] == 3
+        assert json.loads(original[1])["code"] == "transport_timeout"
+        history = tuple(owned.connection.iterdump())
+        late = validate_outcome(
+            ticket,
+            CallOutcome(status=AttemptStatus.SUCCEEDED, effect=EffectState.UNKNOWN,
+                settlement=Settlement(SettlementBasis.OBSERVED,
+                    EvidenceValue(type="operation_returned", version=1, data={})),
+                observations=(), call_info=CallInfo(local_exit_code=0)),
+            _CONTRACTS,
         )
-        assert decision.recovery is RecoveryClass.ALREADY_SETTLED
-        assert decision.redispatch is False
-
-        settled = await settle_cancelled_call(
-            CancelOutcome(cancelled=False, final_outcome=RecoveryOutcome(local_exit_code=0))
+        result = repository.finish_attempt(
+            AttemptFinish(ticket=ticket, outcome=late, occurred_at=_NOW),
+            new_operation_key(), owned,
         )
-        assert settled.saved is True
-        saved = _value(
-            owned,
-            "SELECT status FROM operation_attempts WHERE run_id = ? AND attempt_no = 1",
-            ticket.run_id,
-        )
-        assert saved[0] == 3  # 原失败保留
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.disposition is FinishDisposition.ALREADY_ENDED
+        assert result.value.attempt_status is AttemptStatus.FAILED
+        assert _value(owned, "SELECT status, error_json, result_json FROM operation_attempts"
+                      " WHERE run_id = ? AND attempt_no = 1", ticket.run_id) == original
+        assert tuple(owned.connection.iterdump()) == history
     finally:
         owned.connection.close()

@@ -308,3 +308,24 @@ def test_retry_wait_gate_pending_only_waits_recorded_anchors():
     ) == Decimal("2")
     assert gate.pending(
         "media-input/1", interval_s=Decimal("3"), now_ns=4_000_000_000) is None
+
+
+def test_dispatch_decision_returns_granted_original_ticket():
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+
+    ticket = AttemptTicket(1, "query", None, "query/preflight/1", 7)
+    result = attempts.BeginAttemptResult(attempts.BeginDisposition.GRANTED, ticket=ticket)
+    decision = attempts.dispatch_decision(DbOutcome(DbOutcomeKind.COMPLETED, value=result))
+    assert decision.dispatched is True
+    assert decision.ticket == ticket
+    assert decision.refusal is None
+
+
+def test_dispatch_decision_refuses_rejected_intent():
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+
+    result = attempts.BeginAttemptResult(attempts.BeginDisposition.REJECTED, reason="budget_exhausted")
+    decision = attempts.dispatch_decision(DbOutcome(DbOutcomeKind.COMPLETED, value=result))
+    assert decision.dispatched is False
+    assert decision.ticket is None
+    assert decision.refusal is attempts.RefusalKind.REJECTED

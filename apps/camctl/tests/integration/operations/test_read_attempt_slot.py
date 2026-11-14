@@ -36,7 +36,9 @@ def _intent(command, prepared):
         AttemptTarget(copy_id=prepared.copy_id), None, config, command.occurred_at + 1, copy_round=1)
 
 
-@pytest.mark.parametrize("slot", ["held", "absent", "foreign"])
+@pytest.mark.parametrize("read_request,slot", [
+    (source, slot) for source in ("device", "internal") for slot in ("held", "absent", "foreign")
+] + [("host", "held"), ("host", "foreign")], indirect=["read_request"])
 def test_new_read_attempt_requires_its_own_device_slot(ready_read, slot):
     owned, command, _, prepared = ready_read
     if slot != "held":

@@ -25,11 +25,9 @@ from camctl.operations.attempts import (
     FinishDisposition,
     OperationKind,
     QueryPurpose,
-    RefusalKind,
     RunFinish,
     RunOutcome,
     RunStatus,
-    dispatch_decision,
 )
 from camctl.operations.models import (
     AttemptStatus,
@@ -86,16 +84,6 @@ _CONTRACTS = EvidenceRegistry(
         ),
     )
 )
-
-
-class DispatchSpy:
-    """派发端替身：只记录调用，不产生副作用。"""
-
-    def __init__(self) -> None:
-        self.calls: list = []
-
-    def __call__(self, ticket) -> None:
-        self.calls.append(ticket)
 
 
 def _seed_environment(tmp_path: Path):
@@ -316,18 +304,18 @@ def test_first_intent_creates_run_and_attempt_together(tmp_path: Path) -> None:
         owned.connection.close()
 
 
-def test_prevented_dispatch_keeps_attempt_count(tmp_path: Path) -> None:
+def test_not_dispatched_result_keeps_attempt_count(tmp_path: Path) -> None:
     owned = _seed_environment(tmp_path)
     repository = OperationRepository()
-    dispatches = DispatchSpy()
     try:
         granted = repository.begin_attempt(
             _preflight_intent(), new_operation_key(), owned
         )
-        assert dispatch_decision(granted).dispatched is True
+        assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+        assert granted.value.disposition is BeginDisposition.GRANTED
         ticket = granted.value.ticket
 
-        # 意图提交后、派发前取消生效：驱动从未被调用。
+        # 给定合法的未派发结果，验证仓储保存与预算处理。
         prevented = _validated(
             ticket,
             _outcome(
@@ -338,7 +326,6 @@ def test_prevented_dispatch_keeps_attempt_count(tmp_path: Path) -> None:
                 evidence_type="dispatch_prevented",
             ),
         )
-        assert dispatches.calls == []
 
         finish = repository.finish_attempt(
             AttemptFinish(ticket=ticket, outcome=prevented, occurred_at=_NOW),
@@ -364,12 +351,12 @@ def test_prevented_dispatch_keeps_attempt_count(tmp_path: Path) -> None:
             ticket.run_id,
         )
         assert saved[0] == 3  # FAILED
-        result_json = json.loads(saved[2])
-        assert result_json["settlement"]["basis"] == "not_dispatched"
-        assert result_json["settlement"]["evidence"]["type"] == "dispatch_prevented"
-        assert result_json["observations"] == []
+        assert json.loads(saved[1]) == {"code": "canceled_before_dispatch", "stage": "dispatch", "details": {}}
+        assert json.loads(saved[2]) == {
+            "format_version": 1, "settlement": {"basis": "not_dispatched", "evidence": {
+                "type": "dispatch_prevented", "version": 1, "data": {}}}, "observations": []}
 
-        # 预算用完后的再次意图被拒绝，且不派发。
+        # 预算用完后的再次意图被拒绝。
         rejected = repository.begin_attempt(
             _preflight_intent(
                 config=AttemptConfig(
@@ -381,10 +368,6 @@ def test_prevented_dispatch_keeps_attempt_count(tmp_path: Path) -> None:
         )
         assert rejected.kind is DbOutcomeKind.COMPLETED
         assert rejected.value.disposition is BeginDisposition.REJECTED
-        refused = dispatch_decision(rejected)
-        assert refused.dispatched is False
-        assert refused.refusal is RefusalKind.REJECTED
-        assert dispatches.calls == []
     finally:
         owned.connection.close()
 

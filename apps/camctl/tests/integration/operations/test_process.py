@@ -52,6 +52,17 @@ async def _run(spec: ToolSpec, stop: StopSignal) -> RawToolOutcome:
     return await execute_tool(spec, stop=stop)
 
 
+async def _reap(handle) -> None:
+    """测试持有的进程必须实际退出并完成两条输出管道的读取。"""
+    try:
+        handle.request_kill()
+    except ProcessLookupError:
+        pass
+    async with asyncio.timeout(5):
+        await handle.wait()
+        await handle.wait_output()
+
+
 async def test_normal_tool_exit_and_output() -> None:
     class Never:
         async def requested(self) -> None:
@@ -80,50 +91,82 @@ async def test_timeout_terminates_and_records_grace() -> None:
     assert outcome.exit is not None
 
 
-@pytest.mark.parametrize("already_exited", [False, True])
-async def test_expired_spawn_handoff_reaps_real_child_and_retains_both_channels(tmp_path, already_exited):
+@pytest.mark.parametrize("already_exited,gate_fails", [(False, False), (True, False), (False, True)])
+async def test_expired_spawn_handoff_reaps_real_child_and_retains_both_channels(tmp_path, already_exited, gate_fails):
     handles = []
     marker = tmp_path / "output-flushed"
 
     async def delayed_spawn(spec):
         handle = await spawn_subprocess(spec)
-        handles.append(handle)
-        if already_exited:
-            await handle.wait()
-            await handle.wait_output()
-        else:
-            async with asyncio.timeout(5):
-                while not marker.exists():
-                    await asyncio.sleep(.001)
-        await asyncio.sleep(.03)
-        return handle
+        handed_off = False
+        try:
+            handles.append(handle)
+            if already_exited:
+                await handle.wait()
+                await handle.wait_output()
+            else:
+                async with asyncio.timeout(5):
+                    while not marker.exists():
+                        await asyncio.sleep(.001)
+            if gate_fails:
+                raise RuntimeError("启动门失败")
+            await asyncio.sleep(.03)
+            handed_off = True
+            return handle
+        finally:
+            if not handed_off:
+                await _reap(handle)
 
     script = ("import sys; from pathlib import Path; print('original stdout',flush=True); "
               "print('original stderr',file=sys.stderr,flush=True); "
               "Path(" + repr(str(marker)) + ").write_text('ready')")
     if not already_exited:
         script += "; import time; time.sleep(30)"
-    raw = await execute_tool(_tool(script, timeout_s=Decimal("0.001")),
-                             stop=_CancelRequest(), spawner=delayed_spawn)
-    assert raw.error == "timeout"
-    assert raw.output == b"original stdout\n" and raw.stderr == b"original stderr\n"
-    assert len(handles) == 1
-    assert await handles[0].wait() == raw.exit
-    await handles[0].wait_output()
-    assert raw.used_grace_s == (None if already_exited else GRACE)
-    if already_exited:
-        assert raw.exit.exit_code == 0
+    try:
+        if gate_fails:
+            with pytest.raises(RuntimeError, match="启动门失败"):
+                await execute_tool(_tool(script, timeout_s=Decimal("0.001")),
+                                   stop=_CancelRequest(), spawner=delayed_spawn)
+            assert len(handles) == 1
+            assert await handles[0].wait() is not None
+            await handles[0].wait_output()
+            assert handles[0].output == b"original stdout\n"
+            assert handles[0].stderr == b"original stderr\n"
+            return
+        raw = await execute_tool(_tool(script, timeout_s=Decimal("0.001")),
+                                 stop=_CancelRequest(), spawner=delayed_spawn)
+        assert raw.error == "timeout"
+        assert raw.output == b"original stdout\n" and raw.stderr == b"original stderr\n"
+        assert len(handles) == 1
+        assert await handles[0].wait() == raw.exit
+        await handles[0].wait_output()
+        assert raw.used_grace_s == (None if already_exited else GRACE)
+        if already_exited:
+            assert raw.exit.exit_code == 0
+    finally:
+        for handle in handles:
+            await _reap(handle)
 
 
-async def test_cancel_uses_same_termination_flow() -> None:
+async def test_cancel_uses_same_termination_flow(tmp_path) -> None:
     stop = _CancelRequest()
-    task = asyncio.ensure_future(_run(_tool("import time; time.sleep(30)"), stop))
-    await asyncio.sleep(0.1)
-    stop.request()
-    outcome = await task
-    assert outcome.error == "cancelled"
-    assert outcome.used_grace_s == GRACE
-    assert outcome.exit is not None
+    marker = tmp_path / "started"
+    script = ("import time; from pathlib import Path; Path(" + repr(str(marker)) +
+              ").write_text('started'); time.sleep(30)")
+    task = asyncio.create_task(_run(_tool(script), stop))
+    try:
+        async with asyncio.timeout(5):
+            while not marker.exists():
+                await asyncio.sleep(.005)
+        stop.request()
+        outcome = await task
+        assert outcome.error == "cancelled"
+        assert outcome.used_grace_s == GRACE
+        assert outcome.exit is not None
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_canceled_waiter_reaps_real_process_and_finishes_both_output_readers(tmp_path):
