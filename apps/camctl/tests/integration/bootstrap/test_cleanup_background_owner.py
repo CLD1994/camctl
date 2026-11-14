@@ -297,18 +297,18 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
     from camctl.persistence.repositories.operations import OperationRepository
     from camctl.session.service import StateDbFailure, run_session
     from .cleanup_helpers import finish_cleanup_round
-    from .test_cleanup_host_file_tasks import _seed_repaired_file, _accept_cleanup, _cleanup_factory
-    from .test_output_binding_changes import Catalog, _save_photos
+    from .test_cleanup_host_file_tasks import _repaired_file, _accept_cleanup, _cleanup_factory
+    from .test_output_binding_changes import Catalog
 
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
     loop = asyncio.get_running_loop()
     entered, release = asyncio.Event(), threading.Event()
     querying = threading.Event()
     operations, results, saves, opened = [], [], [], []
     unlink, stat = Path.unlink, os.stat
+    post_delete = False
     actual_delete, actual_query = HostArtifacts.delete, HostArtifacts.query_file
     original_save = OutputsRepository.finish_cleanup_attempt
     original_query_save = OperationRepository.finish_attempt
@@ -318,12 +318,21 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
         release.wait()
 
     def blocked_unlink(path, *args, **kwargs):
+        nonlocal post_delete
         result = unlink(path, *args, **kwargs)
-        if path == target and operation == 'delete':
-            wait_for_thread()
+        if path == target:
+            if operation == 'delete':
+                wait_for_thread()
+            else:
+                post_delete = True
+                raise OSError('删除结果未知')
         return result
 
     def blocked_stat(path, *args, **kwargs):
+        nonlocal post_delete
+        if path == target and post_delete:
+            post_delete = False
+            raise OSError('删除后的观察结果未知')
         try:
             return stat(path, *args, **kwargs)
         finally:
@@ -335,7 +344,8 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
         operations.append(request.operation)
         actual = await actual_delete(port, request)
         if operation == 'query':
-            return DeviceCallResult((), {'code': 'file_delete_failed', 'stage': 'delete'})
+            assert actual.error is not None and actual.observations == ()
+            return actual
         results.append(actual)
         return actual
 
@@ -377,7 +387,7 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
         task = None
     try:
         await wait_session_event(entered, task)
-        assert executor.unfinished_files() == (900,)
+        assert executor.unfinished_files() == (file_id,)
         if task is None:
             owner.stop_new_work()
             owner.stop_new_work()
@@ -389,7 +399,7 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
         for _ in range(5):
             await asyncio.sleep(0)
         assert not task.done() and owner.required_settlements() > 0
-        assert executor.unfinished_files() == (900,)
+        assert executor.unfinished_files() == (file_id,)
         assert len(opened) == 1
         assert await opened[0].read(lambda current: current.connection.execute('SELECT 1').fetchone()) == (1,)
         release.set()

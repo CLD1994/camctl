@@ -39,8 +39,9 @@ from camctl.persistence.initialization import InitOutcome, initialize_state
 from ..capture.test_capture_contract import ResultsDouble
 from .test_run_dispatch import _parsed
 from .test_obtain_flow import (
-    _CAMERA_SCHEMA, _await_query, _cancel, _future_schedule, _past_schedule,
+    _CAMERA_SCHEMA, _await_query, _future_schedule, _past_schedule,
     _photo_entry, _photo_plan, _scalar)
+from .test_recording_stop import _cancel
 
 
 async def _submit(tmp_path: Path, cfg, body: dict) -> None:

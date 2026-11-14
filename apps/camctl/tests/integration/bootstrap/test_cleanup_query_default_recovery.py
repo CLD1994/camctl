@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -27,7 +28,6 @@ from camctl.session.supervision import Supervisor
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import item_error_id
-from camctl.devices.ports import DeviceCallResult
 from camctl.operations.attempts import FinishDisposition
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
@@ -39,7 +39,8 @@ from ..outputs.test_cleanup_query_commit_recovery import (
 from ..outputs.test_cleanup_query_save_recovery import (
     _MatrixDriver, _apply_cleanup_cancel, _member_facts, _start_cleanup,
 )
-from .test_cleanup_flow import _seed_repaired_artifact
+from .test_cleanup_host_file_tasks import host_environment, _repaired_file
+from ..support.recording_consumer_cases import recording_cases
 from .test_output_binding_changes import (
     _NOW, _accept, _registry, _save_photos, environment,
 )
@@ -420,10 +421,9 @@ async def test_waiter_cancel_keeps_original_query_owner(environment):
 
 
 class _LocalProbe(HostArtifacts):
-    """记录本地调用；删除按类级开关失败以进入存在性查询。"""
+    """记录本地端口的实际删除与查询。"""
 
     instances = []
-    fail_delete = False
 
     def __init__(self, staging, executor):
         super().__init__(staging, executor)
@@ -432,9 +432,6 @@ class _LocalProbe(HostArtifacts):
 
     async def delete(self, request):
         self.delete_calls.append(request)
-        if _LocalProbe.fail_delete:
-            return DeviceCallResult(
-                observations=(), error={"code": "local_io_failed", "stage": "delete"})
         return await super().delete(request)
 
     async def query_file(self, request):
@@ -443,16 +440,30 @@ class _LocalProbe(HostArtifacts):
 
 
 async def test_host_artifact_query_recovers_after_save_fault(
-        environment, monkeypatch):
+        host_environment, monkeypatch):
     """主机派生成品的本地查询保存失败后新轮次恢复；目标不落入设备。"""
-    cfg, owned, context, capture_driver = environment
-    await _save_photos(cfg, owned, context, capture_driver)
-    output_id = owned.connection.execute(
-        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
-        " WHERE a.device_id='cam-a'").fetchone()[0]
-    _seed_repaired_artifact(Path(cfg.paths.state_db), cfg, output_id)
-    # 删除调用将失败，而目标文件确已不在：查询按真实缺席核实。
-    (Path(cfg.paths.staging) / "derived" / "900.jpg").unlink()
+    cfg, owned, context, capture_driver, _, _ = host_environment
+    output_id, file_id, target = _repaired_file(cfg, owned)
+    real_unlink, real_stat = Path.unlink, os.stat
+    post_delete = False
+
+    def unlink_then_fail(path, *args, **kwargs):
+        nonlocal post_delete
+        result = real_unlink(path, *args, **kwargs)
+        if path == target:
+            post_delete = True
+            raise OSError("删除结果未知")
+        return result
+
+    def stat_after_delete(path, *args, **kwargs):
+        nonlocal post_delete
+        if post_delete and Path(path) == target:
+            post_delete = False
+            raise OSError("删除后的观察结果未知")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink_then_fail)
+    monkeypatch.setattr(os, "stat", stat_after_delete)
     await _accept(owned, "2", [{
         "name": "清理主机成品", "type": "delete_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
@@ -485,13 +496,13 @@ async def test_host_artifact_query_recovers_after_save_fault(
             OperationRepository, "finish_attempt",
             lambda repository, finish, key, current_owned:
                 fault.save(repository, finish, key, current_owned))
-        _LocalProbe.fail_delete = True
 
         with cleanup_failure(ConsistencyError):
             await finish_cleanup_round(cleanup_flow(session_factory), context)
 
         first = _LocalProbe.instances[-1]
         assert len(first.delete_calls) == 1 and len(first.query_calls) == 1
+        assert not target.exists()
         assert len(fault.calls) == len(fault.receipts) == 1
         assert fault.receipts[0].kind is DbOutcomeKind.UNKNOWN
         assert fault.fault.commit_calls == fault.fault.actual_commits == 1
@@ -500,11 +511,19 @@ async def test_host_artifact_query_recovers_after_save_fault(
             "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
             (str(first_key),)).fetchone() == (1,)
         item_id = int(fault.calls[0][0].ticket.target_id)
+        from camctl.outputs.cleanup_results import saved_cleanup_delete
+        saved_delete = saved_cleanup_delete(owned.connection, item_id)
+        assert saved_delete is not None and saved_delete.actual.error is not None
+        assert saved_delete.actual.observations == ()
+        assert _finish.outcome.outcome.observations[0].data == {
+            "cleanup_item_id": str(item_id), "present": False}
+        assert first.delete_calls[0].file_ref.file_id == file_id
+        assert first.query_calls[0].file_ref.file_id == file_id
         member_before = _member_facts(owned, item_id)
         assert member_before[0] == 3
 
         # 设备目录不再包含原设备：主机目标不得被误分为设备目标。
-        devices.pop("cam-a")
+        devices.pop("cam-1")
         clock.update(wall=_NOW + 5_000, mono=900)
         driver.reject_new_calls = True
         await finish_cleanup_round(cleanup_flow(session_factory), context)

@@ -203,7 +203,8 @@ async def check_unknown_cleanup_supervision(world, monkeypatch, operation, facto
     from ..bootstrap.cleanup_helpers import cleanup_failure, finish_cleanup_round
 
     cfg, owned, context, driver, executor, supervisor = world
-    target = Path(cfg.paths.staging) / 'derived/900.jpg'
+    from ..bootstrap.test_cleanup_host_file_tasks import _repaired_file
+    _, _, target = _repaired_file(cfg, owned)
     original_runner = world.thread_runner.call
     submitted, finishes = [], []
     original_run = executor.run_file_task
@@ -313,12 +314,11 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
 
     cfg, owned, context, driver, executor, supervisor = world
     staging = Path(cfg.paths.staging)
-    target = staging / 'derived/900.jpg'
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b'host-control-original-bytes')
+    from ..bootstrap.test_cleanup_host_file_tasks import _repaired_file
+    _, file_id, target = _repaired_file(cfg, owned)
     ticket = AttemptTicket(1, 'delete', '1', 'delete/1', 1)
     request = LocalArtifactRequest(owned.metadata.instance_id, 'delete', 1, ticket,
-        FileRef(900, FilePurpose.REPAIR_OUTPUT, 'derived/900.jpg', staging))
+        FileRef(file_id, FilePurpose.REPAIR_OUTPUT, str(target.relative_to(staging)), staging))
     port = (await factory(context.database)).local_files
     assert port is not None and current_call_scope() is None
     loop = asyncio.get_running_loop()
@@ -418,7 +418,7 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
     outcome = None
     try:
         await asyncio.wait_for(body_started.wait(), 5)
-        assert executor.unfinished_files() == (900,)
+        assert executor.unfinished_files() == (file_id,)
         assert not target.exists()
         if runner_failure:
             await asyncio.wait_for(collecting.wait(), 5)
@@ -463,7 +463,7 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
         return result
 
     assert len(submitted) == len(actuals) == 1
-    assert submitted[0].task_id.value == identity and submitted[0].file_id == 900
+    assert submitted[0].task_id.value == identity and submitted[0].file_id == file_id
     assert request.ticket is ticket
     assert not target.exists()
     if unavailable_actual:

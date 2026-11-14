@@ -18,24 +18,21 @@ from ..support.bootstrap_runtime_cases import (
     advance_cleanup_once, apply_host_cleanup_cancel,
 )
 from ..support.capture import capture_database
+from ..support.recording_consumer_cases import reconciliation_case, recording_cases
 
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
-from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.cleanup_assembly import cleanup_flow
 from camctl.contracts.values import ConsistencyError
-from camctl.devices.ports import DeviceCallResult
-from camctl.host_files import paths as host_paths
 from camctl.host_files.models import FilePurpose
 from camctl.operations.models import SettlementBasis
 from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
 from camctl.outputs.cleanup_results import saved_cleanup_delete, saved_cleanup_query
-from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.host_files.tasks import FileTask, FileTaskId, FileTaskExecutor
 from camctl.session.supervision import Supervisor
 
 from .test_output_binding_changes import (
-    Driver, _NOW, _accept, _registry, _save_photos,
+    Driver, _NOW, _accept, _registry,
 )
 
 
@@ -43,17 +40,13 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def host_environment(tmp_path, monkeypatch):
-    cfg = load_config({
-        "paths": {
-            "state_db": str(tmp_path / "state.db"),
-            "log_file": str(tmp_path / "camctl.log"),
-            **{name: str(tmp_path / name) for name in ("staging", "ready", "processing")},
-        },
-        "devices": {device: {"kind": "camera", "driver": "camctl-adb"}
-                    for device in ("cam-a", "cam-b")},
-    }, ConfigDefaults())
-    assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+async def host_environment(tmp_path, monkeypatch, recording_cases, capture_resources):
+    case = await reconciliation_case(tmp_path, started_at_offset_s=120, repair=True)
+    await case.advance()
+    cfg = case.config
+    assert case.stop_calls == ["stop_recording"] and case.tools.calls == ["repair"]
+    await case.close()
+    await capture_resources.close()
     owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
     context = SimpleNamespace(
         open_connection=lambda: open_existing(
@@ -81,27 +74,13 @@ async def host_environment(tmp_path, monkeypatch):
                 owned.connection.close()
 
 
-def _seed_repaired_file(cfg, owned):
-    output_id = owned.connection.execute(
-        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
-        " WHERE a.device_id='cam-a'").fetchone()[0]
-    connection = sqlite3.connect(cfg.paths.state_db)
-    try:
-        connection.execute(
-            "INSERT INTO intermediate_files (id, owner_action_id, purpose, relative_path,"
-            " retention_state, cleanup_state, size_bytes, created_event_id, last_event_id,"
-            " change_count) VALUES (900, (SELECT source_action_id FROM outputs WHERE id=?),"
-            " 4, 'derived/900.jpg', 3, 1, 16, 1, 1, 1)", (output_id,))
-        connection.execute(
-            "UPDATE outputs SET kind=2, device_file_id=NULL, intermediate_file_id=900"
-            " WHERE id=?", (output_id,))
-        connection.commit()
-    finally:
-        connection.close()
-    target = Path(cfg.paths.staging) / "derived" / "900.jpg"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"repaired-artifact")
-    return output_id, target
+def _repaired_file(cfg, owned):
+    output_id, file_id, relative_path = owned.connection.execute(
+        "SELECT o.id,i.id,i.relative_path FROM outputs o JOIN intermediate_files i"
+        " ON i.id=o.intermediate_file_id WHERE o.kind=2").fetchone()
+    target = Path(cfg.paths.staging) / relative_path
+    assert target.is_file()
+    return output_id, file_id, target
 
 
 async def _accept_cleanup(owned, output_id):
@@ -168,8 +147,7 @@ async def test_registered_host_delete_wait_cancellation_saves_not_dispatched_onc
     cfg, owned, context, driver, executor, supervisor = host_environment
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     gate = threading.Event()
@@ -212,13 +190,13 @@ async def test_registered_host_delete_wait_cancellation_saves_not_dispatched_onc
             staging=Path(cfg.paths.staging), file_executor=executor,
         )
         cleanup = asyncio.create_task(advance_cleanup_once(factory, context))
-        await _wait_until(lambda: 900 in executor.unfinished_files())
+        await _wait_until(lambda: file_id in executor.unfinished_files())
         item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
         if business_cancel:
             await apply_host_cleanup_cancel(cfg, owned, context)
         cleanup.cancel()
         # 取消先撤回已登记且未开始的任务；blocker 放行后才会完成共享 drain。
-        await _wait_until(lambda: 900 not in executor.unfinished_files())
+        await _wait_until(lambda: file_id not in executor.unfinished_files())
         gate.set()
         with pytest.raises(asyncio.CancelledError) as interrupted:
             await cleanup
@@ -247,7 +225,7 @@ async def test_registered_host_delete_wait_cancellation_saves_not_dispatched_onc
         assert len(attempts) == 1
         assert len(submitted) == 1
         task, task_options = submitted[0]
-        assert task.file_id == 900
+        assert task.file_id == file_id
         assert task.task_id.value == (
             f"cleanup:{owned.metadata.instance_id}:delete:{saved.ticket.run_id}:"
             f"{saved.ticket.attempt_id}")
@@ -256,9 +234,9 @@ async def test_registered_host_delete_wait_cancellation_saves_not_dispatched_onc
         request = requests[0]
         assert request.database_id == owned.metadata.instance_id
         assert request.ticket == saved.ticket
-        assert request.file_ref.file_id == task.file_id == 900
+        assert request.file_ref.file_id == task.file_id == file_id
         assert request.file_ref.purpose is FilePurpose.REPAIR_OUTPUT
-        assert request.file_ref.relative_path == "derived/900.jpg"
+        assert request.file_ref.relative_path == str(target.relative_to(cfg.paths.staging))
         assert request.file_ref.root == Path(cfg.paths.staging)
         assert config == [(cfg.cleanup.max_delete_attempts, None, None)]
 
@@ -289,7 +267,7 @@ async def test_registered_host_delete_wait_cancellation_saves_not_dispatched_onc
         assert not target.exists()
         assert item_status == (4,)
         assert len(submitted) == 2
-        assert submitted[1][0].file_id == 900
+        assert submitted[1][0].file_id == file_id
         assert submitted[1][0].task_id != submitted[0][0].task_id
         assert len(requests) == 2
     finally:
@@ -308,8 +286,7 @@ async def test_registered_host_query_wait_cancellation_keeps_original_consumer(
     cfg, owned, context, driver, executor, supervisor = host_environment
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     gate = threading.Event()
@@ -324,8 +301,7 @@ async def test_registered_host_query_wait_cancellation_keeps_original_consumer(
     blocker = FileTask(
         FileTaskId("r4-test-query-pool-blocker"), 999_002,
         "test", "pool_blocker", occupy_pool)
-    blocker_task = asyncio.create_task(
-        executor.run_file_task(blocker, owner))
+    blocker_task = None
     cleanup = None
     try:
         original_run = original_host_calls()
@@ -333,12 +309,23 @@ async def test_registered_host_query_wait_cancellation_keeps_original_consumer(
         submitted = []
         run_file_task = executor.run_file_task
 
+        original_unlink = Path.unlink
+
+        def fail_unlink(path, *args, **kwargs):
+            if path == target:
+                raise PermissionError("保留文件以查询实际存在状态")
+            return original_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", fail_unlink)
+
         async def fail_delete_capture_query(self, request):
+            nonlocal blocker_task
             operations.append(request.operation)
+            result = await original_run(self, request)
             if request.operation == "delete":
-                return DeviceCallResult((), {
-                    "code": "local_io_failed", "stage": "delete"})
-            return await original_run(self, request)
+                blocker_task = asyncio.create_task(executor.run_file_task(blocker, owner))
+                await asyncio.wait_for(blocker_started.wait(), timeout=5)
+            return result
 
         async def track_task(task, task_owner, **kwargs):
             if task.business == "host_artifact_cleanup":
@@ -352,14 +339,14 @@ async def test_registered_host_query_wait_cancellation_keeps_original_consumer(
             cfg, driver, executor, active_calls=active_calls)
         cleanup = asyncio.create_task(advance_cleanup_once(factory, context))
         await asyncio.wait_for(blocker_started.wait(), timeout=5)
-        await _wait_until(lambda: 900 in executor.unfinished_files())
+        await _wait_until(lambda: file_id in executor.unfinished_files())
         item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
         assert owned.connection.execute(
             "SELECT r.kind,a.status FROM operation_attempts a JOIN operation_runs r"
             " ON r.id=a.run_id WHERE r.cleanup_item_id=? ORDER BY a.id",
             (item_id,)).fetchall()[-1] == (5, 1)
         cleanup.cancel()
-        await _wait_until(lambda: 900 not in executor.unfinished_files())
+        await _wait_until(lambda: file_id not in executor.unfinished_files())
         with pytest.raises(asyncio.CancelledError):
             await cleanup
     finally:
@@ -399,9 +386,8 @@ async def test_registered_host_query_wait_cancellation_keeps_original_consumer(
     assert active_calls == set()
     assert target.is_file()
     assert operations == ["delete", "query"]
-    assert len(submitted) == 1
-    assert submitted[0].stage == "cleanup_query"
-    assert submitted[0].file_id == 900
+    assert [task.stage for task in submitted] == ["cleanup_delete", "cleanup_query"]
+    assert all(task.file_id == file_id for task in submitted)
     assert executor.unfinished_files() == ()
 
     operations_before_resume = tuple(operations)
@@ -416,8 +402,7 @@ async def test_started_host_delete_cancellation_saves_observation_and_error(
         host_environment, monkeypatch):
     """已开始 unlink 的取消等待线程与原 ticket 收场；观察和错误一并保存。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -458,11 +443,11 @@ async def test_started_host_delete_cancellation_saves_observation_and_error(
             " ON r.id=a.run_id WHERE r.cleanup_item_id=? AND r.kind=4", (item_id,)).fetchone()
         assert running == (1,)
         assert active_calls
-        assert 900 in executor.unfinished_files()
+        assert file_id in executor.unfinished_files()
         cleanup.cancel()
         await asyncio.wait_for(_wait_until(lambda: bool(drains)), timeout=5)
         assert active_calls
-        assert 900 in executor.unfinished_files()
+        assert file_id in executor.unfinished_files()
         assert not cleanup.done()
         cleanup.cancel()
         assert len(drains) == 1
@@ -492,7 +477,7 @@ async def test_started_host_delete_cancellation_saves_observation_and_error(
     assert len(worker_threads) == 1 and worker_threads[0] != loop_thread
     assert not target.exists()
     assert not active_calls
-    assert 900 not in executor.unfinished_files()
+    assert file_id not in executor.unfinished_files()
     assert supervisor.outstanding() == ()
 
 
@@ -501,8 +486,7 @@ async def test_supervisor_handoff_failure_keeps_original_handle_until_saved(
         host_environment, monkeypatch, failure_stage):
     """监督注册/登记故障不能丢掉已开始任务，也不能长期保留其 handle。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -586,8 +570,7 @@ async def test_finished_host_delete_cancellation_before_runner_delivery_keeps_ac
     """FileTask completion 已形成但 runner 尚未交付时，撤回不能改写实际结果。"""
     host_runner = host_environment.thread_runner
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -672,8 +655,7 @@ async def test_owner_failure_recovers_same_handle_and_saves_actual_before_error(
     """supervisor owner 失败不重投，collector 用原 handle 保留 actual 后报告错误。"""
     host_runner = host_environment.thread_runner
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     unlink_calls = []
@@ -732,8 +714,7 @@ async def test_canceled_owner_failure_saves_actual_and_chains_drain_error(
     """取消时 owner drain 失败仍从原 handle 保存缺席，并把故障挂到取消原因。"""
     host_runner = host_environment.thread_runner
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -827,8 +808,7 @@ async def test_host_delete_commit_unknown_recovers_same_save_without_task_replay
     from camctl.persistence.repositories.outputs import OutputsRepository
 
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
     active_calls = set()
     factory = _cleanup_factory(
@@ -902,8 +882,8 @@ async def test_started_host_query_cancellation_keeps_query_consumer_for_reentry(
         host_environment, monkeypatch, query_error):
     """取消期间 QUERY 仍由原 AFTER_DELETE ticket 保存，再入场时不重查文件。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
+    original_bytes = target.read_bytes()
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -968,12 +948,12 @@ async def test_started_host_query_cancellation_keeps_query_consumer_for_reentry(
             " ON r.id=a.run_id WHERE r.cleanup_item_id=? ORDER BY a.id", (item_id,)).fetchall()
         assert running[-1] == (5, 1)
         assert active_calls
-        assert 900 in executor.unfinished_files()
+        assert file_id in executor.unfinished_files()
         stats_when_query_paused = len(stat_calls)
         cleanup.cancel()
         await asyncio.wait_for(drain_started.wait(), timeout=5)
         assert active_calls
-        assert 900 in executor.unfinished_files()
+        assert file_id in executor.unfinished_files()
         assert not cleanup.done()
     finally:
         gate.set()
@@ -1007,8 +987,8 @@ async def test_started_host_query_cancellation_keeps_query_consumer_for_reentry(
     assert original_query is not None and original_query.after_delete
     assert active_calls == set()
     assert worker_threads and all(thread != loop_thread for thread in worker_threads)
-    assert original_stat(target).st_size == len(b"repaired-artifact")
-    assert 900 not in executor.unfinished_files()
+    assert target.read_bytes() == original_bytes
+    assert file_id not in executor.unfinished_files()
     # 取消前已经开始的 QUERY 在线程里只观察一次；这次结果形成后，
     # 下方新工厂复入不应再提交 QUERY，也不应再次观察目标。
     assert len(stat_calls) == stats_when_query_paused
@@ -1027,47 +1007,60 @@ async def test_fresh_host_target_path_error_stops_before_attempt_ticket(
         host_environment, monkeypatch):
     """fresh FileRef 纯路径错误在授票前失败，不生成 attempt 或 worker。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
-    calls = []
+    original_bytes = target.read_bytes()
+    owned.connection.execute(
+        "UPDATE intermediate_files SET relative_path=? WHERE id=?",
+        (f"derived/{file_id + 100000}.mp4", file_id))
+    owned.connection.commit()
+    submitted = []
+    run_file_task = executor.run_file_task
 
-    def invalid_target(file_ref, directories):
-        calls.append(file_ref)
-        raise ValueError("controlled unsafe path")
+    async def track_task(task, owner, **kwargs):
+        submitted.append(task)
+        return await run_file_task(task, owner, **kwargs)
 
-    monkeypatch.setattr(host_paths, "resolve_file", invalid_target)
+    monkeypatch.setattr(executor, "run_file_task", track_task)
     factory = _cleanup_factory(cfg, driver, executor)
     with cleanup_failure(ConsistencyError, match="FileRef 身份或路径不合法"):
         await finish_cleanup_round(cleanup_flow(factory), context)
 
-    assert len(calls) == 1
-    assert calls[0].file_id == 900
     assert owned.connection.execute(
         "SELECT COUNT(*) FROM operation_attempts WHERE run_id IN"
         " (SELECT id FROM operation_runs WHERE cleanup_item_id IS NOT NULL)").fetchone() == (0,)
-    assert target.is_file()
+    assert target.read_bytes() == original_bytes
+    assert submitted == []
     assert executor.unfinished_files() == ()
     assert supervisor.outstanding() == ()
 
 
 async def test_legal_ticket_target_recheck_records_real_not_dispatched(
         host_environment, monkeypatch):
-    """合法原票据获准后目标纯校验失败，沿该票据保存未派发结果。"""
+    """真实授票后持久路径损坏，原票据保存未派发结果。"""
+    from camctl.persistence.repositories.outputs import OutputsRepository
+    from camctl.persistence.models import DbOutcomeKind
+
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
+    original_bytes = target.read_bytes()
     await _accept_cleanup(owned, output_id)
-    resolve_file = host_paths.resolve_file
-    calls = []
+    begin = OutputsRepository.begin_cleanup_attempt
+    tickets = []
 
-    def invalid_second_check(file_ref, directories):
-        calls.append(file_ref)
-        if len(calls) == 2:
-            raise ValueError("path changed after ticket grant")
-        return resolve_file(file_ref, directories)
+    def corrupt_after_grant(repository, request, key, current):
+        receipt = begin(repository, request, key, current)
+        ticket = getattr(receipt.value, "ticket", None)
+        if ticket is not None and ticket.operation == "delete":
+            assert receipt.kind is DbOutcomeKind.COMPLETED
+            tickets.append(ticket)
+            current.connection.execute(
+                "UPDATE intermediate_files SET relative_path=? WHERE id=?",
+                (f"derived/{file_id + 100000}.mp4", file_id))
+            current.connection.commit()
+        return receipt
 
-    monkeypatch.setattr(host_paths, "resolve_file", invalid_second_check)
+    monkeypatch.setattr(OutputsRepository, "begin_cleanup_attempt", corrupt_after_grant)
     submitted = []
     run_file_task = executor.run_file_task
 
@@ -1081,12 +1074,12 @@ async def test_legal_ticket_target_recheck_records_real_not_dispatched(
 
     item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     saved = saved_cleanup_delete(owned.connection, item_id)
-    assert len(calls) == 2
-    assert saved is not None
+    assert len(tickets) == 1
+    assert saved is not None and saved.ticket == tickets[0]
     assert saved.actual.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
     assert saved.actual.observations == ()
     assert saved.actual.error is not None
-    assert target.is_file()
+    assert target.read_bytes() == original_bytes
     assert submitted == []
     assert executor.unfinished_files() == ()
 
@@ -1100,8 +1093,7 @@ async def test_ticket_identity_error_is_not_rewritten_as_not_dispatched(
     from camctl.persistence.repositories.outputs import OutputsRepository
 
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
     factory = _cleanup_factory(cfg, driver, executor)
     begin = OutputsRepository.begin_cleanup_attempt
@@ -1126,7 +1118,7 @@ async def test_ticket_identity_error_is_not_rewritten_as_not_dispatched(
     port = (await factory(context.database)).local_files
     bad_request = LocalArtifactRequest(owned.metadata.instance_id, 'delete', item_id,
         replace(ticket, target_id=str(item_id + 1)),
-        FileRef(900, FilePurpose.REPAIR_OUTPUT, 'derived/900.jpg', Path(cfg.paths.staging)))
+        FileRef(file_id, FilePurpose.REPAIR_OUTPUT, str(target.relative_to(cfg.paths.staging)), Path(cfg.paths.staging)))
     with pytest.raises(ConsistencyError, match='原票据'):
         await port.delete(bad_request)
     assert owned.connection.execute(
@@ -1143,8 +1135,7 @@ async def test_host_executor_admission_conflicts_preserve_original_owner(
         host_environment, monkeypatch, conflict):
     """两种 admission 冲突都拒绝第二 owner，原任务继续到实际交付。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -1201,7 +1192,7 @@ async def test_host_executor_admission_conflicts_preserve_original_owner(
         assert row == (1, None)
         assert target.is_file()
         assert original_calls == [conflict]
-        assert (901 if conflict == "duplicate_task_id" else 900) in (
+        assert (901 if conflict == "duplicate_task_id" else file_id) in (
             executor.unfinished_files())
         assert not cleanup.done()
         release_adapter.set()
@@ -1226,8 +1217,7 @@ async def test_cleanup_drain_preserves_failure_from_another_file_owner(
     """本项收场消费共享 drain 时，不能丢弃另一文件责任的失败。"""
     host_runner = host_environment.thread_runner
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -1304,8 +1294,7 @@ async def test_runner_failure_survives_cancellation_during_shared_drain(
     import camctl.bootstrap.cleanup_assembly as cleanup_assembly_module
 
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
@@ -1396,8 +1385,7 @@ async def test_runner_failure_survives_cancellation_during_shared_drain(
 async def test_delete_supervision_diagnostic_survives_unknown_finish(host_environment, monkeypatch):
     """DELETE 的原申请、实际提交和监督错误分别交付且不重放。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
     await check_unknown_cleanup_supervision(host_environment, monkeypatch, 'delete',
         _cleanup_factory(cfg, driver, executor))
@@ -1406,8 +1394,7 @@ async def test_delete_supervision_diagnostic_survives_unknown_finish(host_enviro
 async def test_query_supervision_diagnostic_survives_unknown_finish(host_environment, monkeypatch):
     """QUERY 的原申请、实际提交和监督错误分别交付且不重放。"""
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
     await check_unknown_cleanup_supervision(host_environment, monkeypatch, 'query',
         _cleanup_factory(cfg, driver, executor))
@@ -1418,8 +1405,7 @@ async def test_late_owner_callback_does_not_retain_handle_after_fallback(
     """fallback 取回结果后，最后一次真实 drain 不得重新长期持有 handle。"""
     host_runner = host_environment.thread_runner
     cfg, owned, context, driver, executor, supervisor = host_environment
-    await _save_photos(cfg, owned, context, driver)
-    output_id, target = _seed_repaired_file(cfg, owned)
+    output_id, file_id, target = _repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
 
     original_runner = host_runner.call
