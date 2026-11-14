@@ -244,7 +244,7 @@ class TargetSettlement:
                     (target_action_id,))),
                 description="读取取消取回的中间文件",
             )
-            if set(file_ids) & set(self._work_files.executor.unfinished_files()):
+            if self._work_files.files_in_use(file_ids):
                 return SettlementOutcome(complete=False)
             pending = self._pending_obtain_settlements.get(target_action_id)
             if pending is None:

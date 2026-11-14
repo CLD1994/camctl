@@ -90,6 +90,11 @@ class WithdrawalSession:
         self._pending: dict[int, _PendingWithdrawal] = {}
         self._database_id = None
 
+    def check_resources(self, *, ready: Path, processing: Path, executor: FileTaskExecutor) -> None:
+        """同一撤回会话必须使用调用者的交接目录和文件执行器。"""
+        if self._executor is not executor or self._ready != ready or self._processing != processing:
+            raise ConsistencyError("撤回会话与取消流程的文件资源不同")
+
     def _check_binding(self, database: BusinessDatabase) -> None:
         metadata = database.metadata
         if (metadata.ready_path != canonical_directory_binding(self._ready)

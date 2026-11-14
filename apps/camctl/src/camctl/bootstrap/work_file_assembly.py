@@ -18,6 +18,7 @@ from camctl.outputs.work_files import (
     WorkFileSingleOutcome,
 )
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.runtime import canonical_directory_binding
 from camctl.session.service import StateDbFailure
 from camctl.session.supervision import OwnedTask, Supervisor
 
@@ -34,14 +35,13 @@ class WorkFileRuntime:
     """保存会话的固定范围与处理记录，后台责任使用共同数据库端口。"""
 
     def __init__(self, *, staging: Path, limits: WorkFileLimits, pending_media_results=None,
-                 download_cleanup=None):
+                 download_cleanup=None, executor: FileTaskExecutor | None = None):
         self.staging = staging
         self.limits = limits
         self.repository = OutputsRepository()
         self.supervisor = Supervisor()
         # 整体维护可以等待文件接手；两类监督不能相互等待同一责任。
-        self.file_supervisor = Supervisor()
-        self.executor = FileTaskExecutor(self.file_supervisor)
+        self.executor = executor if executor is not None else FileTaskExecutor(Supervisor())
         self.history = WorkFileHistory()
         self.processed: dict = {}
         self.pending_results: dict = {}
@@ -52,6 +52,22 @@ class WorkFileRuntime:
         self._discovery_after = 0
         self._first_files: set[int] = set()
         self.download_cleanup = download_cleanup
+        self._database_id = None
+
+    def check_resources(self, *, staging: Path, executor: FileTaskExecutor) -> None:
+        """同一清理会话必须使用调用者的工作目录和文件执行器。"""
+        if self.executor is not executor or self.staging != staging:
+            raise ConsistencyError("取消流程与首次清理的文件执行器或工作目录不同")
+
+    def check_binding(self, database):
+        """同一维护责任只能使用原状态库及其绑定的工作目录。"""
+        metadata = database.metadata
+        if metadata.staging_path != canonical_directory_binding(self.staging):
+            raise ConsistencyError("文件清理会话与状态库工作目录绑定不同")
+        if self._database_id is None:
+            self._database_id = metadata.instance_id
+        elif self._database_id != metadata.instance_id:
+            raise ConsistencyError("文件清理会话属于另一状态库")
 
     async def resume_media_results(self, database) -> None:
         """筛选业务前核实会话已取得的媒体申请，不开始设备或工具操作。"""
@@ -73,6 +89,8 @@ class WorkFileRuntime:
     async def first_cleanup(self, file_ids: tuple[int, ...], *, database, occurred_at: int):
         """采用本次必要文件的首次结果，不使用历史扫描范围或额度。"""
         from camctl.cancellation.ports import SettlementOutcome
+
+        self.check_binding(database)
 
         work = WorkFileContext(
             repository=self.repository, database=database, staging=self.staging,
@@ -96,8 +114,13 @@ class WorkFileRuntime:
             self._first_files.discard(file_id)
         return SettlementOutcome(complete=True, failed=failed)
 
+    def files_in_use(self, file_ids: tuple[int, ...]) -> bool:
+        """判断指定文件是否仍有本会话的实际文件任务。"""
+        return bool(set(file_ids) & set(self.executor.unfinished_files()))
+
     async def initialize(self, database) -> None:
         """会话锁内固定范围；本方法不开始文件操作。"""
+        self.check_binding(database)
         def read_range(owned):
             after = self.repository.load_cleanup_cursor(owned)
             ceiling = self.repository.max_cleanup_candidate_id(owned)
@@ -296,7 +319,7 @@ class WorkFileRuntime:
         事实，全部呈现且不互相覆盖；首份媒体原错误保留为异常因果。
         """
         result = await self.supervisor.drain_required()
-        files = await self.file_supervisor.drain_required()
+        files = await self.executor.drain_required()
         self._raise_task_failure()
         reasons = [failure.error for failure in (*result.failed, *files.failed)]
         reasons.extend(

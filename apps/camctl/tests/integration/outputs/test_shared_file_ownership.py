@@ -1,20 +1,25 @@
 """拷贝与发布共用实际文件资格，取消后连接保持到调用结束。"""
 
 import asyncio
+import os
+import sys
 from dataclasses import replace
+from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.host_files.tasks import FileTaskExecutor
-from camctl.outputs import copy, handoff
+from camctl.outputs import copy
 from camctl.outputs.copy import (
     CompletionContext, CopyContext, SegmentContext, complete_copy,
     copy_next_segment, prepare_copy,
 )
-from camctl.outputs.handoff import DeliveryContext, DeliveryDirectories, publish_delivery
+from camctl.outputs.handoff import DeliveryContext, DeliveryPhase, publish_delivery
 from camctl.outputs.work_files import WorkFileSingleOutcome, clean_one_work_file
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.session.supervision import Supervisor
@@ -24,6 +29,9 @@ from .test_copy_segments import (
     local_read, read_targets, segment_env,  # noqa: F401
 )
 from ..support.database import business_database, database_path
+from ..support.public_delivery_cases import prepare_public_delivery
+from ..support.outputs import submit_output_document
+from ..capture.result_consumer_fixtures import ResultCatalog
 from .test_qualification import _NOW
 from .test_work_files import _cancel_delivery, _context, _file_state
 
@@ -33,10 +41,12 @@ from .test_work_files import _cancel_delivery, _context, _file_state
 async def test_shared_file_operation_keeps_qualification_until_actual_end(
         segment_env, tmp_path, monkeypatch, stage):
     owned, roots, qualification = segment_env
+    if stage == 'move':
+        if qualification.delivery_id is None:
+            pytest.skip('内部副本不执行普通 delivery 发布')
+        await _real_publication_and_cancel(tmp_path / 'public', monkeypatch)
+        return
     async with business_database(database_path(owned)) as database:
-        # 普通发布只适用于 delivery；内部拷贝由其他三个分区覆盖。
-        if stage == "move" and qualification.delivery_id is None:
-            pytest.skip("内部副本不执行普通 delivery 发布")
         file_id, copy_id = qualification.target_file_id, qualification.copy_id
         owned.connection.execute("UPDATE device_files SET checksum_support=3 WHERE id=501")
         owned.connection.commit()
@@ -74,21 +84,6 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
             monkeypatch.setattr(copy, "hash_target", hold(copy.hash_target))
             operation = complete_copy(copy_id, CompletionContext(
                 repository, database, roots, _NOW + 20, executor=executor))
-        else:
-            await _drive(owned, roots, copy_id, segment_size=len(_CONTENT))
-            await complete_copy(copy_id, CompletionContext(repository, database, roots, _NOW + 2))
-            directories = DeliveryDirectories(roots.staging, tmp_path / "ready", tmp_path / "processing")
-            directories.ready.mkdir()
-            directories.processing.mkdir()
-            original = handoff.publish_file
-
-            async def move(*args, **kwargs):
-                await asyncio.to_thread(hold(lambda: None))
-                return await original(*args, **kwargs)
-
-            monkeypatch.setattr(handoff, "publish_file", move)
-            operation = publish_delivery(qualification.delivery_id, DeliveryContext(
-                repository, database, directories, _NOW + 20, executor=executor))
 
         running = asyncio.create_task(operation)
         try:
@@ -120,3 +115,101 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
             if session is not None:
                 session.request_stop()
                 await session.wait_stopped()
+
+
+async def _real_publication_and_cancel(tmp_path, monkeypatch):
+    from camctl.bootstrap.flows import cancel_flow
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from camctl.outputs.work_files import WorkFileLimits
+    from camctl.persistence.models import DbExecutorError
+    from camctl.session.locks import acquire_session, lock_file_paths
+
+    class Catalog(ResultCatalog):
+        def action_types(self):
+            return super().action_types() | {'obtain_action_outputs'}
+
+    owned, roots, directories, qualification = await prepare_public_delivery(
+        tmp_path, content=_CONTENT, now=_NOW)
+    lock_path, _ = lock_file_paths(database_path(owned))
+    lease = acquire_session(lock_path)
+    started, release = threading.Event(), threading.Event()
+    running = None
+    try:
+        file_id = qualification.target_file_id
+        relative, = owned.connection.execute(
+            'SELECT relative_path FROM intermediate_files WHERE id=?', (file_id,)).fetchone()
+        filename, = owned.connection.execute(
+            'SELECT file_name FROM deliveries WHERE id=?', (qualification.delivery_id,)).fetchone()
+        source, target = roots.staging / relative, directories.ready / filename
+        assert source.read_bytes() == _CONTENT
+        async with business_database(database_path(owned)) as database:
+            instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            accepted = await submit_output_document(database, catalog=Catalog(), occurred_at=_NOW + 10, body={
+                'request_id': '4', 'created_at': instant, 'name': '取消取回',
+                'actions': [{'name': '取消', 'type': 'cancel_task',
+                             'params': {'target': {'action_instance_id': str(qualification.action_id)}}}]})
+            assert accepted.plan_id is not None, accepted
+            files = WorkFileRuntime(staging=roots.staging, limits=WorkFileLimits(32, 128))
+            executor = files.executor
+            name = 'rename' if sys.platform == 'win32' else 'link'
+            actual_move = getattr(os, name)
+            actual_stat, actual_unlink = os.stat, os.unlink
+            moves, premature = [], []
+
+            def observe_stat(path, *args, **kwargs):
+                if (started.is_set() and not release.is_set() and
+                        isinstance(path, (str, Path)) and Path(path) in (source, target)):
+                    premature.append(('stat', Path(path)))
+                return actual_stat(path, *args, **kwargs)
+
+            def observe_unlink(path, *args, **kwargs):
+                if (started.is_set() and not release.is_set() and
+                        isinstance(path, (str, Path)) and Path(path) in (source, target)):
+                    premature.append(('unlink', Path(path)))
+                return actual_unlink(path, *args, **kwargs)
+
+            def hold_move(src, dst, *args, **kwargs):
+                if Path(src) == source and Path(dst) == target:
+                    moves.append((Path(src), Path(dst)))
+                    started.set()
+                    assert release.wait(10), '测试未放行实际移动'
+                return actual_move(src, dst, *args, **kwargs)
+
+            monkeypatch.setattr(os, name, hold_move)
+            monkeypatch.setattr(os, 'stat', observe_stat)
+            monkeypatch.setattr(os, 'unlink', observe_unlink)
+            operation = publish_delivery(qualification.delivery_id, DeliveryContext(
+                OutputsRepository(), database, directories, _NOW + 20, executor=executor))
+            running = asyncio.create_task(operation)
+            context = SimpleNamespace(database=database, clock=SimpleNamespace(utc_micros=lambda: _NOW + 30))
+            cancel = cancel_flow(staging=directories.staging, ready=directories.ready,
+                processing=directories.processing, work_files=files, file_executor=executor)
+            try:
+                assert await asyncio.to_thread(started.wait, 5), '实际移动必须进入文件接口'
+                assert executor.unfinished_files() == (file_id,)
+                await asyncio.wait_for(cancel(context), 5)
+                assert not running.done() and premature == []
+                assert owned.connection.execute('SELECT cancel_requested FROM actions WHERE id=?',
+                                                (qualification.action_id,)).fetchone() == (1,)
+                assert _file_state(owned, file_id)[1] != 4
+                release.set()
+                result = await asyncio.wait_for(running, 5)
+                assert result.phase is DeliveryPhase.PUBLISHED
+                assert moves == [(source, target)] and executor.unfinished_files() == ()
+                assert target.read_bytes() == _CONTENT and not source.exists()
+                await asyncio.wait_for(cancel(context), 5)
+                assert not target.exists()
+                assert owned.connection.execute('SELECT withdrawal_state FROM deliveries WHERE id=?',
+                                                (qualification.delivery_id,)).fetchone() == (3,)
+            finally:
+                release.set()
+                await asyncio.wait_for(asyncio.gather(running, return_exceptions=True), 10)
+                await asyncio.wait_for(executor.drain_required(), 10)
+        with pytest.raises(DbExecutorError):
+            await database.read(lambda owned: owned.connection.execute('SELECT 1').fetchone())
+    finally:
+        release.set()
+        lease.close()
+        owned.connection.close()
+    reacquired = acquire_session(lock_path)
+    reacquired.close()

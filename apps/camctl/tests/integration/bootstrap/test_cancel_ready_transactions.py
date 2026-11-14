@@ -175,7 +175,7 @@ async def test_later_cancel_request_joins_original_pending_or_failed_delivery_re
     from camctl.bootstrap.flows import cancel_flow
     from camctl.host_files import handoff
 
-    target, ids, runtime = await _pending(environment)
+    target, ids, _runtime = await _pending(environment)
     cfg, owned, context, _driver = environment
     if original_choice is not None:
         repository = OutputsRepository()
@@ -196,7 +196,7 @@ async def test_later_cancel_request_joins_original_pending_or_failed_delivery_re
         return original_remove(path, *args, **kwargs)
     monkeypatch.setattr(os, "remove", remove)
     await cancel_flow(staging=Path(cfg.paths.staging),
-        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), work_files=runtime)(context)
+        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing))(context)
     statuses = owned.connection.execute("SELECT cdi.status FROM cancel_delivery_items cdi JOIN cancel_items ci ON ci.id=cdi.cancel_item_id WHERE ci.action_id=? ORDER BY cdi.id", (second,)).fetchall()
     assert statuses == ([(2,),(2,)] if original_choice is None else [(4,),(4,)])
     assert len(removed) == (2 if original_choice is None else 0)
@@ -247,8 +247,8 @@ async def test_cancel_flow_resumes_committed_unknown_with_original_withdrawal(en
     names = dict(owned.connection.execute("SELECT id,file_name FROM deliveries ORDER BY id"))
     ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)
     second_contents = (ready / names[second_id]).read_bytes()
-    session = WithdrawalSession(ready=ready, processing=processing,
-                                executor=FileTaskExecutor(Supervisor()))
+    executor = FileTaskExecutor(Supervisor())
+    session = WithdrawalSession(ready=ready, processing=processing, executor=executor)
     original_remove, original_save = os.remove, OutputsRepository.advance_withdrawal
     attempts, original_requests = [], []
 
@@ -288,7 +288,7 @@ async def test_cancel_flow_resumes_committed_unknown_with_original_withdrawal(en
         context.database = reopened
         try:
             flow = cancel_flow(staging=Path(cfg.paths.staging), ready=ready, processing=processing,
-                               withdrawal_session=session)
+                               file_executor=executor, withdrawal_session=session)
             await flow(context)
             assert len(original_requests) == 2 and original_requests[0] == original_requests[1]
             assert attempts == [names[first_id], names[second_id]]

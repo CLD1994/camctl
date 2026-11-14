@@ -658,6 +658,7 @@ def cancel_flow(
     motor_permits: dict | None = None,
     start_entries=None,
     work_files: Any = None,
+    file_executor=None,
     withdrawal_session=None,
     resume_media_results=None,
     resume_file_observations=None,
@@ -672,9 +673,25 @@ def cancel_flow(
     from camctl.session.supervision import Supervisor
     from camctl.outputs.withdrawal import WithdrawalSession
 
-    executor = work_files.executor if work_files is not None else FileTaskExecutor(Supervisor())
+    if file_executor is None:
+        if work_files is not None or withdrawal_session is not None:
+            raise TypeError("复用文件清理或撤回会话时必须提供同一文件执行器")
+        else:
+            file_executor = FileTaskExecutor(Supervisor())
+    executor = file_executor
+    if work_files is None:
+        from camctl.bootstrap.config import ConfigDefaults
+        from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+        from camctl.outputs.work_files import WorkFileLimits
+        defaults = ConfigDefaults()
+        work_files = WorkFileRuntime(staging=staging, executor=executor,
+            limits=WorkFileLimits(defaults.work_file_batch_size, defaults.work_file_limit_per_run))
+    else:
+        work_files.check_resources(staging=staging, executor=executor)
     if withdrawal_session is None:
         withdrawal_session = WithdrawalSession(ready=ready, processing=processing, executor=executor)
+    else:
+        withdrawal_session.check_resources(ready=ready, processing=processing, executor=executor)
     pending_origin_settlements = {}
     pending_canceled_publications = {}
     canceled_publication_scans = {}
@@ -701,6 +718,9 @@ def cancel_flow(
 
         nonlocal target_cursor, withdrawal_cursor, cursor_database
         database = context.database
+        from camctl.persistence.runtime import verify_directory_binding
+        verify_directory_binding(database.metadata, str(staging), str(ready), str(processing))
+        work_files.check_binding(database)
         if cursor_database != database.metadata.instance_id:
             if cursor_database is not None and (pending_canceled_publications or pending_obtain_settlements):
                 raise StateDbFailure("原取消发布保存责任属于另一状态库")
