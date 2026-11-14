@@ -50,7 +50,7 @@ camctl 组件与根目录跨组件测试均已完成逐项计时。**最终有�
 
 首轮 OSMO 普通／原生延时模块的四项在 `_assert_runtime_paths_external` 提前失败。采集命令设置的 `CAMCTL_TIMING_REPO`、`CAMCTL_TIMING_DATA` 与 `UV_PROJECT_ENVIRONMENT` 含仓库路径，而测试构造的安装环境会保留这些变量，再要求所有环境值均不含仓库路径。因此这四项没有执行 init、describe 或 capture，不能作为业务失败或有效业务耗时。
 
-纠偏只调整采集环境：插件消费并移除自身配置，启动环境不再设置不需要的两个 UV 变量，原测试及外部路径断言保持。原工作区补测 describe 与普通录像；独立 worktree 补测两个原生延时实例，临时根均位于仓库外。两组各约 96 秒，四项全部通过，未重跑其余范围。最终 CSV 取这四项的补测数据；元数据同时保留首轮与补测回执。补测重建了各组共享准备，不能将有效实例耗时之和解释为首轮连续进程的纯性能基准。
+纠偏只调整采集环境：插件消费并移除自身配置，启动环境不再设置不需要的两个 UV 变量，原测试及外部路径断言保持。原工作区补测 describe 与普通录像；独立 worktree 补测两个原生延时实例，临时根均位于仓库外。两组各约 96 秒，四项全部通过，未重跑其余范围。最终统计采用这四项的补测结果。补测重建了各组共享准备，不能将有效实例耗时之和解释为首轮连续进程的纯性能基准。
 
 ### 跨组件主要成本
 
@@ -181,7 +181,7 @@ history 大规模测试执行中进行了 15 秒、20 Hz 的非阻塞采样，�
 | 文件 | 数量 | 失败范围 |
 | --- | ---: | --- |
 | `bootstrap/test_distribution.py` | 2 | `test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw/jpeg]`。 |
-| `bootstrap/test_osmo_shared_recovery.py` | 10 | 原结果页 partial／terminal、原读取 missing／mismatch、boundary／horizon／authorization、真实未知提交恢复，以及新结果轮次 none／partial。完整 nodeid 在逐项 CSV 中。 |
+| `bootstrap/test_osmo_shared_recovery.py` | 10 | 原结果页 partial／terminal、原读取 missing／mismatch、boundary／horizon／authorization、真实未知提交恢复，以及新结果轮次 none／partial。 |
 | `bootstrap/test_osmo_video_mode_completion.py` | 1 | `test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls`。 |
 | `capture/test_action6_budget_cold_recovery.py` | 1 | `test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy`；实际读取偏移 `[0, 0]`，预期 `[0]`。此前已有干净基线复现，见[环境恢复验证记录](verification.md#测试准备与等待矩阵提速)。 |
 | `devices/test_adb_camera_registration.py` | 2 | `test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6/dji-osmo360-ii]`；本轮未做新的干净源码对照，归因待核对。 |
@@ -202,7 +202,7 @@ history 大规模测试执行中进行了 15 秒、20 Hz 的非阻塞采样，�
 | `test_camctl_cancellation_roundtrip.py` | 1 |
 | `test_hasselblad_photo_parameters.py` | 1 |
 
-camctl 三项跳过分别是 Windows 大小写别名核对、主机来源不携带读取配置的无效参数组合、内部副本不执行普通 delivery 发布的无效参数组合；根目录另有两项 Windows 句柄交接测试按平台跳过。准确 nodeid 与原原因均在逐项 CSV 中。
+camctl 三项跳过分别是 Windows 大小写别名核对、主机来源不携带读取配置的无效参数组合、内部副本不执行普通 delivery 发布的无效参数组合；根目录另有两项 Windows 句柄交接测试按平台跳过。
 
 ## 后续安排
 

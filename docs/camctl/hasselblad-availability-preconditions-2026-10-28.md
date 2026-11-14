@@ -45,7 +45,7 @@ apps/camctl/tests/integration/devices/test_hasselblad_download.py::test_real_tim
 
 该失败能够定位到过时测试包装，不能据此判定生产恢复存在相同缺陷。它也没有证明生产恢复正确。尤其不能将已经出现两份文件、旧进程结束或异常捕获解释为未知 START 已经可靠收场。
 
-另三组既有测试分别有 8、6、6 项在目标行为之前因 `CaptureRuntime(..., owned=...)` 装配失败。它们没有取得预期的释放、恢复或报告生成证据；完整失败摘要分别保留在 `legacy-capture.log`、`legacy-start-release.log` 和 `legacy-report.log`。本次没有删除用例、放宽断言或恢复私有运行时接口来制造通过。
+另三组既有测试分别有 8、6、6 项在目标行为之前因 `CaptureRuntime(..., owned=...)` 装配失败。它们没有取得预期的释放、恢复或报告生成证据。本次没有删除用例、放宽断言或恢复私有运行时接口来制造通过。
 
 ## 证据边界与实施后的门禁
 

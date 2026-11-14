@@ -114,7 +114,7 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_re
 
 这些场景使用软件字节样例与确定的提交观察门闩，不连接真实相机。ARM、真实文件时长、解码、段间边界和现场异常多录仍按分段计划 P9 独立验收。
 
-每轮将 wheel、锁定依赖清单、命令日志、时钟／ADB 记录、提交同步点，以及各场景的状态库、报告和客户端凭据归档到 `tmp/osmo-installed-chain-archive-<pytest-pid>/`，避免后续 pytest 临时目录轮换移除联合链证据。
+测试运行会生成 wheel、锁定依赖清单、命令日志、时钟／ADB 记录、提交同步点，以及各场景的状态库、报告和客户端凭据等临时材料。
 
 Action6 与 OSMO 的分段联合链可通过 `_client_session.py` 在同一世界复用真实 `Application` 和 `Files`，依次执行原计划导出、报告导入和媒体导入。命令及完整参数约束由 `client_driver.ts` 统一维护；每次调用使用独立回执，两个模块显式保留原 120 秒命令预算。世界之间独立，实际 host／CLI 重启及模式配置重载所需的客户端重建继续保留。会话记录启动、每次操作、正常关闭和异常收场证据。
 
