@@ -1,7 +1,7 @@
 """B6 按命令装配与资源关闭的组件集成测试。
 
-真实装配执行 submit/run：submit 不派发设备调用，初始化中途失败
-只关闭已创建资源，重复关闭不重复处理；日常入口面对缺失库不创建。
+真实装配执行 submit/run：submit 不派发设备调用；重复关闭不重复
+处理；日常入口面对缺失库不创建。
 """
 
 from __future__ import annotations
@@ -158,18 +158,34 @@ class TestRunComposition:
         cfg = _config_for(tmp_path)
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         deps = build_runtime(CommandMode.RUN, cfg, catalog=RecordingCatalog())
-        source = await _parsed(tmp_path, _plan_body())
-        task = asyncio.create_task(execute_command(deps, source))
+        source = await _parsed(tmp_path, _plan_body(scheduled_at=_future_schedule(3600)))
+        task = asyncio.create_task(execute_command(deps, source, flows={}))
         try:
-            # 未注册推进流程：受理后仍有未完成动作，会话保持推进循环
-            # 并持有接纳，不按单次通过退出。
-            await asyncio.sleep(0.3)
-            assert probe_admission(deps.admission_lock).is_free is False
+            from .test_recording_stop import _await_query
+
+            # 明确不装配推进流程，等待真实受理后的未完成动作。
+            await _await_query(Path(cfg.paths.state_db),
+                               "SELECT COUNT(*) FROM actions WHERE status = 1",
+                               (1,), task=task)
+            # 受理事务结束后会话才取得接纳锁，等待实际进入接纳阶段。
+            deadline = asyncio.get_running_loop().time() + 15
+            while probe_admission(deps.admission_lock).is_free:
+                if task.done():
+                    raise AssertionError(f"会话提前结束：{await task!r}")
+                if asyncio.get_running_loop().time() >= deadline:
+                    pytest.fail("等待持有接纳锁超时")
+                await asyncio.sleep(0.05)
+            assert not task.done()
+            await _await_query(Path(cfg.paths.state_db),
+                               "SELECT COUNT(*) FROM actions WHERE status = 1",
+                               (1,), task=task)
         finally:
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-        close_runtime(deps)
+            try:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            finally:
+                close_runtime(deps)
         # 取消收尾后接纳不遗留持有，受理结果保持可发现。
         assert probe_admission(deps.admission_lock).is_free is True
         import sqlite3
@@ -234,7 +250,7 @@ class TestRunComposition:
 
 
 class TestResourceCleanup:
-    async def test_mid_failure_keeps_locks_releasable(self, tmp_path: Path) -> None:
+    async def test_repeated_close_without_execution_keeps_locks_releasable(self, tmp_path: Path) -> None:
         cfg = _config_for(tmp_path)
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         # 装配成功后未执行命令即关闭：不遗留锁资格。
