@@ -41,39 +41,40 @@ async def test_direct_fixed_repository_rejects_ineligible_link_source(tmp_path,m
 
 
 @pytest.mark.parametrize('state',['entered','unknown'])
-@pytest.mark.parametrize('coverage',[True,False])
-async def test_bare_fixed_event_rejects_ineligible_or_missing_source_facts(tmp_path,monkeypatch,state,coverage):
-    from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.repositories.transactions import row_facts,event_envelope,row_change,update_change
-    from camctl.contracts.history_values import TransactionRange
-    from camctl.history.validators import EventContext,EventValidationError
-    from camctl.history.reads import ReadCoverage
-    cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,state,monkeypatch)
+async def test_bare_fixed_event_rejects_ineligible_source(tmp_path,monkeypatch,state):
+    from copy import deepcopy
+    from camctl.history.validators import EventValidationError
+    from .test_hasselblad_fixed_request_scope import context_for
+
+    # 同一请求、成员和初始效果：可靠未派发来源可以联动预览。
+    legal_path=tmp_path/'legal'
+    legal_path.mkdir()
+    _,legal,_,legal_runtime,legal_transport,legal_task,_=await world(legal_path,'blocked',monkeypatch)
     try:
-        rows=(update_change('actions',3,{'target_selection_state':1},{'target_selection_state':2}),)
-        facts={'actions':{i:row_facts(owned.connection,'actions',i) for i in (1,2,3)},
-            'auto_preview_links':{i:row_facts(owned.connection,'auto_preview_links',i)
-                for i, in owned.connection.execute('SELECT id FROM auto_preview_links')}}
-        owners={('actions',3):('action',3)}
-        ranges={}
-        if coverage:
-            more=module.include_photo_entry_rows(owned.connection,facts['actions'][1],facts,owners)
-            ranges.update(more.ranges)
-            ranges[('auto_preview_links','obtain_action_id')]=frozenset((1,2))
-            ranges[('actions','id')]=frozenset((1,2,3))
-            ranges[('plans','id')]=frozenset((1,))
-            facts['plans']={1:row_facts(owned.connection,'plans',1)}
-        for identity,target,basis in ((1,1,1),(2,2,2)):
-            owners[('cancel_items',identity)]=('action',3)
-        rows+=(row_change('cancel_items',identity,{'action_id':3,'target_action_id':target,
-                'selection_basis':basis,'status':1,'cancellation_effect':1,'outcome':None,
-                'error_code':None,'error_details_json':None}),)
-        event=replace(event_envelope(100,100,4,3,rows,runtime.wall_us()),change_seq=1)
-        context=EventContext(TransactionRange(100,100,100),owners,facts,read_coverage=ReadCoverage(ranges))
-        with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
+        legal_event,legal_context=context_for(legal,legal_runtime,3,[(1,1,1),(2,2,1)])
+        BusinessStorage().validate_event(legal_event,legal_context)
+    finally:
+        await close(legal,legal_transport,legal_task)
+
+    invalid_path=tmp_path/'ineligible'
+    invalid_path.mkdir()
+    _,owned,_,runtime,transport,task,_=await world(invalid_path,state,monkeypatch)
+    try:
+        event,context=context_for(owned,runtime,3,[(1,1,1),(2,2,1)])
+        assert event.rows==legal_event.rows
+        before=tuple(owned.connection.iterdump())
+        facts=deepcopy(context.state_rows)
+        with pytest.raises(EventValidationError) as raised:
+            BusinessStorage().validate_event(event,context)
+        assert '固定成员' in str(raised.value) and '原完整申请' in str(raised.value)
+        assert context.state_rows==facts
+        assert not owned.connection.in_transaction
+        assert tuple(owned.connection.iterdump())==before
+        assert read_action(owned,1)['cancel_requested']==0 and read_action(owned,2)['cancel_requested']==0
+        if task is not None:
+            assert not task.done()
     finally:
         await close(owned,transport,task)
-
 
 
 @pytest.mark.parametrize('state',['terminal','blocked','canceled'])
@@ -228,7 +229,8 @@ async def test_independent_guard_accepts_reliable_preceding_original_source(tmp_
         await close(owned,transport,task)
 
 
-@pytest.mark.parametrize('missing',[('auto_preview_links','obtain_action_id'),('actions','id'),
+@pytest.mark.parametrize('missing',[('auto_preview_links','source_action_id'),
+    ('auto_preview_links','obtain_action_id'),('actions','id'),
     ('device_activities','action_id'),('operation_runs','action_id'),('operation_attempts','run_id')])
 async def test_independent_guard_requires_every_original_source_range(tmp_path,monkeypatch,missing):
     from camctl.persistence.repositories import cancellation as module
@@ -237,8 +239,16 @@ async def test_independent_guard_requires_every_original_source_range(tmp_path,m
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'terminal',monkeypatch)
     try:
         event,context=bare_context(owned,runtime)
-        context=replace(context,read_coverage=ReadCoverage({k:v for k,v in context.read_coverage.ranges.items() if k!=missing}))
-        with pytest.raises(EventValidationError): BusinessStorage().validate_event(event,context)
+        BusinessStorage().validate_event(event,context)
+        before=tuple(owned.connection.iterdump())
+        incomplete=replace(context,read_coverage=ReadCoverage({k:v for k,v in context.read_coverage.ranges.items() if k!=missing}))
+        with pytest.raises(EventValidationError) as raised:
+            BusinessStorage().validate_event(event,incomplete)
+        cause=raised.value.__cause__ or raised.value
+        assert f'{missing[0]}.{missing[1]}=' in str(cause)
+        assert not owned.connection.in_transaction
+        assert tuple(owned.connection.iterdump())==before
+        assert read_action(owned,1)['cancel_requested']==0 and read_action(owned,2)['cancel_requested']==0
     finally:
         await close(owned,transport,task)
 

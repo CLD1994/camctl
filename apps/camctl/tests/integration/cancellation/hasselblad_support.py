@@ -174,9 +174,11 @@ async def cancel(cfg, runtime):
 
 async def close(owned, transport, task):
     transport.release.set()
-    if task:
-        await task
-    owned.connection.close()
+    try:
+        if task:
+            await task
+    finally:
+        owned.connection.close()
 
 
 def fixed_members(owned, origin):
