@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 
 import pytest
 
@@ -51,10 +50,13 @@ async def test_thread_actual_survives_waiter_cancel() -> None:
     owner = ThreadOwner(_EVENTS, loop)
     token = supervisor.register(owner)
     actual: asyncio.Future = loop.create_future()
+    worker_gate = threading.Event()
+    waiter_started = asyncio.Event()
+    handed_off = False
 
     def worker() -> None:
         # 真实线程执行实际任务，经线程安全入口回传结果。
-        time.sleep(0.02)
+        worker_gate.wait()
 
         def finish() -> None:
             _EVENTS.append(("actual-completed", loop.time()))
@@ -66,7 +68,9 @@ async def test_thread_actual_survives_waiter_cancel() -> None:
     thread.start()
 
     async def waiter() -> None:
+        nonlocal handed_off
         try:
+            waiter_started.set()
             await asyncio.shield(actual)
         except asyncio.CancelledError:
             _EVENTS.append(("waiter-cancelled", loop.time()))
@@ -80,21 +84,31 @@ async def test_thread_actual_survives_waiter_cancel() -> None:
                     pending=actual,
                 ),
             )
+            handed_off = True
             raise
 
     waiter_task = asyncio.create_task(waiter())
-    await asyncio.sleep(0.005)
-    waiter_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await waiter_task
+    try:
+        await asyncio.wait_for(waiter_started.wait(), timeout=5)
+        assert not actual.done()
+        assert thread.is_alive()
+        waiter_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter_task
 
-    # 等待者已取消而实际线程尚未完成：资源未释放、未消费。
-    assert owner.released == set()
-    assert owner.consumptions == 0
-
-    result = await supervisor.drain_required()
-    thread.join(timeout=5)
-    assert not thread.is_alive()
+        # 等待者已取消而实际线程尚未完成：资源未释放、未消费。
+        assert not actual.done()
+        assert owner.released == set()
+        assert owner.consumptions == 0
+    finally:
+        worker_gate.set()
+        if not waiter_task.done():
+            waiter_task.cancel()
+        await asyncio.gather(waiter_task, return_exceptions=True)
+        await asyncio.to_thread(thread.join, 5)
+        assert not thread.is_alive()
+        if handed_off:
+            result = await asyncio.wait_for(supervisor.drain_required(), timeout=5)
 
     assert owner.consumptions == 1
     assert owner.released == {"op-thread"}

@@ -173,17 +173,24 @@ class TestStopMarkerUnderPressure:
         channel.slog(LogRecord(level=LogLevel.WARNING, message="overflow"))
         assert channel.counters.warning_dropped == 1
         channel.start()
-        assert await asyncio.to_thread(writer.entered.wait, 5)
-        channel.slog(LogRecord(level=LogLevel.WARNING, message="backfill"))
-        assert channel.counters.warning_dropped == 1
+        close_task = None
+        try:
+            assert await asyncio.to_thread(writer.entered.wait, 5)
+            channel.slog(LogRecord(level=LogLevel.WARNING, message="backfill"))
+            assert channel.counters.warning_dropped == 1
 
-        close_task = asyncio.create_task(
-            close_logging(runtime, stop_timeout_s=10.0)
-        )
-        await asyncio.sleep(0.2)
-        assert not close_task.done(), "标记应等待满载队列腾出容量"
-        writer.gate.set()
-        result = await close_task
+            close_task = asyncio.create_task(
+                close_logging(runtime, stop_timeout_s=10.0)
+            )
+            await asyncio.sleep(0.2)
+            assert not close_task.done(), "标记应等待满载队列腾出容量"
+        finally:
+            writer.gate.set()
+            if close_task is None:
+                result = await close_logging(runtime, stop_timeout_s=10.0)
+            else:
+                result = await close_task
+            assert result.listener_stopped is True
 
         assert result.listener_stopped is True
         assert result.summary_written is True
@@ -205,14 +212,21 @@ class TestStopMarkerUnderPressure:
             channel.slog(LogRecord(level=LogLevel.WARNING, message=f"w{index}"))
         channel.slog(LogRecord(level=LogLevel.WARNING, message="overflow"))
         channel.start()
-        assert await asyncio.to_thread(writer.entered.wait, 5)
-        channel.slog(LogRecord(level=LogLevel.WARNING, message="backfill"))
+        closing = None
+        try:
+            assert await asyncio.to_thread(writer.entered.wait, 5)
+            channel.slog(LogRecord(level=LogLevel.WARNING, message="backfill"))
 
-        closing = asyncio.create_task(close_logging(runtime, stop_timeout_s=0.01))
-        await asyncio.sleep(0.03)
-        assert not closing.done()
-        writer.gate.set()
-        result = await closing
+            closing = asyncio.create_task(close_logging(runtime, stop_timeout_s=0.01))
+            await asyncio.sleep(0.03)
+            assert not closing.done()
+        finally:
+            writer.gate.set()
+            if closing is None:
+                result = await close_logging(runtime, stop_timeout_s=0.01)
+            else:
+                result = await closing
+            assert result.listener_stopped is True
         assert result.listener_stopped is True
         assert result.summary_written is True
         assert "backfill" in writer.messages

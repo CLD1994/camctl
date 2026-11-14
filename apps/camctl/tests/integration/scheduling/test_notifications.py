@@ -47,12 +47,15 @@ class TestThreadNotification:
         thread = threading.Thread(target=submit_three_times, name="submit-thread")
         thread.start()
         try:
-            while True:
-                token = await notifier.wait_changed(observed, deadline=None)
-                rechecks += 1
-                observed = token
-                if observed.version >= 3:
-                    break
+            async with asyncio.timeout(5):
+                while True:
+                    token = await notifier.wait_changed(observed, deadline=None)
+                    rechecks += 1
+                    observed = token
+                    if observed.version >= 3:
+                        break
         finally:
             thread.join(timeout=5)
+            assert not thread.is_alive()
         assert rechecks >= 1
+        assert observed.version >= 3
