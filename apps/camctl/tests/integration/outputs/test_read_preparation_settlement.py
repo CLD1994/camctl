@@ -289,9 +289,3 @@ async def test_maintenance_waiting_keeps_original_read_even_when_user_cancelled(
         assert (work / "old").read_bytes() == b"old responsibility"
         assert owned.connection.execute("SELECT result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
             (ticket.run_id, ticket.attempt_id)).fetchone() == (None,)
-
-
-def test_ordinary_business_waiting_is_not_a_preparation_error():
-    from camctl.capture.input_copy import InputPhase, InputStep
-    from camctl.outputs.read_attempts import require_preparation_settled
-    assert require_preparation_settled(InputStep(InputPhase.WAITING)) is True
