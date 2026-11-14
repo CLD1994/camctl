@@ -792,3 +792,72 @@ def test_threshold_cannot_retire_when_transaction_boundary_fails(environment, op
             owned.connection.rollback()
     assert outcome.kind is not DbOutcomeKind.COMPLETED
     assert not isinstance(outcome.value, CheckDecisionRetired)
+
+
+class _ThresholdProposal:
+    """经正式业务存储提交的门槛事件提案，可声明不可信读取范围。"""
+
+    def __init__(self, *, multiple=False, claim_empty_attempts=False):
+        self.multiple = multiple
+        self.claim_empty_attempts = claim_empty_attempts
+
+    def plan(self, scope):
+        from camctl.history.events import EventEnvelope, RowChange, RowImage
+        from camctl.history.reads import PlanReadScope, ReadCoverage
+        from camctl.persistence.repositories.transactions import CommandPlan, row_facts
+
+        processing = row_facts(scope.connection, "recording_processing", 1)
+        action = row_facts(scope.connection, "actions", 1)
+        old = processing["check_basis_json"]
+        new = {**old, "threshold_s": Decimal("72.5")}
+        row = RowChange("recording_processing", 1,
+            RowImage(exists=True, values={"check_basis_json": old}),
+            RowImage(exists=True, values={"check_basis_json": new}))
+        allocation = scope.allocate(2 if self.multiple else 1)
+        event = EventEnvelope(event_id=allocation.first_event_id, transaction_id=allocation.txn_id,
+            event_type=18, event_version=1, occurred_at=_NOW + 2, clock_status=2,
+            change_seq=None, reason=1, evidence={}, rows=(row,))
+        if self.multiple:
+            repair = RowChange("recording_processing", 1,
+                RowImage(exists=True, values={"repair_state": 1, "repair_basis_json": None}),
+                RowImage(exists=True, values={"repair_state": 2, "repair_basis_json": {
+                    "reason": 1, "target_duration_ms": 60000, "threshold_s": Decimal("72.5")}}))
+            events = (event, replace(event, event_id=event.event_id + 1, reason=2, rows=(repair,)))
+        else:
+            events = (event,)
+        coverage = (ReadCoverage({("operation_attempts", "run_id"): {1}})
+                    if self.claim_empty_attempts else ReadCoverage())
+        return CommandPlan(events=events,
+            owners={("recording_processing", 1): ("action", 1)},
+            state_rows={"recording_processing": {1: processing}, "actions": {1: action},
+                        "operation_attempts": {}},
+            read_coverage=coverage, plan_read_scope=PlanReadScope(action["plan_id"], 128), result=None)
+
+
+def test_guard_reads_actual_attempt_despite_claimed_empty_coverage(environment):
+    from camctl.persistence.repositories.validation import BusinessStorage
+
+    owned = environment
+    _assert_saved(_save(owned, _check_required()))
+    _seed_empty_check_copy(owned, attempt=True)
+    before = tuple(owned.connection.iterdump())
+    receipt = BusinessStorage().commit_operation(
+        _ThresholdProposal(claim_empty_attempts=True), new_operation_key(), owned)
+    assert receipt.kind == "rolled_back"
+    assert isinstance(receipt.error, EventValidationError)
+    assert "读取流程已有尝试" in str(receipt.error)
+    assert tuple(owned.connection.iterdump()) == before
+
+
+def test_guard_rejects_threshold_embedded_in_multiple_events(environment):
+    from camctl.persistence.repositories.validation import BusinessStorage
+
+    owned = environment
+    _assert_saved(_save(owned, _check_required()))
+    before = tuple(owned.connection.iterdump())
+    receipt = BusinessStorage().commit_operation(
+        _ThresholdProposal(multiple=True), new_operation_key(), owned)
+    assert receipt.kind == "rolled_back"
+    assert isinstance(receipt.error, EventValidationError)
+    assert "必须独立提交" in str(receipt.error)
+    assert tuple(owned.connection.iterdump()) == before
