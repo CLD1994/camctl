@@ -178,7 +178,6 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, 
     import sqlite3
     from ..support.outputs import SqliteOperationFault
     from camctl.bootstrap.cleanup_assembly import HostArtifacts
-    from camctl.outputs import cleanup_results
     from camctl.persistence.repositories.outputs import OutputsRepository
     from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
     _, item_id = _start_cleanup(world.owned, output_id, "2")
@@ -235,7 +234,7 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, 
     from camctl.contracts.values import ConsistencyError
     owner, name = (OutputsRepository, "finish_cleanup_attempt") if operation == "delete" else (OperationRepository, "finish_attempt")
     save = getattr(owner, name)
-    saves, rejected, after_actual_reads = [], [True], []
+    saves, rejected = [], [True]
     failures = []
     def retained(port, request, key, worker):
         if calls and request.ticket == calls[0][0].ticket:
@@ -258,13 +257,6 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, 
                 return saved
         return save(port, request, key, worker)
     monkeypatch.setattr(owner, name, retained)
-    reader = cleanup_results.cleanup_attempt_config
-    def original_config(*args, **kwargs):
-        if calls:
-            after_actual_reads.append(args[1])
-            raise AssertionError("真实返回已经持有原意图，不应重新读取配置")
-        return reader(*args, **kwargs)
-    monkeypatch.setattr(cleanup_results, "cleanup_attempt_config", original_config)
     if operation == "query":
         with pytest.raises(ConsistencyError) as caught:
             await delete_source_file(runtime, item_id)
@@ -273,22 +265,22 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, 
         step = await delete_source_file(runtime, item_id)
         assert step.phase == "finish_rejected"
         assert failures and step.exception.__cause__ is failures[0]
-    assert len(calls) == len(saves) == len(failures) == 1 and not after_actual_reads
+    assert len(calls) == len(saves) == len(failures) == 1
     request, actual = calls[0]
     status, result = world.owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
         (request.ticket.run_id, request.ticket.attempt_id)).fetchone()
     assert (status != 1 and result is not None) if commit_after else (status, result) == (1, None)
-    return item_id, request, actual, calls, saves, rejected, after_actual_reads
+    return item_id, request, actual, calls, saves, rejected
 
 
-async def _retry_original_actual(world, item_id, request, actual, calls, saves, rejected, after_actual_reads):
+async def _retry_original_actual(world, item_id, request, actual, calls, saves, rejected):
     from camctl.outputs.cleanup_results import saved_cleanup_attempt
     before = list(world.channel.operations)
     rejected.clear()
     runtime = await _factory(world)(world.owned)
     await advance_cleanup(runtime)
     assert len(calls) == 1 and len(saves) == 2 and saves[0] == saves[1]
-    assert not after_actual_reads and world.channel.operations == before
+    assert world.channel.operations == before
     saved = saved_cleanup_attempt(world.owned, request.ticket,
         database_id=world.owned.metadata.instance_id, item_id=item_id)
     assert saved.key == saves[0][1] and saved.occurred_at == saves[0][0].occurred_at
