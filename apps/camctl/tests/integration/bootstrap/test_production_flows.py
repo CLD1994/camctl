@@ -15,6 +15,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,7 @@ from camctl.operations.models import CallOutcome, EffectState, EvidenceValue, Se
 from camctl.devices.ports import ControlRequest, DeviceCallResult, DriverDeclaration
 from camctl.persistence.initialization import InitOutcome, initialize_state
 
+from .session_clock import SessionClock
 from .test_recording_stop import (
     _RecordCatalog,
     _await_query,
@@ -192,9 +194,17 @@ def _isolated_registry():
 pytestmark = pytest.mark.asyncio
 
 
+def _install_clock(monkeypatch, clock):
+    monkeypatch.setattr("camctl.bootstrap.lifecycle.SystemClock", lambda: clock)
+    paired = SimpleNamespace(time=lambda: clock.utc_micros() / 1_000_000,
+                             monotonic_ns=clock.monotonic_ns)
+    for module in ("capture_assembly", "obtain_assembly", "cleanup_assembly"):
+        monkeypatch.setattr(f"camctl.bootstrap.{module}.time", paired)
+
+
 class TestRunSessionProductionScheduling:
     async def test_timelapse_reaches_success_through_default_flows(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, monkeypatch) -> None:
         """延时任务经生产默认装配推进到成功终态。
 
         拍摄推进、结果列举适配与等待配置全部来自生产装配：驱动端
@@ -223,17 +233,27 @@ class TestRunSessionProductionScheduling:
             declaration=entry.declaration,
             source_storage_resolver=synthetic_source_storage_resolver,
         )}))
+        clock = SessionClock()
+        _install_clock(monkeypatch, clock)
+        due = _future_schedule(1)
         await _submit_plan(
-            tmp_path, cfg, catalog,
-            _timelapse_plan("1", _future_schedule(1)))
+            tmp_path, cfg, catalog, _timelapse_plan("1", due))
+        clock.reach(due)
         db = Path(cfg.paths.state_db)
         assert _scalar(db, "SELECT driver_id FROM actions WHERE id = 1") == (driver_id,)
         assert current_registry().entry(driver_id).driver is driver
         async with running_session(cfg, catalog) as (_deps, task):
+            # 确认实际发送并保存检查时间，再推进同一对业务时钟。
+            deadline = time.monotonic() + 25
+            await _await_query(
+                db, "SELECT expected_check_at IS NOT NULL FROM device_activities WHERE id = 1",
+                (1,), timeout_s=max(0, deadline - time.monotonic()), task=task)
+            assert ("control", "start_timelapse") in driver.calls
+            clock.advance(2)
             # 发送经生产装配确认；结果列举来自驱动 result 端口。
             await _await_query(
                 db, "SELECT status FROM actions WHERE id = 1", (3,),
-                timeout_s=25, task=task)
+                timeout_s=max(0, deadline - time.monotonic()), task=task)
             assert ("control", "start_timelapse") in driver.calls
             assert ("result", "1") in driver.calls
             # 完整集合满足：按时间与产物完成判定成功终态并登记产物。
@@ -252,7 +272,7 @@ class TestRunSessionProductionScheduling:
 
 class TestRestrictedSessionProductionWinddown:
     async def test_clock_invalid_session_stops_recording_via_default_flows(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, monkeypatch) -> None:
         """受限会话经生产装配保守收场已启动的录像。
 
         第一个正常会话用生产装配确认启动后中断；墙钟不可信的后续
@@ -275,21 +295,25 @@ class TestRestrictedSessionProductionWinddown:
         driver_id = cfg.devices["cam-1"]["driver"]
         driver = _ProductionDriver({})
         register_drivers(_entry_for_driver(driver_id, driver))
-        await _submit_plan(
-            tmp_path, cfg, catalog,
-            _record_plan("1", _future_schedule(1)))
-        db = Path(cfg.paths.state_db)
-        assert _scalar(db, "SELECT driver_id FROM actions WHERE id = 1") == (
-            "production-double",)
-        async with running_session(cfg, catalog) as (_deps, task):
-            await _await_query(
-                db,
-                "SELECT started_at IS NOT NULL FROM device_activities"
-                " WHERE id = 1", (1,), task=task)
-            assert driver.calls == [("control", "start_recording")]
-            assert _scalar(
-                db, "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'start/1'") == (3, 1)
+        with monkeypatch.context() as clock_patch:
+            clock = SessionClock()
+            _install_clock(clock_patch, clock)
+            due = _future_schedule(1)
+            await _submit_plan(
+                tmp_path, cfg, catalog, _record_plan("1", due))
+            clock.reach(due)
+            db = Path(cfg.paths.state_db)
+            assert _scalar(db, "SELECT driver_id FROM actions WHERE id = 1") == (
+                "production-double",)
+            async with running_session(cfg, catalog) as (_deps, task):
+                await _await_query(
+                    db,
+                    "SELECT started_at IS NOT NULL FROM device_activities"
+                    " WHERE id = 1", (1,), task=task)
+                assert driver.calls == [("control", "start_recording")]
+                assert _scalar(
+                    db, "SELECT status, attempts_used FROM operation_runs"
+                    " WHERE responsibility_key = 'start/1'") == (3, 1)
 
         # 墙钟不可信的受限会话：生产受限装配消费保守收场。录像原片
         # 已在设备上（驱动列举可见），等待阶段据此登记归属与完成。

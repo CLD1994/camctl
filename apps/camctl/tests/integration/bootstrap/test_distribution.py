@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import json
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 import textwrap
 import tomllib
 import zipfile
@@ -33,6 +35,8 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
 from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat
@@ -43,9 +47,18 @@ REPO_ROOT = PROJECT_DIR.parents[1]
 _CROSS_DIR = REPO_ROOT / "tests" / "integration"
 _BRIDGE_SOURCE = _CROSS_DIR / "_camctl_stub_entry.py"
 _FIXTURES_SOURCE = _CROSS_DIR / "camctl_fixtures.py"
+_CLOCK_SPEC = importlib.util.spec_from_file_location(
+    "_distribution_clock", _CROSS_DIR / "_osmo_builtin_clock.py")
+assert _CLOCK_SPEC is not None and _CLOCK_SPEC.loader is not None
+_CLOCK = importlib.util.module_from_spec(_CLOCK_SPEC)
+_CLOCK_SPEC.loader.exec_module(_CLOCK)
 
-#: 直接运行时依赖（wheel 声明与锁文件导出都应只包含这些包）。
-_DIRECT_DEPENDENCIES = ("concurrent-log-handler", "janus", "jsonschema")
+#: 直接运行时依赖名称以项目元数据为准。
+_DIRECT_DEPENDENCIES = tuple(
+    canonicalize_name(Requirement(item).name)
+    for item in tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text(
+        encoding="utf-8"))["project"]["dependencies"]
+)
 
 #: 模拟不满足统一运行条件的 SQLite 版本（低于主线最低版本）。
 _NONCOMPLIANT_SQLITE = (3, 40, 0)
@@ -91,7 +104,8 @@ class _Installed:
     requirements: Path
 
     def cli(self, *args: str, driver: dict | None = None,
-            timeout_s: float = 180.0) -> subprocess.CompletedProcess:
+            timeout_s: float = 180.0, clock_at: datetime | None = None,
+            clock_mono_ns: int | None = None) -> subprocess.CompletedProcess:
         """经部署装配桥运行安装后的 camctl；driver 提供时接入替身。
 
         工作目录保持在仓库之外；桥与替身脚本都来自部署目录中的
@@ -99,6 +113,15 @@ class _Installed:
         """
         environment = _clean_environment()
         environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
+        if clock_at is not None:
+            assert clock_mono_ns is not None
+            for name in ("_osmo_builtin_clock.py", "_osmo_builtin_clock_entry.py"):
+                shutil.copy2(_CROSS_DIR / name, self.deploy / name)
+            clock_path = self.deploy / "clock.json"
+            _CLOCK.set_frozen(clock_path, utc_us=int(clock_at.timestamp()) * 1_000_000,
+                              monotonic_ns=clock_mono_ns)
+            environment["CAMCTL_TEST_CLOCK_FILE"] = str(clock_path)
+            environment["CAMCTL_TEST_CLOCK_LOG"] = str(self.deploy / "clock.jsonl")
         command = [str(self.python), str(self.deploy / "_camctl_stub_entry.py"), *args]
         if driver is not None:
             spec = dict(driver)
@@ -195,8 +218,12 @@ def _probe(installed: _Installed, code: str) -> str:
     return result.stdout.strip()
 
 
-def _production_cli(installed: _Installed, *args: str) -> subprocess.CompletedProcess:
-    """直接运行安装包 CLI，不经过设备替身装配桥。"""
+def _production_cli(installed: _Installed, *args: str,
+                    clock_at: datetime | None = None,
+                    clock_mono_ns: int | None = None) -> subprocess.CompletedProcess:
+    """运行安装包 CLI；受控时钟场景使用部署装配桥。"""
+    if clock_at is not None:
+        return installed.cli(*args, clock_at=clock_at, clock_mono_ns=clock_mono_ns)
     environment = _clean_environment()
     environment.pop("CAMCTL_TEST_DRIVER_SPEC", None)
     environment.pop("CAMCTL_TEST_STATE_DB", None)
@@ -960,8 +987,10 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
         "source": {"action_name": "capture"}, "filter": "preview",
     }
 
+    clock_mono = time.monotonic_ns()
     submitted = _production_cli(
-        installed, "submit", str(plan_path), "--config", str(config_path))
+        installed, "submit", str(plan_path), "--config", str(config_path),
+        clock_at=scheduled_at - timedelta(seconds=1), clock_mono_ns=clock_mono)
     assert submitted.returncode == 0, (
         f"paired submit 阶段失败: stdout={submitted.stdout!r}; stderr={submitted.stderr!r}")
     state_db = data_root / "state" / "state.db"
@@ -986,7 +1015,8 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
     }
 
     first_run = _production_cli(
-        installed, "run", str(plan_path), "--config", str(config_path))
+        installed, "run", str(plan_path), "--config", str(config_path),
+        clock_at=scheduled_at, clock_mono_ns=clock_mono + 1_000_000_000)
     assert first_run.returncode == 0, (
         f"paired run 阶段失败: stdout={first_run.stdout!r}; stderr={first_run.stderr!r}")
     first_report_path, first_report = _report_containing_actions(
@@ -1380,7 +1410,7 @@ def test_distribution_works_outside_repository(installed: _Installed) -> None:
         metadata_text = archive.read(metadata_name).decode("utf-8")
     declared = re.findall(r"^Requires-Dist: ([A-Za-z0-9._-]+)",
                           metadata_text, re.MULTILINE)
-    assert sorted(declared) == sorted(_DIRECT_DEPENDENCIES), (
+    assert sorted(map(canonicalize_name, declared)) == sorted(_DIRECT_DEPENDENCIES), (
         f"wheel 声明的依赖越界: {declared}")
     locked = _locked_versions(installed.requirements.read_text(encoding="utf-8"))
     installed_versions = json.loads(_probe(
@@ -1418,15 +1448,19 @@ def test_distribution_works_outside_repository(installed: _Installed) -> None:
     plan_path.write_text(json.dumps(
         _photo_plan("8001", scheduled.strftime("%Y-%m-%d %H:%M:%S")),
         ensure_ascii=False), encoding="utf-8")
+    clock_mono = time.monotonic_ns()
+    scheduled = scheduled.replace(microsecond=0)
     submitted = installed.cli(
         "submit", str(plan_path), "--config", str(installed.config),
-        driver=_photo_driver())
+        driver=_photo_driver(), clock_at=scheduled - timedelta(seconds=1),
+        clock_mono_ns=clock_mono)
     assert submitted.returncode == 0, submitted.stderr
     assert json.loads(submitted.stdout)["kind"] == "succeeded"
 
     # run：设备替身完成拍摄，会话收场并发布报告。
     finished = installed.cli(
-        "run", "--config", str(installed.config), driver=_photo_driver())
+        "run", "--config", str(installed.config), driver=_photo_driver(),
+        clock_at=scheduled, clock_mono_ns=clock_mono + 1_000_000_000)
     assert finished.returncode == 0, (
         f"run stdout: {finished.stdout}\nrun stderr: {finished.stderr}")
     assert json.loads(finished.stdout) == {"kind": "succeeded"}

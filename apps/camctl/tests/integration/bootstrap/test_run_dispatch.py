@@ -31,7 +31,8 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.session.locks import probe_admission
 
 from ..support.database import business_database
-from ..support.session import (capture_factory, capture_entry, ResultDriver,
+from .session_clock import SessionClock
+from ..support.session import (await_database, capture_factory, capture_entry, ResultDriver,
                                run_default_session, session_config, parsed_plan)
 
 from ..capture.test_capture_contract import (
@@ -150,14 +151,15 @@ class _SequentialActivityDriver(DriverDouble):
         )
 
 
-def _capture_factory(cfg, driver: DriverDouble, files: dict):
-    return capture_factory(cfg, driver, ResultsDouble(files), _EVIDENCE)
+def _capture_factory(cfg, driver: DriverDouble, files: dict, clock):
+    return capture_factory(cfg, driver, ResultsDouble(files), _EVIDENCE,
+                           wall_us=clock.utc_micros, monotonic_ns=clock.monotonic_ns)
 
 
-def _run(deps, source, driver, files):
+def _run(deps, source, driver, files, clock):
     return asyncio.create_task(execute_command(
         deps, source,
-        flows={"scheduling": capture_flow(_capture_factory(deps.config, driver, files))},
+        flows={"scheduling": capture_flow(_capture_factory(deps.config, driver, files, clock))},
         poll_interval_s=0.1,
     ))
 
@@ -172,17 +174,29 @@ def _all(db_path: Path, sql: str):
         return connection.execute(sql).fetchall()
 
 
-async def _await_status(db_path: Path, status: int, timeout_s: float = 12.0) -> None:
-    """异步轮询动作状态；等待期间让出控制权供会话任务推进。"""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        row = _scalar(db_path, "SELECT status FROM actions WHERE id = 1")
-        if row is not None and row[0] == status:
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError(
-        f"等待动作终态 {status} 超时，当前: "
-        f"{_scalar(db_path, 'SELECT status FROM actions WHERE id = 1')}")
+async def _await_status(db_path: Path, status: int, *, task, timeout_s: float = 12.0) -> None:
+    """会话结束或动作进入不相容终态时立即报告，成功预算保持不变。"""
+    sql = "SELECT status FROM actions WHERE id = 1"
+
+    async def incompatible_terminal():
+        while True:
+            row = _scalar(db_path, sql)
+            if row is not None and row[0] in (3, 4, 5, 6) and row[0] != status:
+                raise AssertionError(f"动作进入不相容终态 {row[0]}，期望 {status}")
+            await asyncio.sleep(0.05)
+
+    wanted = asyncio.create_task(await_database(
+        db_path, sql, (status,), timeout_s=timeout_s, task=task))
+    incompatible = asyncio.create_task(incompatible_terminal())
+    try:
+        done, _ = await asyncio.wait((wanted, incompatible), return_when=asyncio.FIRST_COMPLETED)
+        for finished in done:
+            await finished
+    finally:
+        for pending in (wanted, incompatible):
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(wanted, incompatible, return_exceptions=True)
 
 
 async def _cancel(task: asyncio.Task) -> None:
@@ -193,19 +207,28 @@ async def _cancel(task: asyncio.Task) -> None:
 
 class TestRunDispatch:
     async def test_run_dispatches_due_photo_and_keeps_report_wait(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch
     ) -> None:
         cfg = _config_for(tmp_path)
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        clock = SessionClock()
+        monkeypatch.setattr("camctl.bootstrap.lifecycle.SystemClock", lambda: clock)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        source = await _parsed(tmp_path, _plan_body("1", _future_schedule(2)))
+        due = _future_schedule(2)
+        source = await _parsed(tmp_path, _plan_body("1", due))
         driver = _ActivityDriver()
         files = {1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}
-        task = _run(deps, source, driver, files)
+        task = _run(deps, source, driver, files, clock)
+        deadline = time.monotonic() + 12
         try:
+            await await_database(Path(cfg.paths.state_db), "SELECT COUNT(*) FROM actions",
+                                 (1,), timeout_s=max(0, deadline - time.monotonic()), task=task)
+            assert driver.calls == []
+            clock.reach(due)
             # 到期前不派发；到期后同一轮开始动作、调用设备并保存终态。
-            await _await_status(Path(cfg.paths.state_db), 3)
+            await _await_status(Path(cfg.paths.state_db), 3, task=task,
+                                timeout_s=max(0, deadline - time.monotonic()))
             assert driver.calls == ["take_photo"]
             row = _scalar(
                 Path(cfg.paths.state_db),
@@ -222,18 +245,27 @@ class TestRunDispatch:
         assert probe_admission(deps.admission_lock).is_free is True
 
     async def test_run_dispatch_failure_path_fails_action(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch
     ) -> None:
         cfg = _config_for(tmp_path)
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        clock = SessionClock()
+        monkeypatch.setattr("camctl.bootstrap.lifecycle.SystemClock", lambda: clock)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        source = await _parsed(tmp_path, _plan_body("2", _future_schedule(2)))
+        due = _future_schedule(2)
+        source = await _parsed(tmp_path, _plan_body("2", due))
         driver = _ActivityDriver(error={"code": "device_error"})
         files = {1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}
-        task = _run(deps, source, driver, files)
+        task = _run(deps, source, driver, files, clock)
+        deadline = time.monotonic() + 12
         try:
-            await _await_status(Path(cfg.paths.state_db), 4)
+            await await_database(Path(cfg.paths.state_db), "SELECT COUNT(*) FROM actions",
+                                 (1,), timeout_s=max(0, deadline - time.monotonic()), task=task)
+            assert driver.calls == []
+            clock.reach(due)
+            await _await_status(Path(cfg.paths.state_db), 4, task=task,
+                                timeout_s=max(0, deadline - time.monotonic()))
             row = _scalar(
                 Path(cfg.paths.state_db),
                 "SELECT error_code FROM actions WHERE id = 1")
@@ -247,18 +279,22 @@ class TestRunDispatch:
             await _cancel(task)
         close_runtime(deps)
 
-    async def test_cancelled_run_rerun_is_idempotent(self, tmp_path: Path) -> None:
+    async def test_cancelled_run_rerun_is_idempotent(self, tmp_path: Path, monkeypatch) -> None:
         cfg = _config_for(tmp_path)
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        clock = SessionClock()
+        monkeypatch.setattr("camctl.bootstrap.lifecycle.SystemClock", lambda: clock)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        source = await _parsed(tmp_path, _plan_body("3", _future_schedule(2)))
+        due = _future_schedule(2)
+        source = await _parsed(tmp_path, _plan_body("3", due))
         driver = _ActivityDriver()
         files = {1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}
 
         # 第一次 run 在等待计划时间时被取消：计划与动作已持久化。
-        first = _run(deps, source, driver, files)
-        await asyncio.sleep(0.5)
+        first = _run(deps, source, driver, files, clock)
+        await await_database(Path(cfg.paths.state_db), "SELECT COUNT(*) FROM actions",
+                             (1,), task=first)
         await _cancel(first)
         assert probe_admission(deps.admission_lock).is_free is True
         assert _scalar(
@@ -267,9 +303,10 @@ class TestRunDispatch:
             Path(cfg.paths.state_db), "SELECT COUNT(*) FROM actions") == (1,)
 
         # 同一请求重送：受理幂等，动作仍只有一个并被派发到终态。
-        second = _run(deps, source, driver, files)
+        clock.reach(due)
+        second = _run(deps, source, driver, files, clock)
         try:
-            await _await_status(Path(cfg.paths.state_db), 3)
+            await _await_status(Path(cfg.paths.state_db), 3, task=second)
             assert _scalar(
                 Path(cfg.paths.state_db), "SELECT COUNT(*) FROM actions") == (1,)
             assert driver.calls == ["take_photo"]
