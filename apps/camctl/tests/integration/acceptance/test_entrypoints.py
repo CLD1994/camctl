@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -167,7 +168,7 @@ class TestRealEntrypoints:
         assert finished.returncode == 0, finished.stderr
         assert json.loads(finished.stdout) == {"kind": "succeeded"}
         assert finished.stdout.count("\n") == 1
-        with sqlite3.connect(home / "state.db") as connection:
+        with closing(sqlite3.connect(home / "state.db")) as connection:
             assert connection.execute(
                 "SELECT status FROM actions").fetchall() == [(3,)]
             assert connection.execute(
@@ -182,7 +183,7 @@ class TestRealEntrypoints:
         message = json.loads(again.stdout)
         assert message["kind"] == "succeeded"
         assert message["body"]["needs_run"] is False
-        with sqlite3.connect(home / "state.db") as connection:
+        with closing(sqlite3.connect(home / "state.db")) as connection:
             assert connection.execute("SELECT id,request_id FROM plans").fetchall() == [(1,42)]
             assert connection.execute("SELECT name,status,execution_spec_json FROM actions").fetchall() == [("status",3,"{}")]
 
@@ -199,7 +200,7 @@ class TestRealEntrypoints:
         result = _run_cli(home, "run", str(broken), "--config", str(config))
         # 拒绝诊断被受理并报告，报告动作完成：会话正常退出。
         assert result.returncode == 0, result.stderr
-        with sqlite3.connect(home / "state.db") as connection:
+        with closing(sqlite3.connect(home / "state.db")) as connection:
             assert connection.execute(
                 "SELECT COUNT(*) FROM plan_file_diagnostics").fetchone() == (1,)
 
@@ -207,7 +208,7 @@ class TestRealEntrypoints:
         plan.unlink()
         recovery = _run_cli(home, "run", "--config", str(config))
         assert recovery.returncode == 0, recovery.stderr
-        with sqlite3.connect(home / "state.db") as connection:
+        with closing(sqlite3.connect(home / "state.db")) as connection:
             assert connection.execute("SELECT request_id FROM plans").fetchall() == [(1,)]
             assert connection.execute("SELECT name,status FROM actions").fetchall() == [("status",3)]
             assert connection.execute("SELECT COUNT(*) FROM plan_file_diagnostics").fetchone() == (1,)
@@ -261,7 +262,7 @@ class TestRealEntrypoints:
             assert result.returncode == 1
             assert result.stdout == ""
             assert "camctl-adb" in result.stderr
-        with sqlite3.connect(home / "state.db") as connection:
+        with closing(sqlite3.connect(home / "state.db")) as connection:
             assert connection.execute("SELECT COUNT(*) FROM plans").fetchone() == (0,)
 
     @pytest.mark.parametrize("mode", ["run", "submit"])
@@ -314,7 +315,7 @@ class TestRealEntrypoints:
             assert result.stdout.count("\n") == 1
         incoming.unlink()
         original_file.unlink()
-        with sqlite3.connect(home / "state.db") as connection:
+        with closing(sqlite3.connect(home / "state.db")) as connection:
             expected_requests = [(42,), (43,)] if scenario in {"bad_ack", "bad_action"} else [(42,)]
             assert connection.execute("SELECT request_id FROM plans ORDER BY id").fetchall() == expected_requests
             # run 会话驱动报告动作到终态；submit 不驱动，动作保持
