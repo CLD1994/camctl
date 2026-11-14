@@ -8,11 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.schemas import create_validator, validation_errors
 from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventValidationError
 from camctl.outputs.definitions import SelectionMode
-from camctl.outputs.sources import SelectionSnapshot, select_outputs
+from camctl.outputs.sources import ItemStatus, SelectionSnapshot, select_outputs
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -292,12 +293,23 @@ async def test_obtain_runtime_consumes_saved_default_exclusions(tmp_path, media_
 def test_locally_qualified_final_target_is_excluded_even_after_host_cleanup(selection_database):
     owned = selection_database
     _exclude(owned, (703, 705))
+    initial = select_outputs(_fixed_resolution((11,)), outputs.load_selection_facts(
+        owned.connection, 11), SelectionMode.DEFAULT)
+    assert initial.selected_output_ids == (703, 705)
     owned.connection.execute("UPDATE outputs SET availability=3, cleanup_status=4 WHERE id=703")
+    owned.connection.execute("UPDATE intermediate_files SET cleanup_state=? WHERE id=801",
+        (int(enum_for("intermediate_files.cleanup_state").COMPLETED),))
     owned.connection.commit()
+    after_cleanup = select_outputs(_fixed_resolution((11,)), outputs.load_selection_facts(
+        owned.connection, 11), SelectionMode.DEFAULT)
+    assert [(item.output_id, item.original_output_id, item.status) for item in after_cleanup.items] == [
+        (703, 701, ItemStatus.FAILED), (705, None, ItemStatus.SELECTED)]
     receipt = outputs.OutputsRepository().fix_selection(
         outputs.FixSelection(61, SelectionSnapshot(True), _NOW), new_operation_key(), owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     assert receipt.value.snapshot.items == ()
+    assert owned.connection.execute("SELECT COUNT(*) FROM obtain_items WHERE selection_id=61").fetchone() == (0,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM deliveries").fetchone() == (0,)
 
 
 def test_unfixed_excluded_obtain_does_not_block_product_successor(competition_database):
