@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from decimal import Decimal
 
 import pytest
 
@@ -9,6 +10,8 @@ from support.repository_ports import repository_port
 
 from camctl.capture.files import file_identity_key
 from camctl.capture.media_flow import run_recording_media
+from camctl.capture.processing import CheckBasis, CheckReason
+from camctl.contracts.json_encoding import encode_exact_json
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.drivers.hasselblad.driver import CameraReadError, EVIDENCE
 from camctl.devices.read_session import ReadSession, ReadEnd
@@ -52,7 +55,10 @@ def prepare_diagnostic_read_case(request, consumer, *, known_digest=False):
     else:
         owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=32", (command.occurred_at + 60_000_000,))
-    owned.connection.execute("UPDATE recording_processing SET check_basis_json=? WHERE id=5", ('{"target_duration_ms":1000}',))
+    # 固定检查依据和当时采用的门槛，先于内部读取授予；测试设备使用默认 10 秒余量。
+    basis = CheckBasis(CheckReason.INSUFFICIENT_TIMING, 1000, threshold_s=Decimal("11"))
+    owned.connection.execute("UPDATE recording_processing SET check_basis_json=? WHERE id=5",
+                             (encode_exact_json(basis.as_json()),))
     if known_digest:
         if consumer == "host":
             owned.connection.execute("UPDATE intermediate_files SET size_bytes=?,sha256=? WHERE id=801", (len(_CONTENT), "a" * 64))
