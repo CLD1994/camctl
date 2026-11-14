@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -149,12 +150,16 @@ async def test_nonzero_download_cleans_partial_and_retains_actual_exit(tmp_path)
 
 @pytest.mark.asyncio
 async def test_download_error_and_cleanup_error_are_both_retained(tmp_path, monkeypatch):
-    from camctl.host_files.downloads import DownloadWorkspace, recover_download
+    from camctl.host_files.downloads import recover_download
     driver, _transport, staging = harness(tmp_path, payload=RAW[:3], failure="output_failed")
-    original = DownloadWorkspace.remove
-    def fail(_self):
-        raise OSError("unlink unavailable")
-    monkeypatch.setattr(DownloadWorkspace, "remove", fail)
+    target = staging / "read-downloads" / "31-1"
+    original = shutil.rmtree
+    cleanup_failure = OSError("unlink unavailable")
+    def fail(path, *args, **kwargs):
+        if Path(path) == target:
+            raise cleanup_failure
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(shutil, "rmtree", fail)
     with pytest.raises(ValueError) as failure:
         await driver.open_read(source(), 0, TICKET, idle_timeout_s=Decimal("10"))
     assert failure.value.reason == "preparation_and_cleanup_failed"
@@ -165,11 +170,12 @@ async def test_download_error_and_cleanup_error_are_both_retained(tmp_path, monk
     assert "unlink unavailable" in str(failure.value)
     assert download_error.steps[-1]["local_exit_code"] == 17
     assert download_error.steps[-1]["transport_error"] == "output_failed"
-    assert isinstance(cleanup_error, OSError)
+    assert cleanup_error is cleanup_failure
     assert str(cleanup_error) == "unlink unavailable"
     assert (staging / "read-downloads" / "31-1").exists()
-    monkeypatch.setattr(DownloadWorkspace, "remove", original)
-    await recover_download(staging, TICKET)
+    monkeypatch.setattr(shutil, "rmtree", original)
+    assert await recover_download(staging, TICKET)
+    assert not target.exists()
 
 
 @pytest.mark.asyncio
@@ -196,19 +202,23 @@ async def test_stopping_open_session_closes_file_and_removes_download(tmp_path):
 
 @pytest.mark.asyncio
 async def test_cleanup_error_is_not_a_successful_read_end_and_can_be_recovered(tmp_path, monkeypatch):
-    from camctl.host_files.downloads import DownloadWorkspace, recover_download
+    from camctl.host_files.downloads import recover_download
     driver, _transport, staging = harness(tmp_path)
     session = await driver.open_read(source(), 0, TICKET, idle_timeout_s=Decimal("10"))
-    original = DownloadWorkspace.remove
-    def fail(_self):
-        raise OSError("unlink failed")
-    monkeypatch.setattr(DownloadWorkspace, "remove", fail)
+    target = staging / "read-downloads" / "31-1"
+    original = shutil.rmtree
+    cleanup_failure = OSError("unlink failed")
+    def fail(path, *args, **kwargs):
+        if Path(path) == target:
+            raise cleanup_failure
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(shutil, "rmtree", fail)
     with pytest.raises(Exception, match="unlink failed"):
         await asyncio.to_thread(session.read_chunk, 100)
     with pytest.raises(Exception, match="unlink failed"):
         await session.wait_stopped()
     assert (staging / "read-downloads" / "31-1").exists()
-    monkeypatch.setattr(DownloadWorkspace, "remove", original)
+    monkeypatch.setattr(shutil, "rmtree", original)
     assert await recover_download(staging, TICKET)
     assert not (staging / "read-downloads" / "31-1").exists()
 
@@ -333,13 +343,27 @@ async def test_real_timeout_or_cancel_waits_for_process_exit_before_removing_par
     driver, staging, marker = managed_harness(tmp_path, sleep=True)
     monkeypatch.setattr(module, "READ_PREPARATION_TIMEOUT_S", Decimal("0.4"))
     task = asyncio.create_task(driver.open_read(source(), 0, TICKET, idle_timeout_s=Decimal("10")))
-    if cancel:
-        async with asyncio.timeout(2):
-            while not marker.exists():
-                await asyncio.sleep(0.005)
-        task.cancel()
-    with pytest.raises(asyncio.CancelledError if cancel else (TimeoutError, ValueError)):
-        await task
+    try:
+        if cancel:
+            async with asyncio.timeout(2):
+                while not marker.exists():
+                    done, _ = await asyncio.wait({task}, timeout=0.005)
+                    if done:
+                        await task
+                        break
+            assert marker.exists()
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError if cancel else (TimeoutError, ValueError)):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=5)
+        assert done, "下载调用未在取消后结束"
+        if not task.cancelled() and task.exception() is None:
+            session = task.result()
+            session.request_stop()
+            await asyncio.wait_for(session.wait_stopped(), timeout=5)
     pid = int(marker.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
