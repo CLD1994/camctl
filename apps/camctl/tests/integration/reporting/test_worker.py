@@ -9,6 +9,10 @@
 from __future__ import annotations
 
 import hashlib
+import multiprocessing
+import os
+import time
+from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 
@@ -58,6 +62,26 @@ async def frozen_report(tmp_path):
     yield db_path, instance_id, report, tmp_path
 
 
+@pytest.fixture
+def database_metadata(tmp_path):
+    """仅准备有效数据库身份与目录绑定，供不读取冻结报告的分区使用。"""
+    db_path = tmp_path / "state.db"
+    _create_valid_database(db_path)
+    owned = open_existing(db_path, DbOpenMode.EXISTING_RO, DbConfig())
+    try:
+        instance_id = owned.metadata.instance_id
+    finally:
+        owned.connection.close()
+    return db_path, instance_id, tmp_path
+
+
+def _metadata_job(db_path, instance_id, home, **overrides):
+    # 这些拒绝分区在访问报告前结束；提供格式合法的任务字段即可。
+    report = SimpleNamespace(report_id=1, from_wm=0, to_wm=1,
+                             boundary=SimpleNamespace(last_event_id=1))
+    return _job(db_path, instance_id, report, home, **overrides)
+
+
 def _job(db_path: Path, instance_id: str, report, tmp_path: Path,
          name: str = "worker-report-1.json", **overrides) -> JobMessage:
     values = dict(
@@ -87,9 +111,9 @@ def _limits() -> MaintenanceLimits:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["staging_root", "ready_root", "processing_root"])
-async def test_worker_rejects_each_changed_binding_before_staging(frozen_report, changed):
-    db_path, instance_id, report, home = frozen_report
-    job = _job(db_path, instance_id, report, home, **{changed: str(home / "changed")})
+async def test_worker_rejects_each_changed_binding_before_staging(database_metadata, changed):
+    db_path, instance_id, home = database_metadata
+    job = _metadata_job(db_path, instance_id, home, **{changed: str(home / "changed")})
 
     result = run_job(job)
 
@@ -121,8 +145,21 @@ class TestRealWorkerProcess:
         self, frozen_report,
     ) -> None:
         db_path, instance_id, report, tmp_path = frozen_report
-        supervisor = WorkerSupervisor(
-            limits=_limits(), lock_path=str(report_lock_path(db_path)))
+        lock_path = str(report_lock_path(db_path))
+        processes = []
+
+        def spawn():
+            context = multiprocessing.get_context("spawn")
+            parent, child = context.Pipe(duplex=True)
+            from camctl.reporting.worker import worker_main
+            process = context.Process(target=worker_main,
+                args=(child, os.getpid(), lock_path, time.monotonic() + _limits().startup_seconds),
+                daemon=True)
+            process.start()
+            processes.append(process)
+            return process, parent, child
+
+        supervisor = WorkerSupervisor(limits=_limits(), lock_path=lock_path, spawn=spawn)
         try:
             startup = await supervisor.start()
             assert startup.ready, startup.detail
@@ -143,6 +180,11 @@ class TestRealWorkerProcess:
                      name="worker-report-2.json"))
             assert second.kind is GenerationOutcomeKind.SUCCESS
             assert second.success is not None
+            second_payload = Path(second.success.path).read_bytes()
+            assert second_payload == payload
+            assert len(second_payload) == second.success.size_bytes
+            assert hashlib.sha256(second_payload).hexdigest() == second.success.sha256
+            assert len(processes) == 1 and processes[0].is_alive()
         finally:
             shutdown = await supervisor.stop()
         assert shutdown.exitcode == 0
@@ -165,9 +207,9 @@ class TestRealWorkerProcess:
             await supervisor.stop()
 
     async def test_held_work_lock_fails_startup_then_succeeds_after_release(
-        self, frozen_report,
+        self, database_metadata,
     ) -> None:
-        db_path, _instance_id, _report, _tmp = frozen_report
+        db_path, _instance_id, _tmp = database_metadata
         lock_path = report_lock_path(db_path)
         held = acquire_work_lock(lock_path, 0.1)
         # 较短的启动时限让锁等待失败按时送达，同时容纳真实 spawn 开销。
@@ -255,9 +297,9 @@ class TestRunJob:
         assert hashlib.sha256(generated).hexdigest() == result.sha256
         assert result.size_bytes == len(generated)
 
-    def test_instance_mismatch_is_state_failure(self, frozen_report) -> None:
-        db_path, _instance_id, report, tmp_path = frozen_report
-        job = _job(db_path, "0" * 32, report, tmp_path)
+    def test_instance_mismatch_is_state_failure(self, database_metadata) -> None:
+        db_path, _instance_id, tmp_path = database_metadata
+        job = _metadata_job(db_path, "0" * 32, tmp_path)
         result = run_job(job)
         assert result.error_kind is ErrorKind.STATE
         assert result.error_code == "instance_mismatch"

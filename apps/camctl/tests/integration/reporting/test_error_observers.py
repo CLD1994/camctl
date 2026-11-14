@@ -14,7 +14,7 @@ from camctl.reporting import publication
 from camctl.reporting.messages import MessageProtocolError, ReadyMessage
 
 from ..support.reporting import report_world, run_report_session
-from .test_supervisor_transport import _Rig
+from .test_supervisor_transport import rigs
 
 
 def _error():
@@ -52,8 +52,8 @@ class _Endpoint:
 
 
 @pytest.mark.asyncio
-async def test_supervisor_shutdown_send_failure_has_complete_diagnostic():
-    rig = _Rig()
+async def test_supervisor_shutdown_send_failure_has_complete_diagnostic(rigs):
+    rig = rigs()
     endpoint = _Endpoint(rig.parent_end)
     rig.parent_end = endpoint
     rig.peer.send(ReadyMessage())
@@ -74,8 +74,8 @@ async def test_supervisor_shutdown_send_failure_has_complete_diagnostic():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error_type", [OSError, MessageProtocolError])
-async def test_explicit_stop_retains_channel_terminal_error_diagnostic(error_type):
-    rig = _Rig()
+async def test_explicit_stop_retains_channel_terminal_error_diagnostic(error_type, rigs):
+    rig = rigs()
     endpoint = _Endpoint(rig.parent_end)
     failure = error_type("收场通道的实际错误")
     failure.__cause__ = PermissionError("完整原因")

@@ -58,11 +58,25 @@ async def test_ready_then_job_round_trip_over_real_pipe() -> None:
     try:
         child.send_bytes(encode_message(ReadyMessage()))
 
-        def peer() -> None:
-            job = decode_message(child.recv_bytes())
-            child.send_bytes(encode_message(_success(job.job_id)))
+        errors = []
 
-        threading.Thread(target=peer, daemon=True).start()
+        def peer() -> None:
+            try:
+                if not child.poll(5):
+                    raise TimeoutError("未收到报告任务")
+                job = decode_message(child.recv_bytes())
+                child.send_bytes(encode_message(_success(job.job_id)))
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                child.close()
+
+        thread = threading.Thread(target=peer)
+        try:
+            thread.start()
+        except BaseException:
+            child.close()
+            raise
         job = _job()
         await asyncio.wait_for(communicator.send(job), 5)
         ready = await asyncio.wait_for(communicator.receive(), 5)
@@ -71,8 +85,16 @@ async def test_ready_then_job_round_trip_over_real_pipe() -> None:
         assert isinstance(result, MessageEvent)
         assert result.message == _success(job.job_id)
     finally:
-        await communicator.close()
-        child.close()
+        try:
+            await asyncio.wait_for(communicator.close(), 5)
+        finally:
+            if "thread" in locals() and thread.ident is not None:
+                await asyncio.to_thread(thread.join, 6)
+                assert not thread.is_alive(), "报告对端线程未结束"
+                if errors:
+                    raise errors[0]
+            else:
+                child.close()
 
 
 async def test_delivered_messages_precede_eof_in_order() -> None:
@@ -114,21 +136,36 @@ async def test_oversized_frame_closes_channel() -> None:
     communicator = WorkerCommunicator(parent)
     communicator.start()
 
+    errors = []
+
     def oversize_peer() -> None:
         # 读端按容量上限拒收并关闭后，对端写满大帧可能遇到断管。
         try:
             child.send_bytes(b"x" * (MAX_MESSAGE_BYTES + 512))
         except (BrokenPipeError, OSError):
             pass
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            child.close()
 
-    threading.Thread(target=oversize_peer, daemon=True).start()
+    thread = threading.Thread(target=oversize_peer)
     try:
+        thread.start()
         terminal = await asyncio.wait_for(communicator.receive(), 5)
         assert isinstance(terminal, ChannelClosed)
         assert terminal.error is not None
     finally:
-        await communicator.close()
-        child.close()
+        try:
+            await asyncio.wait_for(communicator.close(), 5)
+        finally:
+            if thread.ident is not None:
+                await asyncio.to_thread(thread.join, 6)
+                assert not thread.is_alive(), "超长帧对端线程未结束"
+                if errors:
+                    raise errors[0]
+            else:
+                child.close()
 
 
 async def test_close_after_peer_exit_returns_and_closes_endpoint_once() -> None:
