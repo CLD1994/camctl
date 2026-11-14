@@ -1377,6 +1377,10 @@ class TestRecovery:
             next_failure_task = asyncio.create_task(service.on_report_failure(
                 _request(staging, ready, channel, marker, "next report failure")))
             release_progress.set()
+            _, pending = await asyncio.wait(
+                (first_task, recovery_task, next_failure_task), timeout=10,
+            )
+            assert not pending, "副本发布与恢复未在期限内结束"
             first, deletion, second = await asyncio.gather(
                 first_task, recovery_task, next_failure_task)
 
