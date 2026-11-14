@@ -1,4 +1,4 @@
-"""报告运行入口加载实际登记资源，并经存储和控制通信端口交付完整诊断。"""
+"""报告运行入口通过替身隔离资源，交付完整诊断。"""
 
 import json
 from dataclasses import replace
@@ -10,12 +10,10 @@ import pytest
 from camctl.persistence.runtime import StateDatabaseError
 from camctl.reporting import worker
 from camctl.reporting.messages import (
-    MAX_MESSAGE_BYTES, ErrorKind, JobMessage, MessageProtocolError, MessageCapacityError,
-    ResultFailureMessage, ResultSuccessMessage, StartupFailedMessage, StartupPhase,
+    MAX_MESSAGE_BYTES, ErrorKind, JobMessage, MessageCapacityError,
+    ResultSuccessMessage, StartupPhase,
     decode_message, encode_message,
 )
-
-
 
 
 @pytest.fixture

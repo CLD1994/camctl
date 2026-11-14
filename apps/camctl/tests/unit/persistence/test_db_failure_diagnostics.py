@@ -1,4 +1,4 @@
-"""包资源与数据库结果模型组合后保留原实际异常。"""
+"""数据库结果模型保留原实际异常和诊断。"""
 
 import asyncio
 import json
@@ -23,6 +23,6 @@ def test_failure_preserves_control_identity_and_secondary_diagnostics():
     assert db_failure(RuntimeError, "结果已提交但控制交付失败", outcome) is control
     assert db_outcome_for(control) is outcome
     notes = getattr(control, "__notes__", ())
-    diagnostic = next(json.loads(note[ note.index("{"):]) for note in notes if "{" in note)
+    diagnostic = next(json.loads(note[note.index("{"):]) for note in notes if "{" in note)
     assert diagnostic["errno"] == 5
     assert diagnostic["filename"] == "/state"
