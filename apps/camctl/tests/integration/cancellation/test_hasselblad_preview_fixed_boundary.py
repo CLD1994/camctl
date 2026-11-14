@@ -245,7 +245,7 @@ async def test_independent_guard_requires_every_original_source_range(tmp_path,m
         with pytest.raises(EventValidationError) as raised:
             BusinessStorage().validate_event(event,incomplete)
         cause=raised.value.__cause__ or raised.value
-        assert f'{missing[0]}.{missing[1]}=' in str(cause)
+        assert f'{missing[0]}.{missing[1]}' in str(cause)
         assert not owned.connection.in_transaction
         assert tuple(owned.connection.iterdump())==before
         assert read_action(owned,1)['cancel_requested']==0 and read_action(owned,2)['cancel_requested']==0

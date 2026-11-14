@@ -334,7 +334,7 @@ class TestEntryMatrix:
             (8, 3) if _P in expected else (5, 1))
 
     @pytest.mark.asyncio
-    async def test_cancel_results_survive_restart(self, pipeline):
+    async def test_cancel_results_survive_target_completion_and_replay(self, pipeline):
         """已拒绝任务后来自然结束不改旧取消失败；重送不重复效果。"""
         owned = pipeline
         _, _, finished, fixed_operation, result_operations = await _run_cancel(
