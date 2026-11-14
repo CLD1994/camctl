@@ -91,3 +91,28 @@ def auto_preview(name: str, source_name: str) -> dict:
             "purpose": "auto_preview",
         },
     }
+
+
+def admitted_action_row(action_type="camera_take_photo", params=None):
+    """构造符合已受理动作契约的内存事实，不读取业务存储。"""
+    from camctl.contracts.enums import enum_for
+
+    camera = action_type.startswith("camera_")
+    if params is None:
+        params = {"type": "single_shot"}
+    spec = {"target_duration_ms": 1234, "video_result_mode": "single_file"} if action_type == "camera_record" else {}
+    if action_type == "obtain_action_outputs":
+        spec = {"selection_mode": 1}
+    return {
+        "id": 1, "plan_id": 1, "input_index": 0, "name": "shoot" if camera else "control",
+        "type": int(enum_for("actions.type")[action_type.upper()]),
+        "device_id": "cam-1" if camera else None, "scheduled_at": 1768467600000000,
+        "group_name": None, "input_fields_json": {"params": params, **({"policy": {"max_delay_ms": 1000}} if camera else {})},
+        "effective_params_json": {"type": "single_shot"} if camera else None,
+        "driver_id": "camctl-adb" if camera else None, "max_delay_ms": 1000 if camera else None,
+        "execution_spec_json": spec, "status": 1, "execution_started": 0, "cancel_requested": 0,
+        "error_code": None, "error_details_json": None, "first_window_observed_at": None,
+        "expiration_reason": None, "source_resolution_state": 2 if action_type == "obtain_action_outputs" else None,
+        "resolved_source_plan_id": 1 if action_type == "obtain_action_outputs" else None,
+        "target_selection_state": 1 if action_type in {"delete_action_outputs", "cancel_task"} else None, "created_event_id": 1, "last_event_id": 1, "change_count": 1,
+    }

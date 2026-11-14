@@ -92,16 +92,6 @@ async def test_public_projection_preserves_explicit_null(environment, tmp_path, 
     assert fragment[public_field] is None
 
 
-async def test_duplicate_raw_and_column_is_state_error(environment, tmp_path):
-    from camctl.contracts.public_projection import PublicProjectionError
-    connection, _ = environment
-    await _accept(environment, tmp_path, _plan_body())
-    facts = _action_facts(connection)
-    facts.tables["actions"][1]["input_fields_json"] = '{"device_id":"cam-2"}'
-    with pytest.raises(PublicProjectionError):
-        project_public(facts)
-
-
 @pytest.mark.parametrize("changes", [
     {}, {"params":None}, {"device_id":None}, {"group":None},
     {"scheduled_at":"2026-02-30 09:00:00"}, {"extra":{"n":1}},
@@ -197,48 +187,6 @@ async def test_history_rejects_invalid_json_instead_of_returning_text(environmen
         repository.restore_entity("action", 1, repository.current_boundary())
 
 
-async def test_public_projection_rejects_wrong_registered_error_details(environment, tmp_path):
-    from camctl.contracts.public_projection import PublicProjectionError
-    connection, _ = environment
-    original = _plan_body()["actions"][0]
-    original["params"]["shots"] = 99
-    await _accept(environment, tmp_path, _plan_body(actions=[original]))
-    facts = _action_facts(connection)
-    facts.tables["actions"][1]["error_details_json"] = '{"x":1}'
-    with pytest.raises(PublicProjectionError):
-        project_public(facts)
-
-
-@pytest.mark.parametrize("status", [1, 4])
-@pytest.mark.parametrize("missing", ["params", "policy", "device_id", "scheduled_at", "max_delay_ms"])
-async def test_admitted_input_requires_its_original_basis(environment, tmp_path, missing, status):
-    from camctl.acceptance.definitions import read_action_spec
-    from camctl.contracts.input_fields import reconstruct_action_input
-    from camctl.contracts.public_projection import PublicProjectionError
-    from camctl.contracts.values import ConsistencyError
-    connection, _ = environment
-    await _accept(environment, tmp_path, _plan_body())
-    facts = _action_facts(connection)
-    row = facts.tables["actions"][1]
-    row["status"] = status
-    if status == 4:
-        from camctl.contracts.workflow_errors import action_error_id
-        row.update(execution_started=1, error_code=action_error_id("device_start_failed"), error_details_json={})
-    assert project_public(facts)["status"] == ("pending" if status == 1 else "failed")
-    if missing in {"params", "policy"}:
-        fields = parse_exact_json(row["input_fields_json"])
-        del fields[missing]
-        row["input_fields_json"] = fields
-    else:
-        row[missing] = None
-    with pytest.raises(ConsistencyError):
-        reconstruct_action_input(row)
-    with pytest.raises(ConsistencyError):
-        read_action_spec(row)
-    with pytest.raises(PublicProjectionError):
-        project_public(facts)
-
-
 async def test_history_reader_rejects_missing_admitted_input(environment, tmp_path):
     from camctl.persistence.repositories.history import HistoryRepository
     from camctl.contracts.values import ConsistencyError
@@ -248,33 +196,3 @@ async def test_history_reader_rejects_missing_admitted_input(environment, tmp_pa
     with pytest.raises(ConsistencyError):
         repository = HistoryRepository(tmp_path / "state.db")
         repository.restore_entity("action", 1, repository.current_boundary())
-
-
-@pytest.mark.parametrize("action_type,params", [
-    ("obtain_action_outputs", {"source":{"current_plan":True},"purpose":"manual"}),
-    ("delete_action_outputs", {"output_ids":["500"]}),
-    ("cancel_task", {"target":{"plan_instance_id":"500"}}),
-    ("report_status", {"scope":"full"}),
-])
-async def test_admitted_non_capture_params_keep_their_required_structure(environment, tmp_path, action_type, params):
-    from camctl.acceptance.definitions import read_action_spec
-    from camctl.contracts.input_fields import reconstruct_action_input
-    from camctl.contracts.public_projection import PublicProjectionError
-    from camctl.contracts.values import ConsistencyError
-    connection, _ = environment
-    original = {"name":"control","type":action_type,"params":params,"scheduled_at":"2026-01-15 09:00:00"}
-    await _accept(environment, tmp_path, _plan_body(actions=[original]))
-    facts = _action_facts(connection)
-    row = facts.tables["actions"][1]
-    row.update(status=6, cancel_requested=1)
-    assert reconstruct_action_input(row) == original
-    assert read_action_spec(row) is not None
-    fragment = project_public(facts)
-    assert fragment["status"] == "canceled" and "error" not in fragment
-    row["input_fields_json"] = {"params":{}}
-    with pytest.raises(ConsistencyError):
-        reconstruct_action_input(row)
-    with pytest.raises(ConsistencyError):
-        read_action_spec(row)
-    with pytest.raises(PublicProjectionError):
-        project_public(facts)

@@ -14,7 +14,7 @@ class ActionType(IntEnum):
     CAMERA_TAKE_PHOTO = 1
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def row_contract(monkeypatch):
     monkeypatch.setattr(definitions, "decode_member", lambda column,value:ActionType(value))
     monkeypatch.setattr(definitions, "reconstruct_action_input", lambda row:{"params":{"type":"single_shot"}})
@@ -28,21 +28,25 @@ def _row(**changes):
 
 
 @pytest.mark.parametrize("effective", [{}, {"type":None}, {"type":""}, [], "null", 1])
+@pytest.mark.usefixtures("row_contract")
 def test_reader_rejects_missing_effective_parameter_identity(effective):
     with pytest.raises(ConsistencyError):
         definitions.read_action_spec(_row(effective_params_json=effective))
 
 
 @pytest.mark.parametrize("driver", ["", None, 1, False])
+@pytest.mark.usefixtures("row_contract")
 def test_reader_rejects_missing_driver_identity(driver):
     with pytest.raises(ConsistencyError):
         definitions.read_action_spec(_row(driver_id=driver))
 
 
+@pytest.mark.usefixtures("row_contract")
 def test_reader_decodes_effective_json_without_recomputing_it():
     assert definitions.read_action_spec(_row(effective_params_json='{"type":"single_shot"}')) == {}
 
 
+@pytest.mark.usefixtures("row_contract")
 def test_reader_rejects_changed_effective_parameter_type():
     with pytest.raises(ConsistencyError):
         definitions.read_action_spec(_row(effective_params_json={"type":"other"}))
@@ -81,3 +85,13 @@ def test_photo_acceptance_without_task_factory_preserves_the_legacy_empty_defini
         parameter_definition=SimpleNamespace(task_factory=None),
     )
     assert build_action_spec(validation) == {}
+
+
+@pytest.mark.parametrize("spec", [None, "null", "[]", "{}", '{"target_duration_ms":true}', '{"target_duration_ms":0}', '{"action_type":"camera_record","target_duration_ms":1}'])
+def test_saved_record_definition_cannot_be_recomputed(spec):
+    from .helpers import admitted_action_row
+
+    row = admitted_action_row("camera_record")
+    assert definitions.read_action_spec(row) == {"target_duration_ms": 1234, "video_result_mode": "single_file"}
+    with pytest.raises(ConsistencyError):
+        definitions.read_action_spec({**row, "execution_spec_json": spec})

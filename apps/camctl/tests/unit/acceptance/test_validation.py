@@ -11,8 +11,6 @@ from decimal import Decimal
 import pytest
 
 from camctl.acceptance.rules import (
-    ActionValidation,
-    BodyDecision,
     validate_capture_params,
     validate_new_body,
 )
@@ -183,3 +181,83 @@ def test_explicit_invalid_value_not_replaced(value):
     result = validate_capture_params(raw, ParameterDefinition(CAMERA_DEFINITION, {"shots":1}))
     assert not result.ok
     assert raw["shots"] == value
+
+
+class TestBodyRuleErrors:
+    def test_missing_required_definition_for_supported_action(self) -> None:
+        catalog = StubCatalog()
+        catalog.devices = {"cam-1"}
+        # 目录声明支持但缺少定义属规则错误，不是用户参数错误。
+        class NoDefinition(StubCatalog):
+            def parameter_definition(self, device_id, action_type, parameter_type):
+                raise RuleError("已声明参数定义读取失败")
+
+        with pytest.raises(RuleError):
+            validate_new_body(
+                _body([_camera_action()]), NoDefinition()
+            )
+
+
+class TestBodyDecisions:
+    def test_valid_camera_plan_accepted(self) -> None:
+        decision = validate_new_body(_body([_camera_action("a"), _camera_action("b")]), StubCatalog())
+        assert not decision.is_whole_rejection
+        assert [item.name for item in decision.actions if item.ok] == ["a", "b"]
+
+    def test_duplicate_names_whole_rejection(self) -> None:
+        decision = validate_new_body(
+            _body([_camera_action("dup"), _camera_action("dup")]), StubCatalog()
+        )
+        assert decision.is_whole_rejection
+
+    def test_unknown_action_type_whole_rejection(self) -> None:
+        action = _camera_action()
+        action["type"] = "teleport"
+        decision = validate_new_body(_body([action]), StubCatalog())
+        assert decision.is_whole_rejection
+
+    def test_mixed_errors_stay_whole_rejection(self) -> None:
+        # 未知动作、名称重复与本动作参数错误混合：整份拒绝优先。
+        bad_params = _camera_action("bad")
+        bad_params["params"] = {"type": "single_shot", "shots": 99}
+        decision = validate_new_body(
+            _body([_camera_action("dup"), _camera_action("dup"), bad_params]),
+            StubCatalog(),
+        )
+        assert decision.is_whole_rejection
+
+    def test_order_independence(self) -> None:
+        bad = _camera_action("bad")
+        bad["params"] = {"type": "single_shot", "shots": 99}
+        good = _camera_action("good")
+        first = validate_new_body(_body([bad, good]), StubCatalog())
+        second = validate_new_body(_body([good, bad]), StubCatalog())
+        for decision in (first, second):
+            assert not decision.is_whole_rejection
+            assert {item.name: item.ok for item in decision.actions} == {"good": True, "bad": False}
+
+    def test_unknown_device_is_action_failure(self) -> None:
+        decision = validate_new_body(
+            _body([_camera_action("shoot", device="cam-x")]), StubCatalog()
+        )
+        assert not decision.is_whole_rejection
+        assert [item.name for item in decision.actions if not item.ok] == ["shoot"]
+
+    def test_semantic_date_is_action_failure(self) -> None:
+        action = _camera_action()
+        action["scheduled_at"] = "2026-02-30 09:00:00"
+        decision = validate_new_body(_body([action]), StubCatalog())
+        assert not decision.is_whole_rejection
+        assert not decision.actions[0].ok
+
+    def test_invalid_created_at_is_whole_rejection(self) -> None:
+        body = _body([_camera_action()])
+        body["created_at"] = "2026-13-01 08:00:00"
+        decision = validate_new_body(body, StubCatalog())
+        assert decision.is_whole_rejection
+
+    def test_invalid_public_structure_is_whole_rejection(self) -> None:
+        body = _body([_camera_action()])
+        body["extra_field"] = 1
+        decision = validate_new_body(body, StubCatalog())
+        assert decision.is_whole_rejection

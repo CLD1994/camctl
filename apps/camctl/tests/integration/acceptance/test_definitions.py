@@ -7,7 +7,6 @@ import pytest
 from camctl.acceptance.definitions import read_action_spec
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import AcceptanceStateError, PlanDisposition
-from camctl.contracts.values import ConsistencyError
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 from camctl.persistence.repositories.history import HistoryRepository
 from .test_acceptance import Catalog, CAMERA_DEFINITION, _accept, _plan_body, environment
@@ -183,17 +182,6 @@ async def test_history_and_retry_keep_first_definition_after_default_changes(env
     repository = HistoryRepository(tmp_path / "state.db")
     row = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
     assert read_action_spec(row) == {"target_duration_ms":1234, "video_result_mode":"single_file"}
-
-
-@pytest.mark.parametrize("spec", [None, "null", "[]", "{}", '{"target_duration_ms":true}', '{"target_duration_ms":0}', '{"action_type":"camera_record","target_duration_ms":1}'])
-async def test_saved_record_definition_cannot_be_recomputed(environment, tmp_path, spec):
-    connection, context = environment
-    body = _plan_body()
-    body["actions"][0]["type"] = "camera_record"
-    await _accept((connection, replace(context, catalog=TaskCatalog())), tmp_path, body)
-    row = _action_facts(connection).tables["actions"][1]
-    with pytest.raises(ConsistencyError):
-        read_action_spec({**row, "execution_spec_json":spec})
 
 
 async def test_real_history_replay_and_reopened_database_keep_first_facts(environment, tmp_path):
