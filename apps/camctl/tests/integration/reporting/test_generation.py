@@ -431,9 +431,9 @@ class TestGenerateReportFile:
         await _submit(owned, tmp_path, "1")
         await _finish_action(owned)
         report = _freeze(owned)
+        spec = _spec(tmp_path, report, report_id=report.report_id + 5)
 
         with pytest.raises(ConsistencyError):
-            generate_report_file(
-                _spec(tmp_path, report, report_id=report.report_id + 5))
+            generate_report_file(spec)
 
-        assert not (tmp_path / "staging" / "report-6.json").exists()
+        assert not spec.staging_path.exists()

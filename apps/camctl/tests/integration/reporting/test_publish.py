@@ -107,17 +107,6 @@ class TestPublishFlow:
         )
         assert changed.kind.value == "rolled_back"
 
-    def test_changed_bytes_for_same_report_rejected(self, connection, tmp_path: Path) -> None:
-        report_id = _freeze_report(tmp_path, connection)
-        record_report_bytes(
-            new_operation_key(), _owned(connection), report_id, _bytes(b"first\n")
-        )
-        outcome = record_report_bytes(
-            new_operation_key(), _owned(connection), report_id, _bytes(b"different\n")
-        )
-        assert outcome.kind.value == "rolled_back"
-
-
 def _owned(connection):
     from camctl.persistence.runtime import OwnedConnection
 

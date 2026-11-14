@@ -11,10 +11,10 @@ import pytest
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.reporting import policy
-from camctl.reporting.models import ReportBytes
-from camctl.reporting.policy import ReportingRepository, ReportDecisionKind, record_report_bytes
+from camctl.reporting.models import ReportBytes, SyncMode
+from camctl.reporting.policy import ReportingRepository, ReportDecisionKind, record_report_bytes, start_sync
 
-from .test_freeze import environment, _submit, _ack, _sync
+from .test_freeze import environment, _submit, _ack
 from ..support.reporting import deny_storage_access
 
 pytestmark = pytest.mark.asyncio
@@ -45,9 +45,22 @@ async def test_original_freeze_key_returns_original_generate_response(environmen
     elif later == "ack":
         _ack(environment, first.value.report)
     elif later == "sync_end":
-        # 有效同步投影由既有夹具提供；实际开始生产者另有门禁。
-        _sync(environment.connection, 1)
-        _ack(environment, first.value.report)
+        started = start_sync(new_operation_key(), environment, action_id=1,
+                             mode=SyncMode.FULL, occurred_at=2)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        assert started.value.sync_id is not None
+        newer = _freeze(environment, new_operation_key(), occurred_at=3)
+        assert newer.kind is DbOutcomeKind.COMPLETED, newer.error
+        assert newer.value.kind is ReportDecisionKind.GENERATE
+        _ack(environment, newer.value.report)
+        with closing(environment.connection.execute(
+            "SELECT status, ack_report_id, ended_event_id FROM state_syncs WHERE id = ?",
+            (started.value.sync_id,),
+        )) as cursor:
+            status, ack_report_id, ended_event_id = cursor.fetchone()
+        assert status == 2
+        assert ack_report_id == newer.value.report.report_id
+        assert ended_event_id is not None
     elif later == "bytes":
         prepared = record_report_bytes(new_operation_key(), environment, first.value.report.report_id,
                                       ReportBytes(5, "a" * 64), occurred_at=2)
