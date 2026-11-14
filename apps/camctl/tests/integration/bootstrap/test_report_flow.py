@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ def _config_for(home: Path):
         {
             "paths": {
                 "state_db": str(home / "state.db"),
+                "log_file": str(home / "camctl.log"),
                 "staging": str(home / "staging"),
                 "ready": str(home / "ready"),
                 "processing": str(home / "processing"),
@@ -112,6 +114,88 @@ def environment(tmp_path):
 
 
 class TestReportFlowClosure:
+    async def test_sync_accepted_after_scan_before_freeze_is_started(
+        self, environment, monkeypatch,
+    ) -> None:
+        deps, cfg, tmp_path = environment
+        db_path = Path(cfg.paths.state_db)
+        loop = asyncio.get_running_loop()
+        entered, release = asyncio.Event(), threading.Event()
+        original = ReportingRepository.freeze_report
+        blocked = False
+
+        def hold_before_freeze(repository, key, owned, **kwargs):
+            nonlocal blocked
+            if not blocked:
+                blocked = True
+                assert not owned.connection.in_transaction
+                loop.call_soon_threadsafe(entered.set)
+                assert release.wait(20), "测试未释放报告冻结"
+            return original(repository, key, owned, **kwargs)
+
+        monkeypatch.setattr(ReportingRepository, "freeze_report", hold_before_freeze)
+        running = asyncio.create_task(execute_command(deps, None))
+        try:
+            await asyncio.wait_for(entered.wait(), 15)
+            owned = open_existing(db_path, DbOpenMode.EXISTING_RW, DbConfig())
+            try:
+                await asyncio.wait_for(_accept(owned, tmp_path, "1"), 10)
+            finally:
+                owned.connection.close()
+            release.set()
+            outcome = await asyncio.wait_for(asyncio.shield(running), 15)
+            assert outcome.succeeded, outcome.details
+            assert _scalar(db_path, "SELECT status FROM actions WHERE id=1") == (3,)
+            assert _scalar(db_path, "SELECT local_report_id FROM state_syncs WHERE action_id=1")[0] is not None
+            ready, = (tmp_path / "ready").glob("status-report-*.json")
+            report = json.loads(ready.read_text(encoding="utf-8"))
+            assert report["plans"][0]["actions"][0]["status"] == "succeeded"
+        finally:
+            release.set()
+            if not running.done():
+                running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+
+    async def test_new_diagnostic_after_frozen_report_is_also_published(
+        self, environment,
+    ) -> None:
+        from camctl.acceptance.service import AcceptanceContext, accept_input
+        from camctl.persistence.repositories.acceptance import AcceptanceRepository
+        from ..support.database import business_database
+
+        deps, cfg, tmp_path = environment
+        db_path = Path(cfg.paths.state_db)
+        context = AcceptanceContext(mode=CommandMode.RUN, catalog=Catalog(),
+            repository=AcceptanceRepository(),
+            clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})())
+        async with business_database(db_path) as database:
+            for index in (1, 2):
+                path = tmp_path / f"broken-{index}.json"
+                path.write_text('{', encoding="utf-8")
+                source = parse_input(await read_input(str(path),
+                    type("Reader", (), {"read": staticmethod(lambda p: Path(p).read_bytes())})()))
+                await accept_input(source, context, new_operation_key(), database)
+                if index == 1:
+                    key = new_operation_key()
+                    outcome = await database.write(
+                        lambda owned: ReportingRepository().freeze_report(key, owned, occurred_at=1), key=key)
+                    assert outcome.kind.value == "completed"
+                    old_report = outcome.value.report
+                    assert old_report is not None
+            latest = await database.read(lambda owned: owned.connection.execute(
+                "SELECT MAX(change_seq) FROM history_events").fetchone()[0])
+            assert latest > old_report.to_wm
+        outcome = await asyncio.wait_for(execute_command(deps, None), 30)
+        assert outcome.succeeded, outcome.details
+        reports = _all(db_path, "SELECT id,to_wm,status FROM reports ORDER BY id")
+        assert any(identity == old_report.report_id and status == 4 for identity, _, status in reports)
+        assert any(identity != old_report.report_id and wm >= latest and status == 4
+                   for identity, wm, status in reports)
+        ready, = (tmp_path / "ready").glob("status-report-*.json")
+        report = json.loads(ready.read_text(encoding="utf-8"))
+        assert report["to_wm"] >= latest
+        assert len(report["plan_file_diagnostics"]) == 2
+
     async def test_run_completes_report_chain_and_exits(
         self, environment,
     ) -> None:

@@ -1109,6 +1109,7 @@ class _ReportMaintenanceFlow:
 class _ReportMaintenanceProgress:
     started: bool = False
     checked_to_wm: int = 0
+    scanned_to_wm: int = 0
     next_due_at: int | None = None
     remaining_reports: tuple[int, ...] = ()
 
@@ -1376,18 +1377,23 @@ def report_flow(
 
     progress = _ReportMaintenanceProgress()
 
-    async def should_advance(context: Any) -> bool:
-        observer = getattr(context, "report_change_wm", None)
-        if not start_actions or observer is None:
-            return True
+    async def read_change_wm(observer) -> int:
         try:
             latest = await observer()
             from camctl.reporting.ack import validate_watermark
             validate_watermark(latest, "latest_change_wm")
         except (sqlite3.Error, ConsistencyError, DbEnqueueTimeoutError, DbExecutorError) as error:
             raise StateDbFailure(f"报告维护无法可靠观察业务水位: {error}") from error
+        return latest
+
+    async def should_advance(context: Any) -> bool:
+        observer = getattr(context, "report_change_wm", None)
+        if not start_actions or observer is None:
+            return True
+        latest = await read_change_wm(observer)
         return (not progress.started or bool(progress.remaining_reports)
                 or latest > progress.checked_to_wm
+                or latest > progress.scanned_to_wm
                 or (progress.next_due_at is not None
                     and context.clock.utc_micros() >= progress.next_due_at))
 
@@ -1399,16 +1405,19 @@ def report_flow(
         progress.started = True
         business = context.database
         try:
+            observer = getattr(context, "report_change_wm", None)
+            scan_wm = await read_change_wm(observer) if start_actions and observer is not None else None
             now_us = context.clock.utc_micros()
             await _settle_canceled_sync_actions(business, now_us)
             if start_actions:
                 await _start_due_report_actions(business, now_us)
             await _settle_covered_local_syncs(business, now_us)
-            if start_actions and getattr(context, "report_change_wm", None) is not None:
+            if scan_wm is not None:
                 rows = await _query_rows(business,
                     "SELECT MIN(COALESCE(scheduled_at, ?)) FROM actions"
                     " WHERE status = 1 AND cancel_requested = 0 AND type = 7", (now_us,))
                 progress.next_due_at = rows[0][0]
+                progress.scanned_to_wm = max(progress.scanned_to_wm, scan_wm)
             in_flight = await business.read(_in_flight_report_ids)
             pending = tuple(dict.fromkeys((*in_flight, *progress.remaining_reports)))
             if not pending:
