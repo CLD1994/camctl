@@ -806,6 +806,218 @@ async def test_photo_original_requests_reject_released_copies_without_registered
 
 
 
+@pytest.mark.parametrize("timing", ["after", "waiting", "missing_cache", "failed_cache", "redownload", "read_end"])
+async def test_deferred_photo_obtain_downloads_each_role_and_records_delivery_bytes(tmp_path, monkeypatch, timing):
+    from camctl.bootstrap.availability_assembly import AvailabilitySession
+    from camctl.bootstrap.obtain_assembly import obtain_flow
+    from camctl.operations.recovery import RecoveryBoundary
+    from camctl.devices.catalog import DriverDefinitions, build_catalog
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID, driver_definition
+    from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
+    from camctl.devices.drivers.registry import DriverRegistry
+    from camctl.host_files.models import BoundDirectories
+    from camctl.operations.process import LocalExit, RawToolOutcome
+    from ..support.outputs import obtain_factory
+    from .test_host_photo_flow import _input_time
+
+    cfg, owned, capture_driver, runtime, _ = await _world(tmp_path, storage="device")
+    payloads = {"original": b"B" * 180 if timing == "redownload" else _ORIGINAL,
+                "thumbnail": _PREVIEW + b"-camera-new-preview"}
+    first_original = b"A" * 140
+    downloads_by_role = {"original": 0, "thumbnail": 0}
+    calls = []
+    monotonic = [0]
+
+    class DownloadTransport:
+        async def run(self, spec, _stop):
+            command = spec.argv[3]
+            calls.append(tuple(spec.argv[3:]))
+            if command == "list":
+                output = b"vid=0x2756 pid=0x000a  bus=  1 addr= 23\n"
+            elif command == "info":
+                output = b"serial : SERIAL-1\n"
+            elif command == "download":
+                role, camera_name = spec.argv[4:6]
+                assert camera_name == "B9996039.3FR"
+                assert spec.argv[6] == "--output"
+                downloads_by_role[role] += 1
+                content = (first_original if timing == "redownload" and role == "original"
+                           and downloads_by_role[role] == 1 else payloads[role])
+                (Path(spec.argv[7]) / "downloaded.bin").write_bytes(content)
+                output = b"downloaded\n"
+            else:
+                raise AssertionError(spec.argv)
+            return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
+
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
+    try:
+        if timing in ("after", "redownload", "read_end"):
+            await capture_handler("camera_take_photo")(1, runtime)
+        catalog = build_catalog(cfg, DriverDefinitions({DRIVER_ID: driver_definition()}))
+        for request_id, role in (("2", "original"), ("3", "preview")):
+            params = {"source": {"action_instance_id": "1"}, "purpose": "manual"}
+            if role == "preview":
+                params["filter"] = "preview"
+            accepted = await submit_output_document(await capture_database(owned), catalog=catalog,
+                body={"request_id": request_id, "created_at": _input_time(), "name": role,
+                    "actions": [{"name": role, "type": "obtain_action_outputs",
+                                 "scheduled_at": _input_time(), "params": params}]}, occurred_at=_NOW)
+            assert accepted.plan_id is not None, accepted
+        download_driver = HasselbladDriver(cfg.devices, BoundDirectories(Path(cfg.paths.staging)),
+            monotonic_ns=lambda: 0, transport=DownloadTransport())
+        registry = DriverRegistry((_entry(download_driver),))
+        availability = AvailabilitySession(cfg.devices, registry,
+            monotonic_ns=lambda: monotonic[0], occurred_at=lambda: _NOW,
+            recovery_boundary=RecoveryBoundary.UNCONFIRMED, recovery_max_event_id=lambda: None)
+        factory = obtain_factory(devices=cfg.devices, drivers=registry,
+            staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
+            occurred_at=lambda: _NOW, monotonic_ns=lambda: monotonic[0], segment_size=64, file_executor=executor,
+            availability=availability)
+        flow = obtain_flow(factory)
+        context = SimpleNamespace(database=await capture_database(owned), wake=None)
+        cache_errors = []
+        if timing not in ("after", "redownload", "read_end"):
+            await flow(context)
+            assert owned.connection.execute("SELECT status FROM actions WHERE type=4 ORDER BY id").fetchall() == [(2,), (2,)]
+            assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
+            assert not calls
+            await capture_handler("camera_take_photo")(1, runtime)
+            if timing == "missing_cache":
+                original, = owned.connection.execute(
+                    "SELECT relative_path FROM intermediate_files WHERE owner_action_id=1 ORDER BY id LIMIT 1").fetchone()
+                (Path(cfg.paths.staging) / original).unlink()
+            elif timing == "failed_cache":
+                import os
+                original_read = os.read
+                cache_path = Path(cfg.paths.staging) / "capture-originals/1.3fr"
+
+                def read_with_error(fd, size):
+                    try:
+                        path = Path(os.readlink(f"/proc/self/fd/{fd}"))
+                    except OSError:
+                        path = None
+                    if path == cache_path and not cache_errors:
+                        cache_errors.append(path)
+                        raise OSError("测试原图同步副本读取错误")
+                    return original_read(fd, size)
+
+                monkeypatch.setattr(os, "read", read_with_error)
+        read_errors = []
+        if timing == "redownload":
+            import os
+            original_read = os.read
+            first_reads = []
+
+            def fail_after_first_segment(fd, size):
+                try:
+                    path = os.readlink(f"/proc/self/fd/{fd}")
+                except OSError:
+                    path = ""
+                if path.endswith("/downloaded.bin") and downloads_by_role["original"] == 1 and not read_errors:
+                    if first_reads:
+                        read_errors.append(path)
+                        raise OSError("测试首轮相机读取中断")
+                    first_reads.append(path)
+                return original_read(fd, size)
+
+            monkeypatch.setattr(os, "read", fail_after_first_segment)
+        assert len(capture_driver.requests) == 1
+        assert owned.connection.execute("SELECT size_bytes,sha256 FROM device_files ORDER BY id").fetchall() == [(None, None)] * 2
+        fallback = None
+        initial_progress = None
+        verification_saves = []
+        reliable_end = None
+        if timing == "read_end":
+            from camctl.persistence.models import DbOutcome, DbOutcomeKind
+            from camctl.persistence.repositories.outputs import OutputsRepository
+            original_verify = OutputsRepository.save_verification
+
+            def fail_verification(repository, request, key, current):
+                if request.copy_id == 1:
+                    verification_saves.append((request, key))
+                    if len(verification_saves) == 1:
+                        return DbOutcome(DbOutcomeKind.NOT_EXECUTED, error=OSError("校验保存回执失败"))
+                return original_verify(repository, request, key, current)
+
+            monkeypatch.setattr(OutputsRepository, "save_verification", fail_verification)
+        for _ in range(10):
+            try:
+                await flow(context)
+            except Exception as error:
+                if timing != "read_end" or reliable_end is not None:
+                    raise
+                from camctl.contracts.values import ConsistencyError
+                assert isinstance(error, ConsistencyError)
+                row = owned.connection.execute(
+                    "SELECT read_end_event_id,source_size,committed_bytes FROM file_copies WHERE id=1").fetchone()
+                assert row is not None and row[0] is not None and row[1:] == (len(payloads["original"]),) * 2
+                event, = owned.connection.execute("SELECT body_json FROM history_events WHERE id=?", (row[0],)).fetchone()
+                reliable_end = json.loads(event)["evidence"]["read_end"]
+                assert reliable_end["end"] == {"stopped": True, "bytes_read": len(payloads["original"]), "error": None}
+                assert [call[0] for call in calls].count("download") == 1
+            if timing in ("missing_cache", "failed_cache", "redownload"):
+                if timing == "redownload" and initial_progress is None:
+                    initial_progress = owned.connection.execute(
+                        "SELECT c.id,c.source_size,c.committed_bytes,r.attempts_used,r.retry_wait_required "
+                        "FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3 "
+                        "JOIN deliveries d ON d.id=c.delivery_id WHERE d.action_id=2 "
+                        "AND r.attempts_used=1 AND r.retry_wait_required=1").fetchone()
+                if fallback is None:
+                    fallback = owned.connection.execute(
+                        "SELECT d.id,c.id,r.max_attempts_used FROM deliveries d "
+                        "JOIN file_copies c ON c.delivery_id=d.id "
+                        "JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3 "
+                        "WHERE d.action_id=2 AND c.source_device_file_id IS NOT NULL "
+                        "AND r.attempts_used=1 AND r.retry_wait_required=1").fetchone()
+                monotonic[0] += 4_000_000_000
+            if owned.connection.execute("SELECT COUNT(*) FROM deliveries WHERE status=5").fetchone() == (2,):
+                break
+        rows = owned.connection.execute(
+            "SELECT d.id,d.file_name,d.status,c.source_size,c.target_sha256,o.kind "
+            "FROM deliveries d JOIN file_copies c ON c.delivery_id=d.id "
+            "JOIN outputs o ON o.id=d.output_id ORDER BY o.kind").fetchall()
+        assert len(rows) == 2 and len({row[0] for row in rows}) == 2
+        for row, role in zip(rows, ("original", "thumbnail"), strict=True):
+            identity, name, status, size, digest, _kind = row
+            content = (payloads[role] if timing in ("after", "redownload", "read_end") or (timing in ("missing_cache", "failed_cache") and role == "original")
+                       else (_ORIGINAL if role == "original" else _PREVIEW))
+            assert status == 5 and size == len(content)
+            assert digest == hashlib.sha256(content).hexdigest()
+            assert (Path(cfg.paths.ready) / name).read_bytes() == content
+        starts = [json.loads(row[0])["evidence"]["photo_read_start"] for row in owned.connection.execute(
+            "SELECT body_json FROM history_events WHERE json_extract(body_json,'$.evidence.photo_read_start') IS NOT NULL ORDER BY id")]
+        if timing in ("missing_cache", "failed_cache", "redownload"):
+            assert fallback is not None
+            if timing == "redownload":
+                assert len(read_errors) == 1
+                assert initial_progress is not None and initial_progress[1:] == (len(first_original), 64, 1, 1)
+            if timing == "failed_cache":
+                assert len(cache_errors) == 1
+            assert owned.connection.execute(
+                "SELECT d.id,c.id,r.max_attempts_used,r.attempts_used FROM deliveries d "
+                "JOIN file_copies c ON c.delivery_id=d.id JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3 "
+                "WHERE d.action_id=2").fetchone() == (*fallback, 2)
+        if timing == "read_end":
+            assert reliable_end is not None and len(verification_saves) >= 2
+            assert all(saved == verification_saves[0] for saved in verification_saves)
+        downloads = [call[1:3] for call in calls if call[0] == "download"]
+        expected_downloads = (["original", "original", "thumbnail"] if timing == "redownload" else
+                              ["original", "thumbnail"] if timing in ("after", "read_end") else
+                              ["original"] if timing in ("missing_cache", "failed_cache") else [])
+        assert downloads == [(role, "B9996039.3FR") for role in expected_downloads]
+        expected_sizes = ([len(first_original), len(payloads["original"]), len(payloads["thumbnail"])]
+                          if timing == "redownload" else [len(payloads[role]) for role in expected_downloads])
+        assert [item["size_bytes"] for item in starts] == expected_sizes
+        assert owned.connection.execute("SELECT size_bytes,sha256 FROM device_files ORDER BY id").fetchall() == [(None, None)] * 2
+        assert len(capture_driver.requests) == 1
+    finally:
+        settled = await supervisor.drain_required()
+        assert not settled.failed
+        assert not executor.unfinished_files()
+        owned.connection.close()
+
+
 @pytest.mark.parametrize("missing", ["preview", "pair"])
 async def test_device_transaction_rejects_forged_partial_pair(tmp_path, monkeypatch, missing):
     from contextlib import closing
