@@ -245,7 +245,8 @@ async def test_original_withdrawal_result_is_saved_after_failure(environment, mo
     from camctl.persistence.repositories.outputs import OutputsRepository
     from camctl.session.supervision import Supervisor
     from .test_binding_transactions import _CommitFailure
-    from ..operations.test_result_reuse import _FaultConnection
+    import sqlite3
+    from ..support.outputs import SqliteOperationFault
     from ..support.bootstrap_cleanup_cases import apply_direct_cancel
     from ..support.database import business_database, database_path
 
@@ -284,9 +285,12 @@ async def test_original_withdrawal_result_is_saved_after_failure(environment, mo
             inputs.append((command, key))
             if first:
                 first = False
-                faulty = (_FaultConnection(operation_owned.connection, "UPDATE cancel_delivery_items")
+                faulty = (SqliteOperationFault(operation_owned.connection, sqlite3.SQLITE_UPDATE, "cancel_delivery_items")
                           if phase == "projection" else _CommitFailure(operation_owned.connection, phase == "commit_after"))
-                return original_save(repository, command, key, replace(operation_owned, connection=faulty))
+                result = original_save(repository, command, key, replace(operation_owned, connection=faulty))
+                if phase == "projection":
+                    assert faulty.triggered
+                return result
         return original_save(repository, command, key, operation_owned)
 
     monkeypatch.setattr(os, "remove", remove)

@@ -22,6 +22,7 @@ from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.policy import ReportingRepository
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
+from ..support.capture_media_cases import MediaCase, ScriptTools, media_cases  # noqa: F401
 
 def _boundary_of(owned):
     from camctl.persistence.repositories.history import HistoryRepository
@@ -59,23 +60,30 @@ def _events_of(connection, entity_type: int, entity_id: int):
 
 
 async def test_replay_and_fixed_report_do_not_recheck_binding_or_read_sources(
-        pipeline, monkeypatch):
+        pipeline, monkeypatch, media_cases):
     """读取责任回放与固定报告不重查设备绑定或执行读取。"""
     owned, roots, source_id = pipeline
     # 前提：经真实媒体链完成一次完整读取，建立读取责任的持久化事实。
-    from ..capture.test_media_flow import ProbeTools, ReadDriverDouble, _flow
-    from camctl.host_files.media import MediaProbe
-
-    from ..capture.test_input_copy import _CONTENT
-    driver = ReadDriverDouble(_CONTENT)
-    tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
-    flow = await _flow(pipeline, driver, tools)
+    from camctl.host_files.media import MediaProbe, MediaStream
     from camctl.capture.media_flow import run_recording_media
-    await run_recording_media(flow, 1, 1, source_id)
-    second_driver = ReadDriverDouble(_CONTENT)
-    await run_recording_media(
-        await _flow(pipeline, second_driver, tools), 1, 1, source_id)
-    opens_before = (tuple(driver.opens), tuple(second_driver.opens))
+
+    tools = ScriptTools(MediaProbe(Decimal("61"), None, (
+        MediaStream(0, "video", "h264", 64, 64, Decimal("61"), False),)))
+    case = await MediaCase(owned, roots, source_id, tools).start()
+    tickets = []
+    original_open = case.driver.open_read
+
+    async def observed_open(source, offset, ticket, *, idle_timeout_s):
+        tickets.append((ticket, offset))
+        return await original_open(source, offset, ticket, idle_timeout_s=idle_timeout_s)
+
+    case.driver.open_read = observed_open
+    await run_recording_media(case.runtime.media, 1, 1, source_id)
+    second = await MediaCase(owned, roots, source_id, tools).start()
+    await run_recording_media(second.runtime.media, 1, 1, source_id)
+    calls_before = (tuple(case.driver.calls), tuple(second.driver.calls), tuple(tools.calls))
+    assert [call[0] for call in case.driver.calls].count("read") == 1
+    assert not [call for call in second.driver.calls if call[0] == "read"]
     read_run, = owned.connection.execute(
         "SELECT id FROM operation_runs WHERE kind=3").fetchone()
     copy_id, = owned.connection.execute(
@@ -84,6 +92,13 @@ async def test_replay_and_fixed_report_do_not_recheck_binding_or_read_sources(
         "SELECT attempts_used, max_attempts_used FROM operation_runs WHERE id=?",
         (read_run,)).fetchone()
     assert used_before[0] == 1
+    attempts_before = owned.connection.execute(
+        "SELECT id,attempt_no,status,result_json FROM operation_attempts WHERE run_id=?",
+        (read_run,)).fetchall()
+    assert len(attempts_before) == 1 and attempts_before[0][1:3] == (1, 2)
+    assert len(tickets) == 1 and tickets[0][1] == 0
+    assert (tickets[0][0].run_id, tickets[0][0].attempt_id, tickets[0][0].target_id) == (
+        read_run, attempts_before[0][1], str(copy_id))
 
     # 固定 H 报告：冻结、生成并保存字节；staging 文件集为副作用基线。
     frozen = ReportingRepository().freeze_report(
@@ -158,5 +173,11 @@ async def test_replay_and_fixed_report_do_not_recheck_binding_or_read_sources(
 
     # 回放与报告未调用设备绑定或重新打开源，也没有重复媒体检查。
     assert not binding_checks
-    assert (tuple(driver.opens), tuple(second_driver.opens)) == opens_before
+    assert owned.connection.execute(
+        "SELECT id,attempt_no,status,result_json FROM operation_attempts WHERE run_id=?",
+        (read_run,)).fetchall() == attempts_before
+    assert owned.connection.execute(
+        "SELECT attempts_used,max_attempts_used FROM operation_runs WHERE id=?",
+        (read_run,)).fetchone() == used_before
+    assert (tuple(case.driver.calls), tuple(second.driver.calls), tuple(tools.calls)) == calls_before
     assert tools.calls == ["probe"]

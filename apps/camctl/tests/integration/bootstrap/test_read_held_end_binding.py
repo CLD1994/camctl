@@ -9,7 +9,7 @@ import pytest
 from camctl.bootstrap.capture_assembly import session_capture_assembly
 from camctl.bootstrap.obtain_assembly import session_obtain_assembly
 from camctl.capture.handlers import capture_handler
-from camctl.capture.media_flow import RecordingInputCopies, run_recording_media
+from camctl.capture.media_flow import run_recording_media
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.values import ConsistencyError
@@ -17,47 +17,38 @@ from camctl.contracts.enums import enum_for
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DriverDeclaration
-from camctl.outputs.copy import CopyCompletionError
 from camctl.outputs.obtain_flow import advance_obtain
 
 from ..capture.test_capture_contract import ResultsDouble
 from .test_media_assembly import _SessionDriver, _EVIDENCE
 from .test_output_binding_changes import _CONTENT, _NOW, _read_registry as _registry, environment
 from .test_output_binding_transactions import pending_read
-from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow
+from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow, _target_read_open
 
 pytestmark = pytest.mark.asyncio
 
 
-def _fail_local_completion_once(monkeypatch, *, source_checksum_supported=False):
-    complete = RecordingInputCopies.complete
+def _fail_local_completion_once(monkeypatch, reader, staging, *, source_checksum_supported=False):
+    if not source_checksum_supported:
+        return _target_read_open(monkeypatch, reader, staging)
     completed = []
-
-    async def first_unavailable(copies, copy_id, digest):
-        completed.append(copy_id)
-        if len(completed) == 1 and not source_checksum_supported:
-            raise CopyCompletionError('target_sha256', '本地摘要读取暂不可用')
-        return await complete(copies, copy_id, digest)
-
-    monkeypatch.setattr(RecordingInputCopies, 'complete', first_unavailable)
     if source_checksum_supported:
         from camctl.persistence.repositories.outputs import OutputsRepository
         from camctl.persistence.models import DbOutcomeKind
-        from ..cancellation.test_report_sync_lifecycle import _fault_owned
         original = OutputsRepository.save_prepared
-        prepared = []
 
         def fail_after_source_saved(repository, request, key, owned):
-            prepared.append(request)
-            if len(prepared) == 1:
+            if not completed:
                 owned.connection.execute("CREATE TEMP TRIGGER fail_prepared_file BEFORE UPDATE ON intermediate_files BEGIN SELECT RAISE(ABORT, 'prepared file save fault'); END")
                 try:
                     result = original(repository, request, key, owned)
                 finally:
                     owned.connection.execute("DROP TRIGGER fail_prepared_file")
                 assert result.kind is DbOutcomeKind.ROLLED_BACK
-                return result
-            return original(repository, request, key, owned)
+            else:
+                result = original(repository, request, key, owned)
+            completed.append((request, key, result.kind))
+            return result
 
         monkeypatch.setattr(OutputsRepository, 'save_prepared', fail_after_source_saved)
     return completed
@@ -86,7 +77,18 @@ def _held_original(owned, runtime, reader, *, source_checksum_supported=False):
 
 def _actual_result_saved(owned, reader, ticket, progress, completions):
     import json
-    assert len(completions) == 2
+    if isinstance(completions[0], Path):
+        assert len(completions) == 2 and completions[0] == completions[1]
+    else:
+        from camctl.persistence.models import DbOutcomeKind
+        first = completions[0][0]
+        assert completions[0][2] is DbOutcomeKind.ROLLED_BACK
+        assert any(request == first and key == completions[0][1] and kind is DbOutcomeKind.COMPLETED
+                   for request, key, kind in completions[1:])
+        assert all((request.copy_id, request.target_sha256, request.size_bytes) ==
+                   (first.copy_id, first.target_sha256, first.size_bytes)
+                   for request, _, _ in completions)
+        assert first.copy_id == int(ticket.target_id)
     row = owned.connection.execute('SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?',
         (ticket.run_id, ticket.attempt_id)).fetchone()
     assert row[0] == 2 and row[1] is None
@@ -116,7 +118,7 @@ async def test_obtain_held_actual_end_binding_loss_checks_locally_without_unknow
         segment_size=4, occurred_at=lambda: _NOW, monotonic_ns=lambda: 0,
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, recovery_max_event_id=lambda: horizon[0])
     runtime = factory(environment[2].database)
-    completions = _fail_local_completion_once(monkeypatch)
+    completions = _fail_local_completion_once(monkeypatch, reader, cfg.paths.staging)
     with pytest.raises(ConsistencyError):
         await advance_obtain(runtime)
     ticket, progress = _held_original(owned, runtime, reader)
@@ -160,7 +162,7 @@ async def test_internal_held_actual_end_binding_loss_checks_locally_without_unkn
         repair_request=recording.runtime_options["repair_request"])
     try:
         runtime = await factory(recording.database, 'cam-1')
-        completions = _fail_local_completion_once(monkeypatch, source_checksum_supported=source_checksum_supported)
+        completions = _fail_local_completion_once(monkeypatch, reader, recording.roots.staging, source_checksum_supported=source_checksum_supported)
         with pytest.raises(ConsistencyError):
             await run_recording_media(runtime.media, 1, 1, source_id)
         ticket, progress = _held_original(recording.owned, runtime, reader, source_checksum_supported=source_checksum_supported)

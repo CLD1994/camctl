@@ -2,10 +2,12 @@
 
 import asyncio
 import sys
+from pathlib import Path
+import threading
 
 import pytest
 
-from camctl.capture.media_flow import RecordingInputCopies, run_recording_media
+from camctl.capture.media_flow import run_recording_media
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.obtain_flow import advance_obtain
@@ -16,7 +18,7 @@ from ..cancellation.test_report_sync_lifecycle import _fault_owned
 from .test_output_binding_changes import _CONTENT, _NOW, environment
 from .test_output_binding_transactions import pending_read
 from .test_read_execution_runtime import (
-    ReadRequests, _MEDIA_CONTENT, _apply_read_business_cancel, _real_recording_media_flow,
+    ReadRequests, _MEDIA_CONTENT, _apply_read_business_cancel, _real_recording_media_flow, _target_read_open,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -24,15 +26,16 @@ pytestmark = pytest.mark.asyncio
 
 async def _assert_complete_finish_time(owned, runtime, reader, target, advance, monkeypatch, clock):
     raw_time, cancel_time, finish_time, retry_time = (_NOW + value for value in (10, 20, 30, 40))
-    completion_entered, allowed = asyncio.Event(), asyncio.Event()
-    complete = RecordingInputCopies.complete
+    completion_entered, allowed = asyncio.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
 
-    async def after_actual_end(copies, copy_id, digest):
-        completion_entered.set()
-        await allowed.wait()
-        return await complete(copies, copy_id, digest)
+    def pause_open():
+        loop.call_soon_threadsafe(completion_entered.set)
+        if not allowed.wait(timeout=10):
+            raise TimeoutError("等待取消完成后继续读取工作副本")
 
-    monkeypatch.setattr(RecordingInputCopies, "complete", after_actual_end)
+    staging = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2]).parent / "staging"
+    opens = _target_read_open(monkeypatch, reader, staging, gate=pause_open)
     saves = []
     original = OperationRepository.finish_attempt
 
@@ -82,7 +85,7 @@ async def _assert_complete_finish_time(owned, runtime, reader, target, advance, 
         assert owned.connection.execute(
             "SELECT status,attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (
                 int(enum_for("operation_runs.status").CANCELED), ticket.attempt_id)
-        assert len(reader.requests) == 1
+        assert len(reader.requests) == 1 and len(opens) == 1
     finally:
         allowed.set()
         primary = sys.exception()

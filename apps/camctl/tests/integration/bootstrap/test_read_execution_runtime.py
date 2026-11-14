@@ -72,6 +72,36 @@ class ReadRequests:
             "file_id": request.params["file_id"], "sha256": self.digest_value}),), None)
 
 
+def _target_read_open(monkeypatch, reader, staging, *, gate=None):
+    """只观察原票据指向的工作副本的只读打开。"""
+    from contextlib import closing
+    import os
+    import sqlite3
+
+    original = os.open
+    database_path = reader.owned.connection.execute("PRAGMA database_list").fetchone()[2]
+    calls = []
+
+    def open_file(path, flags, *args, **kwargs):
+        if (isinstance(path, (str, Path)) and flags & os.O_ACCMODE == os.O_RDONLY
+                and reader.requests):
+            ticket = reader.requests[0][0]
+            with closing(sqlite3.connect(database_path)) as connection:
+                row = connection.execute(
+                    "SELECT f.relative_path FROM file_copies c JOIN intermediate_files f"
+                    " ON f.id=c.target_file_id WHERE c.id=?", (int(ticket.target_id),)).fetchone()
+            if row is not None and Path(path) == Path(staging) / row[0]:
+                calls.append(Path(path))
+                if len(calls) == 1:
+                    if gate is None:
+                        raise OSError("工作副本摘要暂不可读")
+                    gate()
+        return original(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_file)
+    return calls
+
+
 class _FailureStream(_MemoryStream):
     def __init__(self):
         super().__init__(b"")
@@ -1107,20 +1137,10 @@ async def test_internal_verify_resumes_from_saved_original_end(pipeline, monkeyp
 
 
 async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new_runtime, advance, monkeypatch):
-    from camctl.capture.media_flow import RecordingInputCopies
     from camctl.contracts.values import ConsistencyError
-    from camctl.outputs.copy import CopyCompletionError
 
-    complete = RecordingInputCopies.complete
-    calls = []
-
-    async def fail_first_completion(copies, copy_id, digest):
-        calls.append(copy_id)
-        if len(calls) == 1:
-            raise CopyCompletionError("target_sha256", "本地完整性校验暂不可用")
-        return await complete(copies, copy_id, digest)
-
-    monkeypatch.setattr(RecordingInputCopies, "complete", fail_first_completion)
+    staging = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2]).parent / "staging"
+    calls = _target_read_open(monkeypatch, driver, staging)
     with pytest.raises(ConsistencyError):
         await first_advance()
     assert len(driver.requests) == 1
@@ -1150,6 +1170,7 @@ async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new
     assert owned.connection.execute(
         "SELECT read_end_event_id FROM file_copies WHERE id=?", (copy_id,)).fetchone() == (end_event,)
     assert len(driver.requests) == 1
+    assert len(calls) == 2
 
 
 async def test_obtain_complete_actual_read_precedes_later_business_cancel(pending_read):

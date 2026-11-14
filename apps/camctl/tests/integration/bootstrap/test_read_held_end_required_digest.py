@@ -10,7 +10,7 @@ import pytest
 from camctl.bootstrap.capture_assembly import session_capture_assembly
 from camctl.bootstrap.obtain_assembly import session_obtain_assembly
 from camctl.capture.handlers import capture_handler
-from camctl.capture.media_flow import RecordingInputCopies, run_recording_media
+from camctl.capture.media_flow import run_recording_media
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.enums import enum_for
@@ -18,7 +18,6 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DriverDeclaration
-from camctl.outputs.copy import CopyCompletionError
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
@@ -28,7 +27,7 @@ from ..cancellation.test_report_sync_lifecycle import _fault_owned
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from .test_media_assembly import _EVIDENCE, _SessionDriver
 from .test_output_binding_changes import _CONTENT, _NOW, _read_registry as _registry, environment
-from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow
+from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow, _target_read_open
 from .test_read_failure_original_groups import prepared_without_attempt
 
 pytestmark = pytest.mark.asyncio
@@ -79,17 +78,8 @@ def _drivers(entry):
     return DriverRegistry((entry, replace(entry, driver_id="alternate-camera")))
 
 
-def _hold_before_digest(monkeypatch):
-    complete, calls = RecordingInputCopies.complete, []
-
-    async def once(copies, copy_id, digest):
-        calls.append(copy_id)
-        if len(calls) == 1:
-            raise CopyCompletionError("host_digest_failed", "主机摘要暂不可用，源摘要尚未调用")
-        return await complete(copies, copy_id, digest)
-
-    monkeypatch.setattr(RecordingInputCopies, "complete", once)
-    return calls
+def _hold_before_digest(monkeypatch, reader, staging):
+    return _target_read_open(monkeypatch, reader, staging)
 
 
 def _held_without_digest(owned, runtime, reader):
@@ -204,7 +194,7 @@ async def test_obtain_held_end_missing_required_sha_saves_actual_then_binding_fa
         processing=Path(cfg.paths.processing), segment_size=4, occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
     factory = _business_factory(actual, devices)
     runtime = await factory.build(owned)
-    completions = _hold_before_digest(monkeypatch)
+    completions = _hold_before_digest(monkeypatch, reader, cfg.paths.staging)
     with pytest.raises(ConsistencyError):
         await advance_obtain(runtime)
     ticket, state = _held_without_digest(owned, runtime, reader)
@@ -241,7 +231,7 @@ async def test_internal_held_end_missing_required_sha_saves_actual_then_binding_
         tmp_path, monkeypatch, change, after_commit, capture_resources):
     recording, source, reader, driver, factory = await _internal_runtime(tmp_path)
     runtime = await factory.build(recording.owned)
-    completions = _hold_before_digest(monkeypatch)
+    completions = _hold_before_digest(monkeypatch, reader, recording.roots.staging)
     reopened = None
     try:
         with pytest.raises(ConsistencyError):
@@ -268,7 +258,7 @@ async def test_obtain_held_end_reliable_sha_continues_local_publication(prepared
         processing=Path(cfg.paths.processing), segment_size=4, occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
     factory = _business_factory(actual, devices)
     runtime = await factory.build(owned)
-    completions = _fail_local_completion_once(monkeypatch, source_checksum_supported=True)
+    completions = _fail_local_completion_once(monkeypatch, reader, cfg.paths.staging, source_checksum_supported=True)
     with pytest.raises(ConsistencyError):
         await advance_obtain(runtime)
     ticket, state = _held_original(owned, runtime, reader, source_checksum_supported=True)
@@ -309,7 +299,7 @@ async def test_internal_held_end_reliable_sha_and_saved_results_continue_local_c
         assert original_results[1] is not None and original_results[3] == _NOW
         original_results = original_results[:3]
         assert tuple(runtime.results.calls) == queries
-        completions = _fail_local_completion_once(monkeypatch, source_checksum_supported=True)
+        completions = _fail_local_completion_once(monkeypatch, reader, recording.roots.staging, source_checksum_supported=True)
         with pytest.raises(ConsistencyError):
             await run_recording_media(runtime.media, 1, 1, source)
         ticket, state = _held_original(recording.owned, runtime, reader, source_checksum_supported=True)
