@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -238,8 +239,26 @@ async def test_maintenance_waiting_keeps_original_read_even_when_user_cancelled(
         except ReadPreparationError as error:
             failures.append(error)
             if cancelled:
-                owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=?", (command.action_id,))
-                owned.connection.commit()
+                from camctl.bootstrap.flows import cancel_flow
+                from camctl.devices.catalog import DriverDefinitions, build_catalog
+                from camctl.devices.drivers.hasselblad.definitions import driver_definition
+                from ..capture.test_host_photo_flow import _input_time
+                from ..support.outputs import submit_output_document
+
+                catalog = build_catalog(config, DriverDefinitions({DRIVER_ID: driver_definition()}))
+                accepted = await submit_output_document(runtime.database, catalog=catalog,
+                    occurred_at=command.occurred_at + 20,
+                    body={"request_id": "3", "created_at": _input_time(), "name": "取消取回",
+                          "actions": [{"name": "取消", "type": "cancel_task", "params": {
+                              "target": {"action_instance_id": str(command.action_id)}}}]})
+                assert accepted.plan_id is not None, accepted
+                metadata = runtime.database.metadata
+                flow = cancel_flow(staging=Path(metadata.staging_path), ready=Path(metadata.ready_path),
+                                   processing=Path(metadata.processing_path))
+                await flow(SimpleNamespace(database=runtime.database,
+                    clock=SimpleNamespace(utc_micros=lambda: command.occurred_at + 20)))
+                assert owned.connection.execute("SELECT cancel_requested FROM actions WHERE id=?",
+                                                (command.action_id,)).fetchone() == (1,)
             raise
     driver.open_read = open_read
     async with read_test_runtime(owned, driver, EVIDENCE, staging=staging,
