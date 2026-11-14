@@ -109,9 +109,10 @@ async def test_real_config_reader_rejects_foreign_or_changed_creation_without_io
     assert world.channel.operations == []
 
 
-@pytest.mark.parametrize("output_id", [703, 704, 705])
+@pytest.mark.parametrize("role", ["host_original", "host_preview", "repaired"])
 @pytest.mark.parametrize("operation", ["delete", "query"])
-async def test_host_original_preview_repaired_recovery_preserves_null_config_and_new_task(world, monkeypatch, output_id, operation):
+async def test_host_original_preview_repaired_recovery_preserves_null_config_and_new_task(world, monkeypatch, role, operation):
+    output_id = world.ids[role]
     from camctl.bootstrap import cleanup_assembly
     from .test_output_binding_changes import _NOW
     from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
@@ -168,12 +169,14 @@ async def test_already_saved_missing_wait_is_diagnosed_without_rewriting_or_repl
                 await advance_cleanup(await factory(fresh))
         assert fresh.connection.execute("SELECT * FROM operation_attempts WHERE run_id=? AND attempt_no=?", (ticket.run_id, ticket.attempt_id)).fetchone() == row
         assert world.channel.operations == (["query"] if operation == "delete" else [])
-        assert world.paths[701].exists()
+        assert world.paths[world.ids["original"]].exists()
     finally:
         fresh.connection.close()
 
 
-async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, commit_after=False):
+async def _actual_save_failure(world, monkeypatch, operation, *, output_id=None, commit_after=False):
+    if output_id is None:
+        output_id = world.ids["original"]
     from pathlib import Path
     import sqlite3
     from ..support.outputs import SqliteOperationFault
@@ -183,7 +186,7 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, 
     _, item_id = _start_cleanup(world.owned, output_id, "2")
     factory = _factory(world)
     runtime = await factory(world.owned)
-    local = output_id in (703, 704, 705)
+    local = output_id in {world.ids[role] for role in ("host_original", "host_preview", "repaired")}
     if operation == "query":
         class QueryGate(OutputsRepository):
             calls = []
@@ -300,7 +303,7 @@ async def test_actual_device_return_retries_original_save_after_current_port_rem
 
 async def test_actual_host_query_return_keeps_original_null_config_after_save_failure(world, monkeypatch):
     from camctl.bootstrap import cleanup_assembly
-    case = await _actual_save_failure(world, monkeypatch, "query", output_id=703)
+    case = await _actual_save_failure(world, monkeypatch, "query", output_id=world.ids["host_original"])
     def forbidden_ports(*args):
         raise AssertionError("主机原返回保存不能解析当前设备端口")
     monkeypatch.setattr(cleanup_assembly, "port_for", forbidden_ports)
@@ -317,12 +320,12 @@ async def test_actual_device_query_unknown_commit_retries_original_save(world, m
     world.cfg = replace(world.cfg, devices={})
     await _retry_original_actual(world, *case)
     assert world.channel.operations == ["delete", "query"]
-    assert world.paths[701].exists()
+    assert world.paths[world.ids["original"]].exists()
 
 
 async def test_actual_host_delete_unknown_commit_retries_original_save(world, monkeypatch):
     from camctl.bootstrap import cleanup_assembly
-    case = await _actual_save_failure(world, monkeypatch, "delete", output_id=703, commit_after=True)
+    case = await _actual_save_failure(world, monkeypatch, "delete", output_id=world.ids["host_original"], commit_after=True)
     def forbidden_ports(*args):
         raise AssertionError("主机原返回保存不能解析当前设备端口")
     monkeypatch.setattr(cleanup_assembly, "port_for", forbidden_ports)
@@ -330,5 +333,5 @@ async def test_actual_host_delete_unknown_commit_retries_original_save(world, mo
     assert world.owned.connection.execute(
         "SELECT timeout_s_json,retry_interval_s_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
         (case[1].ticket.run_id, case[1].ticket.attempt_id)).fetchone() == (None, None)
-    assert world.channel.operations == [] and not world.paths[703].exists()
-    assert all(path.exists() for identity, path in world.paths.items() if identity != 703)
+    assert world.channel.operations == [] and not world.paths[world.ids["host_original"]].exists()
+    assert all(path.exists() for identity, path in world.paths.items() if identity != world.ids["host_original"])

@@ -35,13 +35,11 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..devices.test_adb_camera_transport import LocalAdbChannel
-from ..outputs.test_qualification import (
-    _seed_environment, _seed_plan, _seed_action, _seed_device_file, _seed_output,
-)
 from ..outputs.test_cleanup_delete_save_recovery import _FaultOutputs
 from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
 from .test_output_binding_changes import _NOW, _accept
 from ..support.capture import capture_database
+from ..support.bootstrap_cleanup_sources import CONTENT, prepare_delivery, prepare_photo, prepare_recording
 from ..support.outputs import output_test_session
 from ..support.bootstrap_cleanup_cases import cleanup_case_factory, save_cleanup_intent
 
@@ -88,91 +86,75 @@ async def world(tmp_path, request, capture_resources, isolated_driver_registries
             "cam-1": {"kind": "camera", "driver": binding.driver_id, "adb": {"serial": "serial-1"},
                       "cleanup": {"delete_retry_interval_s": "0", "query_retry_interval_s": "0"}},
             "action6": {"kind": "camera", "driver": "dji-action6", "adb": {"serial": "never-called"}},
+            "hb": {"kind": "camera", "driver": "hasselblad_cfv100c",
+                "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": "SERIAL-1",
+                    "product_id": 10, "output_storage": "host"}},
             "hb-device": {"kind": "camera", "driver": "hasselblad_cfv100c",
-                "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": "never-called",
-                    "output_storage": "device"}},
+                "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": "SERIAL-2",
+                    "product_id": 10, "output_storage": "device"}},
         }}, ConfigDefaults())
-    _, owned = _seed_environment(tmp_path)
-    connection = owned.connection
-    _seed_plan(connection, 1)
-    for action_id, device, driver_id in ((11, "cam-1", binding.driver_id),
-                                       (12, "hb", "hasselblad_cfv100c"), (13, "hb-device", "hasselblad_cfv100c")):
-        _seed_action(connection, action_id, 1, action_type=2, device_id=device, status=3)
-        connection.execute("UPDATE actions SET driver_id=? WHERE id=?", (driver_id, action_id))
-    paths = {}
-    for output_id, name, action_id, file_binding in (
-        (701, "clip 'one'\n.OSV", 11, binding), (702, "clip 'one'\n.LRF", 11, binding),
-        (706, "hb-original.3FR", 13, DeviceBinding("hb-device", "hasselblad_cfv100c")),
-    ):
-        name = name.replace(".OSV", ".MP4") if file_binding.driver_id == "dji-action6" else name
-        path = tmp_path / "device" / name
-        path.parent.mkdir(exist_ok=True)
-        path.write_bytes(b"source")
-        paths[output_id] = path
-        _seed_device_file(connection, output_id, action_id, size=6)
-        if output_id == 706:
-            from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
-            import hashlib
-            identity = CameraFileIdentity(file_binding, "/DCIM/hb-original.3FR", "hb-original.3FR",
-                DownloadVariant.ORIGINAL, hashlib.sha256(b"source").hexdigest(), "serial-1", 1, 6)
-            identity_key = json.dumps([file_binding.device_id, file_binding.driver_id, identity.file_identity])
-            locator = json.dumps(identity.locator())
-        else:
-            identity_key = json.dumps([file_binding.device_id, file_binding.driver_id, str(path)])
-            locator = json.dumps({"path": str(path)})
-        connection.execute("UPDATE device_files SET identity_key=?,locator_json=?,original_name=? WHERE id=?",
-            (identity_key, locator, name, output_id))
-        _seed_output(connection, output_id, action_id, output_id, size=6)
-    connection.execute("UPDATE device_files SET role=3,original_device_file_id=701,pairing_evidence_json='{}' WHERE id=702")
-    connection.execute("UPDATE outputs SET kind=3 WHERE id=702")
-    for output_id, purpose, relative, source, kind in (
-        (703, 5, "capture-originals/703.3fr", 12, 1),
-        (704, 6, "capture-previews/704.jpg", 12, 3),
-        (705, 4, "derived/705.mp4", 11, 2),
-    ):
-        path = Path(cfg.paths.staging) / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"source")
-        paths[output_id] = path
-        connection.execute("INSERT INTO intermediate_files (id,owner_action_id,purpose,relative_path,"
-            " retention_state,cleanup_state,size_bytes,created_event_id,last_event_id,change_count)"
-            " VALUES (?,?,?,?,3,1,6,1,1,1)", (output_id, source, purpose, relative))
-        connection.execute("INSERT INTO outputs (id,source_action_id,kind,intermediate_file_id,availability,"
-            " cleanup_status,media_json,created_event_id,last_event_id,change_count) VALUES (?,?,?,?,1,1,'{}',1,1,1)",
-            (output_id, source, kind, output_id))
-    connection.executemany("INSERT INTO output_origins (output_id,original_output_id) VALUES (?,?)",
-                           ((702, 701), (704, 703), (705, 701)))
-    _seed_action(connection, 14, 1, action_type=4, status=3)
-    connection.execute("INSERT INTO deliveries (id,action_id,output_id,file_name,display_name,status,"
-        " publication_intent_event_id,published_event_id,withdrawal_state,created_event_id,last_event_id,change_count)"
-        " VALUES (801,14,701,'801.OSV','retained copy',5,1,1,1,1,1,1)")
-    connection.commit()
-    copy = Path(cfg.paths.ready) / "801.OSV"
-    copy.parent.mkdir(parents=True)
-    copy.write_bytes(b"delivered-copy")
-    register_builtin_camera_drivers(cfg)
-    from camctl.devices.drivers.hasselblad.registration import register_builtin_hasselblad_driver
-    register_builtin_hasselblad_driver(cfg)
-    registry = drivers_runtime.current_registry()
-    entry = registry.entry(binding.driver_id)
-    channel = FileChannel()
-    entry.driver.transport = channel
-    supervisor = Supervisor()
-    executor = FileTaskExecutor(supervisor)
-    context = SimpleNamespace(database=await capture_database(owned), open_connection=lambda: open_existing(
-        Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
-    value = SimpleNamespace(cfg=cfg, owned=owned, registry=registry, entry=entry, channel=channel,
-                            binding=binding, paths=paths, copy=copy, executor=executor, context=context, resources=capture_resources)
+    from camctl.persistence.initialization import InitOutcome, initialize_state
+    assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+    owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+    tools = None
+    supervisor = None
     try:
+        action, original_path, preview_path, _record_driver, tools = await prepare_recording(
+            cfg, owned, capture_resources, binding.driver_id, tmp_path)
+        rows = owned.connection.execute(
+            "SELECT id,kind FROM outputs WHERE source_action_id=? ORDER BY kind", (action,)).fetchall()
+        ids = {"original": next(identity for identity, kind in rows if kind == 1),
+               "preview": next(identity for identity, kind in rows if kind == 3),
+               "repaired": next(identity for identity, kind in rows if kind == 2)}
+        for role in ("preview", "repaired"):
+            assert owned.connection.execute(
+                "SELECT original_output_id FROM output_origins WHERE output_id=?", (ids[role],)).fetchone() == (ids["original"],)
+        _, ids["host_original"], ids["host_preview"], _ = await prepare_photo(
+            cfg, owned, capture_resources, device_id="hb", request_id=10)
+        _, ids["hb_original"], ids["hb_preview"], hb_driver = await prepare_photo(
+            cfg, owned, capture_resources, device_id="hb-device", request_id=11)
+        delivery_id, delivery_file_id, copy = await prepare_delivery(
+            cfg, owned, action, ids["original"], binding.driver_id)
+        paths = {ids["original"]: original_path, ids["preview"]: preview_path}
+        for role in ("host_original", "host_preview", "repaired"):
+            relative, = owned.connection.execute(
+                "SELECT f.relative_path FROM outputs o JOIN intermediate_files f"
+                " ON f.id=o.intermediate_file_id WHERE o.id=?", (ids[role],)).fetchone()
+            paths[ids[role]] = Path(cfg.paths.staging) / relative
+        contents = {identity: path.read_bytes() for identity, path in paths.items()}
+        register_builtin_camera_drivers(cfg)
+        from camctl.devices.drivers.hasselblad.registration import register_builtin_hasselblad_driver
+        register_builtin_hasselblad_driver(cfg)
+        registry = drivers_runtime.current_registry()
+        entry = registry.entry(binding.driver_id)
+        channel = FileChannel()
+        entry.driver.transport = channel
+        supervisor = Supervisor()
+        executor = FileTaskExecutor(supervisor)
+        context = SimpleNamespace(database=await capture_database(owned), open_connection=lambda: open_existing(
+            Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
+        value = SimpleNamespace(cfg=cfg, owned=owned, registry=registry, entry=entry, channel=channel,
+                                binding=binding, paths=paths, contents=contents, ids=ids, copy=copy,
+                                delivery_id=delivery_id, delivery_file_id=delivery_file_id,
+                                hb_driver=hb_driver, executor=executor, context=context, resources=capture_resources)
         with output_test_session():
             yield value
             assert not executor.unfinished_files()
     finally:
-        settled = await supervisor.drain_required()
-        assert not settled.failed
-        assert not executor.unfinished_files()
-        await context.database.close()
-        owned.connection.close()
+        try:
+            if supervisor is not None:
+                settled = await supervisor.drain_required()
+                assert not settled.failed
+                assert not executor.unfinished_files()
+        finally:
+            try:
+                if tools is not None:
+                    await tools.close()
+            finally:
+                try:
+                    await capture_resources.close()
+                finally:
+                    owned.connection.close()
 
 
 def _factory(world, **kwargs):
@@ -226,9 +208,12 @@ async def test_recovery_registry_rejects_missing_or_invalid_registration(driver_
         assert recovery_registry(entry, operation) is None
 
 
-@pytest.mark.parametrize("output_id", [701, 702, 703, 704, 705])
-async def test_exact_cleanup_keeps_osv_lrf_host_family_and_published_copy(world, output_id):
+@pytest.mark.parametrize("role", ["original", "preview", "host_original", "host_preview", "repaired"])
+async def test_exact_cleanup_keeps_osv_lrf_host_family_and_published_copy(world, role):
+    output_id = world.ids[role]
     before = world.owned.connection.execute("SELECT * FROM deliveries").fetchall()
+    copies = world.owned.connection.execute("SELECT * FROM file_copies WHERE delivery_id=?", (world.delivery_id,)).fetchall()
+    assert len(copies) == 1
     _start_cleanup(world.owned, output_id, "2")
     flow = cleanup_flow(_factory(world))
     await flow(world.context)
@@ -236,14 +221,16 @@ async def test_exact_cleanup_keeps_osv_lrf_host_family_and_published_copy(world,
     for identity, path in world.paths.items():
         assert path.exists() is (identity != output_id)
         if identity != output_id:
-            assert path.read_bytes() == b"source"
-    assert world.copy.read_bytes() == b"delivered-copy"
+            assert path.read_bytes() == world.contents[identity]
+    assert world.copy.read_bytes() == CONTENT
     assert world.owned.connection.execute("SELECT * FROM deliveries").fetchall() == before
+    assert world.owned.connection.execute("SELECT * FROM file_copies WHERE delivery_id=?", (world.delivery_id,)).fetchall() == copies
+    assert world.owned.connection.execute("SELECT target_file_id FROM file_copies WHERE delivery_id=?", (world.delivery_id,)).fetchone() == (world.delivery_file_id,)
     assert world.owned.connection.execute("SELECT status,outcome FROM cleanup_items").fetchone() == (4, 1)
-    assert world.channel.operations == (["delete"] if output_id in (701, 702) else [])
-    assert world.owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (1,)
-    if output_id in (703, 704, 705):
-        assert world.owned.connection.execute("SELECT timeout_s_json,retry_interval_s_json FROM operation_attempts").fetchone() == (None, None)
+    assert world.channel.operations == (["delete"] if role in ("original", "preview") else [])
+    assert world.owned.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id IS NOT NULL").fetchone() == (1,)
+    if role in ("host_original", "host_preview", "repaired"):
+        assert world.owned.connection.execute("SELECT a.timeout_s_json,a.retry_interval_s_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id IS NOT NULL").fetchone() == (None, None)
 
 
 @pytest.mark.parametrize("behaviors,expected,kept", [
@@ -253,7 +240,7 @@ async def test_exact_cleanup_keeps_osv_lrf_host_family_and_published_copy(world,
     (["unreceived", "normal", "unreceived", "unreceived"], ["delete", "query", "delete", "query"], True),
 ])
 async def test_unknown_delete_queries_original_target_with_independent_budget(world, behaviors, expected, kept):
-    _, item_id = _start_cleanup(world.owned, 701, "2")
+    _, item_id = _start_cleanup(world.owned, world.ids["original"], "2")
     world.channel.behaviors = list(behaviors)
     factory = _factory(world)
     # 查询结果保存后开始新会话；先消费原事实，再使用同会话消费身份继续。
@@ -262,8 +249,8 @@ async def test_unknown_delete_queries_original_target_with_independent_budget(wo
             factory = _factory(world)
         await advance_cleanup(await factory(world.owned))
     assert world.channel.operations == expected
-    assert world.paths[701].exists() is kept
-    assert world.paths[702].read_bytes() == b"source"
+    assert world.paths[world.ids["original"]].exists() is kept
+    assert world.paths[world.ids["preview"]].read_bytes() == b"source"
     rows = world.owned.connection.execute("SELECT kind,attempts_used FROM operation_runs WHERE cleanup_item_id=? ORDER BY id", (item_id,)).fetchall()
     assert rows == [(4, expected.count("delete")), (5, expected.count("query"))]
     state = world.owned.connection.execute("SELECT status,error_code FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
@@ -271,7 +258,7 @@ async def test_unknown_delete_queries_original_target_with_independent_budget(wo
 
 
 async def test_reliable_absence_and_actual_channel_error_save_along_original_key(world):
-    _, item_id = _start_cleanup(world.owned, 701, "2")
+    _, item_id = _start_cleanup(world.owned, world.ids["original"], "2")
     world.channel.behaviors = ["error_after"]
     factory = _factory(world)
     runtime = await factory(world.owned)
@@ -280,7 +267,7 @@ async def test_reliable_absence_and_actual_channel_error_save_along_original_key
                          matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id)):
         assert (await delete_source_file(runtime, item_id)).phase == "finish_rejected"
     original = port.calls[0]
-    assert world.channel.operations == ["delete"] and not world.paths[701].exists()
+    assert world.channel.operations == ["delete"] and not world.paths[world.ids["original"]].exists()
     port.enabled = False
     fresh = world.context.open_connection()
     try:
@@ -304,10 +291,12 @@ async def test_reliable_absence_and_actual_channel_error_save_along_original_key
         fresh.connection.close()
 
 
-def _lost_intent(world, operation, *, output_id=701, item_id=None):
+def _lost_intent(world, operation, *, output_id=None, item_id=None):
+    if output_id is None:
+        output_id = world.ids["original"]
     if item_id is None:
         _, item_id = _start_cleanup(world.owned, output_id, "2")
-    local = output_id in (703, 704, 705)
+    local = output_id in {world.ids[role] for role in ("host_original", "host_preview", "repaired")}
     declaration = world.cfg.devices.get("cam-1", {}).get("cleanup", {})
     config = AttemptConfig(1) if local else AttemptConfig(
         3 if operation == "delete" else 2,
@@ -338,32 +327,42 @@ async def test_old_running_uses_registered_recovery_without_replaying_original_t
             await advance_cleanup(recovered)
         assert world.channel.operations == (["query", "delete"] if operation == "delete" else ["delete"])
         assert fresh.connection.execute("SELECT COUNT(*) FROM operation_attempts WHERE run_id=? AND attempt_no=?", (ticket.run_id, ticket.attempt_id)).fetchone() == (1,)
-        assert not world.paths[701].exists() and world.paths[702].exists()
+        assert not world.paths[world.ids["original"]].exists() and world.paths[world.ids["preview"]].exists()
     finally:
         fresh.connection.close()
 
 
-async def test_mixed_cleanup_routes_saved_device_host_and_unsupported_source_independently(world):
+async def test_mixed_cleanup_routes_saved_device_host_and_unsupported_source_independently(world, monkeypatch):
     delivery = world.owned.connection.execute("SELECT * FROM deliveries").fetchall()
+    copies = world.owned.connection.execute("SELECT * FROM file_copies WHERE delivery_id=?", (world.delivery_id,)).fetchall()
     hb = world.registry.entry("hasselblad_cfv100c")
+    hb_deletes = []
+    async def forbidden_delete(request):
+        hb_deletes.append(request)
+        raise AssertionError("不支持删除的设备不能接收删除请求")
+    monkeypatch.setattr(hb.driver, "delete", forbidden_delete)
     action6 = world.registry.entry("dji-action6")
     world.registry = DriverRegistry((world.entry, action6, replace(hb,
         declaration=replace(hb.declaration, delete_supported=False))))
+    selected = [world.ids[role] for role in ("original", "host_original", "hb_original")]
     await _accept(world.owned, "2", [{"name": "混合精确清理", "type": "delete_action_outputs",
-        "scheduled_at": "2026-01-15 09:00:00", "params": {"output_ids": ["701", "703", "706"]}}])
+        "scheduled_at": "2026-01-15 09:00:00", "params": {"output_ids": [str(value) for value in selected]}}])
     factory = _factory(world)
     for _ in range(3):
         await advance_cleanup(await factory(world.owned))
-    assert world.channel.operations == ["delete"]
-    assert not world.paths[701].exists() and not world.paths[703].exists()
-    assert world.paths[702].exists() and world.paths[704].exists() and world.paths[705].exists()
-    assert world.paths[706].read_bytes() == b"source"
+    assert world.channel.operations == ["delete"] and hb_deletes == []
+    assert not world.paths[world.ids["original"]].exists() and not world.paths[world.ids["host_original"]].exists()
+    assert all(world.paths[world.ids[role]].read_bytes() == world.contents[world.ids[role]]
+               for role in ("preview", "host_preview", "repaired"))
+    failure = item_error_id("cleanup_items", "file_delete_failed")
     assert world.owned.connection.execute(
-        "SELECT output_id,status,error_code FROM cleanup_items ORDER BY output_id").fetchall() == [
-            (701, 4, None), (703, 4, None), (706, 5, item_error_id("cleanup_items", "file_delete_failed"))]
-    assert world.owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (2,)
+        "SELECT output_id,status,error_code FROM cleanup_items ORDER BY output_id").fetchall() == sorted([
+            (world.ids["original"], 4, None), (world.ids["host_original"], 4, None),
+            (world.ids["hb_original"], 5, failure), (world.ids["hb_preview"], 5, failure)])
+    assert world.owned.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id IS NOT NULL").fetchone() == (2,)
     assert world.owned.connection.execute("SELECT * FROM deliveries").fetchall() == delivery
-    assert world.copy.read_bytes() == b"delivered-copy"
+    assert world.owned.connection.execute("SELECT * FROM file_copies WHERE delivery_id=?", (world.delivery_id,)).fetchall() == copies
+    assert world.copy.read_bytes() == CONTENT
 
 
 @pytest.mark.parametrize("verification", ["absent", "unknown"])
@@ -371,7 +370,7 @@ async def test_mixed_cleanup_routes_saved_device_host_and_unsupported_source_ind
 async def test_old_delete_recovery_uses_original_query_budget_for_absence_or_unknown(world, verification):
     item_id, ticket, horizon = _lost_intent(world, "delete")
     if verification == "absent":
-        world.paths[701].unlink()
+        world.paths[world.ids["original"]].unlink()
     else:
         world.channel.behaviors = ["unreceived", "unreceived"]
     fresh = world.context.open_connection()
@@ -392,7 +391,7 @@ async def test_old_delete_recovery_uses_original_query_budget_for_absence_or_unk
         state = fresh.connection.execute("SELECT status,error_code FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
         assert state == ((4, None) if verification == "absent" else
             (5, item_error_id("cleanup_items", "file_query_attempts_exhausted")))
-        assert world.paths[702].read_bytes() == b"source"
+        assert world.paths[world.ids["preview"]].read_bytes() == b"source"
         assert fresh.connection.execute("SELECT attempts_used FROM operation_runs WHERE kind=4").fetchone() == (1,)
     finally:
         fresh.connection.close()
