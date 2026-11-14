@@ -313,6 +313,8 @@ class TestRealFileClose:
         # 重复关闭不重复汇总。
         again = await close_logging(runtime)
         assert again.summary_written is True
+        content = _read_log(tmp_path)
+        assert "工作记录" in content
         assert content.count("日志关闭摘要") == 1
 
     async def test_disabled_file_channel_skips_summary(

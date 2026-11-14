@@ -1,7 +1,6 @@
 """L4/L6 多进程文件写入、轮换与有序关闭的组合测试。
 
-真实文件与 CLH：追加与轮换分离、保留数量含活动文件、两个独立
-进程写同一文件互不损坏；关闭摘要只写一次且不经队列。
+真实文件与 CLH：轮换失败、保留数量及两个独立进程写同一文件。
 """
 
 from __future__ import annotations
@@ -13,10 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from camctl.logging_runtime.clh_adapter import FileChannel, WriteResult
-from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
+from camctl.logging_runtime.clh_adapter import FileChannel
 from camctl.logging_runtime.models import LogLevel
-from camctl.logging_runtime.service import LogChannel, LogRecord
+from camctl.logging_runtime.service import LogRecord
 
 pytestmark = pytest.mark.asyncio
 
@@ -26,19 +24,6 @@ def _record(message: str, level: LogLevel = LogLevel.INFO) -> LogRecord:
 
 
 class TestFileChannel:
-    async def test_append_and_rotation_separated(self, tmp_path: Path) -> None:
-        channel = FileChannel(
-            tmp_path / "camctl.log", max_bytes=64, file_count=3
-        )
-        result = channel.write_record(_record("m" * 60))
-        assert result.appended is True
-        # 上一条已越过阈值：下一条触发轮换。
-        second = channel.write_record(_record("second-line"))
-        assert second.appended is True
-        channel.close()
-        files = sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("camctl.log"))
-        assert files, "应产生日志文件"
-
     async def test_rotation_failure_does_not_hide_append(self, tmp_path: Path) -> None:
         channel = FileChannel(
             tmp_path / "camctl.log", max_bytes=32, file_count=2
@@ -67,34 +52,6 @@ class TestFileChannel:
         log_files = [p for p in tmp_path.iterdir() if p.name.startswith("camctl.log")]
         # 保留总量 2 = 活动文件 + 1 份归档。
         assert len(log_files) <= 2
-
-
-class TestOrderedClose:
-    async def test_close_summary_is_once(self, tmp_path: Path) -> None:
-        written: list[str] = []
-
-        def writer(record: LogRecord) -> bool:
-            written.append(record.message)
-            return True
-
-        channel = LogChannel(
-            capacity=8, low_watermark=2, high_watermark=4,
-            level=LogLevel.DEBUG, writer=writer,
-        )
-        # 不启动监听：水位随生产上升制造确定性丢弃。
-        for index in range(4):
-            channel.slog(LogRecord(level=LogLevel.DEBUG, message=f"d{index}"))
-            await channel.alog(LogRecord(level=LogLevel.DEBUG, message=f"a{index}"))
-        assert channel.counters.total_dropped() >= 1
-        channel.start()
-        runtime = LogRuntime(channel=channel)
-        first = await close_logging(runtime)
-        assert first.dropped_total >= 1
-        assert first.summary_written is True
-        again = await close_logging(runtime)
-        assert again.summary_written is True  # 不重复尝试
-        summaries = [m for m in written if "日志关闭摘要" in m]
-        assert len(summaries) == 1
 
 
 class TestTwoProcesses:

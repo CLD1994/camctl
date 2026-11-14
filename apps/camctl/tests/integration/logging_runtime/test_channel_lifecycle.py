@@ -87,7 +87,10 @@ class TestCloseSummary:
         """丢弃存在时摘要由监听线程写出一次，携带身份与计数。"""
         writer = ProbeWriter()
         channel, runtime = _channel_and_runtime(writer)
-        _make_drops(channel, count=2)
+        for index in range(4):
+            channel.slog(LogRecord(level=LogLevel.DEBUG, message=f"d{index}"))
+            await channel.alog(LogRecord(level=LogLevel.DEBUG, message=f"a{index}"))
+        assert channel.counters.total_dropped() >= 2
         channel.start()
         await channel.alog(LogRecord(level=LogLevel.INFO, message="工作记录"))
 

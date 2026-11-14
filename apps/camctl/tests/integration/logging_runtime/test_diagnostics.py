@@ -6,6 +6,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
 from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.clh_adapter import FileChannel
@@ -35,28 +36,43 @@ class GatedFileWriter:
     def __call__(self, record):
         if not self.entered.is_set():
             self.entered.set()
-            if not self.release.wait(10):
-                raise TimeoutError("测试没有释放日志消费者")
+            self.release.wait()
         return self.file_channel.write_record(record).completion
 
 
-async def full_channel(tmp_path):
+async def make_full_channel(tmp_path):
     file_channel = FileChannel(tmp_path / "camctl.log", max_bytes=1 << 20, file_count=1)
     writer = GatedFileWriter(file_channel)
     channel = LogChannel(capacity=3, low_watermark=1, high_watermark=2,
                          level=LogLevel.DEBUG, writer=writer)
-    channel.start()
-    await channel.alog(LogRecord(LogLevel.WARNING, "hold-consumer"))
-    assert await asyncio.to_thread(writer.entered.wait, 5)
-    for number in range(3):
-        result = channel.slog(LogRecord(LogLevel.WARNING, f"backlog-{number}"))
-        assert result.decision.kind is AdmissionKind.ACCEPTED
     runtime = LogRuntime(channel=channel, file_closer=file_channel.close)
-    return channel, writer, runtime
+    try:
+        channel.start()
+        await channel.alog(LogRecord(LogLevel.WARNING, "hold-consumer"))
+        assert await asyncio.to_thread(writer.entered.wait, 5)
+        for number in range(3):
+            result = channel.slog(LogRecord(LogLevel.WARNING, f"backlog-{number}"))
+            assert result.decision.kind is AdmissionKind.ACCEPTED
+        return channel, writer, runtime
+    except BaseException:
+        writer.release.set()
+        await close_logging(runtime)
+        raise
 
 
-async def test_availability_result_delivers_both_streams_once_after_full_queue(tmp_path):
-    channel, writer, runtime = await full_channel(tmp_path)
+@pytest_asyncio.fixture
+async def full_channel(tmp_path):
+    channel, writer, runtime = await make_full_channel(tmp_path)
+    try:
+        yield channel, writer, runtime
+    finally:
+        writer.release.set()
+        await close_logging(runtime)
+
+
+
+async def test_availability_result_delivers_both_streams_once_after_full_queue(tmp_path, full_channel):
+    channel, writer, runtime = full_channel
     stdout, stderr = b"doctor: FAIL\x00\xff", b"tool error\xff"
     diagnostics = ToolDiagnostics(1, (ToolCallOutput(
         1, "doctor", ToolStream(ToolStreamState.COMPLETE, stdout),
@@ -94,8 +110,8 @@ async def test_availability_result_delivers_both_streams_once_after_full_queue(t
     assert not channel.listener_alive
 
 
-async def test_full_queue_waits_after_cleanup_and_cancel_keeps_single_record(tmp_path):
-    channel, writer, runtime = await full_channel(tmp_path)
+async def test_full_queue_waits_after_cleanup_and_cancel_keeps_single_record(tmp_path, full_channel):
+    channel, writer, runtime = full_channel
     fallback = []
     completed_body = asyncio.Event()
     stopped = []
@@ -146,8 +162,8 @@ async def test_full_queue_waits_after_cleanup_and_cancel_keeps_single_record(tmp
     assert not channel.listener_alive
 
 
-async def test_body_failure_reaches_stop_before_root_flush_waits_for_queue(tmp_path):
-    channel, writer, runtime = await full_channel(tmp_path)
+async def test_body_failure_reaches_stop_before_root_flush_waits_for_queue(tmp_path, full_channel):
+    channel, writer, runtime = full_channel
     original = RuntimeError("fatal-session-error")
     fallback = []
     stopped = []
@@ -179,8 +195,8 @@ async def test_body_failure_reaches_stop_before_root_flush_waits_for_queue(tmp_p
     assert not fallback
 
 
-async def test_cancelled_root_flush_hands_off_all_records_before_close(tmp_path):
-    channel, writer, runtime = await full_channel(tmp_path)
+async def test_cancelled_root_flush_hands_off_all_records_before_close(tmp_path, full_channel):
+    channel, writer, runtime = full_channel
     fallback = []
     flushing = None
     with error_diagnostics_context(channel, fallback.append):
@@ -230,9 +246,8 @@ async def test_admitted_record_uses_command_fallback_when_consumer_cannot_write(
 
 @pytest.mark.parametrize("cancel_flush", [False, True])
 async def test_background_admission_allows_later_flow_stop_and_same_device_rounds(
-    tmp_path, cancel_flush,
+    tmp_path, cancel_flush, full_channel,
 ):
-    channel, writer, runtime = await full_channel(tmp_path)
     fallback = []
     operations = []
     states = []
@@ -257,6 +272,7 @@ async def test_background_admission_allows_later_flow_stop_and_same_device_round
         clock=SimpleNamespace(utc_micros=lambda: 1_750_000_000_000_000),
         facts_query=lambda connection: facts,
         flows={"device": device_flow, "stop": stop_flow})
+    channel, writer, runtime = full_channel
     with error_diagnostics_context(channel, fallback.append, background=True):
         driving = asyncio.create_task(run_session(context, None))
         flushing = None
@@ -299,14 +315,14 @@ async def test_background_admission_allows_later_flow_stop_and_same_device_round
     assert not channel.listener_alive
 
 
-async def test_single_waiter_joins_full_queue_admission_and_preserves_repeated_cancellation(tmp_path):
-    channel, writer, runtime = await full_channel(tmp_path)
+async def test_single_waiter_joins_full_queue_admission_and_preserves_repeated_cancellation(tmp_path, full_channel):
+    channel, writer, runtime = full_channel
     fallback = []
     waiter = None
     with error_diagnostics_context(channel, fallback.append, background=True):
-        error = ValueError("joined-original-error")
-        state = record_error(error, stage="joined")
         try:
+            error = ValueError("joined-original-error")
+            state = record_error(error, stage="joined")
             await asyncio.sleep(0)
             assert state.status is DiagnosticStatus.HELD
             duplicate = prepare_log_diagnostic(LogRecord(LogLevel.ERROR, "replacement"), error=error)

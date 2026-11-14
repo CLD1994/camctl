@@ -81,6 +81,8 @@ class TestAtomicAdmission:
         await async_producer()
         thread.join(timeout=10)
         await asyncio.to_thread(channel.stop_listener, timeout=10)
+        channel.async_close()
+        await channel.await_closed()
         for result in results:
             assert result.queue_depth <= 8
         accepted = [r for r in results if r.decision.kind is AdmissionKind.ACCEPTED]
@@ -110,21 +112,33 @@ class TestAtomicAdmission:
         channel2.start()
         await asyncio.to_thread(channel.stop_listener, timeout=10)
         await asyncio.to_thread(channel2.stop_listener, timeout=10)
+        channel.async_close()
+        channel2.async_close()
+        await channel.await_closed()
+        await channel2.await_closed()
 
     async def test_warning_and_error_survive_middle_zone(self) -> None:
         writer = CollectingWriter()
         counting = CountingRandom()
-        channel = _channel(writer, capacity=16, low=1, high=4, random_source=counting)
-        channel.start()
-        await channel.alog(LogRecord(level=LogLevel.DEBUG, message="warm"))
-        for index in range(4):
-            result = await channel.alog(LogRecord(level=LogLevel.WARNING, message=f"w{index}"))
-            assert result.decision.kind is AdmissionKind.ACCEPTED
-            result = await channel.alog(LogRecord(level=LogLevel.ERROR, message=f"e{index}"))
-            assert result.decision.kind is AdmissionKind.ACCEPTED
-        await asyncio.to_thread(channel.stop_listener, timeout=10)
-        levels = {record.level for record in writer.written}
-        assert LogLevel.WARNING in levels and LogLevel.ERROR in levels
+        channel = _channel(writer, capacity=16, low=1, high=10, random_source=counting)
+        try:
+            warm = await channel.alog(LogRecord(level=LogLevel.DEBUG, message="warm"))
+            assert warm.decision.kind is AdmissionKind.ACCEPTED
+            assert warm.queue_depth == 1
+            for index in range(4):
+                for level, message in ((LogLevel.WARNING, f"w{index}"),
+                                       (LogLevel.ERROR, f"e{index}")):
+                    result = await channel.alog(LogRecord(level=level, message=message))
+                    assert result.decision.kind is AdmissionKind.ACCEPTED
+                    assert result.queue_depth == 2 + index * 2 + (level is LogLevel.ERROR)
+                    assert 1 <= result.queue_depth - 1 < 10
+        finally:
+            channel.start()
+            await asyncio.to_thread(channel.stop_listener, timeout=10)
+            channel.async_close()
+            await channel.await_closed()
+        assert [record.message for record in writer.written] == [
+            "warm", *[message for index in range(4) for message in (f"w{index}", f"e{index}")]]
 
     async def test_accepted_fifo_order_preserved(self) -> None:
         writer = CollectingWriter()
@@ -134,6 +148,8 @@ class TestAtomicAdmission:
             await channel.alog(LogRecord(level=LogLevel.ERROR, message=f"m{index}"))
             channel.slog(LogRecord(level=LogLevel.ERROR, message=f"s{index}", source=LogSource.SYNC))
         await asyncio.to_thread(channel.stop_listener, timeout=10)
+        channel.async_close()
+        await channel.await_closed()
         assert [r.message for r in writer.written] == [
             m for index in range(10) for m in (f"m{index}", f"s{index}")
         ]
