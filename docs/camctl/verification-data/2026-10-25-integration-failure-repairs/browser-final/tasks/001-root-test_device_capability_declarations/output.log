@@ -1,8 +1,0 @@
-..                                                                       [100%]
-============================== slowest durations ===============================
-22.91s call     tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide
-17.11s call     tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart
-4.80s setup    tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide
-
-(3 durations < 0.005s hidden.  Use -vv to show these durations.)
-2 passed in 44.96s

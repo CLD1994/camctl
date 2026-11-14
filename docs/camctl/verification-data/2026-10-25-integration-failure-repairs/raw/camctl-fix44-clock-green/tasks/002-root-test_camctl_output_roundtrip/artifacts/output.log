@@ -1,6 +1,0 @@
-.                                                                        [100%]
-============================== slowest durations ===============================
-28.77s call     tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain
-
-(2 durations < 0.005s hidden.  Use -vv to show these durations.)
-1 passed in 28.97s

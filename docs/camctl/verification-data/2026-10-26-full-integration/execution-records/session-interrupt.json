@@ -1,8 +1,0 @@
-{
-  "pid": 1967562,
-  "pgid": 1967562,
-  "command": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/023-camctl-session/source/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/session -q --durations=0 -p integration_progress --basetemp /tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/023-camctl-session/tmp/pytest -p camctl_memory_plugin --camctl-memory-limit 2GiB --camctl-memory-cgroup-root /sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67 ",
-  "signal": "SIGINT",
-  "reason": "bounded reproduction confirmed observer ended with missing snapshot_owner while tested coroutine waits forever on swept event",
-  "proof": "/tmp/camctl-full-272f-diagnosis/session-observer-control/red-receipt.json"
-}

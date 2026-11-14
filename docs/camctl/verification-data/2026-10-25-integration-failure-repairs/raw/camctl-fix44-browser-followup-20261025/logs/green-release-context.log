@@ -1,9 +1,0 @@
-
- RUN  v5.0.1 /tmp/camctl-fix44-browser-20261025/apps/client
-
-
- Test Files  2 passed (2)
-      Tests  5 passed | 103 skipped (108)
-   Start at  17:09:00
-   Duration  48.82s (tests 90%, import 8%, transform 3%)
-

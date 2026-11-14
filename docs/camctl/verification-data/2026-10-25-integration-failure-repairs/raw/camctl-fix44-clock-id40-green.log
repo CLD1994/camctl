@@ -1,6 +1,0 @@
-证据目录 /tmp/camctl-fix44-clock-id40-green
-启动 root/test_camctl_cancellation_roundtrip pid=1049985 cwd=/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/source
-进度 root/test_camctl_cancellation_roundtrip pid=1049985 tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result
-进度 root/test_camctl_cancellation_roundtrip pid=1049985 tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result
-结束 root/test_camctl_cancellation_roundtrip status=passed exit=0 seconds=33.534
-汇总 /tmp/camctl-fix44-clock-id40-green/summary.json exit=0

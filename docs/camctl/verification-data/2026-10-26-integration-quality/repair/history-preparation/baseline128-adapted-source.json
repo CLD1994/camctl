@@ -1,5 +1,0 @@
-{
-  "head": "b8fd1387f856d9a4e4a5384d57fa3bfb9b9f3f39",
-  "test_sha256": "3386729e77008c3addee29d5ff19a9500ce01cdfe5615e3ca934942f5e670eaa",
-  "changes": "only _finish_many true asynchronous database adapter; count remains 128; original assertions unchanged"
-}

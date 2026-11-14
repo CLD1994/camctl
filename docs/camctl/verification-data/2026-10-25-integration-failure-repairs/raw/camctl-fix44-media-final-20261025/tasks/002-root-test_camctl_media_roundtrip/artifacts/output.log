@@ -1,8 +1,0 @@
-...                                                                      [100%]
-============================== slowest durations ===============================
-21.20s call     tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers
-11.98s call     tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing
-0.01s call     tests/integration/test_camctl_media_roundtrip.py::test_managed_tool_children_stay_in_process_group
-
-(6 durations < 0.005s hidden.  Use -vv to show these durations.)
-3 passed in 33.29s

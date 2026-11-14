@@ -1,9 +1,0 @@
-....                                                                     [100%]
-============================== slowest durations ===============================
-21.37s call     tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires
-15.35s call     tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work
-15.14s call     tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers
-12.02s call     tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed
-
-(8 durations < 0.005s hidden.  Use -vv to show these durations.)
-4 passed in 63.99s (0:01:03)

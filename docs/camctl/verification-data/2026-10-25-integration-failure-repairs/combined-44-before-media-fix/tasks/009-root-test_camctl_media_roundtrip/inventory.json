@@ -1,4 +1,0 @@
-[
-  "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
-  "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers"
-]

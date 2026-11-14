@@ -1,6 +1,0 @@
-{
-  "assertions_preserved": 58,
-  "test_functions_preserved": 7,
-  "decorators_and_parameterization_preserved": true,
-  "normalization": "仅将flow.owned和pipeline.owned规范成同一测试观察连接引用"
-}

@@ -1,6 +1,0 @@
-证据目录 /tmp/camctl-quality-repair-evidence/final-history/related-run
-启动 camctl/history pid=1710352 cwd=/tmp/camctl-quality-repair-evidence/final-history/related-run/tasks/001-camctl-history/source
-进度 camctl/history pid=1710352 tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[output-plans-1-1-4096]
-进度 camctl/history pid=1710352 tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[complete_without_length-forward]
-结束 camctl/history status=passed exit=0 seconds=34.032
-汇总 /tmp/camctl-quality-repair-evidence/final-history/related-run/summary.json exit=0

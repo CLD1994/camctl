@@ -1,5 +1,0 @@
-[
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/081-root-test_camctl_acceptance_map/source/tests/integration/test_camctl_acceptance_map.py::test_every_software_contract_has_evidence_owner",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/081-root-test_camctl_acceptance_map/source/tests/integration/test_camctl_acceptance_map.py::test_summary_counts_match_entries",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/081-root-test_camctl_acceptance_map/source/tests/integration/test_camctl_acceptance_map.py::test_every_contract_scenario_is_mapped"
-]

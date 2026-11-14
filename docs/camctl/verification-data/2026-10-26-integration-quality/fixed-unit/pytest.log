@@ -1,9 +1,0 @@
-........................................................................ [ 66%]
-....................................                                     [100%]
-============================= slowest 5 durations ==============================
-0.29s call     tests/unit/persistence/test_segment_saved_finish_facts.py::test_explicit_failure_rule_consumes_only_supplied_error_facts[None]
-0.19s call     tests/unit/persistence/test_segment_saved_finish_facts.py::test_canonical_orders_originals_before_preview_and_uses_actual_mapping[False]
-0.04s call     tests/unit/persistence/test_fixed_member_consumption.py::test_finish_candidates_carry_the_file_already_read_for_each_member[False]
-0.01s call     tests/unit/persistence/test_segment_saved_finish_facts.py::test_original_key_verification_consumes_whole_exact_event_group[missing_last]
-0.01s call     tests/unit/persistence/test_segment_saved_finish_facts.py::test_result_identity_keeps_no_activity_and_no_results_partition[None]
-108 passed in 2.13s

@@ -1,8 +1,0 @@
-[
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source/tests/integration/test_device_capability_declarations.py::test_installed_declarations_match_checkout_and_protocol_resources",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source/tests/integration/test_device_capability_declarations.py::test_installed_arbitrary_driver_keeps_empty_actions_and_individual_sources",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source/tests/integration/test_device_capability_declarations.py::test_installed_source_change_keeps_accepted_execution_definition",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source/tests/integration/test_device_capability_declarations.py::test_installed_document_survives_client_loader_http_and_invalid_reload",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source/tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source/tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart"
-]

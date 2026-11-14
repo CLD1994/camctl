@@ -1,5 +1,0 @@
-docs/camctl/integration-test-batch-write-cost-2026-10-25.md: ../../apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py:448
-docs/camctl/integration-test-batch-write-cost-2026-10-25.md: ../../apps/camctl/src/camctl/persistence/repositories/segment_transactions.py:990
-docs/camctl/integration-test-batch-write-cost-2026-10-25.md: ../../apps/camctl/src/camctl/persistence/repositories/segments.py:146
-docs/camctl/integration-test-batch-write-cost-2026-10-25.md: ../../apps/camctl/src/camctl/persistence/repositories/result_pages.py:315
-docs/camctl/integration-test-batch-write-cost-2026-10-25.md: ../../apps/camctl/src/camctl/persistence/repositories/result_pages.py:465

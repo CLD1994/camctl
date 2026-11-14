@@ -1,6 +1,0 @@
-[
-  "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]",
-  "tests/integration/test_camctl_process_recovery.py::test_early_reap_never_signals_stale_group_or_starts_run",
-  "tests/integration/test_camctl_process_recovery.py::test_original_group_does_not_kill_parallel_submit_or_other_groups[grouped]",
-  "tests/integration/test_camctl_process_recovery.py::test_original_group_does_not_kill_parallel_submit_or_other_groups[detached]"
-]

@@ -1,6 +1,0 @@
-3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]
-3.53.1
-/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py
-{"facts": [[1, 3, 1, null, null, 1, 10, 10, 3, 2]], "members": [1], "outcome": "completed", "error": "None"}
-.
-1 passed in 2.69s

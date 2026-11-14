@@ -1,9 +1,0 @@
-[
-  "tests/integration/session/test_idle_background_exit.py::test_idle_database_enters_settlement_without_restarting_empty_rounds[False]",
-  "tests/integration/session/test_idle_background_exit.py::test_idle_database_enters_settlement_without_restarting_empty_rounds[True]",
-  "tests/integration/session/test_idle_background_exit.py::test_late_background_failure_is_delivered_before_normal_close[settlement]",
-  "tests/integration/session/test_idle_background_exit.py::test_late_background_failure_is_delivered_before_normal_close[facts_read]",
-  "tests/integration/session/test_idle_background_exit.py::test_new_work_during_settlement_is_driven_before_admission_closes[False]",
-  "tests/integration/session/test_idle_background_exit.py::test_new_work_during_settlement_is_driven_before_admission_closes[True]",
-  "tests/integration/session/test_idle_background_exit.py::test_persistent_work_keeps_driving_before_idle_settlement"
-]

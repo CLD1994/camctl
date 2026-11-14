@@ -1,5 +1,0 @@
-[
-  "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[projection]",
-  "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_before]",
-  "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_after]"
-]

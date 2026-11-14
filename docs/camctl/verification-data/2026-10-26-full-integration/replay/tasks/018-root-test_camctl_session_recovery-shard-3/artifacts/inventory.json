@@ -1,4 +1,0 @@
-[
-  "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
-  "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers"
-]

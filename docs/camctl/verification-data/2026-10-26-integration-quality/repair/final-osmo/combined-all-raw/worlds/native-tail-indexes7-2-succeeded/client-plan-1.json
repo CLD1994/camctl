@@ -1,1 +1,0 @@
-{"name":"osmo-camera_timelapse","actions":[{"name":"capture","type":"camera_timelapse","device_id":"osmo360ii","scheduled_at":"2026-10-25 20:39:14","params":{"type":"osmo360ii_timelapse","interval_s":2,"duration_s":300,"bitrate":"high","exposure":{"mode":"auto"}},"policy":{"max_delay_ms":30000}}],"request_id":"6483637496057300863","created_at":"2026-10-25 20:39:17"}

@@ -1,4 +1,0 @@
-[
-  "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
-  "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]"
-]

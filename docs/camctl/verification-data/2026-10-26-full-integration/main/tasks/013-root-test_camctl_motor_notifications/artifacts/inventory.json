@@ -1,7 +1,0 @@
-[
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/013-root-test_camctl_motor_notifications/source/tests/integration/test_camctl_motor_notifications.py::test_client_export_host_callback_report_import_boundaries",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/013-root-test_camctl_motor_notifications/source/tests/integration/test_camctl_motor_notifications.py::test_slow_callback_allows_submit_new_run_and_fifo",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/013-root-test_camctl_motor_notifications/source/tests/integration/test_camctl_motor_notifications.py::test_motor_and_camera_share_cli_without_device_result_confusion",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/013-root-test_camctl_motor_notifications/source/tests/integration/test_camctl_motor_notifications.py::test_host_restarts_interrupted_cli_without_repeating_notification[after_intent-0]",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/013-root-test_camctl_motor_notifications/source/tests/integration/test_camctl_motor_notifications.py::test_host_restarts_interrupted_cli_without_repeating_notification[after_write-1]"
-]

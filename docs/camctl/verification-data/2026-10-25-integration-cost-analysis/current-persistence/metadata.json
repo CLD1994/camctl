@@ -1,6 +1,0 @@
-{
-  "source_head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
-  "source": "/tmp/camctl-timing-current-persistence-k83xjj2w/source",
-  "run": "/tmp/camctl-timing-current-persistence-k83xjj2w",
-  "nodeid": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency"
-}

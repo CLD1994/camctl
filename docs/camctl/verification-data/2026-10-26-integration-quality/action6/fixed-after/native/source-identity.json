@@ -1,7 +1,0 @@
-{
-  "production_commit": "61c675710d8350a96f2f7d164f5ff1d6a220684f",
-  "test_file": "/tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py",
-  "test_sha256": "b0b468267e8f450010a6b2100c85f4aa3435f7d87b56efc08cb6de6a28afb874",
-  "python": "3.11.17",
-  "node": "24.22.1"
-}

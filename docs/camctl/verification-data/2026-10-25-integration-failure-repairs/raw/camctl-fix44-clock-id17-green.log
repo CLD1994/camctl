@@ -1,6 +1,0 @@
-证据目录 /tmp/camctl-fix44-clock-id17-green
-启动 root/test_hasselblad_photo_roundtrip pid=1053132 cwd=/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source
-进度 root/test_hasselblad_photo_roundtrip pid=1053132 tests/integration/test_hasselblad_photo_roundtrip.py
-进度 root/test_hasselblad_photo_roundtrip pid=1053132 tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
-结束 root/test_hasselblad_photo_roundtrip status=failed exit=1 seconds=43.281
-汇总 /tmp/camctl-fix44-clock-id17-green/summary.json exit=1

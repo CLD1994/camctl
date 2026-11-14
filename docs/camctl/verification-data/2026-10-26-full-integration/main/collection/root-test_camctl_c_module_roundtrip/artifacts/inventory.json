@@ -1,5 +1,0 @@
-[
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_c_module_roundtrip/source/tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_c_module_roundtrip/source/tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_c_module_roundtrip/source/tests/integration/test_camctl_c_module_roundtrip.py::test_late_cancel_roundtrip_via_c_module"
-]

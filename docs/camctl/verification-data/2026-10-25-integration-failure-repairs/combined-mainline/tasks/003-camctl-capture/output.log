@@ -1,7 +1,0 @@
-.                                                                        [100%]
-============================== slowest durations ===============================
-3.68s call     tests/integration/capture/test_action6_budget_cold_recovery.py::test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy
-0.01s setup    tests/integration/capture/test_action6_budget_cold_recovery.py::test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy
-
-(1 durations < 0.005s hidden.  Use -vv to show these durations.)
-1 passed in 15.56s

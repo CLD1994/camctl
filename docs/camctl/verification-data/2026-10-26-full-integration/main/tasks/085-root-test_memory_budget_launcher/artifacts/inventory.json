@@ -1,8 +1,0 @@
-[
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/085-root-test_memory_budget_launcher/source/tests/integration/test_memory_budget_launcher.py::test_launcher_handshake_and_close_support_high_file_descriptors",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/085-root-test_memory_budget_launcher/source/tests/integration/test_memory_budget_launcher.py::test_launcher_does_not_evaluate_bash_env_before_entering_group",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/085-root-test_memory_budget_launcher/source/tests/integration/test_memory_budget_launcher.py::test_exec_launcher_preserves_pid_process_group_stdio_and_cwd",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/085-root-test_memory_budget_launcher/source/tests/integration/test_memory_budget_launcher.py::test_failed_group_entry_never_executes_the_business_command",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/085-root-test_memory_budget_launcher/source/tests/integration/test_memory_budget_launcher.py::test_real_cgroup_finishes_the_whole_process_tree",
-  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/085-root-test_memory_budget_launcher/source/tests/integration/test_memory_budget_launcher.py::test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero"
-]

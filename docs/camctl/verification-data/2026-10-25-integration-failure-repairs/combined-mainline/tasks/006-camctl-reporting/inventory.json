@@ -1,3 +1,0 @@
-[
-  "tests/integration/reporting/test_result_error_state.py::test_uninterpretable_frozen_error_stops_worker_without_publish"
-]

@@ -1,9 +1,0 @@
-内存预算启动收据：/tmp/camctl-memsw-validation/host-deployment-delegation/launcher.json
-.....                                                                    [100%]
-=============================== warnings summary ===============================
-../../../../../../workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469
-  /workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: could not create cache path /.pytest_cache/v/cache/nodeids: [Errno 13] Permission denied: '/pytest-cache-files-p6eex7k2'
-    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-5 passed, 1 warning in 36.65s

@@ -1,1 +1,0 @@
-{"status": "passed", "scope": "existing real read gate and ShellFileTools dd command", "forwarded_before_release": 0, "offset": 65536, "forwarded_after_release": 66560, "exit_code": 0, "does_not_validate": "installed CLI, persistence or full OSMO scenario"}

@@ -1,6 +1,0 @@
-内存预算启动收据：/tmp/camctl-memsw-validation/capacity-delegation/launcher.json
-ERROR: usage: python -m pytest [options] [file_or_dir] [file_or_dir] [...]
-python -m pytest: error: unrecognized arguments: --camctl-memory-limit 2GiB --camctl-memory-cgroup-root /sys/fs/cgroup/memory/camctl-budget-1480119-26f8d426f65c4832bf4d948e91468e13
-  inifile: /opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/pyproject.toml
-  rootdir: /opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl
-

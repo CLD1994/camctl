@@ -1,7 +1,0 @@
-{
-  "source_head": "7644b7c6be42a995f3eab629721296e01309d826",
-  "source": "/tmp/camctl-same-check-options-ykdqfnct/source",
-  "compared_files": 1139,
-  "mismatches": [],
-  "method": "逐项与git show baseline:path字节比较；未将snapshot当作git worktree。"
-}

@@ -1,4 +1,0 @@
-PLAN_OK 5
-connection_in_transaction False
-COPY_RECEIPT DbOutcomeKind.COMPLETED None
-COPY_ACTIONS [(5,), (2,)]

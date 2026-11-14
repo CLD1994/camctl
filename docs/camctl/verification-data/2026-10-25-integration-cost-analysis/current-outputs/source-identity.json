@@ -1,7 +1,0 @@
-{
-  "source_repository": "/opt/devcontainer/.codex/worktrees/de38/camctl",
-  "head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
-  "source_snapshot": "/tmp/camctl-timing-current-outputs-20261025T132740Z/source",
-  "method": "git archive HEAD",
-  "source_status": ""
-}

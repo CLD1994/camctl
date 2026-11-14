@@ -1,8 +1,0 @@
-[
-  "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
-  "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
-  "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
-  "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
-  "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
-  "tests/integration/test_camctl_session_recovery.py::test_late_result_preserves_terminal_decision"
-]

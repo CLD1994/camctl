@@ -1,4 +1,0 @@
-[
-  "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
-  "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries"
-]

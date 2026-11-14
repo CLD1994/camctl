@@ -1,8 +1,0 @@
-{
-  "head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
-  "tracked_files": 3656,
-  "tracked_bytes": 77557154,
-  "verification_data_files": 1761,
-  "verification_data_bytes": 47897148,
-  "boundary": "静态追踪文件体积；不是实际复制I/O或耗时测量。run-integration.py逐任务复制整个冻结源码。"
-}
