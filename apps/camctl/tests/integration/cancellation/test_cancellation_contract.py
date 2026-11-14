@@ -16,12 +16,8 @@ import pytest
 from ..support.database import business_database, database_path
 
 from camctl.cancellation.models import (
-    CancelApplyMode,
     CancelTarget,
     FixedCancelSet,
-    FixedTarget,
-    CancellationEffect,
-    SelectionBasis,
 )
 from camctl.persistence.repositories.cancellation import load_eligibility_facts
 from camctl.cancellation.rules import (
@@ -212,35 +208,23 @@ def _settlement(database, owned):
         withdrawal_execute=execute_withdrawal)
 
 
-def _runtime(database, owned):
+def _runtime(database, owned, result_operations):
     from camctl.cancellation.service import CancellationRuntime
 
+    class RecordingRepository(CancellationRepository):
+        def record_cancel_result(self, command, key, current):
+            result = super().record_cancel_result(command, key, current)
+            result_operations.append((command, key, result))
+            return result
+
     return CancellationRuntime(
-        database=database, repository=CancellationRepository(),
+        database=database, repository=RecordingRepository(),
         settlement=_settlement(database, owned), occurred_at=lambda: _TICK)
 
 
 def _eligibility(owned, target_id):
     return decide_cancel_eligibility(
         load_eligibility_facts(owned.connection, target_id))
-
-
-def _expected_results(owned, direct_ids):
-    """按目标事实独立推导逐项结果（不读取取消流程的任何状态）。"""
-    from camctl.cancellation.rules import CancelEligibility
-
-    expected = {}
-    for target_id in direct_ids:
-        eligibility = _eligibility(owned, target_id)
-        if eligibility is CancelEligibility.TERMINAL:
-            expected[target_id] = ("succeeded", 2)
-        elif eligibility is CancelEligibility.ALLOW_PRE_START:
-            expected[target_id] = ("succeeded", 1)
-        elif eligibility is CancelEligibility.REJECT_UNSUPPORTED:
-            expected[target_id] = ("failed", 1)
-        else:
-            raise AssertionError(f"矩阵目标应无其他分区: {target_id}")
-    return expected
 
 
 async def _run_cancel(owned, cancel_action_id, target):
@@ -259,15 +243,16 @@ async def _run_cancel(owned, cancel_action_id, target):
         auto_candidates=sqlite_auto_candidates(
             owned.connection, resolution.action_ids)))
     assert hasattr(fixed, "targets"), fixed
-    saved = repository.fix_cancel_targets(
-        FixCancelTargets(cancel_action_id, fixed, _TICK),
-        new_operation_key(), owned)
+    fix_command = FixCancelTargets(cancel_action_id, fixed, _TICK)
+    fix_key = new_operation_key()
+    saved = repository.fix_cancel_targets(fix_command, fix_key, owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    result_operations = []
     async with business_database(database_path(owned)) as database:
         progress = await apply_cancel(
             ApplyCancel(origin_action_id=cancel_action_id,
                         item_ids=saved.value.item_ids),
-            _runtime(database, owned))
+            _runtime(database, owned, result_operations))
     from camctl.cancellation.models import FinishCancelAction
     from camctl.cancellation.rules import summarize_cancel
     summary = summarize_cancel(progress)
@@ -275,7 +260,8 @@ async def _run_cancel(owned, cancel_action_id, target):
         FinishCancelAction(cancel_action_id, _TICK),
         new_operation_key(), owned)
     assert finish.kind is DbOutcomeKind.COMPLETED, finish.error
-    return progress, summary, finish.value
+    return (progress, summary, finish.value, (fix_command, fix_key, saved.value),
+            result_operations)
 
 
 def _facts_of(owned, action_ids):
@@ -304,37 +290,54 @@ def _item_results(owned, cancel_action_id):
 
 
 class TestEntryMatrix:
+    @pytest.mark.parametrize(
+        "cancel_id,target,expected",
+        [
+            pytest.param(
+                _ACTION_CANCEL, CancelTarget(action_instance_id=_A),
+                {_A: ("failed", 1)}, id="action"),
+            pytest.param(
+                _GROUP_CANCEL, CancelTarget(plan_instance_id=1, group="g"),
+                {_A: ("failed", 1), _B: ("succeeded", 1)}, id="group"),
+            pytest.param(
+                _PLAN_CANCEL, CancelTarget(plan_instance_id=1),
+                {_A: ("failed", 1), _B: ("succeeded", 1),
+                 _C: ("succeeded", 2), _P: ("succeeded", 2)}, id="plan"),
+            pytest.param(
+                _REQUEST_CANCEL, CancelTarget(request_id="4242"),
+                {_A: ("failed", 1), _B: ("succeeded", 1),
+                 _C: ("succeeded", 2), _P: ("succeeded", 2)}, id="request"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_four_entries_match_independent_results(self, pipeline):
+    async def test_four_entries_match_independent_results(
+            self, pipeline, cancel_id, target, expected):
         owned = pipeline
-        cases = {
-            _ACTION_CANCEL: (CancelTarget(action_instance_id=_A), [_A]),
-            _GROUP_CANCEL: (CancelTarget(plan_instance_id=1, group="g"),
-                            [_A, _B]),
-            _PLAN_CANCEL: (CancelTarget(plan_instance_id=1),
-                           [_A, _B, _C, _P]),
-            _REQUEST_CANCEL: (CancelTarget(request_id="4242"),
-                              [_A, _B, _C, _P]),
-        }
-        results = {}
-        for cancel_id, (target, direct_ids) in cases.items():
-            # 期望值在每个入口施加取消前按目标事实独立推导；前序
-            # 入口的取消会改变目标状态，后续入口按演进后事实推导。
-            expected = _expected_results(owned, direct_ids)
-            _, summary, finished = await _run_cancel(owned, cancel_id, target)
-            assert summary.status.value == "failed", (cancel_id, summary.status)
-            assert finished.action_status == 4
-            results[cancel_id] = _item_results(owned, cancel_id)
-            assert results[cancel_id] == expected, \
-                (cancel_id, results[cancel_id], expected)
-        # 计划与请求入口覆盖同一集合，逐项结果一致。
-        assert results[_PLAN_CANCEL] == results[_REQUEST_CANCEL]
+        # 每个参数使用独立数据库：B 在施加取消前均尚未启动。
+        assert owned.connection.execute(
+            "SELECT id, status, cancel_requested FROM actions"
+            " WHERE id IN (?, ?, ?, ?) ORDER BY id", (_A, _B, _C, _P)
+        ).fetchall() == [(_A, 2, 0), (_B, 1, 0), (_C, 3, 0), (_P, 3, 0)]
+        _, summary, finished, _, _ = await _run_cancel(owned, cancel_id, target)
+        assert summary.status.value == "failed"
+        assert finished.action_status == 4
+        assert _item_results(owned, cancel_id) == expected
+        # A 的拒绝不改变其原执行状态；直接寻址 B 时取消实际生效。
+        assert _value(owned, "SELECT status, cancel_requested FROM actions WHERE id=?",
+                      _A) == (2, 0)
+        assert _value(owned, "SELECT status, cancel_requested FROM actions WHERE id=?",
+                      _B) == ((6, 1) if _B in expected else (1, 0))
+        # 计划及请求直接包含已终态的 P；它仍独立撤回 ready 交付。
+        assert _value(owned, "SELECT status, cancel_requested FROM actions WHERE id=?",
+                      _P) == (3, 0)
+        assert _value(owned, "SELECT status, withdrawal_state FROM deliveries WHERE id=301") == (
+            (8, 3) if _P in expected else (5, 1))
 
     @pytest.mark.asyncio
     async def test_cancel_results_survive_restart(self, pipeline):
         """已拒绝任务后来自然结束不改旧取消失败；重送不重复效果。"""
         owned = pipeline
-        _, _, finished = await _run_cancel(
+        _, _, finished, fixed_operation, result_operations = await _run_cancel(
             owned, _PLAN_CANCEL, CancelTarget(plan_instance_id=1))
         assert finished.action_status == 4
         # 边界 H：固定已保存事实的字节。
@@ -363,7 +366,26 @@ class TestEntryMatrix:
             owned, "SELECT status, error_code FROM cancel_items"
             " WHERE action_id = ? AND target_action_id = ?",
             _PLAN_CANCEL, _A) == (4, 1)
-        # 同一取消的事务重送不重复效果；旧历史事实字节保持。
+        # 拒绝结果用原输入和原键重送，目标结束后仍复用原失败。
+        rejected_command, rejected_key, rejected_result = next(
+            operation for operation in result_operations
+            if operation[0].code == "task_cancel_unsupported")
+        replay_result = CancellationRepository().record_cancel_result(
+            rejected_command, rejected_key, owned)
+        assert replay_result.kind is DbOutcomeKind.COMPLETED, replay_result.error
+        assert replay_result.value.disposition.value == "already"
+        assert replay_result.value.item_ids == rejected_result.value.item_ids
+        assert _value(
+            owned, "SELECT status, error_code FROM cancel_items"
+            " WHERE action_id = ? AND target_action_id = ?",
+            _PLAN_CANCEL, _A) == (4, 1)
+        # 固定事务使用原输入和原键重送，复用首次结果。
+        fix_command, fix_key, original_result = fixed_operation
+        replay = CancellationRepository().fix_cancel_targets(fix_command, fix_key, owned)
+        assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
+        assert replay.value.disposition.value == "already"
+        assert replay.value.item_ids == original_result.item_ids
+        # 同一取消再次固定不重复效果；旧历史事实字节保持。
         from camctl.cancellation.models import FixCancelTargets
 
         repository = CancellationRepository()
@@ -373,13 +395,13 @@ class TestEntryMatrix:
         assert resend.value.disposition.value == "already", resend
         after = tuple(owned.connection.execute(
             "SELECT id, body_json FROM history_events ORDER BY id").fetchall())
-        assert after[:len(boundary)] == boundary
+        assert after == boundary
 
     @pytest.mark.asyncio
     async def test_finished_cancel_does_not_wait_for_device(self, pipeline):
         """全部有限处理结束后取消动作结束，不等待设备或客户端。"""
         owned = pipeline
-        _, summary, finished = await _run_cancel(
+        _, summary, finished, _, _ = await _run_cancel(
             owned, _GROUP_CANCEL, CancelTarget(plan_instance_id=1, group="g"))
         # 组入口：A 拒绝、B 未启动取消——本次处理全部结束。
         assert finished.action_status == 4
