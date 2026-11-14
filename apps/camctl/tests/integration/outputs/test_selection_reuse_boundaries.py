@@ -17,7 +17,7 @@ from camctl.persistence.repositories.transactions import TransactionError
 from ..support.output_source_cases import observed_event_guards
 
 from .test_selection_reuse import _save, _reuse, _Advance, selection_database, family_database
-from .test_selection_authority import _request, _snapshot, _NOW
+from .test_selection_authority import _snapshot, _NOW
 from .test_selection_event_sequence import _scenarios, _Sequence
 from .test_sources import _seed_output
 from .test_read_associations import _command as _read_command
