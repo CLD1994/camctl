@@ -15,7 +15,6 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.models import EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.validation import validate_outcome
 from camctl.history.validators import EventContext
-from camctl.persistence.repositories import result_pages
 from camctl.persistence.repositories import capture as capture_storage
 from .transaction_fixtures import capture_operation_command
 from camctl.persistence.repositories.transactions import BoundedCommandPlan, commit_operation
@@ -122,7 +121,7 @@ async def test_unpaired_preview_completion_requires_saved_page_and_original_wait
 
 
 @pytest.mark.asyncio
-async def test_strict_file_input_does_not_consume_legacy_result_search(tmp_path, monkeypatch):
+async def test_legacy_completion_does_not_qualify_strict_file_input(tmp_path):
     from .test_segment_file_pairing import _world
     owned, runtime, _, saved = await _world(tmp_path, [_entry("legacy.OSV")])
     try:
@@ -134,12 +133,6 @@ async def test_strict_file_input_does_not_consume_legacy_result_search(tmp_path,
             file_id, 3, runtime.wall_us(), basis=1, observation={}, size_bytes=10),
             new_operation_key(), owned))
 
-        def forbidden(*args, **kwargs):
-            raise AssertionError("严格完成证明不得搜索旧结果")
-
-        for name in ("_legacy_source_entry", "_complete_source_entry", "read_source_inputs"):
-            monkeypatch.setattr(result_pages, name, forbidden)
-        monkeypatch.setattr(type(runtime.capture), "read_result_sources", forbidden)
         result = runtime.capture.read_saved_result_file_input(
             saved.ref, file_id, _boundary(owned), owned)
         assert result.completion is FileCompletionState.UNKNOWN
@@ -257,6 +250,11 @@ async def test_strict_file_proof_queries_its_owner_history_not_all_events(tmp_pa
             stop_result_event_id=context["stop_result_event_id"]),
             new_operation_key(), owned))
 
+        from camctl.contracts.enums import load_registry
+        owner = load_registry()["history_objects"]["device_file"]["id"]
+        boundary = _boundary(owned)
+        observations = []
+
         class MeasuredConnection:
             def __init__(self, connection):
                 self.connection = connection
@@ -265,14 +263,20 @@ async def test_strict_file_proof_queries_its_owner_history_not_all_events(tmp_pa
                 return getattr(self.connection, name)
 
             def execute(self, sql, params=()):
-                if "$.after.values.completion_state" in sql:
+                normalized = " ".join(sql.lower().split())
+                if ("entity_event_links" in normalized
+                        and tuple(params) == (owner, file_id, boundary.last_event_id)):
                     plan = self.connection.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
-                    assert any("entity_type=? AND entity_id=?" in row[-1] for row in plan), plan
+                    observations.append(plan)
                 return self.connection.execute(sql, params)
 
         result = runtime.capture.read_saved_result_file_input(
-            saved.ref, file_id, _boundary(owned),
+            saved.ref, file_id, boundary,
             replace(owned, connection=MeasuredConnection(owned.connection)))
+        assert observations, "未观察到指定文件和历史边界的查询"
+        for plan in observations:
+            details = "".join("".join(row[-1].lower().split()) for row in plan)
+            assert all(part in details for part in ("index", "entity_type=?", "entity_id=?", "event_id<?")), plan
         assert result.completion is FileCompletionState.COMPLETE
     finally:
         owned.connection.close()

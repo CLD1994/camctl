@@ -143,19 +143,36 @@ async def test_every_output_batch_remains_invisible_until_full_commit(tmp_path):
 async def test_late_batch_or_final_guard_failure_rolls_back_entire_group(tmp_path,cut,monkeypatch):
     import sqlite3
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
-    before=_fingerprint(owned.connection);number=0
+    before=_complete_persisted_state(owned);number=0
     def hook(stage,sql,params):
         nonlocal number
         if stage=='before' and sql.startswith('INSERT INTO outputs'):
             number+=1
             if number==cut:raise sqlite3.OperationalError('controlled batch failure')
+    error = transactions.ConsistencyError('controlled final guard failure')
+    hits = []
     if cut=='final':
-        def fail(*args):raise transactions.ConsistencyError('controlled final guard failure')
-        monkeypatch.setattr(transactions,'verify_publication',fail)
+        from camctl.persistence.repositories.validation import BusinessStorage, build_business_rules
+        real_rule = build_business_rules()['segments']
+        branch = load_event_registry()['events']['SEGMENT_FACTS']
+        def fail_after_real_rule(event, context):
+            real_rule(event, context)
+            if event.event_type == branch['id'] and event.reason == branch['branches']['ACTIVATE']['reason']:
+                hits.append(event.event_id)
+                raise error
+        storage = BusinessStorage(overrides={'segments': fail_after_real_rule})
+        original_commit = transactions.commit_operation
+        monkeypatch.setattr(transactions, 'commit_operation',
+            lambda command, key, actual: original_commit(command, key, actual, storage=storage))
     try:
         saved=transactions.finish_segment_recording(request,new_operation_key(),replace(owned,connection=ConnectionProbe(owned.connection,hook)),batch_size=2)
         assert saved.kind=='rolled_back'
-        assert _fingerprint(owned.connection)==before
+        if cut == 'final':
+            assert hits and saved.error is error
+        else:
+            assert number == cut and isinstance(saved.error, sqlite3.OperationalError)
+        assert not owned.connection.in_transaction
+        assert _complete_persisted_state(owned)==before
         assert repo.read_active_set(ref.action_id,owned) is None
     finally:owned.connection.close()
 
@@ -623,10 +640,11 @@ async def test_direct_terminal_request_cannot_omit_its_complete_group(tmp_path,m
             plan_read_scope=PlanReadScope(action['plan_id'],2))
     decorate_transaction_command(monkeypatch,transactions,plan)
     try:
-        before=_fingerprint(owned.connection)
+        before=_complete_persisted_state(owned)
         saved=transactions.finish_segment_recording(request,key,owned,batch_size=2)
         assert saved.kind=='rolled_back',saved.error
-        assert _fingerprint(owned.connection)==before
+        assert not owned.connection.in_transaction
+        assert _complete_persisted_state(owned)==before
     finally:owned.connection.close()
 
 
@@ -710,10 +728,11 @@ async def test_final_activation_independently_requires_applicable_closure(tmp_pa
         return replace(result,events=events(),complete=lambda db:None)
     decorate_transaction_command(monkeypatch,transactions,plan)
     try:
-        before=_fingerprint(owned.connection)
+        before=_complete_persisted_state(owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
         assert saved.kind=='rolled_back',saved.error
-        assert _fingerprint(owned.connection)==before
+        assert not owned.connection.in_transaction
+        assert _complete_persisted_state(owned)==before
     finally:owned.connection.close()
 
 

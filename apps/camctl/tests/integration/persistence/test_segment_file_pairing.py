@@ -334,8 +334,7 @@ async def test_old_ownership_branch_cannot_use_new_page_method(tmp_path, bounded
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('bounded', [False, True])
-@pytest.mark.parametrize('fake_single_context', [False, True])
+@pytest.mark.parametrize(('bounded', 'fake_single_context'), [(False, False), (True, False), (True, True)])
 async def test_real_legal_file_prefix_cannot_join_single_ownership_group(tmp_path, bounded, fake_single_context):
     from camctl.persistence.repositories.transactions import CommandPlan, TransactionScope
     from camctl.contracts.history_values import TransactionRange

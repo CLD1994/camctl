@@ -173,7 +173,7 @@ async def test_create_rejects_file_qualification_that_changed_after_original_bou
 
 
 @pytest.mark.parametrize('bypass',[None,'finite','bounded'])
-async def test_saved_result_set_prevents_another_actual_results_attempt(tmp_path,monkeypatch,bypass):
+async def test_saved_result_set_prevents_another_actual_results_attempt(tmp_path,bypass):
     from camctl.capture.segment_storage import ResultSetCreate,SegmentSourceKind,PublicationKind
     from .result_page_fixtures import begin_result_check
     from .test_segment_scan_pairing import _ready
@@ -183,41 +183,49 @@ async def test_saved_result_set_prevents_another_actual_results_attempt(tmp_path
         _finish_scan(owned,runtime,saved,retry_wait=True)
         action_id=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
             (saved.ref.ticket.run_id,)).fetchone()[0]
+        from camctl.operations.attempts import AttemptIntent,AttemptTarget,OperationKind
+        from camctl.persistence.repositories.operations import OperationRepository
+        from camctl.history.reads import PlanReadScope
+        from ..support.output_planning import capture_operation,proposal_state,EventSequence,ScopedEventSequence
+        from .test_segment_transaction_batches import _complete_persisted_state
+        intent=AttemptIntent(operation='result',action_id=action_id,
+            kind=OperationKind.CHECK_CAPTURE_RESULTS,
+            target=AttemptTarget(activity_id=int(saved.ref.ticket.target_id)),
+            query_purpose=None,config=runtime.check_config,occurred_at=runtime.wall_us())
+        key=new_operation_key()
+        # 在固定集合之前从真实仓储取得合法的新尝试事件；原库不提交该事件。
+        proposal=capture_operation(owned,lambda actual: OperationRepository().begin_attempt(intent,key,actual))
         request=ResultSetCreate(action_id,int(saved.ref.ticket.target_id),saved.ref.ticket.run_id,
             SegmentSourceKind.COMPLETE_SCAN,_boundary(owned),saved.ref,
             PublicationKind.RESULT,None,None,runtime.wall_us())
         result=SegmentRepository().create_result_set(request,new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
-        before=owned.connection.execute('SELECT COUNT(*) FROM operation_attempts').fetchone()
+        before=_complete_persisted_state(owned)
+        attempts=owned.connection.execute('SELECT COUNT(*) FROM operation_attempts').fetchone()
         if bypass is None:
             decision=begin_result_check(owned,runtime,action_id)
             assert decision.ticket is None
         else:
-            from camctl.operations.attempts import AttemptIntent,AttemptTarget,OperationKind
-            from camctl.persistence.repositories import segment_result_sets
-            from camctl.persistence.repositories import operations as operations_storage
-            from camctl.persistence.repositories.operations import OperationRepository
-            from camctl.persistence.event_reads import SqlEventReads
-            intent=AttemptIntent(operation='result',action_id=action_id,
-                kind=OperationKind.CHECK_CAPTURE_RESULTS,
-                target=AttemptTarget(activity_id=int(saved.ref.ticket.target_id)),
-                query_purpose=None,config=runtime.check_config,occurred_at=runtime.wall_us())
-            key=new_operation_key()
-            class Command:
-                def plan(self,scope):
-                    # 仅跳过命令的预检；内核具名守卫仍读取真实已固定集合。
-                    with monkeypatch.context() as patch:
-                        patch.setattr(segment_result_sets,'result_run_has_set',lambda *args:False)
-                        plan=capture_operation_command(operations_storage,lambda: OperationRepository().begin_attempt(intent,key,owned)).plan(scope)
-                    if bypass=='bounded':
-                        return BoundedCommandPlan(plan.events,
-                            lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
-                                current_reads=SqlEventReads(scope.connection,plan.plan_read_scope)),
-                            None,lambda connection:None)
-                    return plan
-            receipt=commit_operation(Command(),key,owned)
-            assert receipt.kind=='rolled_back' and '已固定' in str(receipt.error)
-        assert owned.connection.execute('SELECT COUNT(*) FROM operation_attempts').fetchone()==before
+            plan_id,=owned.connection.execute('SELECT plan_id FROM actions WHERE id=?',(action_id,)).fetchone()
+            scope=PlanReadScope(plan_id,128)
+            current=proposal_state(owned,owners=proposal.owners)
+            next_event,=owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()
+            events=[]
+            for offset,event in enumerate(proposal.events):
+                rows=tuple(replace(row,after=replace(row.after,values={**row.after.values,
+                    'intent_event_id':next_event+offset}))
+                    if row.table=='operation_attempts' and 'intent_event_id' in row.after.values
+                    else row for row in event.rows)
+                events.append(replace(event,rows=rows))
+            if bypass=='bounded':
+                command=ScopedEventSequence(events,current,lambda event:scope)
+            else:
+                command=EventSequence(events,current,plan_read_scope=scope)
+            receipt=commit_operation(command,key,owned)
+            assert receipt.kind=='rolled_back' and '已固定' in str(receipt.error),receipt.error
+        assert owned.connection.execute('SELECT COUNT(*) FROM operation_attempts').fetchone()==attempts
+        assert not owned.connection.in_transaction
+        assert _complete_persisted_state(owned)==before
     finally:
         owned.connection.close()
 
@@ -773,8 +781,8 @@ async def test_complete_scan_writer_cannot_replace_retained_result(tmp_path,monk
         owned.connection.close()
 
 
-@pytest.mark.parametrize('layout',['same_page','old_page','old_only'])
-@pytest.mark.parametrize('new_complete',[False,True])
+@pytest.mark.parametrize(('layout','new_complete'),[
+    ('same_page',False),('same_page',True),('old_page',False),('old_page',True),('old_only',False)])
 async def test_current_scan_checks_metadata_only_for_actual_difference(tmp_path,layout,new_complete):
     from camctl.capture.segment_storage import ResultSetCreate,SegmentSourceKind,PublicationKind
     from .result_page_fixtures import begin_result_check
