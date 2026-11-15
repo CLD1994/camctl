@@ -388,6 +388,7 @@ class TestGenerateReportFile:
         owned, tmp_path = environment
         await _submit(owned, tmp_path, "1")
         await _finish_action(owned)
+        await _submit(owned, tmp_path, "2")
         report = _freeze(owned)
         frozen = (report.report_id, report.boundary.last_event_id,
                   report.from_wm, report.to_wm, report.format_version)
@@ -405,8 +406,10 @@ class TestGenerateReportFile:
         document = json.loads(first_bytes)
         assert (document['report_id'], document['from_wm'], document['to_wm']) == (
             str(report.report_id), report.from_wm, report.to_wm)
+        assert [(plan['plan_instance_id'], [action['action_instance_id'] for action in plan['actions']])
+                for plan in document['plans']] == [('1', ['1']), ('2', ['2'])]
         # 冻结后的新计划在窗口外；读取批次与写出缓冲不改变报告字节。
-        await _submit(owned, tmp_path, "2")
+        await _submit(owned, tmp_path, "3")
         second = generate_report_file(
             _spec(tmp_path, report, name="staging/second.json"))
         assert second.path.read_bytes() == first_bytes
