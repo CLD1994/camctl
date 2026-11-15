@@ -282,8 +282,8 @@ def test_resolve_sources_fixes_members_and_initializes_selections(
 ) -> None:
     """执行期固定：成员、依赖与 PENDING 选择同一事务保存。"""
     _, owned = _six_form_environment(tmp_path)
-    repository = OutputsRepository()
     try:
+        repository = OutputsRepository()
         outcome = repository.resolve_sources(
             ResolveSources(
                 action_id=30,
@@ -323,11 +323,11 @@ def test_resolve_sources_fixes_members_and_initializes_selections(
 def test_resolve_sources_failure_saves_terminal_action(tmp_path: Path) -> None:
     """可靠确认引用无效：动作失败终态与错误详情共同保存。"""
     _, owned = _six_form_environment(tmp_path)
-    repository = OutputsRepository()
-    owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
-        (json.dumps({"params":{"source":{"action_instance_id":"99"}}}),))
-    owned.connection.commit()
     try:
+        repository = OutputsRepository()
+        owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+            (json.dumps({"params":{"source":{"action_instance_id":"99"}}}),))
+        owned.connection.commit()
         outcome = repository.resolve_sources(
             ResolveSources(
                 action_id=30,
@@ -370,21 +370,21 @@ def test_resolve_sources_failure_completes_last_action_plan(
     解析失败会让计划永远停留在执行中，且后续会话没有推进入口。
     """
     _, owned = _six_form_environment(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "UPDATE actions SET status = 3 WHERE id IN (11, 12, 13, 14)")
-    connection.execute("UPDATE plans SET status=2 WHERE id IN (1,2)")
-    connection.commit()
-    repository = OutputsRepository()
-    owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
-        (json.dumps({"params":{"source":{"action_instance_id":"99"}}}),))
-    if unfinished_sibling:
-        connection.execute("UPDATE actions SET status=2 WHERE id=11")
-    owned.connection.commit()
-    before_plan = plan_before(connection, 1)
-    key = new_operation_key()
     try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "UPDATE actions SET status = 3 WHERE id IN (11, 12, 13, 14)")
+        connection.execute("UPDATE plans SET status=2 WHERE id IN (1,2)")
+        connection.commit()
+        repository = OutputsRepository()
+        owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+            (json.dumps({"params":{"source":{"action_instance_id":"99"}}}),))
+        if unfinished_sibling:
+            connection.execute("UPDATE actions SET status=2 WHERE id=11")
+        owned.connection.commit()
+        before_plan = plan_before(connection, 1)
+        key = new_operation_key()
         outcome = repository.resolve_sources(
             ResolveSources(
                 action_id=30,
@@ -441,13 +441,13 @@ def test_canceled_obtain_settlement_observes_own_plan_siblings(tmp_path, unfinis
 def test_legal_empty_source_set_fixes_without_selections(tmp_path: Path) -> None:
     """计划范围没有拍摄成员：合法空集合固定，零条选择。"""
     target, owned = _six_form_environment(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    # 用取消动作替身构造只剩非产物来源的计划范围场景：直接移除录像 21。
-    connection.execute("DELETE FROM actions WHERE id = 21")
-    connection.commit()
-    repository = OutputsRepository()
     try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        # 用取消动作替身构造只剩非产物来源的计划范围场景：直接移除录像 21。
+        connection.execute("DELETE FROM actions WHERE id = 21")
+        connection.commit()
+        repository = OutputsRepository()
         outcome = repository.resolve_sources(
             ResolveSources(
                 action_id=30,
@@ -521,13 +521,13 @@ def test_fix_selection_default_replaces_original_with_repaired(
 ) -> None:
     """默认方式：修复替代原片、预览不入选，条目与 FIXED 共同保存。"""
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_output(connection, 501, 21, 1)
-    _seed_output(connection, 502, 21, 3, original_output_id=501)
-    _seed_output(connection, 503, 21, 2, original_output_id=501)
-    connection.commit()
     try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_output(connection, 501, 21, 1)
+        _seed_output(connection, 502, 21, 3, original_output_id=501)
+        _seed_output(connection, 503, 21, 2, original_output_id=501)
+        connection.commit()
         facts = load_selection_facts(connection, 21)
         snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.DEFAULT)
         outcome = repository.fix_selection(
@@ -551,7 +551,7 @@ def test_fix_selection_default_replaces_original_with_repaired(
         # 唯一原片 501 被修复成品 503 替代：仅一条修复条目，预览不入选。
         assert items == [(2, 503, 501, 2, None, None)]
     finally:
-        connection.close()
+        owned.connection.close()
 
 
 def test_fix_selection_legal_empty_selection(tmp_path: Path) -> None:
@@ -749,13 +749,13 @@ def test_fix_selection_partial_failure_saves_per_item_results(
 ) -> None:
     """精确 ID：不存在、归属不匹配、已清理逐项失败，合法项继续。"""
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_output(connection, 501, 21, 1, availability=3)  # 已清理
-    _seed_output(connection, 502, 21, 1)
-    _seed_output(connection, 702, 11, 1)  # 属于其他来源
-    connection.commit()
     try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_output(connection, 501, 21, 1, availability=3)  # 已清理
+        _seed_output(connection, 502, 21, 1)
+        _seed_output(connection, 702, 11, 1)  # 属于其他来源
+        connection.commit()
         requested = (901, 702, 501, 502)
         _set_selection_request(connection, SelectionMode.EXPLICIT_IDS, requested)
         facts = load_selection_facts(connection, 21, requested_output_ids=requested)
@@ -787,7 +787,7 @@ def test_fix_selection_partial_failure_saves_per_item_results(
         assert rows[3][2] == 2 and rows[3][1] == 502
         assert all(row[5] is None for row in rows)
     finally:
-        connection.close()
+        owned.connection.close()
 
 
 def test_fixed_selection_survives_restart_without_reselecting(
@@ -795,25 +795,27 @@ def test_fixed_selection_survives_restart_without_reselecting(
 ) -> None:
     """重启后：同键重送与再次固定都沿用已保存选择，不因新产物重选。"""
     target, owned, repository, selection_id = _prepared_selection(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_output(connection, 501, 21, 1)
-    connection.commit()
-    facts = load_selection_facts(connection, 21)
-    snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.DEFAULT)
-    key = new_operation_key()
-    first = repository.fix_selection(
-        FixSelection(selection_id=selection_id, snapshot=snapshot, occurred_at=_NOW),
-        key,
-        owned,
-    )
-    assert first.kind is DbOutcomeKind.COMPLETED
+    try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_output(connection, 501, 21, 1)
+        connection.commit()
+        facts = load_selection_facts(connection, 21)
+        snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.DEFAULT)
+        key = new_operation_key()
+        first = repository.fix_selection(
+            FixSelection(selection_id=selection_id, snapshot=snapshot, occurred_at=_NOW),
+            key,
+            owned,
+        )
+        assert first.kind is DbOutcomeKind.COMPLETED
 
-    # 新产物出现：不得进入已固定选择。
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_output(connection, 509, 21, 1)
-    connection.commit()
-    connection.close()
+        # 新产物出现：不得进入已固定选择。
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_output(connection, 509, 21, 1)
+        connection.commit()
+    finally:
+        owned.connection.close()
 
     reopened = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
     try:
@@ -854,19 +856,19 @@ def test_saved_selection_missing_output_record_is_consistency_error(
 ) -> None:
     """已保存条目引用的产物记录缺失：状态库矛盾，不解释为不存在。"""
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_output(connection, 502, 21, 1)
-    connection.commit()
-    facts = load_selection_facts(connection, 21)
-    snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.DEFAULT)
-    outcome = repository.fix_selection(
-        FixSelection(selection_id=selection_id, snapshot=snapshot, occurred_at=_NOW),
-        new_operation_key(),
-        owned,
-    )
-    assert outcome.kind is DbOutcomeKind.COMPLETED
     try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_output(connection, 502, 21, 1)
+        connection.commit()
+        facts = load_selection_facts(connection, 21)
+        snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.DEFAULT)
+        outcome = repository.fix_selection(
+            FixSelection(selection_id=selection_id, snapshot=snapshot, occurred_at=_NOW),
+            new_operation_key(),
+            owned,
+        )
+        assert outcome.kind is DbOutcomeKind.COMPLETED
         # 模拟权威记录缺失：条目仍保留原身份。
         connection.execute("BEGIN IMMEDIATE")
         connection.execute("DELETE FROM outputs WHERE id = 502")
@@ -878,17 +880,17 @@ def test_saved_selection_missing_output_record_is_consistency_error(
         else:
             raise AssertionError("记录缺失必须按状态库矛盾拒绝")
     finally:
-        connection.close()
+        owned.connection.close()
 
 
 def test_fix_selection_rejects_unfinished_source(tmp_path: Path) -> None:
     """来源未终态：固定拒绝并回滚，不保存任何条目。"""
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute("UPDATE actions SET status = 2 WHERE id = 21")
-    connection.commit()
     try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("UPDATE actions SET status = 2 WHERE id = 21")
+        connection.commit()
         facts = load_selection_facts(connection, 21)
         assert facts.source_completed is False
         pending_snapshot = select_outputs(
@@ -918,4 +920,4 @@ def test_fix_selection_rejects_unfinished_source(tmp_path: Path) -> None:
         assert status[0] == 1
         assert _value(owned, "SELECT COUNT(*) FROM obtain_items")[0] == 0
     finally:
-        connection.close()
+        owned.connection.close()

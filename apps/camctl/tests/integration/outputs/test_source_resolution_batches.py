@@ -252,9 +252,9 @@ async def test_original_source_key_rechecks_original_h_after_later_work_and_new_
     observation, callbacks = source_observation
     storage = observation.storage
     _, owned, request = await _real_environment(tmp_path, storage=storage)
-    repository = outputs.OutputsRepository(1, storage=storage)
-    key = new_operation_key()
     try:
+        repository = outputs.OutputsRepository(1, storage=storage)
+        key = new_operation_key()
         first = repository.resolve_sources(request,key,owned)
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
         before = tuple(owned.connection.iterdump())
@@ -403,24 +403,26 @@ async def test_unknown_commit_recovers_same_source_request_and_ids_after_reopen(
     import sqlite3
     from camctl.persistence.runtime import DbConfig,DbOpenMode,OwnedConnection,open_existing
     path,owned,request=await _real_environment(tmp_path,cleanup=cleanup, storage=storage)
-    key=new_operation_key()
-    db=owned.connection
-    class LoseCommit:
-        @property
-        def in_transaction(self):
-            return db.in_transaction
-        @property
-        def total_changes(self):
-            return db.total_changes
-        def execute(self,sql,args=()):
-            if sql=="COMMIT":
-                if committed:
-                    db.execute(sql,args)
-                raise sqlite3.OperationalError("commit response lost")
-            return db.execute(sql,args)
-    result=outputs.OutputsRepository(1, storage=storage).resolve_sources(request,key,OwnedConnection(LoseCommit(),None))
-    assert result.kind is DbOutcomeKind.UNKNOWN
-    db.close()
+    try:
+        key=new_operation_key()
+        db=owned.connection
+        class LoseCommit:
+            @property
+            def in_transaction(self):
+                return db.in_transaction
+            @property
+            def total_changes(self):
+                return db.total_changes
+            def execute(self,sql,args=()):
+                if sql=="COMMIT":
+                    if committed:
+                        db.execute(sql,args)
+                    raise sqlite3.OperationalError("commit response lost")
+                return db.execute(sql,args)
+        result=outputs.OutputsRepository(1, storage=storage).resolve_sources(request,key,OwnedConnection(LoseCommit(),None))
+        assert result.kind is DbOutcomeKind.UNKNOWN
+    finally:
+        owned.connection.close()
     owned=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
     try:
         before=tuple(owned.connection.execute("SELECT id,action_id,depends_on_action_id FROM action_dependencies"))
@@ -652,49 +654,49 @@ async def test_source_write_and_original_key_keep_bounded_pages(source_observati
         directory=tmp_path/str(count)
         directory.mkdir()
         _,owned,request=await _real_environment(directory,captures=count, storage=storage)
-        db=owned.connection
-        stats={"max_fetch":0,"fetched":0,"sql_calls":0,"group_checks":0,"body_rows":0,"first_body_limit":None}
-        txn=db.execute("SELECT MAX(id)+1 FROM history_transactions").fetchone()[0]
-        class Cursor:
-            def __init__(self,cursor,body=False):
-                self.cursor=cursor
-                self.body=body
-            def __getattr__(self,name):
-                return getattr(self.cursor,name)
-            def fetchall(self):
-                rows=self.cursor.fetchall()
-                assert len(rows)<=128
-                stats['max_fetch']=max(stats['max_fetch'],len(rows))
-                stats['fetched']+=len(rows)
-                if self.body:stats['body_rows']+=len(rows)
-                return rows
-            def fetchmany(self,size):
-                assert size<=128
-                rows=self.cursor.fetchmany(size)
-                stats["max_fetch"]=max(stats["max_fetch"],len(rows))
-                stats["fetched"]+=len(rows)
-                if self.body:
-                    stats["body_rows"]+=len(rows)
-                return rows
-            def fetchone(self):
-                row=self.cursor.fetchone()
-                stats["fetched"]+=int(row is not None)
-                return row
-        class Measured:
-            def __getattr__(self,name):
-                return getattr(db,name)
-            def execute(self,sql,args=()):
-                from ..support.outputs import observed_query
-                stats['sql_calls']+=1
-                cursor,columns,reads=observed_query(db,sql,args)
-                if ('history_events','transaction_id') in reads and args==(txn,) and len(columns)==3:
-                    stats['group_checks']+=1
-                body=('history_events','body_json') in reads and len(args)==4 and 'event_type' in columns
-                if body and stats['first_body_limit'] is None:stats['first_body_limit']=args[-1]
-                if ('action_dependencies','id') in reads and any(table=='entity_event_links' for table,column in reads):
-                    if 'original_id_query' not in stats:stats['original_id_query']=(sql,args)
-                return Cursor(cursor,body)
         try:
+            db=owned.connection
+            stats={"max_fetch":0,"fetched":0,"sql_calls":0,"group_checks":0,"body_rows":0,"first_body_limit":None}
+            txn=db.execute("SELECT MAX(id)+1 FROM history_transactions").fetchone()[0]
+            class Cursor:
+                def __init__(self,cursor,body=False):
+                    self.cursor=cursor
+                    self.body=body
+                def __getattr__(self,name):
+                    return getattr(self.cursor,name)
+                def fetchall(self):
+                    rows=self.cursor.fetchall()
+                    assert len(rows)<=128
+                    stats['max_fetch']=max(stats['max_fetch'],len(rows))
+                    stats['fetched']+=len(rows)
+                    if self.body:stats['body_rows']+=len(rows)
+                    return rows
+                def fetchmany(self,size):
+                    assert size<=128
+                    rows=self.cursor.fetchmany(size)
+                    stats["max_fetch"]=max(stats["max_fetch"],len(rows))
+                    stats["fetched"]+=len(rows)
+                    if self.body:
+                        stats["body_rows"]+=len(rows)
+                    return rows
+                def fetchone(self):
+                    row=self.cursor.fetchone()
+                    stats["fetched"]+=int(row is not None)
+                    return row
+            class Measured:
+                def __getattr__(self,name):
+                    return getattr(db,name)
+                def execute(self,sql,args=()):
+                    from ..support.outputs import observed_query
+                    stats['sql_calls']+=1
+                    cursor,columns,reads=observed_query(db,sql,args)
+                    if ('history_events','transaction_id') in reads and args==(txn,) and len(columns)==3:
+                        stats['group_checks']+=1
+                    body=('history_events','body_json') in reads and len(args)==4 and 'event_type' in columns
+                    if body and stats['first_body_limit'] is None:stats['first_body_limit']=args[-1]
+                    if ('action_dependencies','id') in reads and any(table=='entity_event_links' for table,column in reads):
+                        if 'original_id_query' not in stats:stats['original_id_query']=(sql,args)
+                    return Cursor(cursor,body)
             measured=OwnedConnection(Measured(),None)
             repository=outputs.OutputsRepository(4, storage=storage)
             key=new_operation_key()
@@ -712,7 +714,7 @@ async def test_source_write_and_original_key_keep_bounded_pages(source_observati
             assert any("entity_event_links" in row and "INDEX" in row for row in explain),explain
             records.append({"N":count,"B":4,"original_id_plan":explain,**stats})
         finally:
-            db.close()
+            owned.connection.close()
     print("P5_SOURCE_BATCHES "+json.dumps(records))
 
 
@@ -883,15 +885,15 @@ async def test_aggregate_role_is_revoked_when_page_assembly_fails(source_observa
     from ..support.output_source_cases import QueryProbe
     import sqlite3
     owned,request=await _aggregate_role_world(tmp_path,start, storage=storage)
-    target=6 if start else 5
-    fault=sqlite3.DatabaseError('page SQL failed') if failure=='sql' else RuntimeError('page assembly failed')
-    active={'value':False}
-    probe=QueryProbe(owned.connection,lambda reads,columns,args: active['value'] and args==(target,)
-        and any(table=='actions' for table,column in reads),
-        'execute' if failure=='sql' else 'fetch',error=fault)
-    owned=replace(owned,connection=probe)
-    checked=[]
     try:
+        target=6 if start else 5
+        fault=sqlite3.DatabaseError('page SQL failed') if failure=='sql' else RuntimeError('page assembly failed')
+        active={'value':False}
+        probe=QueryProbe(owned.connection,lambda reads,columns,args: active['value'] and args==(target,)
+            and any(table=='actions' for table,column in reads),
+            'execute' if failure=='sql' else 'fetch',error=fault)
+        owned=replace(owned,connection=probe)
+        checked=[]
         def inspect(db,event,context,reads,q):
             if checked:return
             checked.append(event.event_id)
@@ -1136,12 +1138,12 @@ async def test_source_aggregate_pages_have_exact_current_ids_and_keep_point_role
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.history.reads import ProductReadScope
     owned, request = await _aggregate_role_world(tmp_path, start, storage=storage)
-    active={'value':False}
-    probe=QueryProbe(owned.connection,lambda reads,columns,args: active['value']
-        and ('actions','plan_id') in reads and columns==frozenset({'id'}) and len(args)==3)
-    owned=replace(owned,connection=probe)
-    checked = []
     try:
+        active={'value':False}
+        probe=QueryProbe(owned.connection,lambda reads,columns,args: active['value']
+            and ('actions','plan_id') in reads and columns==frozenset({'id'}) and len(args)==3)
+        owned=replace(owned,connection=probe)
+        checked = []
         def inspect(db, event, context, reads, q):
             if checked:
                 return
