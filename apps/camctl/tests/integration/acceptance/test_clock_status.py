@@ -144,12 +144,12 @@ async def test_reused_request_preserves_old_clock_status(environment, tmp_path) 
     assert first.value.plan_disposition is PlanDisposition.REGISTERED
     _assert_latest_transaction(connection, [2, 1], _ACCEPTED_AT)
 
-    # 原键核实不会为同一输入生成第二个事务。
+    # 原键核实恢复第一次完整答复，不为同一输入生成第二个事务。
     transaction_snapshot = _all_rows(connection, "history_transactions")
     event_snapshot = _all_rows(connection, "history_events")
     retry = AcceptanceRepository().process_input(command, key, owned)
     assert retry.kind is DbOutcomeKind.COMPLETED
-    assert retry.value.plan_disposition is PlanDisposition.REUSED
+    assert retry.value == first.value
     assert _all_rows(connection, "history_transactions") == transaction_snapshot
     assert _all_rows(connection, "history_events") == event_snapshot
 
@@ -162,7 +162,7 @@ async def test_reused_request_preserves_old_clock_status(environment, tmp_path) 
     old_transactions = _all_rows(connection, "history_transactions")
     legacy_retry = AcceptanceRepository().process_input(command, key, owned)
     assert legacy_retry.kind is DbOutcomeKind.COMPLETED
-    assert legacy_retry.value.plan_disposition is PlanDisposition.REUSED
+    assert legacy_retry.value == first.value
     assert _all_rows(connection, "history_events") == old_history
     assert _all_rows(connection, "history_transactions") == old_transactions
 
