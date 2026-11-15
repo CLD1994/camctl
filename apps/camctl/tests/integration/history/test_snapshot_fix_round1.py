@@ -10,6 +10,7 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.snapshots import prepare_snapshot
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.transactions import encode_json_value
+from camctl.persistence.runtime import StateDatabaseError
 from .test_record_segment_history import (
     _fixture,
     _save,
@@ -791,10 +792,15 @@ async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp
     real_connect = sqlite3.connect
     target_uri = history.path.resolve().as_uri() + '?mode=ro'
     failed = []
+    reads_opened = []
     derived = []
     query_error = sqlite3.OperationalError('forward page read failed')
 
     class ReadConnection(sqlite3.Connection):
+        def close(self):
+            super().close()
+            self.was_closed = True
+
         def execute(self, statement, *args, **kwargs):
             reads = set()
 
@@ -824,7 +830,10 @@ async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp
         if str(database) == target_uri:
             assert 'factory' not in kwargs
             kwargs['factory'] = ReadConnection
-            return real_connect(database, *args, **kwargs)
+            connection = real_connect(database, *args, **kwargs)
+            connection.was_closed = False
+            reads_opened.append(connection)
+            return connection
         path = Path(database) if isinstance(database, (str, Path)) else None
         if path is not None and path.is_absolute() and path.is_relative_to(temporary):
             assert 'factory' not in kwargs
@@ -853,10 +862,14 @@ async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp
             )
         monkeypatch.setattr(tempfile, 'tempdir', str(temporary))
         monkeypatch.setattr(sqlite3, 'connect', connect)
-        with pytest.raises(ConsistencyError if failure == 'missing_event' else sqlite3.OperationalError) as raised:
+        with pytest.raises(ConsistencyError if failure == 'missing_event' else StateDatabaseError) as raised:
             history.open_segment_history(ref.action_id, boundary, strategy='snapshot', batch_size=1)
         if failure == 'query_error':
-            assert failed == [True] and raised.value is query_error
+            assert failed == [True] and raised.value.__cause__ is query_error
+        assert reads_opened and all(connection.was_closed for connection in reads_opened)
+        for connection in reads_opened:
+            with pytest.raises(sqlite3.ProgrammingError):
+                sqlite3.Connection.execute(connection, 'SELECT 1')
         assert derived and all(
             existed and connection.was_closed and not path.exists() and not path.parent.exists()
             for connection, path, existed in derived

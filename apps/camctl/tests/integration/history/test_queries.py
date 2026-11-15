@@ -19,6 +19,7 @@ from camctl.contracts.history_values import BoundaryError, HistoryBoundary, INIT
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.history import HistoryRepository
+from camctl.persistence.runtime import StateDatabaseError
 
 from ..persistence.test_runtime import _create_valid_database
 from ..support.database import business_database
@@ -538,9 +539,9 @@ async def test_successful_page_owns_data_after_all_read_resources_close(reposito
 async def test_sql_failure_preserves_error_and_releases_read_resources(repository, monkeypatch, failure):
     boundary = await _seed_plans(repository, 1)
     opened, injected_error = _track_read_connection(repository, monkeypatch, failure)
-    with pytest.raises(sqlite3.OperationalError) as caught:
+    with pytest.raises(StateDatabaseError) as caught:
         repository.read_events(_scope(boundary), boundary)
-    assert caught.value is injected_error
+    assert caught.value.__cause__ is injected_error
     assert opened
     for connection in opened:
         _assert_resources_released(connection)

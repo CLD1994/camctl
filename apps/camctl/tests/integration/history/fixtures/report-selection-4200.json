@@ -1,11 +1,11 @@
 {
   "description": "真实受理、调度和拍摄生成的报告历史只读样本。",
-  "database_format_version": 9,
-  "database_sha256": "a4144e809ac9ca31c9ab6cc30a2728dfbadf7817a86c452df156362b0a9d5a92",
-  "database_bytes": 6971392,
-  "gzip_sha256": "feb375811d67195ad56d1909ce042e8893f0225809d9d739d4cab5baa5f5c164",
-  "gzip_bytes": 857654,
-  "database_instance_id": "f4fda5e9c00846c09e56ece6ed2e53db",
+  "database_format_version": 10,
+  "database_sha256": "de968968b8f35a3fb37103ae26b39305155aa06096f1f8b3df6b28fe9a8d1462",
+  "database_bytes": 7008256,
+  "gzip_sha256": "f7d910ce7adacffba3a457d8b59940456d15ad567b9829427785661f8748ff9f",
+  "gzip_bytes": 874881,
+  "database_instance_id": "d5344bfa771241b3b33c6b424a09a3b2",
   "metadata_paths": {
     "staging": "/srv/camctl/staging",
     "ready": "/srv/camctl/ready",
