@@ -35,6 +35,8 @@ from ..support.capture import capture_database
 from camctl.devices.drivers.registry import DriverRegistry
 from .test_cleanup_query_commit_recovery import _CommitFaultConnection
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.operations import OperationRepository
+from support.repository_ports import repository_port
 
 from ..operations.test_obtain_check_identity import _environment, _NOW
 
@@ -185,25 +187,32 @@ async def test_actual_v2_resolves_original_identity_or_missing_failure(
 @pytest.mark.asyncio
 async def test_unknown_receipt_reuses_original_result_then_remaining_budget(tmp_path):
     owned, runtime, query = await _world(tmp_path, [None, True])
-    original = runtime.operations.finish_attempt
-    requests = []
+    class LostOnce(OperationRepository):
+        def __init__(self):
+            self.requests = []
 
-    def lost_once(request, key, owned):
-        requests.append((request, key))
-        if len(requests) == 1:
-            fault = _CommitFaultConnection(owned.connection, after_commit=True)
-            fault.error = OperationalError("实际已提交，回执丢失")
-            saved = original(request, key, replace(owned, connection=fault))
-            assert fault.actual_commits == 1
-            return saved
-        return original(request, key, owned)
+        def finish_attempt(self, request, key, owned):
+            self.requests.append((request, key))
+            if len(self.requests) == 1:
+                fault = _CommitFaultConnection(owned.connection, after_commit=True)
+                fault.error = OperationalError("实际已提交，回执丢失")
+                saved = super().finish_attempt(request, key, replace(owned, connection=fault))
+                assert fault.commit_calls == fault.actual_commits == 1
+                return saved
+            return super().finish_attempt(request, key, owned)
 
-    runtime.operations.finish_attempt = lost_once
+    port = LostOnce()
     try:
-        with pytest.raises(ConsistencyError, match="回执丢失"):
+        with repository_port(
+            OperationRepository, port, ("finish_attempt",),
+            matches=lambda name, args, kwargs: (
+                args[0].ticket.operation == "query"
+                and args[0].ticket.target_id == "1"),
+        ):
+            with pytest.raises(ConsistencyError, match="回执丢失"):
+                await _round(runtime)
             await _round(runtime)
-        await _round(runtime)
-        assert requests[0] == requests[1]
+        assert port.requests[0] == port.requests[1]
         assert len(query.calls) == 2
         assert [call.ticket.attempt_id for call in query.calls] == [1, 2]
         assert owned.connection.execute(

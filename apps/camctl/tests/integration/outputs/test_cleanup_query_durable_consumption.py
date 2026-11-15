@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.outputs.cleanup_flow import delete_source_file
@@ -102,15 +104,16 @@ class _QueryIntentCommitFault(OutputsRepository):
     pytest.param("cancel", True, "cancel_cleanup_item", id="cancel-present"),
     pytest.param("cancel", None, "cancel_cleanup_item", id="cancel-unknown"),
 ])
-async def test_new_factory_consumes_original_saved_query_without_memory(environment, consumer, present, method, capture_resources):
+async def test_new_factory_consumes_original_saved_query_without_memory(environment, consumer, present, method, capture_resources, port_stack):
     cfg, _, context, _ = environment
     base, driver, action_id, item_id, old_member = await _world(environment, consumer, present)
     runtime, members, operations = await _instrument(
-        base, item_id, member_method=method, after_commit=False)
+        base, item_id, port_stack, member_method=method, after_commit=False)
     await _first_rejected(runtime, item_id, {"result_rejected", "cancel_rejected"})
     assert members.fault is not None and members.fault.triggered
     assert members.results[0].kind is DbOutcomeKind.UNKNOWN
     _, _, abandoned_key = members.calls[0]
+    port_stack.close()
     original_query = operations.query_facts
     original_prefix = operations.query_prefix
     calls_before = (len(driver.deletes), len(driver.queries))
@@ -203,7 +206,9 @@ async def test_saved_unknown_is_consumed_once_and_wait_anchor_survives_fresh_rou
 
 async def test_query_before_later_possible_delete_is_not_recovered_as_latest_observation(environment, capture_resources):
     cfg, _, context, _ = environment
-    base, old_driver, _, item_id, _ = await _world(environment, "after", True)
+    clock = [0]
+    base, old_driver, _, item_id, _ = await _world(
+        environment, "after", True, monotonic_ns=lambda: clock[0])
     runtime = await base.for_item(item_id)
     first = await delete_source_file(runtime, item_id)
     assert first.phase == "still_present", first
@@ -212,9 +217,9 @@ async def test_query_before_later_possible_delete_is_not_recovered_as_latest_obs
     # 同一成员在删除间隔到时后真正发出第二次 DELETE，仍返回未知。
     # 紧随其后的 QUERY 意图在真实 COMMIT 前失败，关闭连接回滚该意图。
     fault_port = _QueryIntentCommitFault()
-    base.outputs = fault_port
-    base.monotonic_ns = lambda: 10_000_000_000
-    again = await delete_source_file(await base.for_item(item_id), item_id)
+    clock[0] = 10_000_000_000
+    with repository_port(OutputsRepository, fault_port, ("begin_cleanup_attempt",)):
+        again = await delete_source_file(await base.for_item(item_id), item_id)
     assert again.phase == "query_rejected", again
     assert fault_port.fault is not None and fault_port.fault.triggered
     assert fault_port.result.kind is DbOutcomeKind.UNKNOWN
@@ -250,12 +255,13 @@ async def test_query_before_later_possible_delete_is_not_recovered_as_latest_obs
 
 
 @pytest.mark.parametrize("binding", ["removed", "changed", "unregistered"])
-async def test_saved_absence_finishes_before_current_binding_or_driver_resolution(environment, binding, capture_resources):
+async def test_saved_absence_finishes_before_current_binding_or_driver_resolution(environment, binding, capture_resources, port_stack):
     cfg, _, context, _ = environment
     base, _, _, item_id, _ = await _world(environment, "after", False)
     runtime, _, operations = await _instrument(
-        base, item_id, member_method="finish_cleanup_item", after_commit=False)
+        base, item_id, port_stack, member_method="finish_cleanup_item", after_commit=False)
     await _first_rejected(runtime, item_id, {"result_rejected"})
+    port_stack.close()
     original_query = operations.query_facts
     await runtime.database.close()
     environment[1].connection.close()

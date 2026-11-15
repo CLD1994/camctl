@@ -28,6 +28,8 @@ from camctl.persistence.repositories.history import (
 )
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.repositories.transactions import row_facts
+from support.repository_ports import repository_port
 
 from ..bootstrap.test_output_binding_changes import _save_photos, environment
 from ..history.test_object_closure import _business_rows
@@ -135,6 +137,30 @@ def _image(entity: str, entity_id: int, rows, boundary: HistoryBoundary,
         boundary.last_event_id, change_count)
 
 
+def _boundary_rows(connection, action_id, output_id):
+    """直接按所属关系保存 H 时完整成员，不使用恢复结果构造预期。"""
+    rows = {}
+    for entity, queries in {
+        "action": (
+            ("actions", "SELECT id FROM actions WHERE id=?", action_id),
+            ("cleanup_items", "SELECT id FROM cleanup_items WHERE action_id=?", action_id),
+            ("operation_runs", "SELECT id FROM operation_runs WHERE action_id=?", action_id),
+            ("operation_attempts", "SELECT a.id FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.action_id=?", action_id),
+            ("device_activities", "SELECT id FROM device_activities WHERE action_id=?", action_id),
+        ),
+        "output": (
+            ("outputs", "SELECT id FROM outputs WHERE id=?", output_id),
+            ("output_origins", "SELECT id FROM output_origins WHERE output_id=?", output_id),
+        ),
+    }.items():
+        rows[entity] = _business_rows({
+            (table, identity): row_facts(connection, table, identity)
+            for table, query, owner in queries
+            for (identity,) in connection.execute(query, (owner,))
+        })
+    return rows
+
+
 async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
     cfg, owned, context, capture_driver = environment
     await _save_photos(cfg, owned, context, capture_driver)
@@ -147,9 +173,10 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
     await _c1_unknown_delete_terminal(cfg, owned, driver, outputs["cam-b"])
     b_action, b_item = _start_cleanup(owned, outputs["cam-b"], "3")
     b_runtime = await _new_runtime(cfg, owned, driver)
-    b_runtime.operations = _CancelQueryPort(owned, b_item, b_action, "after")
+    b_port = _CancelQueryPort(owned, b_item, b_action, "after")
     driver.matrix_enabled, driver.present = True, None
-    b_step = await delete_source_file(await b_runtime.for_item(b_item), b_item)
+    with repository_port(OperationRepository, b_port, ("finish_attempt",)):
+        b_step = await delete_source_file(await b_runtime.for_item(b_item), b_item)
     assert (b_step.phase, b_step.detail) == ("canceled", None), b_step
 
     # 成员 A：删除未知后查询确认缺席；结果事务真实提交后丢失回执。
@@ -157,7 +184,7 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     history = HistoryRepository(path)
     a_runtime = await _new_runtime(cfg, owned, driver)
-    a_runtime.operations = _CommittedQueryFault(owned, a_item)
+    a_port = _CommittedQueryFault(owned, a_item)
     executor = DbExecutor(
         lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()),
         capacity=4, enqueue_timeout_seconds=9)
@@ -169,8 +196,10 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
                 SnapshotRef(_entity_ref("action"), a_action),
                 SnapshotRef(_entity_ref("output"), outputs["cam-a"])))))
         driver.matrix_enabled, driver.present = True, False
-        with pytest.raises(ConsistencyError):
-            await delete_source_file(await a_runtime.for_item(a_item), a_item)
+        with repository_port(OperationRepository, a_port, ("finish_attempt",)):
+            with pytest.raises(ConsistencyError):
+                await delete_source_file(await a_runtime.for_item(a_item), a_item)
+        assert a_port.fault.commit_calls == a_port.fault.actual_commits == 1
 
         txn_id, last_event = owned.connection.execute(
             "SELECT id, last_event_id FROM history_transactions"
@@ -179,6 +208,7 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
         frozen_history = tuple(owned.connection.execute(
             "SELECT id, body_json FROM history_events WHERE id <= ? ORDER BY id",
             (frozen.last_event_id,)))
+        expected = _boundary_rows(owned.connection, a_action, outputs["cam-a"])
         calls_before_resume = (len(driver.deletes), len(driver.queries))
 
         resumed = await _new_runtime(cfg, owned, driver)
@@ -222,9 +252,10 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
             current), events, frozen)
         selected = _business_rows(history.restore_entity(
             entity, entity_id, frozen, event_batch_size=1))
-        assert from_snapshot.rows == initial.rows
-        assert from_current.rows == initial.rows
-        assert selected == _business_rows(initial.rows)
+        for restored in (initial.rows, from_snapshot.rows, from_current.rows, selected):
+            actual = _business_rows(restored)
+            assert set(actual) == set(expected[entity])
+            assert actual == expected[entity]
 
     restored_action = _business_rows(history.restore_entity(
         "action", a_action, frozen, event_batch_size=1))

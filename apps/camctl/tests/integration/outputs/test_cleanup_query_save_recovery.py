@@ -42,6 +42,7 @@ from ..bootstrap.test_output_binding_changes import (
     Driver, _NOW, _registry, _save_photos, environment,
 )
 
+from support.repository_ports import repository_port
 from ..support.outputs import prepare_cleanup_member, cleanup_factory
 from ..support.capture import capture_database
 
@@ -133,12 +134,12 @@ class _QueryFinishPort(OperationRepository):
         return result
 
 
-async def _new_runtime(cfg, owned, driver, *, query_attempts=3):
+async def _new_runtime(cfg, owned, driver, *, query_attempts=3, monotonic_ns=lambda: 0):
     factory = cleanup_factory(
         devices=cfg.devices, drivers=_registry(driver),
         max_delete_attempts=3, max_query_attempts=query_attempts,
         staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
-        monotonic_ns=lambda: 0,
+        monotonic_ns=monotonic_ns,
     )
     return await factory(await capture_database(owned))
 
@@ -192,7 +193,6 @@ async def test_query_save_matrix(environment, consumer, present, kind):
 
     base = await _new_runtime(cfg, owned, driver)
     port = _QueryFinishPort(kind, item_id, driver)
-    base.operations = port
     runtime = await base.for_item(item_id)
     driver.matrix_enabled, driver.present = True, present
     queries_before = len(driver.queries)
@@ -201,10 +201,11 @@ async def test_query_save_matrix(environment, consumer, present, kind):
         driver.on_delete_return = lambda: _apply_cleanup_cancel(owned, action_id)
 
     error, step = None, None
-    try:
-        step = await delete_source_file(runtime, item_id)
-    except ConsistencyError as caught:
-        error = caught
+    with repository_port(OperationRepository, port, ("finish_attempt",)):
+        try:
+            step = await delete_source_file(runtime, item_id)
+        except ConsistencyError as caught:
+            error = caught
 
     expected_queries = 2 if (kind is DbOutcomeKind.COMPLETED and consumer == "before"
                               and present is True) else 1

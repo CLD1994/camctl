@@ -32,6 +32,7 @@ from .test_cleanup_query_save_recovery import (
     _original_member_rows, _start_cleanup,
 )
 from ..bootstrap.test_output_binding_changes import _NOW, _save_photos, environment, _registry
+from support.repository_ports import repository_port
 from ..support.outputs import cleanup_factory
 from ..support.database import database_path
 
@@ -174,7 +175,7 @@ class _LocalOperations(OperationRepository):
         return result
 
 
-async def _world(environment, consumer, present):
+async def _world(environment, consumer, present, *, monotonic_ns=lambda: 0):
     cfg, owned, context, capture_driver = environment
     await _save_photos(cfg, owned, context, capture_driver)
     output_id = owned.connection.execute(
@@ -190,18 +191,19 @@ async def _world(environment, consumer, present):
         action_id, item_id = _start_cleanup(owned, output_id, "3")
     else:
         action_id, item_id = _start_cleanup(owned, output_id, "2")
-    base = await _new_runtime(cfg, owned, driver)
+    base = await _new_runtime(cfg, owned, driver, monotonic_ns=monotonic_ns)
     driver.matrix_enabled, driver.present = True, present
     if consumer == "cancel":
         driver.on_delete_return = lambda: _apply_cleanup_cancel(owned, action_id)
     return base, driver, action_id, item_id, old_member
 
 
-async def _instrument(base, item_id, *, member_method=None, companion_fault=False, after_commit=False):
+async def _instrument(base, item_id, port_stack, *, member_method=None, companion_fault=False, after_commit=False):
     members = _MemberResults(item_id, member_method, after_commit)
     operations = _LocalOperations(
         item_id, base.retry_gate, companion_fault=companion_fault, after_commit=after_commit)
-    base.outputs, base.operations = members, operations
+    port_stack.enter_context(repository_port(OutputsRepository, members, ("finish_cleanup_item", "cancel_cleanup_item")))
+    port_stack.enter_context(repository_port(OperationRepository, operations, ("finish_attempt", "finish_stale_runs")))
     return await base.for_item(item_id), members, operations
 
 
@@ -213,7 +215,7 @@ async def _first_rejected(runtime, item_id, phases):
     assert step.phase in phases, step
 
 
-async def _fresh_runtime(runtime, owned, binding, resources, item_id):
+async def _fresh_runtime(owned, binding, resources, item_id):
     database = await resources.restart_database(database_path(owned))
     factory = cleanup_factory(
         devices={binding.device_id: {"driver": binding.driver_id, "cleanup": {
@@ -224,7 +226,6 @@ async def _fresh_runtime(runtime, owned, binding, resources, item_id):
         occurred_at=lambda: _NOW + 50_000_000, monotonic_ns=lambda: 1_000_000_000_000,
     )
     base = await factory(database)
-    base.outputs, base.operations = runtime.outputs, runtime.operations
     return await base.for_item(item_id)
 
 
@@ -244,10 +245,10 @@ def _check_old_member(owned, old_member):
 
 @pytest.mark.parametrize("after_commit", [False, True], ids=["before-commit", "after-commit"])
 @pytest.mark.parametrize("consumer", ["before", "after", "cancel"])
-async def test_saved_absence_member_finish_interrupted(environment, consumer, after_commit, capture_resources):
+async def test_saved_absence_member_finish_interrupted(environment, consumer, after_commit, capture_resources, port_stack):
     base, driver, action_id, item_id, old_member = await _world(environment, consumer, False)
     runtime, members, operations = await _instrument(
-        base, item_id, member_method="finish_cleanup_item", after_commit=after_commit)
+        base, item_id, port_stack, member_method="finish_cleanup_item", after_commit=after_commit)
     await _first_rejected(runtime, item_id, {"result_rejected"})
     assert members.fault is not None and members.fault.triggered
     assert len(members.calls) == 1
@@ -263,7 +264,7 @@ async def test_saved_absence_member_finish_interrupted(environment, consumer, af
         assert (original_member[4] is not None) is after_commit
         _check_original_query(fresh, operations, item_id)
         resumed = await _fresh_runtime(
-            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
+            fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 
@@ -292,10 +293,10 @@ async def test_saved_absence_member_finish_interrupted(environment, consumer, af
 
 @pytest.mark.parametrize("after_commit", [False, True], ids=["before-commit", "after-commit"])
 @pytest.mark.parametrize("present", [True, None], ids=["present", "unknown"])
-async def test_saved_cancel_observation_member_finish_interrupted(environment, present, after_commit, capture_resources):
+async def test_saved_cancel_observation_member_finish_interrupted(environment, present, after_commit, capture_resources, port_stack):
     base, driver, action_id, item_id, _ = await _world(environment, "cancel", present)
     runtime, members, operations = await _instrument(
-        base, item_id, member_method="cancel_cleanup_item", after_commit=after_commit)
+        base, item_id, port_stack, member_method="cancel_cleanup_item", after_commit=after_commit)
     await _first_rejected(runtime, item_id, {"cancel_rejected"})
     assert members.fault is not None and members.fault.triggered
     assert len(members.calls) == 1
@@ -309,7 +310,7 @@ async def test_saved_cancel_observation_member_finish_interrupted(environment, p
         assert original_member[0] == (6 if after_commit else 3)
         _check_original_query(fresh, operations, item_id)
         resumed = await _fresh_runtime(
-            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
+            fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 
@@ -339,10 +340,10 @@ async def test_saved_cancel_observation_member_finish_interrupted(environment, p
     pytest.param("after", False, id="succeeded-member"),
     pytest.param("cancel", None, id="canceled-member"),
 ])
-async def test_terminal_member_companion_finish_interrupted(environment, consumer, present, after_commit, capture_resources):
+async def test_terminal_member_companion_finish_interrupted(environment, consumer, present, after_commit, capture_resources, port_stack):
     base, driver, _, item_id, _ = await _world(environment, consumer, present)
     runtime, members, operations = await _instrument(
-        base, item_id, companion_fault=True, after_commit=after_commit)
+        base, item_id, port_stack, companion_fault=True, after_commit=after_commit)
     await _first_rejected(runtime, item_id, {"companion_rejected"})
     assert operations.fault is not None and operations.fault.triggered
     assert len(members.calls) == 1 and members.results[0].kind is DbOutcomeKind.COMPLETED
@@ -358,7 +359,7 @@ async def test_terminal_member_companion_finish_interrupted(environment, consume
         assert original_member[4] is not None
         before_recovery = _history(fresh)
         resumed = await _fresh_runtime(
-            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
+            fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 
@@ -427,10 +428,10 @@ async def _saved_absence_query(environment):
     action_id, item_id = _start_cleanup(owned, output_id, "2")
     base = await _new_runtime(cfg, owned, driver)
     port = _RecordingQuerySaves(item_id)
-    base.operations = port
     runtime = await base.for_item(item_id)
     driver.matrix_enabled, driver.present = True, False
-    step = await delete_source_file(runtime, item_id)
+    with repository_port(OperationRepository, port, ("finish_attempt",)):
+        step = await delete_source_file(runtime, item_id)
     assert (step.phase, step.detail) == ("succeeded", "ABSENCE_CONFIRMED"), step
     assert len(driver.queries) == 1 and len(driver.deletes) == 1
     assert len(port.calls) == 1
@@ -444,15 +445,14 @@ async def test_query_result_redelivery_remains_pending(environment, kind):
     cfg, owned, _, _ = environment
     base, driver, action_id, item_id, old_member = await _world(environment, "before", False)
     port = _FailingQuerySaves(kind, item_id, driver, base.retry_gate)
-    base.operations = port
     runtime = await base.for_item(item_id)
     deletes_before, queries_before = len(driver.deletes), len(driver.queries)
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, item_id)
-    first_finish, first_key = port.calls[0]
-
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, item_id)
+    with repository_port(OperationRepository, port, ("finish_attempt",)):
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(runtime, item_id)
+        first_finish, first_key = port.calls[0]
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(runtime, item_id)
 
     assert len(port.calls) == 2
     assert port.calls[1] == (first_finish, first_key)

@@ -17,6 +17,8 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
+from support.repository_ports import repository_port
+
 from .test_cleanup_query_local_consumption import (
     _assert_history_prefix, _first_rejected, _fresh_runtime, _history,
     _instrument, _query_facts, _saved_key_count, _world,
@@ -61,50 +63,50 @@ async def test_advance_saves_all_original_queries_before_any_new_device_call(env
     _, item_b = _start_cleanup(owned, output_b, "5")
     assert item_a < item_b
     port = _BlockedQueryResults((item_a, item_b))
-    base.operations = port
 
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(await base.for_item(item_a), item_a)
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(await base.for_item(item_b), item_b)
-    originals = {int(request.ticket.target_id): (request, key)
-                 for request, key in port.calls}
-    assert set(originals) == {item_a, item_b}
-    assert _query_facts(owned, item_a)[0][1] == 1
-    assert _query_facts(owned, item_b)[0][1] == 1
-    assert _member_facts(owned, item_a)[0] == 3
-    assert _member_facts(owned, item_b)[0] == 3
-    calls_before = (len(driver.deletes), len(driver.queries))
+    with repository_port(OperationRepository, port, ("finish_attempt",)):
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(await base.for_item(item_a), item_a)
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(await base.for_item(item_b), item_b)
+        originals = {int(request.ticket.target_id): (request, key)
+                     for request, key in port.calls}
+        assert set(originals) == {item_a, item_b}
+        assert _query_facts(owned, item_a)[0][1] == 1
+        assert _query_facts(owned, item_b)[0][1] == 1
+        assert _member_facts(owned, item_a)[0] == 3
+        assert _member_facts(owned, item_b)[0] == 3
+        calls_before = (len(driver.deletes), len(driver.queries))
 
-    # A 原结果可以可靠提交，B 仍拒绝。A 的在场观察不能抢先触发删除。
-    port.blocked.remove(item_a)
-    with pytest.raises(ConsistencyError):
-        await advance_cleanup(base)
+        # A 原结果可以可靠提交，B 仍拒绝。A 的在场观察不能抢先触发删除。
+        port.blocked.remove(item_a)
+        with pytest.raises(ConsistencyError):
+            await advance_cleanup(base)
 
-    assert (len(driver.deletes), len(driver.queries)) == calls_before
-    assert _query_facts(owned, item_a)[0][1] == 1
-    assert _query_facts(owned, item_b)[0][1] == 1
-    for item_id in (item_a, item_b):
-        retries = [(request, key) for request, key in port.calls
-                   if int(request.ticket.target_id) == item_id]
-        assert len(retries) == 2
-        assert retries[1][0] is originals[item_id][0]
-        assert retries[1][1] == originals[item_id][1]
-    for item_id, saved in ((item_a, True), (item_b, False)):
-        original_run = originals[item_id][0].ticket.run_id
-        result_json = owned.connection.execute(
-            "SELECT result_json FROM operation_attempts WHERE run_id=?",
-            (original_run,),
-        ).fetchone()[0]
-        assert (result_json is not None) is saved
-    assert _member_facts(owned, item_a)[0] == 3
-    assert _member_facts(owned, item_b)[0] == 3
+        assert (len(driver.deletes), len(driver.queries)) == calls_before
+        assert _query_facts(owned, item_a)[0][1] == 1
+        assert _query_facts(owned, item_b)[0][1] == 1
+        for item_id in (item_a, item_b):
+            retries = [(request, key) for request, key in port.calls
+                       if int(request.ticket.target_id) == item_id]
+            assert len(retries) == 2
+            assert retries[1][0] is originals[item_id][0]
+            assert retries[1][1] == originals[item_id][1]
+        for item_id, saved in ((item_a, True), (item_b, False)):
+            original_run = originals[item_id][0].ticket.run_id
+            result_json = owned.connection.execute(
+                "SELECT result_json FROM operation_attempts WHERE run_id=?",
+                (original_run,),
+            ).fetchone()[0]
+            assert (result_json is not None) is saved
+        assert _member_facts(owned, item_a)[0] == 3
+        assert _member_facts(owned, item_b)[0] == 3
 
 
-async def test_other_success_key_does_not_become_original_member_save(environment, capture_resources):
+async def test_other_success_key_does_not_become_original_member_save(environment, capture_resources, port_stack):
     base, driver, _, item_id, _ = await _world(environment, "after", False)
     runtime, members, operations = await _instrument(
-        base, item_id, member_method="finish_cleanup_item", after_commit=False)
+        base, item_id, port_stack, member_method="finish_cleanup_item", after_commit=False)
     await _first_rejected(runtime, item_id, {"result_rejected"})
     assert members.fault is not None and members.fault.triggered
     assert members.results[0].kind is DbOutcomeKind.UNKNOWN
@@ -131,7 +133,7 @@ async def test_other_success_key_does_not_become_original_member_save(environmen
         assert _saved_key_count(fresh, actual_key) == 1
         before_recovery = _history(fresh)
         resumed = await _fresh_runtime(
-            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
+            fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 

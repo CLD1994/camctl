@@ -24,6 +24,8 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
+from support.repository_ports import repository_port
+
 from ..bootstrap.test_output_binding_changes import _NOW, _save_photos, environment
 from ..support.outputs import cleanup_factory, output_drivers
 from .test_cleanup_query_save_recovery import (
@@ -194,15 +196,15 @@ async def test_query_result_commit_unknown(environment, consumer, present, after
         action_id, item_id = _start_cleanup(owned, output_id, "2")
     base = await _new_runtime(cfg, owned, driver)
     port = _CommitQueryPort(item_id, action_id, output_id, after_commit=after_commit)
-    base.operations = port
     runtime = await base.for_item(item_id)
     driver.matrix_enabled, driver.present = True, present
     queries_before, deletes_before = len(driver.queries), len(driver.deletes)
     if consumer == "cancel":
         driver.on_delete_return = lambda: _apply_cleanup_cancel(owned, action_id)
 
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, item_id)
+    with repository_port(OperationRepository, port, ("finish_attempt",)):
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(runtime, item_id)
     assert len(port.calls) == len(port.receipts) == 1
     assert port.receipts[0].kind is DbOutcomeKind.UNKNOWN
     assert port.receipts[0].error is port.fault.error
@@ -243,10 +245,10 @@ async def test_query_result_commit_unknown(environment, consumer, present, after
             occurred_at=lambda: _NOW + 9_999_999, monotonic_ns=lambda: 900,
         )
         base = await factory(database)
-        base.operations = port
         resumed = await base.for_item(item_id)
-        with pytest.raises(_SavedQuery):
-            await delete_source_file(resumed, item_id)
+        with repository_port(OperationRepository, port, ("finish_attempt",)):
+            with pytest.raises(_SavedQuery):
+                await delete_source_file(resumed, item_id)
         assert len(port.calls) == len(port.receipts) == 2
         restored_finish, restored_key, restored_instance = port.calls[1]
         assert restored_finish == original_finish
