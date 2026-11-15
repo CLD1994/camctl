@@ -764,11 +764,12 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             for name in waiter_names
         ]
         waiter_ids = [identity for identity, _ in waiters]
-        expected_actions = {source_id: "succeeded", **{identity: "succeeded" for identity in waiter_ids}}
+        expected_actions = {source_id: "succeeded", **{identity: "running" for identity in waiter_ids}}
         host_failure = failure
         failure = _watch_actions(demo, deployment, expected_actions, host_failure)
         _wait_for_waiting_obtains(deployment, source_id, waiter_names, failure)
         expected_actions[source_id] = source_status
+        expected_actions.update({identity: "succeeded" for identity in waiter_ids})
         failure = _watch_actions(demo, deployment, expected_actions, host_failure)
         if case != "unknown":
             runs = [record for record in _records(deployment.root / "cli-processes.jsonl")
@@ -1289,11 +1290,12 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
             for name in waiter_names
         ]
         waiter_ids = [identity for identity, _ in waiters]
-        expected_actions = {source_id: "succeeded", **{identity: "succeeded" for identity in waiter_ids}}
+        expected_actions = {source_id: "succeeded", **{identity: "running" for identity in waiter_ids}}
         host_failure = failure
         failure = _watch_actions(demo, deployment, expected_actions, host_failure)
         _wait_for_waiting_obtains(deployment, source_id, waiter_names, failure)
         expected_actions[source_id] = "failed"
+        expected_actions.update({identity: "succeeded" for identity in waiter_ids})
         failure = _watch_actions(demo, deployment, expected_actions, host_failure)
         _release_clock(scenario, 330)
         report = wait_for(
