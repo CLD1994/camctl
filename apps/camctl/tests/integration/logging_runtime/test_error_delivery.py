@@ -164,7 +164,7 @@ async def test_concurrent_identical_records_keep_separate_write_receipts():
         second_release.set()
         assert (await second).delivered is False
         # 写入回执与消费者记账分别完成；join 等待后者实际结束。
-        await channel.join()
+        await asyncio.wait_for(channel.join(), timeout=5)
         assert channel.pending_count() == 0
         assert calls == [record, record]
     finally:
