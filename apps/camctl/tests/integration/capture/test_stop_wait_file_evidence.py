@@ -18,6 +18,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
 
+from .task_cleanup import close_observer
 from .test_record_file_completion_wait import (
     _completed_result, _completion, _stop_context,
 )
@@ -44,28 +45,32 @@ async def _page_world(tmp_path, *, completion_changes=None, entry_changes=None, 
         assembly_options={"check_config": AttemptConfig(3, Decimal("10"), Decimal("2"))},
         evidence_contracts=(_REGISTRY.contract("results_returned", 1),
             EvidenceContract("adb_foreground_recovery", 1, "result", frozenset())))
-    context = _stop_context(owned, action_id)
-    entry = {**_entry("a"), **(entry_changes or {})}
+    try:
+        context = _stop_context(owned, action_id)
+        entry = {**_entry("a"), **(entry_changes or {})}
 
-    async def read(request, batch):
-        return _completed_result(request.ticket, context, entries=[entry],
-            finalized=error is None, error=error,
-            completion=_completion(context, **(completion_changes or {})))
+        async def read(request, batch):
+            return _completed_result(request.ticket, context, entries=[entry],
+                finalized=error is None, error=error,
+                completion=_completion(context, **(completion_changes or {})))
 
-    driver = result_driver(case, side_effect=read)
-    original = CaptureRepository.save_result_page
-    def stop_after_page(repository, request, key, current):
-        receipt = original(repository, request, key, current)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        return replace(receipt, handoff_error=_PageSaved())
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(CaptureRepository, "save_result_page", stop_after_page)
-        with pytest.raises(_PageSaved):
-            await capture_handler(handler)(action_id, runtime)
-    ticket = current_result_ticket(owned, action_id)
-    saved = CaptureRepository().read_last_result_page(ticket, owned)
-    file_id = dict(saved.file_ids)[entry["identity"]]
-    return owned, runtime, action_id, context, entry, driver, ticket, saved, file_id
+        driver = result_driver(case, side_effect=read)
+        original = CaptureRepository.save_result_page
+        def stop_after_page(repository, request, key, current):
+            receipt = original(repository, request, key, current)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            return replace(receipt, handoff_error=_PageSaved())
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(CaptureRepository, "save_result_page", stop_after_page)
+            with pytest.raises(_PageSaved):
+                await capture_handler(handler)(action_id, runtime)
+        ticket = current_result_ticket(owned, action_id)
+        saved = CaptureRepository().read_last_result_page(ticket, owned)
+        file_id = dict(saved.file_ids)[entry["identity"]]
+        return owned, runtime, action_id, context, entry, driver, ticket, saved, file_id
+    except BaseException:
+        close_observer(owned)
+        raise
 
 
 def _completion_command(file_id, context, entry, saved, **changes):

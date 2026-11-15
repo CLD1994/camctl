@@ -30,6 +30,8 @@ from .test_recording_start_runtime import (
     _ANCHOR, StartDriver, _result,
 )
 
+from .task_cleanup import close_observer, settle_capture_task
+from ..support.task_wait import wait_for_signal
 from .recording_start_fixtures import start_case
 from ..support.result_cases import result_case
 
@@ -152,15 +154,19 @@ async def test_normal_record_stop_confirmed_with_error_completes_stop_fact(tmp_p
 
 async def _confirmed_world(tmp_path, case, *, cold=False, query=None):
     owned = await case.world(tmp_path)
-    driver = StartDriver(_result(confirmed=True, activity_id='1'))
-    options = dict(stop_config=AttemptConfig(1, Decimal('.125'), Decimal('1')), query=query)
-    runtime = await case.runtime(owned, driver, **options)
-    await capture_handler('camera_record')(case.aid, runtime)
-    case.wall[0] = _NOW + 61_000_000
-    case.mono[0] = _ANCHOR + 61_000_000_000
-    if cold:
-        runtime = await case.reopen(owned, driver, wall=case.wall, mono=case.mono, **options)
-    return owned, runtime
+    try:
+        driver = StartDriver(_result(confirmed=True, activity_id='1'))
+        options = dict(stop_config=AttemptConfig(1, Decimal('.125'), Decimal('1')), query=query)
+        runtime = await case.runtime(owned, driver, **options)
+        await capture_handler('camera_record')(case.aid, runtime)
+        case.wall[0] = _NOW + 61_000_000
+        case.mono[0] = _ANCHOR + 61_000_000_000
+        if cold:
+            runtime = await case.reopen(owned, driver, wall=case.wall, mono=case.mono, **options)
+        return owned, runtime
+    except BaseException:
+        close_observer(owned)
+        raise
 
 
 async def test_reconcile_entry_stop_confirmed_with_error_completes_stop_fact(tmp_path, start_case):
@@ -228,14 +234,14 @@ async def test_canceled_capture_stop_confirmed_with_error_completes_stop_fact(tm
         config = AttemptConfig(1, Decimal('10'), Decimal('1'))
         runtime = await start_case.runtime(owned, driver, stop_config=config)
         pending = asyncio.create_task(capture_handler('camera_record')(start_case.aid, runtime))
-        await entered.wait()
+        await wait_for_signal(entered, pending)
         assert driver.calls[0].ticket is not None
         await _request_cancel(runtime, start_case.aid, start_case.wall)
         await _request_second_cancel(runtime, start_case.aid, start_case.wall)
         await capture_handler('camera_record')(start_case.aid, runtime)
         assert stopper.calls == []
         release.set()
-        await pending
+        await asyncio.wait_for(asyncio.shield(pending), 30)
         resumed = await start_case.reopen(owned, driver, stop_config=config)
         await capture_handler('camera_record')(start_case.aid, resumed)
         assert stopper.calls == ['stop_recording']
@@ -250,9 +256,10 @@ async def test_canceled_capture_stop_confirmed_with_error_completes_stop_fact(tm
         assert stopper.calls == ['stop_recording']
     finally:
         release.set()
-        if pending is not None and not pending.done():
-            await pending
-        owned.connection.close()
+        try:
+            await settle_capture_task(pending)
+        finally:
+            close_observer(owned)
 
 
 async def _request_second_cancel(runtime, action_id, wall):
@@ -461,7 +468,7 @@ async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path, st
         start_case.stopper.delegate = stopper
         pending = asyncio.create_task(
             capture_handler("camera_record")(1, runtime))
-        await asyncio.wait_for(entered.wait(), 1)
+        await wait_for_signal(entered, pending, timeout=1)
         # 取消生效时停止在途：不派发新停止，不提前结束活动。
         await _request_cancel(runtime, start_case.aid, start_case.wall)
         await capture_handler("camera_record")(1, runtime)
@@ -471,7 +478,7 @@ async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path, st
         assert (activity["activity_state"], activity["occupancy_state"]) == (2, 1)
 
         released.set()
-        await asyncio.wait_for(pending, 1)
+        await asyncio.wait_for(asyncio.shield(pending), 1)
         # 实际返回按停止事实保存并收场，重入按取消终态收尾。
         await capture_handler("camera_record")(1, runtime)
         assert stopper.calls == ["stop_recording"]
@@ -484,9 +491,10 @@ async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path, st
         _assert_settle_transactions(owned, run_id, activity_id)
     finally:
         released.set()
-        if pending is not None and not pending.done():
-            await pending
-        owned.connection.close()
+        try:
+            await settle_capture_task(pending, timeout=1)
+        finally:
+            close_observer(owned)
 
 
 async def _accept_followup(runtime, wall):

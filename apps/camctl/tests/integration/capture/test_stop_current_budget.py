@@ -25,6 +25,8 @@ from camctl.persistence.models import DbOutcomeKind
 from .test_call_result_save import ReturnedCall, _outcome
 from .test_capture_contract import _NOW, _entry
 from .test_recording_start_runtime import StartDriver, _ANCHOR, _result
+from .task_cleanup import close_observer, settle_capture_task
+from ..support.task_wait import wait_for_signal
 from .recording_start_fixtures import start_case
 
 
@@ -34,19 +36,23 @@ pytestmark = pytest.mark.asyncio
 async def _ready(tmp_path, case, maximum, *, max_delay_ms=60000):
     """当前配置属于会话工厂的显式输入；正常轮次保留同一工厂锚点。"""
     owned = await case.world(tmp_path, max_delay_ms=max_delay_ms)
-    devices = {'cam-1': {'driver': 'camctl-adb', 'recording': {
-        'max_start_attempts': 3, 'start_timeout_s': Decimal('.75'), 'start_retry_interval_s': Decimal('1'),
-        'max_stop_attempts': maximum, 'stop_timeout_s': Decimal('.125'), 'stop_retry_interval_s': Decimal('1'),
-        'repair_margin_s': Decimal('10')},
-        'query': {'max_attempts': 2, 'timeout_s': Decimal('.5'), 'retry_interval_s': Decimal('1')}}}
-    case.budget_devices = devices
-    driver = StartDriver(_result(confirmed=True, activity_id='1'))
-    runtime = await case.runtime(owned, driver, assembly_options={
-        'devices': devices, 'start_config': None, 'stop_config': None, 'query_config': None})
-    await capture_handler('camera_record')(case.aid, runtime)
-    case.wall[0] = _NOW + 60_000_000
-    case.mono[0] = _ANCHOR + 60_000_000_000
-    return owned, runtime, case.wall, case.mono
+    try:
+        devices = {'cam-1': {'driver': 'camctl-adb', 'recording': {
+            'max_start_attempts': 3, 'start_timeout_s': Decimal('.75'), 'start_retry_interval_s': Decimal('1'),
+            'max_stop_attempts': maximum, 'stop_timeout_s': Decimal('.125'), 'stop_retry_interval_s': Decimal('1'),
+            'repair_margin_s': Decimal('10')},
+            'query': {'max_attempts': 2, 'timeout_s': Decimal('.5'), 'retry_interval_s': Decimal('1')}}}
+        case.budget_devices = devices
+        driver = StartDriver(_result(confirmed=True, activity_id='1'))
+        runtime = await case.runtime(owned, driver, assembly_options={
+            'devices': devices, 'start_config': None, 'stop_config': None, 'query_config': None})
+        await capture_handler('camera_record')(case.aid, runtime)
+        case.wall[0] = _NOW + 60_000_000
+        case.mono[0] = _ANCHOR + 60_000_000_000
+        return owned, runtime, case.wall, case.mono
+    except BaseException:
+        close_observer(owned)
+        raise
 
 
 async def _with_limit(case, owned, maximum, *, cold=False):
@@ -252,7 +258,7 @@ async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, star
         stopper = PendingStop(actual)
         start_case.stopper.delegate = stopper
         pending = asyncio.create_task(_save_actual_stop(runtime, start_case.aid))
-        await entered.wait()
+        await wait_for_signal(entered, pending)
         run_id = _stop_run(owned)[0]
         runtime = await _with_limit(start_case, owned, 1)
         await capture_handler("camera_record")(1, runtime)
@@ -263,7 +269,7 @@ async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, star
         assert _activity(owned) == (2, 1, _NOW)
 
         released.set()
-        await pending
+        await asyncio.wait_for(asyncio.shield(pending), 30)
         attempt, = _stop_attempts(owned)
         assert attempt[3:5] == ((2, 3) if confirmed else (3, 1))
         assert attempt[5] is not None
@@ -282,9 +288,10 @@ async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, star
             _assert_exhausted(owned, run_id, 1)
     finally:
         released.set()
-        if pending is not None:
-            await pending
-        owned.connection.close()
+        try:
+            await settle_capture_task(pending)
+        finally:
+            close_observer(owned)
 
 
 @pytest.mark.parametrize("confirmed", [False, True])
@@ -321,13 +328,17 @@ async def test_higher_limit_preserves_original_stop_terminal_result(tmp_path, st
 
 async def _recording_consumer(tmp_path, case):
     owned, runtime, wall, mono = await _ready(tmp_path, case, 3, max_delay_ms=5000)
-    action_id = case.aid
-    activity_id, = owned.connection.execute('SELECT id FROM device_activities').fetchone()
-    assert owned.connection.execute(
-        'SELECT check_decision,repair_state,source_device_file_id FROM recording_processing WHERE action_id=?',
-        (action_id,)).fetchone() == (1, 1, None)
-    case.options['results'].files_by_action[activity_id] = (_entry('original', size=41),)
-    return owned, runtime, action_id, activity_id
+    try:
+        action_id = case.aid
+        activity_id, = owned.connection.execute('SELECT id FROM device_activities').fetchone()
+        assert owned.connection.execute(
+            'SELECT check_decision,repair_state,source_device_file_id FROM recording_processing WHERE action_id=?',
+            (action_id,)).fetchone() == (1, 1, None)
+        case.options['results'].files_by_action[activity_id] = (_entry('original', size=41),)
+        return owned, runtime, action_id, activity_id
+    except BaseException:
+        close_observer(owned)
+        raise
 
 
 def _confirmed_stop_error(activity_id):

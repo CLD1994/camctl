@@ -27,6 +27,8 @@ from camctl.persistence.repositories.scheduling import SchedulingRepository
 from .test_capture_contract import _NOW
 from .test_natural_wait_time_eligibility import _request_cancel
 from .test_recording_start_runtime import _ANCHOR, _START_EVIDENCE, StartDriver, StateQuery, _result, _start
+from .task_cleanup import close_observer, settle_capture_task
+from ..support.task_wait import wait_for_signal
 from .recording_start_fixtures import start_case, StartSaveFault, observe_start_save
 from ..support.result_cases import result_case
 
@@ -292,7 +294,7 @@ async def test_residual_consumer_finds_unfinished_old_start_under_terminal_actio
 @pytest.mark.parametrize('late_error', [False, True])
 async def test_canceled_query_storage_keeps_late_actual_observation_without_reviving_runs(
         tmp_path, start_case, late_error):
-    """独立仓储合同：取消终态先保存，原QUERY实际返回后仍交付原事实。"""
+    """独立仓储合同：取消终态先保存，测试持有的QUERY返回后仍交付原事实。"""
     import asyncio
     from camctl.devices.bindings import DeviceBinding
     from camctl.devices.evidence import DeviceObservation
@@ -327,7 +329,7 @@ async def test_canceled_query_storage_keeps_late_actual_observation_without_revi
         ticket = begun.value.ticket
         task = asyncio.create_task(query(ControlRequest('query', DeviceBinding('cam-1', 'camctl-adb'),
             {'activity_id': '1'}, ticket=ticket, timeout_s=Decimal('0.5'))))
-        await entered.wait()
+        await wait_for_signal(entered, task)
         await _request_cancel(runtime, start_case.aid, start_case.wall)
         terminal_key = new_operation_key()
         ended = await runtime.database.write(lambda current: CaptureRepository().finish_canceled_capture(
@@ -337,7 +339,7 @@ async def test_canceled_query_storage_keeps_late_actual_observation_without_revi
         assert owned.connection.execute(
             'SELECT status FROM operation_attempts WHERE run_id=?', (ticket.run_id,)).fetchone() == (1,)
         release.set()
-        response = await task
+        response = await asyncio.wait_for(asyncio.shield(task), 30)
         finish = AttemptFinish(ticket, validate_outcome(ticket, response.outcome, _START_EVIDENCE),
             _NOW, run_finish=RunFinish(RunOutcome.CANCELED))
         observation = ActivityObservationSave(start_case.aid, _NOW, started_at=_NOW, activity_state=2)
@@ -368,6 +370,7 @@ async def test_canceled_query_storage_keeps_late_actual_observation_without_revi
         assert repeated.kind is DbOutcomeKind.COMPLETED and tuple(owned.connection.iterdump()) == before
     finally:
         release.set()
-        if task is not None and not task.done():
-            await task
-        owned.connection.close()
+        try:
+            await settle_capture_task(task)
+        finally:
+            close_observer(owned)

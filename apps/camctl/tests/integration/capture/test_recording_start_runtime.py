@@ -27,6 +27,8 @@ from camctl.persistence.repositories.scheduling import SchedulingRepository
 
 from .test_capture_contract import _NOW
 
+from .task_cleanup import close_observer, settle_capture_task
+from ..support.task_wait import wait_for_signal
 from .recording_start_fixtures import start_case
 
 pytestmark = pytest.mark.asyncio
@@ -392,7 +394,7 @@ async def test_original_start_stays_in_flight_without_second_dispatch_or_early_t
         runtime = (await start_case.runtime(owned, driver, wall=wall))
         handler = capture_handler("camera_record")
         pending = asyncio.create_task(handler(1, runtime))
-        await entered.wait()
+        await wait_for_signal(entered, pending)
         wall[0] += 60_000_001
         await handler(1, runtime)
         assert len(driver.calls) == 1
@@ -400,13 +402,14 @@ async def test_original_start_stays_in_flight_without_second_dispatch_or_early_t
         assert owned.connection.execute("SELECT status FROM operation_attempts").fetchone() == (1,)
         assert owned.connection.execute("SELECT status FROM actions WHERE id = 1").fetchone() == (2,)
         released.set()
-        await pending
+        await asyncio.wait_for(asyncio.shield(pending), 30)
         assert _start(owned, start_case.aid)[1:] == (3, 1, 0)
     finally:
         released.set()
-        if pending is not None:
-            await pending
-        owned.connection.close()
+        try:
+            await settle_capture_task(pending)
+        finally:
+            close_observer(owned)
 
 
 def _sent_result(activity_id="12"):

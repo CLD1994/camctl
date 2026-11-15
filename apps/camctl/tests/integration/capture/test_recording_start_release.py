@@ -15,6 +15,8 @@ from camctl.persistence.repositories.capture import ReleaseOutcome
 from .test_natural_wait_time_eligibility import _request_cancel
 from .test_capture_contract import _NOW
 from .test_recording_start_runtime import StartDriver, _result
+from .task_cleanup import close_observer, settle_capture_task
+from ..support.task_wait import wait_for_signal
 from .recording_start_fixtures import start_case
 
 pytestmark = pytest.mark.asyncio
@@ -117,18 +119,19 @@ async def test_actual_start_call_keeps_occupancy_until_its_result_arrives(tmp_pa
     try:
         runtime = (await start_case.runtime(owned, HeldStart()))
         task = asyncio.create_task(capture_handler("camera_record")(1, runtime))
-        await asyncio.wait_for(entered.wait(), 1)
+        await wait_for_signal(entered, task, timeout=1)
         await _request_cancel(runtime, start_case.aid, start_case.wall)
         await capture_handler("camera_record")(1, runtime)
         assert owned.connection.execute(
             "SELECT occupancy_state FROM device_activities WHERE action_id=1").fetchone() == (1,)
         assert owned.connection.execute("SELECT status FROM operation_attempts").fetchone() == (1,)
         release.set()
-        await task
+        await asyncio.wait_for(asyncio.shield(task), 1)
         assert owned.connection.execute(
             "SELECT occupancy_state FROM device_activities WHERE action_id=1").fetchone() == (2,)
     finally:
         release.set()
-        if task is not None and not task.done():
-            await task
-        owned.connection.close()
+        try:
+            await settle_capture_task(task, timeout=1)
+        finally:
+            close_observer(owned)
