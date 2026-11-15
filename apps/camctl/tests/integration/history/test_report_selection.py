@@ -332,7 +332,7 @@ class _QueryProbe:
 
 
 class _StatementProbe:
-    """记录真实报告选择语句，包括 execute 和取行期间的 SQLite 指令。"""
+    """记录真实语句和取行；VM 指令估计为进度回调次数乘以粒度。"""
 
     def __init__(self, repository, monkeypatch):
         import sqlite3
@@ -367,7 +367,7 @@ class _StatementProbe:
                 def advance():
                     steps[0] += 100
                     if record is not None:
-                        record['vm_steps'] = steps[0]
+                        record['vm_steps_estimate'] = steps[0]
                     return 0
 
                 record = None
@@ -386,7 +386,7 @@ class _StatementProbe:
                 if any(table == 'report_entity_changes' for table, _ in reads) and len(columns) in (1, 2):
                     record = {'kind': 'candidate' if len(columns) == 2 else 'page',
                               'sql': sql, 'parameters': tuple(parameters),
-                              'vm_steps': steps[0], 'reads': reads}
+                              'vm_steps_estimate': steps[0], 'reads': reads}
                     cursor.record = record
                     probe.statements.append(record)
                 else:
@@ -534,7 +534,7 @@ def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_
           'reading_s': reading, 'verification_s': time.perf_counter() - started,
           'sqlite': __import__('sqlite3').sqlite_version,
           'statements': [(record['kind'], record['sql'], record['parameters'], len(record['rows']),
-                          record['vm_steps'], plan) for record, plan in zip(records, plans)],
+                          record['vm_steps_estimate'], plan) for record, plan in zip(records, plans)],
           'vm_granularity': 100}, flush=True)
     problems = []
     candidate_access = [row for row in plans[0] if 'report_changes_by_sequence' in row]
@@ -572,11 +572,11 @@ def test_actual_report_query_work_for_page_sizes(report_selection_sample, monkey
     assert all(len(record['rows']) <= page_size + 1 for record in pages)
     print('REPORT_PAGE_WORK', {'page_size': page_size, 'reading_s': reading,
           'verification_s': time.perf_counter() - started, 'queries': len(records),
-          'candidate_vm': records[0]['vm_steps'],
-          'page_vm_total': sum(record['vm_steps'] for record in pages),
-          'page_vm_first': pages[0]['vm_steps'], 'page_vm_last': pages[-1]['vm_steps'],
-          'page_vm_min': min(record['vm_steps'] for record in pages),
-          'page_vm_max': max(record['vm_steps'] for record in pages),
+          'candidate_vm_estimate': records[0]['vm_steps_estimate'],
+          'page_vm_total_estimate': sum(record['vm_steps_estimate'] for record in pages),
+          'page_vm_first_estimate': pages[0]['vm_steps_estimate'], 'page_vm_last_estimate': pages[-1]['vm_steps_estimate'],
+          'page_vm_min_estimate': min(record['vm_steps_estimate'] for record in pages),
+          'page_vm_max_estimate': max(record['vm_steps_estimate'] for record in pages),
           'vm_granularity': 100}, flush=True)
 
 
