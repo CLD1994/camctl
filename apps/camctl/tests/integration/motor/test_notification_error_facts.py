@@ -6,6 +6,8 @@ import pytest
 
 from camctl.motor import notification
 
+from .pipe_support import close_if_same, run_pipe_case
+
 
 def test_failed_write_returns_original_exception():
     read_fd, write_fd = os.pipe()
@@ -30,6 +32,7 @@ def test_failed_write_returns_original_exception():
 
 def test_open_failure_retains_original_exception(monkeypatch):
     read_fd, write_fd = os.pipe()
+    identity = os.fstat(write_fd)
     failure = OSError(9, 'fd configuration failed')
     monkeypatch.setattr(notification.os, 'set_inheritable', Mock(side_effect=failure))
     try:
@@ -39,10 +42,17 @@ def test_open_failure_retains_original_exception(monkeypatch):
         with pytest.raises(OSError):
             os.fstat(write_fd)
     finally:
-        os.close(read_fd)
+        try:
+            close_if_same(write_fd, identity)
+        finally:
+            os.close(read_fd)
 
 
 def test_partial_write_close_failure_keeps_original_error_and_known_range():
+    run_pipe_case(_partial_write_close_failure_keeps_original_error_and_known_range)
+
+
+def _partial_write_close_failure_keeps_original_error_and_known_range():
     read_fd, write_fd = os.pipe()
     failure = OSError(5, 'close failed')
     def short_write(fd, message):

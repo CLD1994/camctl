@@ -19,13 +19,13 @@ async def motor_database(tmp_path):
     path = tmp_path / "motor.db"
     create_test_database(path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-    body = _body()
-    body["actions"][0]["policy"] = {"max_delay_ms": 1}
-    _admit(owned, body)
-    observed = SchedulingRepository().observe_window(
-        ObserveWindowRequest(1, NOW, NOW), new_operation_key(), owned)
-    assert observed.kind.value == "completed", observed.error
     try:
+        body = _body()
+        body["actions"][0]["policy"] = {"max_delay_ms": 1}
+        _admit(owned, body)
+        observed = SchedulingRepository().observe_window(
+            ObserveWindowRequest(1, NOW, NOW), new_operation_key(), owned)
+        assert observed.kind.value == "completed", observed.error
         async with business_database(path) as database:
             yield owned, database
     finally:

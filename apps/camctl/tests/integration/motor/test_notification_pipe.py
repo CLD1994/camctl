@@ -13,10 +13,16 @@ from camctl.motor.notification import (
 )
 from camctl.operations.process import ToolSpec, execute_tool
 
+from .pipe_support import close_if_same, run_pipe_case
+
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX 通知管道")
 
 
 def test_real_pipe_normalized_lines_and_eof():
+    run_pipe_case(_real_pipe_normalized_lines_and_eof)
+
+
+def _real_pipe_normalized_lines_and_eof():
     read_fd, write_fd = os.pipe()
     writer = open_notification_writer(write_fd)
     try:
@@ -39,6 +45,10 @@ def test_real_pipe_normalized_lines_and_eof():
 
 
 def test_full_pipe_returns_without_waiting_or_retry():
+    run_pipe_case(_full_pipe_returns_without_waiting_or_retry)
+
+
+def _full_pipe_returns_without_waiting_or_retry():
     read_fd, write_fd = os.pipe()
     writer = open_notification_writer(write_fd)
     try:
@@ -85,10 +95,14 @@ def test_read_end_is_rejected_and_closed():
 
 def test_regular_file_is_not_a_notification_channel(tmp_path):
     fd = os.open(tmp_path / "file", os.O_CREAT | os.O_WRONLY, 0o600)
-    writer = open_notification_writer(fd)
-    assert not writer.available
-    with pytest.raises(OSError):
-        os.fstat(fd)
+    identity = os.fstat(fd)
+    try:
+        writer = open_notification_writer(fd)
+        assert not writer.available
+        with pytest.raises(OSError):
+            os.fstat(fd)
+    finally:
+        close_if_same(fd, identity)
 
 
 def test_invalid_descriptor_keeps_explicit_unavailable_reason():
@@ -109,6 +123,7 @@ def test_cli_early_configuration_failure_closes_notification_fd(tmp_path):
     config = tmp_path / "invalid.toml"
     config.write_text("[paths\n")
     read_fd, write_fd = os.pipe()
+    identity = os.fstat(write_fd)
     out, err = StringIO(), StringIO()
     try:
         result = main(["run", "--host-notification-fd", str(write_fd),
@@ -119,7 +134,10 @@ def test_cli_early_configuration_failure_closes_notification_fd(tmp_path):
         os.set_blocking(read_fd, False)
         assert os.read(read_fd, 1) == b""
     finally:
-        os.close(read_fd)
+        try:
+            close_if_same(write_fd, identity)
+        finally:
+            os.close(read_fd)
 
 
 def test_managed_tool_does_not_inherit_notification_writer():
@@ -180,9 +198,22 @@ async def test_report_process_does_not_inherit_notification_writer(tmp_path):
                 continue
         assert f"pipe:[{inode}]" not in targets
     finally:
-        await supervisor.stop()
-        for process in processes:
-            if process.is_alive():
-                process.terminate(); process.join(10)
-        writer.close()
-        os.close(read_fd)
+        try:
+            processes.extend(process for process in multiprocessing.active_children()
+                             if process.pid not in previous and process not in processes)
+            await supervisor.stop()
+        finally:
+            try:
+                for process in processes:
+                    if process.is_alive():
+                        process.terminate()
+                        process.join(10)
+                    if process.is_alive():
+                        process.kill()
+                        process.join(10)
+                    assert not process.is_alive(), "报告进程未能退出"
+            finally:
+                try:
+                    writer.close()
+                finally:
+                    os.close(read_fd)
