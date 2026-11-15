@@ -44,7 +44,8 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
     from ..support.segment_inspection_cases import inspection_source
     from camctl.outputs.obtain_flow import advance_obtain
 
-    source = world = None
+    source = world = executor = operation = running = None
+    started, release = threading.Event(), threading.Event()
     read_sessions, segment_paths = [], []
 
     def observe_sessions(driver):
@@ -66,87 +67,86 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
 
         monkeypatch.setattr(driver, "open_read", open_read)
 
-    if purpose == "delivery":
-        cfg, owned, context, driver = environment
-        await _save_photos(cfg, owned, context, driver)
-        source_id, = owned.connection.execute(
-            "SELECT id FROM actions WHERE device_id='cam-a'").fetchone()
-        accepted = await submit_output_document(context.database, catalog=Catalog(), occurred_at=now, body={
-            "request_id": "2", "created_at": "2026-01-15 08:00:00", "name": "取回照片",
-            "actions": [{"name": "取回", "type": "obtain_action_outputs",
-                "scheduled_at": "2026-01-15 09:00:00",
-                "params": {"source": {"action_instance_id": str(source_id)}}}],
-        })
-        assert accepted.plan_id is not None, accepted
-        action_id, = owned.connection.execute(
-            "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
-        database = context.database
-        observe_sessions(driver)
-        roots = BoundDirectories(staging=Path(cfg.paths.staging))
-        executor = FileTaskExecutor(Supervisor())
-        for directory in (cfg.paths.staging, cfg.paths.ready, cfg.paths.processing):
-            Path(directory).mkdir(parents=True, exist_ok=True)
-        factory = obtain_factory(
-            devices=cfg.devices, drivers=_read_registry(driver), staging=roots.staging,
-            ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
-            occurred_at=lambda: now + 20, monotonic_ns=lambda: 0,
-            segment_size=len(_CONTENT), file_executor=executor)
-        runtime = factory(database)
-        operation = advance_obtain(runtime)
-        catalog, target_directory = Catalog(), "deliveries"
-    else:
-        directory = tmp_path / "inspection"
-        directory.mkdir()
-        source = await inspection_source(directory, count=1)
-        world = await inspection_case(source, capture_resources)
-        owned, database, roots, executor = world.owned, world.database, world.roots, world.executor
-        observe_sessions(world.driver)
-        action_id = world.ref.action_id
-        now = world.wall[0]
-        from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
-        from camctl.capture.segment_inspections import inspect_segment
-        from camctl.devices.drivers.registry import DriverRegistry
-        factory = session_capture_assembly(
-            devices=world.config.devices, drivers=DriverRegistry((world.entry,)),
-            results=world.results, staging=roots.staging, wait_config=execution_wait_config,
-            wall_us=lambda: world.wall[0], monotonic_ns=lambda: 7_000_000_000,
-            probe_request=world.probe_request, repair_request=world.repair_request,
-            segment_size=len(_CONTENT), file_executor=executor, **world.collections)
-        capture = await factory(database, "cam-1")
-        operation = inspect_segment(capture.media, world.request)
-        catalog, target_directory = Action6RecordCatalog(), "recording-inputs"
-
-    started, release = threading.Event(), threading.Event()
-    loop_thread = threading.get_ident()
-    actual_threads, selected_paths = [], []
-    actual_open = os.open
-
-    def hold(path):
-        selected_paths.append(path)
-        actual_threads.append(threading.get_ident())
-        if threading.get_ident() == loop_thread:
-            raise OSError("实际文件操作不能在事件循环中等待")
-        started.set()
-        assert release.wait(10), "测试未放行实际文件调用"
-
-    def matches(path):
-        return (isinstance(path, (str, Path)) and Path(path).is_absolute()
-                and Path(path).parent == roots.staging / target_directory)
-
-    def open_file(path, flags, *args, **kwargs):
-        selected = matches(path)
-        if selected and not started.is_set() and (
-                (stage == "prepare" and flags & os.O_CREAT)
-                or (stage == "hash" and flags & os.O_ACCMODE == os.O_RDONLY)):
-            hold(Path(path))
-        fd = actual_open(path, flags, *args, **kwargs)
-        if selected and stage == "segment" and flags & os.O_ACCMODE == os.O_RDWR:
-            segment_paths.append(Path(path))
-        return fd
-
-    monkeypatch.setattr(os, "open", open_file)
-    running = asyncio.create_task(operation)
     try:
+        if purpose == "delivery":
+            cfg, owned, context, driver = environment
+            await _save_photos(cfg, owned, context, driver)
+            source_id, = owned.connection.execute(
+                "SELECT id FROM actions WHERE device_id='cam-a'").fetchone()
+            accepted = await submit_output_document(context.database, catalog=Catalog(), occurred_at=now, body={
+                "request_id": "2", "created_at": "2026-01-15 08:00:00", "name": "取回照片",
+                "actions": [{"name": "取回", "type": "obtain_action_outputs",
+                    "scheduled_at": "2026-01-15 09:00:00",
+                    "params": {"source": {"action_instance_id": str(source_id)}}}],
+            })
+            assert accepted.plan_id is not None, accepted
+            action_id, = owned.connection.execute(
+                "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+            database = context.database
+            observe_sessions(driver)
+            roots = BoundDirectories(staging=Path(cfg.paths.staging))
+            executor = FileTaskExecutor(Supervisor())
+            for directory in (cfg.paths.staging, cfg.paths.ready, cfg.paths.processing):
+                Path(directory).mkdir(parents=True, exist_ok=True)
+            factory = obtain_factory(
+                devices=cfg.devices, drivers=_read_registry(driver), staging=roots.staging,
+                ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
+                occurred_at=lambda: now + 20, monotonic_ns=lambda: 0,
+                segment_size=len(_CONTENT), file_executor=executor)
+            runtime = factory(database)
+            operation = advance_obtain(runtime)
+            catalog, target_directory = Catalog(), "deliveries"
+        else:
+            directory = tmp_path / "inspection"
+            directory.mkdir()
+            source = await inspection_source(directory, count=1)
+            world = await inspection_case(source, capture_resources)
+            owned, database, roots, executor = world.owned, world.database, world.roots, world.executor
+            observe_sessions(world.driver)
+            action_id = world.ref.action_id
+            now = world.wall[0]
+            from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
+            from camctl.capture.segment_inspections import inspect_segment
+            from camctl.devices.drivers.registry import DriverRegistry
+            factory = session_capture_assembly(
+                devices=world.config.devices, drivers=DriverRegistry((world.entry,)),
+                results=world.results, staging=roots.staging, wait_config=execution_wait_config,
+                wall_us=lambda: world.wall[0], monotonic_ns=lambda: 7_000_000_000,
+                probe_request=world.probe_request, repair_request=world.repair_request,
+                segment_size=len(_CONTENT), file_executor=executor, **world.collections)
+            capture = await factory(database, "cam-1")
+            operation = inspect_segment(capture.media, world.request)
+            catalog, target_directory = Action6RecordCatalog(), "recording-inputs"
+
+        loop_thread = threading.get_ident()
+        actual_threads, selected_paths = [], []
+        actual_open = os.open
+
+        def hold(path):
+            selected_paths.append(path)
+            actual_threads.append(threading.get_ident())
+            if threading.get_ident() == loop_thread:
+                raise OSError("实际文件操作不能在事件循环中等待")
+            started.set()
+            assert release.wait(10), "测试未放行实际文件调用"
+
+        def matches(path):
+            return (isinstance(path, (str, Path)) and Path(path).is_absolute()
+                    and Path(path).parent == roots.staging / target_directory)
+
+        def open_file(path, flags, *args, **kwargs):
+            selected = matches(path)
+            if selected and not started.is_set() and (
+                    (stage == "prepare" and flags & os.O_CREAT)
+                    or (stage == "hash" and flags & os.O_ACCMODE == os.O_RDONLY)):
+                hold(Path(path))
+            fd = actual_open(path, flags, *args, **kwargs)
+            if selected and stage == "segment" and flags & os.O_ACCMODE == os.O_RDWR:
+                segment_paths.append(Path(path))
+            return fd
+
+        monkeypatch.setattr(os, "open", open_file)
+        running = asyncio.create_task(operation)
         await _wait_started(started, running)
         assert len(selected_paths) == 1
         if stage in ("segment", "hash"):
@@ -177,22 +177,55 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
         assert executor.unfinished_files() == ()
         assert actual_threads and all(value != loop_thread for value in actual_threads)
     finally:
+        original, errors = sys.exception(), []
         release.set()
-        await _wait_finished(running)
-        await asyncio.gather(running, return_exceptions=True)
-        drain = asyncio.create_task(executor.drain_required())
-        await _wait_finished(drain)
-        settled = await drain
-        assert not settled.failed
+        if running is None and operation is not None:
+            try:
+                operation.close()
+            except BaseException as error:
+                errors.append(error)
+        if running is not None:
+            try:
+                await _wait_finished(running)
+                result, = await asyncio.gather(running, return_exceptions=True)
+                if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError) and result is not original:
+                    errors.append(result)
+            except BaseException as error:
+                errors.append(error)
+        if executor is not None:
+            try:
+                drain = asyncio.create_task(executor.drain_required())
+                await _wait_finished(drain)
+                settled = await drain
+                assert not settled.failed
+            except BaseException as error:
+                errors.append(error)
         for session in read_sessions:
-            session.request_stop()
-            read_end = asyncio.create_task(session.wait_stopped())
-            await _wait_finished(read_end)
-            assert (await read_end).stopped
+            try:
+                session.request_stop()
+            except BaseException as error:
+                errors.append(error)
+            try:
+                read_end = asyncio.create_task(session.wait_stopped())
+                await _wait_finished(read_end)
+                assert (await read_end).stopped
+            except BaseException as error:
+                errors.append(error)
         if world is not None:
-            await world.close()
+            try:
+                close_world = asyncio.create_task(world.close())
+                await _wait_finished(close_world)
+                await close_world
+            except BaseException as error:
+                errors.append(error)
         if source is not None:
-            source[0].connection.close()
+            try:
+                source[0].connection.close()
+            except BaseException as error:
+                errors.append(error)
+        if errors:
+            raise BaseExceptionGroup("共享文件测试及资源收场失败",
+                                     ([original] if original is not None else []) + errors)
 
 
 @pytest.mark.asyncio

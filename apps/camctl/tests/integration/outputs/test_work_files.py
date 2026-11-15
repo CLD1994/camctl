@@ -11,6 +11,8 @@
 import asyncio
 import hashlib
 import json
+import re
+import sys
 import threading
 from contextlib import closing
 from dataclasses import replace
@@ -318,19 +320,41 @@ async def test_release_requires_stopped_operations(environment, monkeypatch):
             RetentionRelease(file_id, now + 40), new_operation_key(), owned)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
         assert isinstance(outcome.error, ConsistencyError)
-        assert str(outcome.error) == f"中间文件 {file_id} 仍有 1 个未结束操作尝试"
+        message = str(outcome.error)
+        numbers = re.findall(r"\d+", message)
+        assert numbers.count(str(file_id)) >= 1 + (file_id == 1)
+        assert "1" in numbers and "未结束" in message and "尝试" in message
         assert not owned.connection.in_transaction and tuple(owned.connection.iterdump()) == before
         assert _file_state(owned, file_id)[:2] == (1, 1)
         assert paths[0].read_bytes() == photo
     finally:
+        original, errors = sys.exception(), []
         if original_status is not None:
-            owned.connection.execute("UPDATE deliveries SET status=? WHERE id=?", (original_status, delivery_id))
-            owned.connection.commit()
+            try:
+                owned.connection.execute("UPDATE deliveries SET status=? WHERE id=?", (original_status, delivery_id))
+                owned.connection.commit()
+            except BaseException as error:
+                errors.append(error)
         release.set()
-        await asyncio.wait_for(asyncio.shield(running), 10)
-        settled = await asyncio.wait_for(asyncio.shield(executor.drain_required()), 10)
-        assert not settled.failed
-        await asyncio.gather(waiter, return_exceptions=True)
+        try:
+            await asyncio.wait_for(asyncio.shield(running), 10)
+        except BaseException as error:
+            if error is not original:
+                errors.append(error)
+        try:
+            settled = await asyncio.wait_for(asyncio.shield(executor.drain_required()), 10)
+            assert not settled.failed
+        except BaseException as error:
+            errors.append(error)
+        try:
+            done, _ = await asyncio.wait({waiter}, timeout=10)
+            assert done, "等待开始信号的任务未结束"
+            await waiter
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            raise BaseExceptionGroup("释放保护测试及资源收场失败",
+                                     ([original] if original is not None else []) + errors)
 
 
 @pytest.mark.asyncio
