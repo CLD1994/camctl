@@ -192,6 +192,7 @@ class DbExecutor:
         self._stopping = False
         self._closed = False
         self._worker_error: BaseException | None = None
+        self._close_result: asyncio.Future | None = None
         self._thread: threading.Thread | None = None
         self._loop = asyncio.get_running_loop()
 
@@ -228,28 +229,51 @@ class DbExecutor:
         return WithdrawalResult(key=key, status=status)
 
     async def close(self) -> None:
-        """停止接纳，撤回未开始操作，等待已开始操作实际结束。"""
-        released: list[asyncio.Future] = []
-        with self._lock:
-            if self._closed or self._stopping:
-                return
-            self._stopping = True
-            jobs, admissions = self._core.withdraw_all()
-            for job in jobs:
-                released.append(self._results.pop(job.key, None))  # type: ignore[arg-type]
-            for admission in admissions:
-                released.append(self._results.pop(admission.job.key, None))  # type: ignore[arg-type]
-            self._work_available.notify_all()
-        for result in released:
-            if result is not None and not result.done():
-                result.set_result(DbOutcome(kind=DbOutcomeKind.NOT_EXECUTED))
-        thread = self._thread
-        if thread is not None:
-            await self._loop.run_in_executor(None, thread.join)
-        with self._lock:
-            self._closed = True
-        if self._worker_error is not None:
-            raise self._worker_error
+        """停止接纳并等待数据库线程实际退出；取消等待不取消关闭。"""
+        if self._close_result is None:
+            released: list[asyncio.Future] = []
+            with self._lock:
+                self._stopping = True
+                jobs, admissions = self._core.withdraw_all()
+                for job in jobs:
+                    released.append(self._results.pop(job.key, None))  # type: ignore[arg-type]
+                for admission in admissions:
+                    released.append(self._results.pop(admission.job.key, None))  # type: ignore[arg-type]
+                self._work_available.notify_all()
+            for result in released:
+                if result is not None and not result.done():
+                    result.set_result(DbOutcome(kind=DbOutcomeKind.NOT_EXECUTED))
+            self._close_result = self._loop.create_future()
+            thread = self._thread
+            if thread is None:
+                self._finish_close(None)
+            else:
+                def join_worker() -> None:
+                    error = None
+                    try:
+                        thread.join()
+                    except BaseException as caught:
+                        error = caught
+                    self._loop.call_soon_threadsafe(self._finish_close, error)
+
+                try:
+                    threading.Thread(target=join_worker, name="camctl-db-join").start()
+                except BaseException as error:
+                    self._finish_close(error)
+        error = await asyncio.shield(self._close_result)
+        if error is not None:
+            raise error
+
+    def _finish_close(self, join_error: BaseException | None) -> None:
+        if join_error is None:
+            with self._lock:
+                self._closed = True
+        elif self._worker_error is not None:
+            if join_error.__cause__ is None:
+                join_error.__cause__ = self._worker_error
+            else:
+                join_error.add_note(f"关闭数据库连接失败: {self._worker_error!r}")
+        self._close_result.set_result(join_error or self._worker_error)
 
     # -- 内部：提交路径 -----------------------------------------------
 

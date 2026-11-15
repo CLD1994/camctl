@@ -587,3 +587,111 @@ class TestRealSqliteCombination:
                 assert observer.execute("SELECT value FROM executor_marker").fetchone() == (marker,)
         finally:
             await _finish_executor(executor, pending, release, closing)
+
+
+async def test_close_finishes_while_default_file_pool_is_busy():
+    from concurrent.futures import ThreadPoolExecutor
+
+    loop = asyncio.get_running_loop()
+    pool = ThreadPoolExecutor(max_workers=1)
+    loop.set_default_executor(pool)
+    entered = asyncio.Event()
+    release = threading.Event()
+    stock: list[FakeOwned] = []
+    executor = DbExecutor(_fake_factory(stock))
+
+    def file_work():
+        loop.call_soon_threadsafe(entered.set)
+        release.wait()
+
+    file_result = loop.run_in_executor(None, file_work)
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        receipt = await asyncio.wait_for(executor.submit_read(_read_job()), 5)
+        assert receipt.value == 7
+        await asyncio.wait_for(executor.close(), 5)
+        assert stock[0].connection.closed
+        assert not file_result.done()
+        await executor.close()
+    finally:
+        release.set()
+        await asyncio.wait_for(file_result, 5)
+        await executor.close()
+        pool.shutdown(wait=True)
+
+
+async def test_cancelled_close_can_be_taken_over_and_delivers_close_error():
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    error = OSError('connection close failure')
+
+    class ClosingConnection(FakeConnection):
+        def close(self):
+            loop.call_soon_threadsafe(entered.set)
+            release.wait()
+            self.closed = True
+            raise error
+
+    connection = ClosingConnection()
+    executor = DbExecutor(lambda: FakeOwned(connection))
+    assert (await executor.submit_read(_read_job())).value == 7
+    first = asyncio.create_task(executor.close())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        first.cancel('close waiter')
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        second = asyncio.create_task(executor.close())
+        await asyncio.sleep(0)
+        assert not second.done()
+        release.set()
+        with pytest.raises(OSError) as caught:
+            await asyncio.wait_for(second, 5)
+        assert caught.value is error and connection.closed
+        with pytest.raises(OSError) as repeated:
+            await executor.close()
+        assert repeated.value is error
+    finally:
+        release.set()
+        if not first.done():
+            await asyncio.gather(first, return_exceptions=True)
+
+
+async def test_business_close_delivers_failure_after_cancel_and_to_other_waiters():
+    from camctl.persistence.business import BusinessDatabase
+
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    error = OSError('connection close failure')
+
+    class ClosingConnection(FakeConnection):
+        def close(self):
+            loop.call_soon_threadsafe(entered.set)
+            release.wait()
+            self.closed = True
+            raise error
+
+    connection = ClosingConnection()
+    executor = DbExecutor(lambda: FakeOwned(connection))
+    database = BusinessDatabase(executor, None)
+    assert await database.read(lambda owned: 7) == 7
+    first = asyncio.create_task(database.close())
+    second = asyncio.create_task(database.close())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        first.cancel('close waiter')
+        await asyncio.sleep(0)
+        assert not first.done() and not second.done()
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(first, second, return_exceptions=True), 5)
+        assert results == [error, error] and connection.closed
+        assert isinstance(error.__cause__, asyncio.CancelledError)
+        assert error.__cause__.args == ('close waiter',)
+        with pytest.raises(OSError) as repeated:
+            await database.close()
+        assert repeated.value is error
+    finally:
+        release.set()
+        await asyncio.gather(first, second, return_exceptions=True)

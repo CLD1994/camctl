@@ -240,9 +240,16 @@ async def test_close_rejects_new_submission_and_preserves_original_receipt(
     original = _submit(executor, _job(kind, 'original'))
     job = _dispatch(executor) if stage == 'dispatched' else None
     executor._thread = create_autospec(threading.Thread, instance=True, spec_set=True)
-    joined = asyncio.get_running_loop().create_future()
-    join = create_autospec(executor._loop.run_in_executor, return_value=joined)
-    monkeypatch.setattr(executor._loop, 'run_in_executor', join)
+    targets = []
+
+    class WaitingThread:
+        def __init__(self, *, target, name):
+            targets.append(target)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(threading, "Thread", WaitingThread)
     closing = asyncio.create_task(executor.close())
     await asyncio.sleep(0)
     with pytest.raises(DbExecutorError):
@@ -255,17 +262,38 @@ async def test_close_rejects_new_submission_and_preserves_original_receipt(
         assert original.done() and original.result().kind is DbOutcomeKind.NOT_EXECUTED
     error = RuntimeError('worker shutdown') if close_error else None
     executor._worker_error = error
-    joined.set_result(None)
+    targets[0]()
     if close_error:
         with pytest.raises(RuntimeError) as caught:
             await closing
         assert caught.value is error
     else:
         await closing
-    join.assert_called_once_with(None, executor._thread.join)
+    executor._thread.join.assert_called_once_with()
     assert executor._closed and not executor._results
     with pytest.raises(DbExecutorError):
         _submit(executor, _job(kind, 'after close'))
+
+
+async def test_close_delivers_join_failure_with_its_original_cause(executor, monkeypatch):
+    cause = OSError('join cause')
+    error = RuntimeError('join failure')
+    error.__cause__ = cause
+    executor._thread = create_autospec(threading.Thread, instance=True, spec_set=True)
+    executor._thread.join.side_effect = error
+
+    class WaitingThread:
+        def __init__(self, *, target, name):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(threading, 'Thread', WaitingThread)
+    for _ in range(2):
+        with pytest.raises(RuntimeError) as caught:
+            await executor.close()
+        assert caught.value is error and caught.value.__cause__ is cause
 
 
 @pytest.mark.parametrize('kind', list(DbJobKind))

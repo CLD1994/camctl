@@ -154,30 +154,6 @@ async def test_worker_shutdown_close_error_keeps_delivered_read_and_is_recorded(
     assert result.error is None and executor._worker_error is error
 
 
-async def test_business_close_shares_actual_worker_shutdown_failure(owned, monkeypatch):
-    from camctl.persistence.business import BusinessDatabase
-    error = RuntimeError('worker close failed')
-    executor = DbExecutor(lambda: owned)
-    executor._worker_error = error
-    executor._thread = create_autospec(threading.Thread, instance=True, spec_set=True)
-    joined = asyncio.get_running_loop().create_future()
-    join = create_autospec(executor._loop.run_in_executor, return_value=joined)
-    monkeypatch.setattr(executor._loop, 'run_in_executor', join)
-    database = BusinessDatabase(executor, owned.metadata)
-    first = asyncio.create_task(database.close())
-    second = asyncio.create_task(database.close())
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert not first.done() and not second.done()
-    joined.set_result(None)
-    results = await asyncio.gather(first, second, return_exceptions=True)
-    assert results == [error, error]
-    with pytest.raises(RuntimeError) as caught:
-        await database.close()
-    assert caught.value is error
-    join.assert_called_once_with(None, executor._thread.join)
-
-
 @pytest.mark.parametrize('kind', [DbJobKind.READ, DbJobKind.WRITE])
 async def test_factory_control_is_delivered_without_stranding_future(owned, kind):
     control = KeyboardInterrupt('factory control')
