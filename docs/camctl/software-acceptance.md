@@ -1524,10 +1524,10 @@
 - 原文：[验收 P-05](database/consistency-verification.md#报告对象分页的具体查询验证)（分页期间提交新事件的冻结范围不变）。
 - 结论：部分覆盖
 - 归属：R 生成（reporting 计划）。
-- 生产入口：apps/camctl/src/camctl/reporting/generation.py、apps/camctl/src/camctl/persistence/repositories/history.py
-- 测试：apps/camctl/tests/integration/reporting/test_generation.py、apps/camctl/tests/integration/reporting/test_freeze_reuse.py、apps/camctl/tests/integration/reporting/test_result_error_generation.py、apps/camctl/tests/integration/history/test_report_selection.py
-- 证据：有界选择在首批交付后，真实保存旧动作的新状态、新产物及新计划，再续读和冷打开原H，入选身份集合均保持正确。生成用例经正式受理入口实际吸收ACK，确认累计水位后，按原报告身份与冻结范围、不同批量及缓冲重建，完整字节保持一致。ACK后原冻结答复、查询错误／取消关闭选择及数据库重开后重建另有分层验证。
-- 未核验前提：大范围续页间提交、缓存命中后的完整字节对照，以及候选失败后由新报告进程沿原身份/H重建仍须分别核验。已有分层结果不等于这些交叉已验证，当前有界页间选择也不证明完整报告字节；ACK用例不承担客户端接收和传输闭环。当前补强与边界见[工作记录](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
+- 生产入口：apps/camctl/src/camctl/reporting/generation.py、apps/camctl/src/camctl/persistence/repositories/history.py、apps/camctl/src/camctl/reporting/supervisor.py、apps/camctl/src/camctl/reporting/worker.py
+- 测试：apps/camctl/tests/integration/reporting/test_generation.py、apps/camctl/tests/integration/reporting/test_freeze_reuse.py、apps/camctl/tests/integration/reporting/test_result_error_generation.py、apps/camctl/tests/integration/history/test_report_selection.py、apps/camctl/tests/integration/reporting/test_worker.py
+- 证据：有界选择在首批交付后，真实保存旧动作的新状态、新产物及新计划，再续读和冷打开原H，入选身份集合均保持正确。生成用例经正式受理入口实际吸收ACK，确认累计水位后，按原报告身份与冻结范围、不同批量及缓冲重建，完整字节保持一致。真实报告进程遇到已选计划的历史目录缺行时按一致性错误退出，恢复原行后由新进程沿原身份/H重建，完整字节相同。查询错误／取消关闭选择及数据库重开后重建另有分层验证。
+- 未核验前提：大范围续页间提交、缓存复用后的完整字节对照，以及读取中SQL错误或取消与新进程重建的交叉仍须分别核验。单行历史目录故障不承接全部错误分区，有界页间选择不证明完整报告字节；ACK用例不承担客户端接收和传输闭环。当前补强与边界见[工作记录](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
 
 #### 验收 P-06
 - 原文：[验收 P-06](database/consistency-verification.md#报告对象分页的具体查询验证)（候选峰值与完整选择工作量）。
