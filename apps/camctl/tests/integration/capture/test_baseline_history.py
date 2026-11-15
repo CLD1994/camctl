@@ -91,19 +91,6 @@ async def test_128_entries_form_one_complete_history_chunk(owned, tmp_path):
     assert page.items[0].event_id == saved.value.event_id and page.next_cursor is None
 
 
-async def test_129_entries_are_not_accepted_as_one_chunk(owned, tmp_path):
-    activity_id = await _activity(owned, tmp_path)
-    with pytest.raises(ValueError):
-        models.BaselineChunkSave(activity_id, 1, _entries(*(f"{n:03d}" for n in range(129))), _SCHEDULED)
-
-
-@pytest.mark.parametrize("entries", [(), ("a", "a"), ("b", "a")])
-async def test_empty_duplicate_or_unsorted_chunk_is_rejected(owned, tmp_path, entries):
-    activity_id = await _activity(owned, tmp_path)
-    with pytest.raises(ValueError):
-        models.BaselineChunkSave(activity_id, 1, _entries(*entries), _SCHEDULED)
-
-
 async def test_chunk_gap_and_cross_chunk_duplicate_are_rejected(owned, tmp_path):
     activity_id = await _activity(owned, tmp_path)
     first = _append(owned, activity_id, _entries("a"))

@@ -130,19 +130,26 @@ async def _stopped_action6_record(tmp_path, *, runtime_options=None):
         tmp_path, "record", catalog=Action6RecordCatalog(), start=False,
         runtime_options=options,
     )
-    (activity,) = owned.connection.execute(
-        "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
-    ).fetchone()
-    fixed = runtime.capture.fix_baseline(
-        BaselineFixSave(activity, 0, 0, _NOW), new_operation_key(), owned
-    )
-    assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    await capture_handler(handler)(action_id, runtime)
-    wall[0], mono[0] = _NOW + 12_000_000, 17_000_000_000
-    await _prepare_through_handler(runtime, action_id, handler, "conclude")
-    assert owned.connection.execute(
-        "SELECT activity_state FROM device_activities WHERE id=?", (activity,)).fetchone() == (3,)
-    wall[0], mono[0] = _NOW + 17_000_000, 22_000_000_000
+    try:
+        (activity,) = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
+        ).fetchone()
+        fixed = runtime.capture.fix_baseline(
+            BaselineFixSave(activity, 0, 0, _NOW), new_operation_key(), owned
+        )
+        assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+        await capture_handler(handler)(action_id, runtime)
+        wall[0], mono[0] = _NOW + 12_000_000, 17_000_000_000
+        await _prepare_through_handler(runtime, action_id, handler, "conclude")
+        assert owned.connection.execute(
+            "SELECT activity_state FROM device_activities WHERE id=?", (activity,)).fetchone() == (3,)
+        wall[0], mono[0] = _NOW + 17_000_000, 22_000_000_000
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as close_error:
+            error.add_note(f"关闭观察连接时出错：{close_error!r}")
+        raise
     return owned, runtime, action_id, handler, stopper, result_port, evidence
 
 

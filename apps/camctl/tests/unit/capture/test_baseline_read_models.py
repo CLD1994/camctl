@@ -7,6 +7,7 @@ import pytest
 from camctl.capture import baseline_models as models
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
+from camctl.devices.file_identity import FileIdentity
 
 
 _BINDING = DeviceBinding('cam-1', 'camera-driver')
@@ -108,3 +109,13 @@ def test_actual_return_rejects_a_different_error_from_same_read():
     error=ErrorValue('directory_failed','baseline',{})
     with pytest.raises(ValueError):
         models.BaselineReadReturn(1,2,None,DirectoryRead(None,error,None))
+
+
+@pytest.mark.parametrize("names", [
+    tuple(f"{n:03d}" for n in range(129)), (), ("a", "a"), ("b", "a"),
+], ids=["129", "empty", "duplicate", "unsorted"])
+def test_chunk_rejects_invalid_entry_count_or_order(names):
+    binding = DeviceBinding("cam-1", "dji-action6")
+    entries = tuple(FileIdentity(binding, f"/mnt/media_rw/emulated/DCIM/{name}") for name in names)
+    with pytest.raises(ValueError):
+        models.BaselineChunkSave(1, 1, entries, 1_768_467_600_000_000)

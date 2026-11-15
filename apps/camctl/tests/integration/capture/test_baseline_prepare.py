@@ -14,6 +14,7 @@ from camctl.devices.directory import DirectoryCursor, DirectoryRead
 from camctl.devices.ports import ControlDriver
 from camctl.devices.evidence import EvidenceRegistry
 from ..support.capture import capture_runtime
+from ..support.task_wait import wait_for_signal, settle_tasks
 from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
@@ -156,7 +157,7 @@ async def test_real_worker_original_and_recovery_consume_one_baseline_chunk(data
     normal = asyncio.create_task(baseline.prepare_baseline(1, activity_id, runtime=runtime))
     recovery = None
     try:
-        await entered.wait()
+        await wait_for_signal(entered, normal)
         recovery = asyncio.create_task(baseline.prepare_baseline(1, activity_id, runtime=runtime))
         await asyncio.sleep(0)
         if cancel_normal:
@@ -164,7 +165,8 @@ async def test_real_worker_original_and_recovery_consume_one_baseline_chunk(data
             await asyncio.sleep(0)
             assert not normal.done()
         release.set()
-        results = await asyncio.gather(normal, recovery, return_exceptions=True)
+        results = await asyncio.wait_for(
+            asyncio.shield(asyncio.gather(normal, recovery, return_exceptions=True)), timeout=30)
         if cancel_normal:
             assert isinstance(results[0], asyncio.CancelledError)
         else:
@@ -177,4 +179,4 @@ async def test_real_worker_original_and_recovery_consume_one_baseline_chunk(data
             "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (saves[0][1],)).fetchone()) == (1,)
     finally:
         release.set()
-        await asyncio.gather(*(task for task in (normal, recovery) if task is not None), return_exceptions=True)
+        await settle_tasks(normal, recovery)

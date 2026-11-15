@@ -245,19 +245,26 @@ async def baseline_read_world(database, tmp_path, directory, *, repository=None,
                 product_rules=({"kind": "video", "format_id": "mp4", "min_count": 1,
                     "exact_count": None, "min_size_bytes": 1, "require_pairing": False},)))
     owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-    assert owned.metadata.instance_id == database.metadata.instance_id
-    activity = await _prepared(owned, tmp_path, "camera_timelapse", catalog=SegmentCatalog())
-    case = baseline_case_for()
-    options = {}
-    if boundary is not None:
-        options["recovery_boundary"] = boundary
-    if horizon is not None:
-        options["recovery_max_event_id"] = horizon
-    runtime = await case.runtime(owned, directory=directory, driver=None,
-        devices={"cam-1": {"driver": "dji-action6", "result_check": {
-            "max_attempts": 3, "call_timeout_s": Decimal("1.0000000000000001"),
-            "retry_interval_s": Decimal("3")}}},
-        capture_repository=repository, **options)
+    try:
+        assert owned.metadata.instance_id == database.metadata.instance_id
+        activity = await _prepared(owned, tmp_path, "camera_timelapse", catalog=SegmentCatalog())
+        case = baseline_case_for()
+        options = {}
+        if boundary is not None:
+            options["recovery_boundary"] = boundary
+        if horizon is not None:
+            options["recovery_max_event_id"] = horizon
+        runtime = await case.runtime(owned, directory=directory, driver=None,
+            devices={"cam-1": {"driver": "dji-action6", "result_check": {
+                "max_attempts": 3, "call_timeout_s": Decimal("1.0000000000000001"),
+                "retry_interval_s": Decimal("3")}}},
+            capture_repository=repository, **options)
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as close_error:
+            error.add_note(f"关闭观察连接时出错：{close_error!r}")
+        raise
     return owned, runtime, activity
 
 

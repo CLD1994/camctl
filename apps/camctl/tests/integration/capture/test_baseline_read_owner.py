@@ -12,6 +12,7 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from ..support.baseline_cases import (baseline_case, baseline_case_for,
     BaselineReadBoundary, baseline_read_world, baseline_handler, request_baseline_cancel)
+from ..support.task_wait import wait_for_signal, settle_tasks
 from .baseline_database import database, baseline_read_intent as _intent
 from ..scheduling.test_start_action import _SCHEDULED
 
@@ -84,16 +85,16 @@ async def test_actual_return_is_saved_before_cancellation_propagates(database, t
     owned, runtime, _ = await baseline_read_world(database, tmp_path, directory, repository=repository)
     task = asyncio.create_task(baseline_handler(runtime))
     try:
-        await directory.started.wait()
+        await wait_for_signal(directory.started, task)
         assert (await _stored(owned))[0] == 1
         task.cancel()
-        await directory.cancelled.wait()
+        await wait_for_signal(directory.cancelled, task)
         assert not task.done()
         task.cancel()
         baseline_case_for().clock.wall = _SCHEDULED + 1
         directory.release.set()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(asyncio.shield(task), timeout=30)
         assert len(directory.calls) == 1 and len(repository.returns) == 1
         request, key = repository.returns[0]
         assert request.returned_at == _SCHEDULED + 1 and request.error == error
@@ -102,8 +103,10 @@ async def test_actual_return_is_saved_before_cancellation_propagates(database, t
         assert view.state.name == "RETURNED" and view.error == error
     finally:
         directory.release.set()
-        await asyncio.gather(task, return_exceptions=True)
-        owned.connection.close()
+        try:
+            await settle_tasks(task)
+        finally:
+            owned.connection.close()
 
 
 async def test_unknown_save_keeps_actual_return_and_does_not_read_again(database, tmp_path):
@@ -146,7 +149,7 @@ async def test_intent_saved_but_cancelled_before_call_has_no_fabricated_return(d
     cancel_item = await request_baseline_cancel(owned, tmp_path, 1, _SCHEDULED, apply=False)
     task = asyncio.create_task(baseline_handler(runtime))
     try:
-        await entered.wait()
+        await wait_for_signal(entered, task)
         # 意图worker尚在原回调中，取消使用已受理的独立公开仓储连接。
         from camctl.cancellation.models import ApplyCancelTarget, CancelApplyMode
         from camctl.persistence.repositories.cancellation import CancellationRepository
@@ -156,15 +159,17 @@ async def test_intent_saved_but_cancelled_before_call_has_no_fabricated_return(d
         assert canceled.kind is DbOutcomeKind.COMPLETED, canceled.error
         gate.set()
         try:
-            await task
+            await asyncio.wait_for(asyncio.shield(task), timeout=30)
         finally:
             assert directory.calls == []
             state, event, returned_at, error = await _stored(owned)
             assert state == 3 and event is not None and returned_at is None and error is None
     finally:
         gate.set()
-        await asyncio.gather(task, return_exceptions=True)
-        owned.connection.close()
+        try:
+            await settle_tasks(task)
+        finally:
+            owned.connection.close()
 
 
 async def test_return_handoff_waits_for_actual_task_to_finish(database, tmp_path):
@@ -172,21 +177,23 @@ async def test_return_handoff_waits_for_actual_task_to_finish(database, tmp_path
     owned, runtime, _ = await baseline_read_world(database, tmp_path, directory, repository=repository)
     task = asyncio.create_task(baseline_handler(runtime))
     try:
-        await directory.started.wait()
+        await wait_for_signal(directory.started, task)
         intent, _ = repository.intents[0]
         call_id = owned.connection.execute("SELECT id FROM baseline_read_calls").fetchone()[0]
         assert CaptureRepository().read_baseline_call_result(call_id, owned, execution_finished=False) is None
         assert not task.done() and (await _stored(owned))[0] == 1
         directory.release.set()
         with pytest.raises(BaselineReadBoundary):
-            await task
+            await asyncio.wait_for(asyncio.shield(task), timeout=30)
         request, key = repository.returns[0]
         assert CaptureRepository().verify_baseline_read_write(request, key, owned, execution_finished=False) is None
         assert CaptureRepository().verify_baseline_read_write(request, key, owned).state.name == "RETURNED"
     finally:
         directory.release.set()
-        await asyncio.gather(task, return_exceptions=True)
-        owned.connection.close()
+        try:
+            await settle_tasks(task)
+        finally:
+            owned.connection.close()
 
 
 async def test_directory_receives_the_production_stop_port(database, tmp_path):
@@ -270,19 +277,21 @@ async def test_current_task_prevents_cold_recovery_until_actual_handoff(database
         boundary=RecoveryBoundary.HOST_POWER_CYCLE, horizon=lambda: maximum[0])
     task = asyncio.create_task(baseline_handler(runtime))
     try:
-        await directory.started.wait()
+        await wait_for_signal(directory.started, task)
         maximum[0] = owned.connection.execute("SELECT created_event_id FROM baseline_read_calls").fetchone()[0]
         await baseline_handler(await baseline_case_for().view())
         assert not task.done() and (await _stored(owned))[0] == 1
         assert repository.unknowns == []
         directory.release.set()
         with pytest.raises(BaselineReadBoundary):
-            await task
+            await asyncio.wait_for(asyncio.shield(task), timeout=30)
         assert (await _stored(owned))[0] == 2
     finally:
         directory.release.set()
-        await asyncio.gather(task, return_exceptions=True)
-        owned.connection.close()
+        try:
+            await settle_tasks(task)
+        finally:
+            owned.connection.close()
 
 
 @pytest.mark.parametrize("kind", ["empty", "nonempty", "error", "unknown"])
@@ -345,15 +354,15 @@ async def test_cancelled_actual_directory_call_recovers_unknown_after_session_re
         async def read_directory(self, request, *, stop):
             self.calls.append(request)
             self.started.set()
-            await asyncio.Event().wait()
+            await self.release.wait()
     directory, repository = Directory(), ObserveRead()
     owned, runtime, _ = await baseline_read_world(database, tmp_path, directory, repository=repository)
     task = asyncio.create_task(baseline_handler(runtime))
     try:
-        await directory.started.wait()
+        await wait_for_signal(directory.started, task)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(asyncio.shield(task), timeout=30)
         assert (await _stored(owned))[0] == 1
         assert len(directory.calls) == 1 and repository.unknowns == []
         event = owned.connection.execute("SELECT created_event_id FROM baseline_read_calls").fetchone()[0]
@@ -366,7 +375,11 @@ async def test_cancelled_actual_directory_call_recovers_unknown_after_session_re
         assert key == repository.intents[0][0].result_save_key
         assert CaptureRepository().verify_baseline_read_write(request, key, owned).state.name == "UNCONFIRMED"
     finally:
-        owned.connection.close()
+        directory.release.set()
+        try:
+            await settle_tasks(task)
+        finally:
+            owned.connection.close()
 
 
 @pytest.mark.parametrize("lookup", ["intent", "result"])

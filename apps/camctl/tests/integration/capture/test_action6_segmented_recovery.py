@@ -161,59 +161,66 @@ async def _overrun_recording(
             **({"stop_config": AttemptConfig(3, Decimal("1"), Decimal("3"))}
                if retry_stop else {})),
     )
-    (activity_id,) = owned.connection.execute(
-        "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
-    ).fetchone()
-    if fix_baseline:
-        fixed = runtime.capture.fix_baseline(
-            BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned
-        )
-        assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    await capture_handler(handler)(action_id, runtime)
-
-    if retry_stop:
-        wall[0], mono[0] = _NOW + 72_000_000, 77_000_000_000
+    try:
+        (activity_id,) = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
+        ).fetchone()
+        if fix_baseline:
+            fixed = runtime.capture.fix_baseline(
+                BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned
+            )
+            assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
         await capture_handler(handler)(action_id, runtime)
-        assert stopper.stop.await_count == 1
-        wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
-        expected_elapsed = 75_000_000_000
-    elif recovery_resources is not None:
-        # START 后结束旧 worker 和文件责任；新会话不得复用旧单调钟锚点。
-        database = await recovery_resources.restart_database(owned)
-        runtime = await recovery_resources.runtime(
-            database, driver=tools.assembly_driver, **tools.assembly_options
-        )
-        wall[0], mono[0] = _NOW + 75_000_000, 1_000_000_000
-        expected_elapsed = None
-    else:
-        wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
-        expected_elapsed = 75_000_000_000
-    await _prepare_through_handler(runtime, action_id, handler, "conclude")
-    assert owned.connection.execute(
-        "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
-    ).fetchone() == (expected_elapsed,)
-    if retry_stop:
-        from camctl.persistence.repositories.normal_recording_stop import read_normal_recording_stop
 
-        from camctl.contracts.enums import enum_for
+        if retry_stop:
+            wall[0], mono[0] = _NOW + 72_000_000, 77_000_000_000
+            await capture_handler(handler)(action_id, runtime)
+            assert stopper.stop.await_count == 1
+            wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
+            expected_elapsed = 75_000_000_000
+        elif recovery_resources is not None:
+            # START 后结束旧 worker 和文件责任；新会话不得复用旧单调钟锚点。
+            database = await recovery_resources.restart_database(owned)
+            runtime = await recovery_resources.runtime(
+                database, driver=tools.assembly_driver, **tools.assembly_options
+            )
+            wall[0], mono[0] = _NOW + 75_000_000, 1_000_000_000
+            expected_elapsed = None
+        else:
+            wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
+            expected_elapsed = 75_000_000_000
+        await _prepare_through_handler(runtime, action_id, handler, "conclude")
+        assert owned.connection.execute(
+            "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
+        ).fetchone() == (expected_elapsed,)
+        if retry_stop:
+            from camctl.persistence.repositories.normal_recording_stop import read_normal_recording_stop
 
-        assert stopper.stop.await_count == 2
-        attempts = owned.connection.execute(
-            "SELECT a.status,a.effect_state FROM operation_runs r"
-            " JOIN operation_attempts a ON a.run_id=r.id"
-            " WHERE r.responsibility_key=? ORDER BY a.attempt_no", (f"stop/{action_id}",)
-        ).fetchall()
-        assert attempts == [
-            (int(enum_for("operation_attempts.status").FAILED),
-             int(enum_for("operation_attempts.effect_state").UNKNOWN)),
-            (int(enum_for("operation_attempts.status").SUCCEEDED),
-             int(enum_for("operation_attempts.effect_state").CONFIRMED)),
-        ]
-        assert not read_normal_recording_stop(
-            owned.connection, await runtime.action(action_id), activity_id
-        )
-    wall[0] = _NOW + 80_000_000
-    mono[0] += 5_000_000_000
+            from camctl.contracts.enums import enum_for
+
+            assert stopper.stop.await_count == 2
+            attempts = owned.connection.execute(
+                "SELECT a.status,a.effect_state FROM operation_runs r"
+                " JOIN operation_attempts a ON a.run_id=r.id"
+                " WHERE r.responsibility_key=? ORDER BY a.attempt_no", (f"stop/{action_id}",)
+            ).fetchall()
+            assert attempts == [
+                (int(enum_for("operation_attempts.status").FAILED),
+                 int(enum_for("operation_attempts.effect_state").UNKNOWN)),
+                (int(enum_for("operation_attempts.status").SUCCEEDED),
+                 int(enum_for("operation_attempts.effect_state").CONFIRMED)),
+            ]
+            assert not read_normal_recording_stop(
+                owned.connection, await runtime.action(action_id), activity_id
+            )
+        wall[0] = _NOW + 80_000_000
+        mono[0] += 5_000_000_000
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as close_error:
+            error.add_note(f"关闭观察连接时出错：{close_error!r}")
+        raise
     return owned, runtime, action_id, handler, tools, result_port, evidence
 
 
