@@ -28,12 +28,19 @@ _OUTPUT_PROBE_FAULTS = (
 
 async def prepared_repair(tmp_path, *, check_required=False):
     owned, runtime, flow, source_id, source, tools, entry = (await prepared_input(tmp_path, check_required, "valid"))
-    await run_recording_media(flow, 1, 1, source_id, target_extension="osv")
-    status = load_processing_status(owned, 1)
-    assert status.repair_state == 4
-    output = replace(source, duration_s=Decimal("60"), streams=tuple(
-        replace(s, duration_s=Decimal("60")) for s in source.streams if s.attached_pic is not True))
-    return owned, status.repair_output_file_id, source, output
+    try:
+        await run_recording_media(flow, 1, 1, source_id, target_extension="osv")
+        status = load_processing_status(owned, 1)
+        assert status.repair_state == 4
+        output = replace(source, duration_s=Decimal("60"), streams=tuple(
+            replace(s, duration_s=Decimal("60")) for s in source.streams if s.attached_pic is not True))
+        return owned, status.repair_output_file_id, source, output
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as closing:
+            error.add_note(f"关闭观察连接时出错：{closing!r}")
+        raise
 
 
 @pytest.mark.asyncio

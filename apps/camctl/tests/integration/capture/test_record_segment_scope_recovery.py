@@ -271,26 +271,33 @@ async def _stopped_world(tmp_path, *, control_known=True, pending_capture_group=
         assembly_options={"check_config": check_config or AttemptConfig(3, Decimal("1.25"), Decimal("2"))},
         evidence_contracts=(_REGISTRY.contract("results_returned", 1),
                             _REGISTRY.contract("adb_foreground_recovery", 1)))
-    case.clock.wall = _NOW + 12_000_000
-    case.clock.monotonic = 17_000_000_000
-    if not control_known:
-        runtime = await case.reopen(owned, cold=True)
-    class StopSaved(Exception):
-        pass
-    method = "finish_host_timer_stop"
-    original = getattr(CaptureRepository, method)
-    def stop_after_save(repository, *args, **kwargs):
-        receipt = original(repository, *args, **kwargs)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        return replace(receipt, handoff_error=StopSaved())
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(CaptureRepository, method, stop_after_save)
-        with pytest.raises(StopSaved):
-            if control_known:
-                await capture_handler(handler)(action_id, runtime)
-            else:
-                await advance_winddown(action_id, runtime, {}, wait_cap_s=Decimal(0))
-    return owned, runtime, action_id, handler, case.stopper
+    try:
+        case.clock.wall = _NOW + 12_000_000
+        case.clock.monotonic = 17_000_000_000
+        if not control_known:
+            runtime = await case.reopen(owned, cold=True)
+        class StopSaved(Exception):
+            pass
+        method = "finish_host_timer_stop"
+        original = getattr(CaptureRepository, method)
+        def stop_after_save(repository, *args, **kwargs):
+            receipt = original(repository, *args, **kwargs)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            return replace(receipt, handoff_error=StopSaved())
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(CaptureRepository, method, stop_after_save)
+            with pytest.raises(StopSaved):
+                if control_known:
+                    await capture_handler(handler)(action_id, runtime)
+                else:
+                    await advance_winddown(action_id, runtime, {}, wait_cap_s=Decimal(0))
+        return owned, runtime, action_id, handler, case.stopper
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as closing:
+            error.add_note(f"关闭观察连接时出错：{closing!r}")
+        raise
 
 
 async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media(

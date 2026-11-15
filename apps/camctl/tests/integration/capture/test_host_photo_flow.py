@@ -76,6 +76,7 @@ from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
 from camctl.persistence.repositories.cancellation import CancellationRepository
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.scheduling import ObserveWindowRequest, SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import (
     DatabaseUnsupportedFormatError,
@@ -391,62 +392,69 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
     initialized = initialize_state(cfg, state_db)
     assert initialized.outcome is InitOutcome.CREATED, initialized.detail
     owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
-    selected_driver = (driver_factory(cfg) if driver_factory is not None else
-                       driver or _PhotoDriver(Path(cfg.paths.staging)))
-    actions = [{
-        "name": "单张 RAW", "type": "camera_take_photo", "device_id": "cam-1",
-        "scheduled_at": _input_time(), "params": (
-            {"type": "photo"} if legacy else {
-                "type": "hasselblad_photo",
-                "capture_format": capture_format,
-                "exposure": {"mode": "P", "iso": 100},
-                "white_balance": {"mode": "auto"},
-                "focus": {"mode": "MF"},
-            }
-        ),
-        "policy": {"max_delay_ms": 5000},
-    }]
-    if photo_focus is not None:
-        actions[0]["params"]["focus"] = photo_focus
-    if photo_group is not None:
-        actions[0]["group"] = photo_group
-    actions.extend(extra_actions)
-    if cancel_action:
-        actions.append({"name": "取消单张", "type": "cancel_task",
-                        "params": {"target": {"action_instance_id": "1"}}})
-    catalog = (catalog_factory(cfg) if catalog_factory is not None else
-        _LegacyPhotoCatalog() if legacy else build_catalog(
-        cfg, DriverDefinitions({DRIVER_ID: driver_definition()})))
-    database = await capture_database(owned)
-    accepted = await accept_input(ParsedInput("hasselblad.json", {
-            "request_id": "1", "created_at": _input_time(), "name": "主机 RAW 拍摄",
-            "actions": actions,
-        }), AcceptanceContext(CommandMode.RUN, catalog, AcceptanceRepository(),
-            clock=SimpleNamespace(utc_micros=lambda: _NOW)),
-        new_operation_key(), database)
-    assert accepted.plan_id is not None, accepted
-    scheduled = SchedulingRepository()
-    for save, request in ((
-        (scheduled.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
-        (scheduled.start_action, StartActionRequest(1, _NOW, _NOW, expected_identity=_configured_identity(cfg))),
-    ) if start_first else ()):
-        receipt = save(request, new_operation_key(), owned)
-        if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise AssertionError(receipt.error)
-    clock = wall if wall is not None else [_NOW]
-    registry = DriverRegistry((_entry(selected_driver, evidence),))
-    devices = cfg.devices if factory_out is None else dict(cfg.devices)
-    options = dict(driver=selected_driver, evidence=_entry(selected_driver, evidence).evidence,
-        devices=devices, drivers=registry, results=results,
-        staging=Path(cfg.paths.staging), wait_config=lambda _action: None,
-        wall_us=lambda: clock[0], monotonic_ns=lambda: 9_000_000_000)
-    if factory_out is None:
-        runtime = await capture_runtime(database, **options)
-    else:
-        factory = await capture_factory(database, **options)
-        factory_out.append((factory, devices))
-        runtime = await factory(database)
-    return cfg, owned, selected_driver, runtime, clock
+    try:
+        selected_driver = (driver_factory(cfg) if driver_factory is not None else
+                           driver or _PhotoDriver(Path(cfg.paths.staging)))
+        actions = [{
+            "name": "单张 RAW", "type": "camera_take_photo", "device_id": "cam-1",
+            "scheduled_at": _input_time(), "params": (
+                {"type": "photo"} if legacy else {
+                    "type": "hasselblad_photo",
+                    "capture_format": capture_format,
+                    "exposure": {"mode": "P", "iso": 100},
+                    "white_balance": {"mode": "auto"},
+                    "focus": {"mode": "MF"},
+                }
+            ),
+            "policy": {"max_delay_ms": 5000},
+        }]
+        if photo_focus is not None:
+            actions[0]["params"]["focus"] = photo_focus
+        if photo_group is not None:
+            actions[0]["group"] = photo_group
+        actions.extend(extra_actions)
+        if cancel_action:
+            actions.append({"name": "取消单张", "type": "cancel_task",
+                            "params": {"target": {"action_instance_id": "1"}}})
+        catalog = (catalog_factory(cfg) if catalog_factory is not None else
+            _LegacyPhotoCatalog() if legacy else build_catalog(
+            cfg, DriverDefinitions({DRIVER_ID: driver_definition()})))
+        database = await capture_database(owned)
+        accepted = await accept_input(ParsedInput("hasselblad.json", {
+                "request_id": "1", "created_at": _input_time(), "name": "主机 RAW 拍摄",
+                "actions": actions,
+            }), AcceptanceContext(CommandMode.RUN, catalog, AcceptanceRepository(),
+                clock=SimpleNamespace(utc_micros=lambda: _NOW)),
+            new_operation_key(), database)
+        assert accepted.plan_id is not None, accepted
+        scheduled = SchedulingRepository()
+        for save, request in ((
+            (scheduled.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
+            (scheduled.start_action, StartActionRequest(1, _NOW, _NOW, expected_identity=_configured_identity(cfg))),
+        ) if start_first else ()):
+            receipt = save(request, new_operation_key(), owned)
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise AssertionError(receipt.error)
+        clock = wall if wall is not None else [_NOW]
+        registry = DriverRegistry((_entry(selected_driver, evidence),))
+        devices = cfg.devices if factory_out is None else dict(cfg.devices)
+        options = dict(driver=selected_driver, evidence=_entry(selected_driver, evidence).evidence,
+            devices=devices, drivers=registry, results=results,
+            staging=Path(cfg.paths.staging), wait_config=lambda _action: None,
+            wall_us=lambda: clock[0], monotonic_ns=lambda: 9_000_000_000)
+        if factory_out is None:
+            runtime = await capture_runtime(database, **options)
+        else:
+            factory = await capture_factory(database, **options)
+            factory_out.append((factory, devices))
+            runtime = await factory(database)
+        return cfg, owned, selected_driver, runtime, clock
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as closing:
+            error.add_note(f"关闭观察连接时出错：{closing!r}")
+        raise
 
 
 def _saved_output_rows(owned):
@@ -650,47 +658,51 @@ async def test_confirmed_host_photo_releases_device_for_second_new_photo(tmp_pat
 
 @pytest.mark.parametrize("commit_before_unknown", [False, True])
 async def test_unknown_activity_close_receipt_recovers_without_repeating_capture(
-        tmp_path, monkeypatch, commit_before_unknown):
+        tmp_path, commit_before_unknown):
     _cfg, owned, driver, runtime, _clock = await _world(tmp_path)
-    conclude = runtime.capture.conclude_activity
     calls = []
 
-    def conclude_with_unknown(command, key, current_owned):
-        calls.append((command, key))
-        if len(calls) == 1 and not commit_before_unknown:
-            return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("收场提交回执未知"))
-        receipt = conclude(command, key, current_owned)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        if len(calls) == 1:
-            return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("收场提交后回执丢失"))
-        return receipt
+    class UnknownConclusion:
+        def __init__(self):
+            self.delegate = CaptureRepository()
 
-    monkeypatch.setattr(runtime.capture, "conclude_activity", conclude_with_unknown)
+        def conclude_activity(self, command, key, current_owned):
+            calls.append((command, key))
+            if len(calls) == 1 and not commit_before_unknown:
+                return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("收场提交回执未知"))
+            receipt = self.delegate.conclude_activity(command, key, current_owned)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            if len(calls) == 1:
+                return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("收场提交后回执丢失"))
+            return receipt
+
     try:
-        with pytest.raises(ConsistencyError, match="活动收场"):
+        with repository_port(CaptureRepository, UnknownConclusion(), ("conclude_activity",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == 1):
+            with pytest.raises(ConsistencyError, match="活动收场"):
+                await capture_handler("camera_take_photo")(1, runtime)
+
+            assert len(driver.requests) == 1
+            assert len(calls) == 1
+            assert calls[0][0].action_id == 1
+            assert owned.connection.execute(
+                "SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+            assert owned.connection.execute(
+                "SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=1"
+            ).fetchone() == ((3, 2) if commit_before_unknown else (2, 1))
+            assert _saved_output_rows(owned) == []
+
             await capture_handler("camera_take_photo")(1, runtime)
 
-        assert len(driver.requests) == 1
-        assert len(calls) == 1
-        assert calls[0][0].action_id == 1
-        assert owned.connection.execute(
-            "SELECT status FROM actions WHERE id=1").fetchone() == (2,)
-        assert owned.connection.execute(
-            "SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=1"
-        ).fetchone() == ((3, 2) if commit_before_unknown else (2, 1))
-        assert _saved_output_rows(owned) == []
-
-        await capture_handler("camera_take_photo")(1, runtime)
-
-        assert len(driver.requests) == 1
-        assert len(calls) == 2
-        assert calls[0][0] == calls[1][0]
-        assert owned.connection.execute(
-            "SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=1"
-        ).fetchone() == (3, 2)
-        assert owned.connection.execute(
-            "SELECT status FROM actions WHERE id=1").fetchone() == (3,)
-        assert len(_saved_output_rows(owned)) == 2
+            assert len(driver.requests) == 1
+            assert len(calls) == 2
+            assert calls[0][0] == calls[1][0]
+            assert owned.connection.execute(
+                "SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=1"
+            ).fetchone() == (3, 2)
+            assert owned.connection.execute(
+                "SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+            assert len(_saved_output_rows(owned)) == 2
     finally:
         owned.connection.close()
 

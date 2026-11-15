@@ -264,24 +264,31 @@ async def _successful_osv_repair(tmp_path):
 
     owned, _runtime, flow, source_id, _source, tools, _entry = await prepared_input(
         tmp_path, False, "valid")
-    action_id, processing_id = owned.connection.execute(
-        "SELECT action_id,id FROM recording_processing WHERE source_device_file_id=?",
-        (source_id,)).fetchone()
-    tools.result = "success"
-    tools.refresh()
-    await run_recording_media(flow, action_id, processing_id, source_id, target_extension="osv")
-    await run_recording_media(flow, action_id, processing_id, source_id, target_extension="osv")
-    status = load_processing_status(owned, processing_id)
-    assert status.repair_state == 5
-    output_id = status.repair_output_file_id
-    relative, size, sha256 = owned.connection.execute(
-        "SELECT relative_path,size_bytes,sha256 FROM intermediate_files WHERE id=? AND owner_action_id=?",
-        (output_id, action_id)).fetchone()
-    content = (tmp_path / "staging" / relative).read_bytes()
-    assert size == len(content) and size > 0
-    assert sha256 == hashlib.sha256(content).hexdigest()
-    assert tools.repairs == 1
-    return owned, action_id, source_id, output_id, sha256, tools
+    try:
+        action_id, processing_id = owned.connection.execute(
+            "SELECT action_id,id FROM recording_processing WHERE source_device_file_id=?",
+            (source_id,)).fetchone()
+        tools.result = "success"
+        tools.refresh()
+        await run_recording_media(flow, action_id, processing_id, source_id, target_extension="osv")
+        await run_recording_media(flow, action_id, processing_id, source_id, target_extension="osv")
+        status = load_processing_status(owned, processing_id)
+        assert status.repair_state == 5
+        output_id = status.repair_output_file_id
+        relative, size, sha256 = owned.connection.execute(
+            "SELECT relative_path,size_bytes,sha256 FROM intermediate_files WHERE id=? AND owner_action_id=?",
+            (output_id, action_id)).fetchone()
+        content = (tmp_path / "staging" / relative).read_bytes()
+        assert size == len(content) and size > 0
+        assert sha256 == hashlib.sha256(content).hexdigest()
+        assert tools.repairs == 1
+        return owned, action_id, source_id, output_id, sha256, tools
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as closing:
+            error.add_note(f"关闭观察连接时出错：{closing!r}")
+        raise
 
 
 @pytest.mark.asyncio

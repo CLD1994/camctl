@@ -22,13 +22,20 @@ from .test_recording_media_link import _NOW
 
 async def promoted(tmp_path):
     owned, action_id, source_id, output_id, sha256, tools = await _successful_osv_repair(tmp_path)
-    repaired = replace(_repaired_draft(output_id, batch=source_id), sha256=sha256)
-    command = _finish(action_id, drafts=(repaired, _original_draft(source_id)))
-    key = new_operation_key()
-    outcome = CaptureRepository().finish_capture(command,key,owned)
-    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-    assert owned.connection.execute("SELECT retention_state FROM intermediate_files WHERE id=?",(output_id,)).fetchone() == (3,)
-    return owned, command, key, outcome.value, tools
+    try:
+        repaired = replace(_repaired_draft(output_id, batch=source_id), sha256=sha256)
+        command = _finish(action_id, drafts=(repaired, _original_draft(source_id)))
+        key = new_operation_key()
+        outcome = CaptureRepository().finish_capture(command,key,owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert owned.connection.execute("SELECT retention_state FROM intermediate_files WHERE id=?",(output_id,)).fetchone() == (3,)
+        return owned, command, key, outcome.value, tools
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as closing:
+            error.add_note(f"关闭观察连接时出错：{closing!r}")
+        raise
 
 
 def reopen(owned):

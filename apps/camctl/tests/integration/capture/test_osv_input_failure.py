@@ -69,38 +69,45 @@ async def prepared_input(tmp_path, check_required, fault):
     basis = '{"reason":2,"target_duration_ms":60000}' if check_required else (
     '{"reason":3,"target_duration_ms":60000,"control_elapsed_ns":75000000000}')
     owned, staging = await _environment(tmp_path, check_decision=3 if check_required else 2, check_basis=basis)
-    entry = replace(_entry("clip", size=len(_CONTENT)), original_name="clip.OSV",
-        media_type=None, format_id="osv")
-    # 手工媒体前置采用完整原观察；后续真实页沿同一序列化核对来源。
-    entry = observed_file(ResultsDouble.serialized_entries((entry,))[0])
-    source_id = save_source_entry(owned, entry)
-    if not check_required:
-        from camctl.capture.processing import RepairBasis, RepairReason, RepairDecisionChoice, RepairDecisionSave
-        saved = CaptureRepository().save_repair_decision(RepairDecisionSave(1,
-            RepairDecisionChoice.PENDING, RepairBasis(RepairReason.THRESHOLD_REACHED,
-                60000, Decimal('70'), control_elapsed_ns=75_000_000_000), _NOW),
-            new_operation_key(), owned)
-        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    source = dual_probe()
-    streams = list(source.streams)
-    if fault == "short_video": streams[1] = replace(streams[1], duration_s=Decimal("55"))
-    if fault in ("short_audio", "short_audio_unknown"):
-        streams[2] = replace(streams[2], duration_s=Decimal("55"))
-    if fault == "short_audio_unknown": streams[0] = replace(streams[0], attached_pic=None)
-    if fault == "missing_video": streams.pop(1)
-    if fault == "unknown": streams[1] = replace(streams[1], duration_s=None)
-    source = replace(source, streams=tuple(streams))
-    if fault in ("short_container", "short_container_unknown"):
-        source = replace(source, duration_s=Decimal("55"))
-        if fault == "short_container_unknown":
-            source = replace(source, streams=tuple(replace(s, duration_s=None) if s.index == 2 else s
-                for s in source.streams))
-    if fault == "tool_failed": source = MediaProbe(None, "tool_failed: exit=1")
-    if fault == "no_video_empty": source = MediaProbe(None, "no_video_stream: 容器没有视频流")
-    tools = Tools(source)
-    flow = await recording_media(owned, tools, staging, margin=Decimal(10))
-    runtime = await _runtime(owned, {1: (entry,)}, media=flow)
-    return owned, runtime, flow, source_id, source, tools, entry
+    try:
+        entry = replace(_entry("clip", size=len(_CONTENT)), original_name="clip.OSV",
+            media_type=None, format_id="osv")
+        # 手工媒体前置采用完整原观察；后续真实页沿同一序列化核对来源。
+        entry = observed_file(ResultsDouble.serialized_entries((entry,))[0])
+        source_id = save_source_entry(owned, entry)
+        if not check_required:
+            from camctl.capture.processing import RepairBasis, RepairReason, RepairDecisionChoice, RepairDecisionSave
+            saved = CaptureRepository().save_repair_decision(RepairDecisionSave(1,
+                RepairDecisionChoice.PENDING, RepairBasis(RepairReason.THRESHOLD_REACHED,
+                    60000, Decimal('70'), control_elapsed_ns=75_000_000_000), _NOW),
+                new_operation_key(), owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+        source = dual_probe()
+        streams = list(source.streams)
+        if fault == "short_video": streams[1] = replace(streams[1], duration_s=Decimal("55"))
+        if fault in ("short_audio", "short_audio_unknown"):
+            streams[2] = replace(streams[2], duration_s=Decimal("55"))
+        if fault == "short_audio_unknown": streams[0] = replace(streams[0], attached_pic=None)
+        if fault == "missing_video": streams.pop(1)
+        if fault == "unknown": streams[1] = replace(streams[1], duration_s=None)
+        source = replace(source, streams=tuple(streams))
+        if fault in ("short_container", "short_container_unknown"):
+            source = replace(source, duration_s=Decimal("55"))
+            if fault == "short_container_unknown":
+                source = replace(source, streams=tuple(replace(s, duration_s=None) if s.index == 2 else s
+                    for s in source.streams))
+        if fault == "tool_failed": source = MediaProbe(None, "tool_failed: exit=1")
+        if fault == "no_video_empty": source = MediaProbe(None, "no_video_stream: 容器没有视频流")
+        tools = Tools(source)
+        flow = await recording_media(owned, tools, staging, margin=Decimal(10))
+        runtime = await _runtime(owned, {1: (entry,)}, media=flow)
+        return owned, runtime, flow, source_id, source, tools, entry
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as closing:
+            error.add_note(f"关闭观察连接时出错：{closing!r}")
+        raise
 
 
 @pytest.mark.asyncio
