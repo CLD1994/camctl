@@ -49,21 +49,85 @@ async def test_selection_pages_preserve_targets_and_necessary_ancestors(finished
 
 
 @pytest.mark.asyncio
-async def test_old_h_excludes_new_targets_and_their_ancestors(finished_photo):
+async def test_old_h_excludes_new_targets_and_their_ancestors(finished_photo, monkeypatch):
+    import time
+    from camctl.contracts.enums import enum_for
+
+    started = time.perf_counter()
     owned, path = finished_photo
     await _submit(owned, path, '1')
-    before = _boundary(owned.connection)
     await _submit(owned, path, '2')
-    # H 后目录中仍有第二计划的目标；其损坏不能回填或污染旧 H。
-    owned.connection.execute('PRAGMA foreign_keys=OFF')
-    owned.connection.execute('DELETE FROM plans WHERE id=2')
-    request = ReportScopeRequest(before, 0, _to_wm(owned.connection), 1)
+    before = _boundary(owned.connection)
+    before_wm = _to_wm(owned.connection)
+    assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (0,)
+    request = ReportScopeRequest(before, 0, before_wm, 1)
+    preparation = time.perf_counter() - started
+
+    repository = HistoryRepository(path / 'state.db')
+    with monkeypatch.context() as patch:
+        probe = _StatementProbe(repository, patch)
+        with repository.report_read_scope():
+            with repository.open_report_selection(request) as selection:
+                started = time.perf_counter()
+                first = selection.read_page('plan')
+                assert first.items == (1,) and first.next_cursor is not None
+                assert [record['kind'] for record in probe.statements] == ['candidate']
+                assert probe.statements[0]['rows'] == [(1, None), (2, None)]
+                first_page = time.perf_counter() - started
+
+                # 第一页已经交付：真实完成旧动作，再受理 H 之后的新计划。
+                started = time.perf_counter()
+                await _finish_action(owned)
+                after_action = _boundary(owned.connection)
+                status, last_event = owned.connection.execute(
+                    'SELECT status,last_event_id FROM actions WHERE id=1').fetchone()
+                assert status == int(enum_for('actions.status').SUCCEEDED)
+                assert before.last_event_id < last_event <= after_action.last_event_id
+                assert owned.connection.execute(
+                    'SELECT id,source_action_id FROM outputs WHERE created_event_id>? ORDER BY id',
+                    (before.last_event_id,)).fetchall() == [(1, 1)]
+                assert _to_wm(owned.connection) > before_wm
+                await _submit(owned, path, '3')
+                after_new_plan = _boundary(owned.connection)
+                assert after_new_plan.last_event_id > after_action.last_event_id
+                assert owned.connection.execute(
+                    'SELECT id FROM plans WHERE id=3 AND created_event_id>?',
+                    (before.last_event_id,)).fetchone() == (3,)
+                assert owned.connection.execute(
+                    'SELECT id,plan_id FROM actions WHERE id=3 AND created_event_id>?',
+                    (before.last_event_id,)).fetchone() == (3, 3)
+                # 未来计划的损坏不应进入旧边界；合法提交均已完成。
+                owned.connection.execute('PRAGMA foreign_keys=OFF')
+                owned.connection.execute('DELETE FROM plans WHERE id=3')
+                assert not owned.connection.in_transaction
+                assert owned.connection.execute('SELECT id FROM plans WHERE id=3').fetchone() is None
+                later_changes = time.perf_counter() - started
+
+                started = time.perf_counter()
+                second = selection.read_page('plan', cursor=first.next_cursor)
+                assert second.items == (2,) and second.next_cursor is None
+                assert len(probe.statements) == 1
+                assert _read(selection, 'action', 1) == [1]
+                assert _read(selection, 'action', 2) == [2]
+                assert _read(selection, 'action', 3) == []
+                assert _read(selection, 'output', 1) == []
+                continuation = time.perf_counter() - started
+
+    # 在后来提交及未来计划损坏之后冷打开，仍按同一 H 独立选择。
+    started = time.perf_counter()
     with HistoryRepository(path / 'state.db').open_report_selection(request) as selection:
-        assert _read(selection, 'plan') == [1]
+        assert _read(selection, 'plan') == [1, 2]
         assert _read(selection, 'action', 1) == [1]
-        assert _read(selection, 'action', 2) == []
+        assert _read(selection, 'action', 2) == [2]
+        assert _read(selection, 'action', 3) == []
+        assert _read(selection, 'output', 1) == []
     with HistoryRepository(path / 'state.db').open_report_selection(replace(request, boundary=INITIAL_BOUNDARY)) as selection:
         assert _read(selection, 'plan') == []
+    print('REPORT_FROZEN_PAGE', {'preparation_s': preparation, 'first_page_s': first_page,
+          'later_changes_s': later_changes, 'continuation_s': continuation,
+          'cold_read_s': time.perf_counter() - started, 'before_h': repr(before),
+          'before_wm': before_wm, 'after_action_h': repr(after_action),
+          'after_new_plan_h': repr(after_new_plan)}, flush=True)
 
 
 @pytest.mark.asyncio
