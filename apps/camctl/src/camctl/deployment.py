@@ -13,6 +13,7 @@ def _migrate_v9_to_v10(state_db: Path, identity: dict) -> None:
     from camctl.persistence.capture_preparation_upgrade import _upgrade_full_copy
     from camctl.persistence.runtime import DbConfig, DbOpenMode, _FORMAT_VERSIONS, open_existing
 
+    info = state_db.stat()
     owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         if asdict(owned.metadata) != identity:
@@ -21,6 +22,13 @@ def _migrate_v9_to_v10(state_db: Path, identity: dict) -> None:
                            upgrade_name='format', description='数据库格式', minimum='V9')
     finally:
         owned.connection.close()
+    os.chown(state_db, info.st_uid, info.st_gid)
+    os.chmod(state_db, info.st_mode & 0o7777)
+    descriptor = os.open(state_db, os.O_RDWR | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 # 起点到下一格式的登记。每个迁移负责校验其历史和进度语义。
