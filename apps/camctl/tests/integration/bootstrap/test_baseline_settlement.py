@@ -311,6 +311,27 @@ async def test_not_called_unknown_receipt_keeps_original_request_until_cancel_an
     assert case.directory.calls == []
 
 
+async def test_cold_resume_finishes_cancel_after_not_called_commit(tmp_path, bootstrap_case):
+    case = bootstrap_case
+    original, _ = await _unstarted(case, tmp_path)
+    await case.cancel()
+    case.after_save = lambda name, request, key, receipt: (
+        DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("原结果回执未知"))
+        if name == "save_baseline_read_not_called" else receipt)
+    with pytest.raises(ConsistencyError):
+        await capture_handler(case.handler)(case.action_id, await case.view())
+    assert _call(case) == (str(original.call_key), str(original.result_save_key), 4, None, None)
+    assert case.owned.connection.execute("SELECT status FROM actions").fetchone() == (2,)
+    case.after_save = None
+    runtime = await case.reconnect(cold=True)
+    await capture_handler(case.handler)(case.action_id, runtime)
+    await case.common_round()
+    assert case.owned.connection.execute("SELECT status FROM actions").fetchone() == (6,)
+    assert case.owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
+    assert _call(case) == (str(original.call_key), str(original.result_save_key), 4, None, None)
+    assert case.directory.calls == []
+
+
 async def test_cold_resume_releases_terminal_not_called_scope(tmp_path, bootstrap_case):
     case = bootstrap_case
     runtime = await _world(case, tmp_path, segmented=True)
