@@ -29,8 +29,8 @@ def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
     return query_state(state_db, sql, params)
 
 
-def _await(predicate, timeout_s: float, message: str):
-    return wait_for(predicate, timeout_s, message)
+def _await(predicate, timeout_s: float, message: str, *, failure=None):
+    return wait_for(predicate, timeout_s, message, failure=failure)
 
 
 def _plan_body(name: str) -> dict:
@@ -81,11 +81,12 @@ def _matches_request(report: dict, request_id: int, plan_id: int, action_id: int
 def _published_report(deployment: Deployment, demo: HostDemo,
                       plan_path: Path, request_id: int) -> tuple[int, str]:
     """递交计划并等待报告发布，返回（报告 id、ready 文件名）。"""
+    failure = demo.watch_failures(request_id=request_id, expected_statuses={"sync": "SUCCEEDED"})
     demo.submit(plan_path)
     _await(
         lambda: glob.glob("status-report-*.json",
                           root_dir=str(deployment.ready)) or None,
-        timeout_s=120, message="报告未发布到 ready")
+        timeout_s=120, message="报告未发布到 ready", failure=failure)
 
     def completed_report():
         rows = _query(deployment.state_db,
@@ -110,7 +111,7 @@ def _published_report(deployment: Deployment, demo: HostDemo,
         return None
 
     return _await(completed_report, timeout_s=120,
-                  message="同步动作与计划未到终态，或 ready 报告尚未覆盖其结果")
+                  message="同步动作与计划未到终态，或 ready 报告尚未覆盖其结果", failure=failure)
 
 
 def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
@@ -171,13 +172,14 @@ def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
             _plan_body("第二份同步"))
         assert second_receipt["has_ack"] is True
         assert second_receipt["last_report_id"] == str(report_id)
+        failure = demo.watch_failures(request_id=second_receipt["request_id"], expected_statuses={"sync": "SUCCEEDED"})
         demo.submit(second_plan)
         _await(lambda: _query(
             state_db,
             "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
         ) == [(report_id, _query(
             state_db, "SELECT to_wm FROM reports WHERE id = ?", (report_id,))[0][0])]
-        or None, timeout_s=120, message="ACK 未被吸收")
+        or None, timeout_s=120, message="ACK 未被吸收", failure=failure)
 
         # 主程序侧事实：两次 submit 与领取都有模块日志记录。
         log = demo.module_log()
@@ -204,12 +206,13 @@ def test_invalid_body_with_valid_ack_absorbs_ack_only(
             "request_id": "414141",
             "last_report_id": str(report_id),
         }, ensure_ascii=False), encoding="utf-8")
+        failure = demo.watch_failures()
         demo.submit(invalid)
         _await(lambda: _query(
             state_db,
             "SELECT acknowledged_report_id FROM runtime_state"
         ) == [(report_id,)] or None,
-            timeout_s=120, message="合法 ACK 未被吸收")
+            timeout_s=120, message="合法 ACK 未被吸收", failure=failure)
         # 正文被拒绝：不产生新计划，也不产生新动作。
         assert _query(state_db, "SELECT COUNT(*) FROM plans")[0][0] \
             == plans_before
@@ -228,17 +231,18 @@ def test_resubmitted_request_keeps_single_identity(
     demo = HostDemo(deployment, host_demo)
     try:
         demo.start()
+        failure = demo.watch_failures(request_id=request_id, expected_statuses={"sync": "SUCCEEDED"})
         demo.submit(plan_path)
         _await(lambda: _query(
             state_db, "SELECT id FROM plans WHERE request_id = ?",
             (request_id,)) or None,
-            timeout_s=120, message="首次递交未受理")
+            timeout_s=120, message="首次递交未受理", failure=failure)
         demo.submit(plan_path)
         # 会话推进到计划终态后重送：身份与事实数量保持一次受理。
         _await(lambda: _query(
             state_db, "SELECT status FROM plans WHERE request_id = ?",
             (request_id,)) == [(3,)] or None,
-            timeout_s=120, message="计划未到终态")
+            timeout_s=120, message="计划未到终态", failure=failure)
         assert _query(
             state_db, "SELECT COUNT(*) FROM plans WHERE request_id = ?",
             (request_id,)) == [(1,)]

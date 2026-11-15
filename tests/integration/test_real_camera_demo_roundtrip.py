@@ -49,8 +49,8 @@ def _capture(params, clock, *, name="capture"):
             "policy": {"max_delay_ms": 30000}}
 
 
-def _idle(demo, previous=0):
-    return wait_for(lambda: _completed_runs(demo) > previous, 60, "本次 run 未完成回收")
+def _idle(demo, previous=0, *, failure):
+    return wait_for(lambda: _completed_runs(demo) > previous, 60, "本次 run 未完成回收", failure=failure)
 
 
 def _completed_runs(demo):
@@ -59,7 +59,6 @@ def _completed_runs(demo):
 
 
 def _reading(deployment, demo):
-    assert '"reason" : "state_db_error"' not in demo.module_log(), demo.module_log()[-3000:]
     failed = query_state(deployment.state_db, "SELECT error_code,error_details_json FROM actions WHERE name='obtain' AND status=?",
                          (int(enum_for("actions.status").FAILED),))
     assert not failed, failed
@@ -81,15 +80,16 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
     result = deployment.camctl("init", "--config", str(deployment.config_path))
     assert result.exit_code == 0, result.stderr
     deployment.install_client_capabilities(spec)
-    capture, _ = deployment.export_plan_with_client(_body("camera-demo", [_capture(params, clock)]))
+    capture, capture_receipt = deployment.export_plan_with_client(_body("camera-demo", [_capture(params, clock)]))
     if action_type == "camera_timelapse":
         exported = parse_exact_json(capture.read_text(encoding="utf-8"))
         assert exported["actions"][0]["params"] == params
     demo = HostDemo(deployment, host_demo, launcher=write_stub_launcher(deployment))
     try:
+        failure = demo.watch_failures(request_id=capture_receipt["request_id"], expected_statuses={"capture": "SUCCEEDED"})
         demo.start()
         demo.submit(capture)
-        started = wait_for(lambda: _started(deployment, "capture"), 60, "原 START/SENT 未可靠保存")
+        started = wait_for(lambda: _started(deployment, "capture"), 60, "原 START/SENT 未可靠保存", failure=failure)
         assert started[3] is not None and started[4] is not None
         if action_type == "camera_timelapse":
             action_facts = query_state(deployment.state_db,
@@ -103,13 +103,14 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
             # 跨进程恢复使用原发送和原基准，不重新设置或启动。
             demo.stop()
             advance_clock(clock, params["duration_s"] + 2)
+            failure = demo.watch_failures(request_id=capture_receipt["request_id"], expected_statuses={"capture": "SUCCEEDED"})
             demo.start()
             demo.submit(capture)
         else:
             advance_clock(clock, params["duration_s"])
         capture_report = wait_for(lambda: _report_with_statuses(deployment.ready, {"capture": "succeeded"}),
-                                  60, "capture 未成功或最终报告未发布")
-        _idle(demo)
+                                  60, "capture 未成功或最终报告未发布", failure=failure)
+        _idle(demo, failure=failure)
         assert _started(deployment, "capture")[3:] == started[3:]
         action_id = _actions(capture_report)["capture"]["action_instance_id"]
         assert action_id == str(started[0])
@@ -136,9 +137,10 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
         obtain, receipt = deployment.export_plan_with_client(obtain_body)
         assert receipt["last_report_id"] == capture_report["report_id"]
         previous = _completed_runs(demo)
+        failure = demo.watch_failures(request_id=receipt["request_id"], expected_statuses={"obtain": "SUCCEEDED", "next-record": "SUCCEEDED"})
         demo.submit(obtain)
-        wait_for(lambda: _reading(deployment, demo), 60, "原片读取未开始")
-        wait_for(lambda: _started(deployment, "next-record"), 60, "后续录像未开始")
+        wait_for(lambda: _reading(deployment, demo), 60, "原片读取未开始", failure=failure)
+        wait_for(lambda: _started(deployment, "next-record"), 60, "后续录像未开始", failure=failure)
         advance_clock(clock, 10)
         def stopped_report():
             stopped_event = _stopped(deployment, "next-record")
@@ -150,7 +152,7 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
             frozen = query_state(deployment.state_db, "SELECT frozen_event_id FROM reports WHERE id=?",
                                  (int(report["report_id"]),))
             return report if frozen and frozen[0][0] >= stopped_event else None
-        wait_for(stopped_report, 45, "长读取期间到期停止或停止后的报告未推进")
+        wait_for(stopped_report, 45, "长读取期间到期停止或停止后的报告未推进", failure=failure)
         assert query_state(deployment.state_db,
             "SELECT t.status,t.result_event_id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
             " WHERE r.copy_id IS NOT NULL") == [(int(enum_for("operation_attempts.status").RUNNING), None)]
@@ -160,8 +162,8 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
             ("next-record", int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS))) == []
         (deployment.gates / "release-read").touch()
         report = wait_for(lambda: _report_with_statuses(deployment.ready, {"obtain": "succeeded", "next-record": "succeeded"}),
-                          60, "独立 obtain 未成功")
-        _idle(demo, previous)
+                          60, "独立 obtain 未成功", failure=failure)
+        _idle(demo, previous, failure=failure)
         assert query_state(deployment.state_db,
             "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [(int(capture_report["report_id"]), capture_report["to_wm"])]
         copy = query_state(deployment.state_db,
@@ -187,9 +189,10 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
         ack, receipt = deployment.export_plan_with_client(_body("camera-demo-ack", [
             {"name": "ack", "type": "report_status", "scheduled_at": schedule(clock), "params": {"scope": "full"}}]))
         assert receipt["last_report_id"] == report["report_id"]
+        failure = demo.watch_failures(request_id=receipt["request_id"], expected_statuses={"ack": "SUCCEEDED"})
         demo.submit(ack)
         wait_for(lambda: query_state(deployment.state_db,
-            "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [(int(report["report_id"]), report["to_wm"])], 60, "取回报告 ACK 未吸收")
+            "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [(int(report["report_id"]), report["to_wm"])], 60, "取回报告 ACK 未吸收", failure=failure)
         calls = [json.loads(line) for line in (deployment.gates / "camera-calls.jsonl").read_text().splitlines()]
         assert sum(call["kind"] == "start" for call in calls) == 2
         assert sum(call["kind"] == "start" and str(call["target"]) == str(action_id)

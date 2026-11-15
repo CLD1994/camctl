@@ -251,14 +251,14 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
         report = wait_for(lambda: _report_with_statuses(
             deployment.ready, {"清理": "succeeded", "取延时": "succeeded"}
         ) or None,
-            timeout_s=120, message="会话最终报告未发布")
+            timeout_s=120, message="会话最终报告未发布", failure=failure)
         report_path = _report_file(deployment.ready)
         report_bytes = report_path.read_bytes()
         demo.claim()
         wait_for(lambda: (
             len(_delivered_files(deployment.processing)) == 2
             and _report_file(deployment.processing).exists()) or None,
-            timeout_s=30, message="领取未移动交付与报告")
+            timeout_s=30, message="领取未移动交付与报告", failure=failure)
         assert not list(deployment.ready.iterdir())
         claimed = _delivered_files(deployment.processing)
         assert {path.read_bytes() for path in claimed} == expected
@@ -290,12 +290,13 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
         sync_path, sync_receipt = deployment.export_plan_with_client(sync_body)
         assert sync_receipt["has_ack"] is True
         assert sync_receipt["last_report_id"] == report["report_id"]
+        failure = demo.watch_failures(request_id=sync_receipt["request_id"], expected_statuses={"sync": "SUCCEEDED"})
         demo.submit(sync_path)
         wait_for(lambda: query_state(
             state_db,
             "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
         ) == [(int(report["report_id"]), report["to_wm"])] or None,
-            timeout_s=180, message="ACK 未被吸收")
+            timeout_s=180, message="ACK 未被吸收", failure=failure)
     finally:
         demo.stop()
 
@@ -382,12 +383,12 @@ def test_auto_preview_roundtrip_via_c_module(
         report = wait_for(lambda: _report_with_statuses(
             deployment.ready,
             {"shoot": "succeeded", "auto-preview": "succeeded"}) or None,
-            timeout_s=120, message="会话最终报告未发布")
+            timeout_s=120, message="会话最终报告未发布", failure=failure)
         demo.claim()
         wait_for(lambda: (
             len(_delivered_files(deployment.processing)) == 1
             and _report_file(deployment.processing).exists()) or None,
-            timeout_s=30, message="领取未移动预览交付与报告")
+            timeout_s=30, message="领取未移动预览交付与报告", failure=failure)
         assert not list(deployment.ready.iterdir())
         claimed = _delivered_files(deployment.processing)
         assert [path.read_bytes() for path in claimed] == [
@@ -475,13 +476,13 @@ def test_late_cancel_roundtrip_via_c_module(
         report = wait_for(lambda: _report_with_statuses(
             deployment.ready,
             {"拍录": "succeeded", "取回": "succeeded"}) or None,
-            timeout_s=120, message="会话最终报告未发布")
+            timeout_s=120, message="会话最终报告未发布", failure=failure)
 
         demo.claim()
         wait_for(lambda: (
             len(_delivered_files(deployment.processing)) == 1
             and _report_file(deployment.processing).exists()) or None,
-            timeout_s=30, message="领取未移动交付与报告")
+            timeout_s=30, message="领取未移动交付与报告", failure=failure)
         claimed = _delivered_files(deployment.processing)
         assert [path.read_bytes() for path in claimed] == [
             _CANCEL_CLIP_CONTENT.encode("utf-8")]
@@ -506,11 +507,12 @@ def test_late_cancel_roundtrip_via_c_module(
         cancel_path, cancel_receipt = deployment.export_plan_with_client(
             cancel_body)
         assert cancel_receipt["has_ack"] is True
+        failure = demo.watch_failures(request_id=cancel_receipt["request_id"], expected_statuses={"取消": "SUCCEEDED"})
         demo.submit(cancel_path)
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions WHERE name = '取消'"
         ) == [(3,)] or None,
-            timeout_s=180, message="取消动作未收场")
+            timeout_s=180, message="取消动作未收场", failure=failure)
         # 取消按不可撤回收场：交付不删除、原请求终态不改写。
         assert query_state(
             state_db, "SELECT status FROM plans ORDER BY id") == [(3,), (3,)]
@@ -526,6 +528,6 @@ def test_late_cancel_roundtrip_via_c_module(
             state_db,
             "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
         ) == [(int(report["report_id"]), report["to_wm"])] or None,
-            timeout_s=180, message="取消计划携带的 ACK 未被吸收")
+            timeout_s=180, message="取消计划携带的 ACK 未被吸收", failure=failure)
     finally:
         demo.stop()

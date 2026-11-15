@@ -14,6 +14,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from camctl.contracts.enums import enum_for
+
 from camctl_fixtures import (
     CliResult,
     Deployment,
@@ -37,13 +39,27 @@ def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
 
 
 def _await_row(state_db: Path, sql: str, params=(), *,
-               timeout_s: float = 30.0) -> list[tuple]:
+               timeout_s: float = 30.0, process=None, request_id=None, action=None) -> list[tuple]:
     """轮询查询直到出现行；同步点，不使用随机 sleep。"""
     deadline = time.monotonic() + timeout_s
+    next_failure_check = 0.0
+    statuses = enum_for("actions.status")
     while True:
         rows = _query(state_db, sql, params)
         if rows:
             return rows
+        now = time.monotonic()
+        if now >= next_failure_check:
+            failed = _query(state_db,
+                "SELECT a.status,a.error_code,a.error_details_json FROM actions a"
+                " JOIN plans p ON p.id=a.plan_id WHERE p.request_id=? AND a.name=?"
+                " AND a.status IN (?,?,?)",
+                (request_id, action, *(int(statuses[name]) for name in ("FAILED", "CANCELED", "EXPIRED"))))
+            assert not failed, f"请求 {request_id} 的动作 {action} 进入不相容终态: {failed}"
+            if process is not None and process.poll() is not None:
+                stdout, stderr = process.communicate()
+                raise AssertionError(f"会话在等待期间退出 ({process.returncode}): {stdout}\n{stderr}")
+            next_failure_check = now + 0.05
         assert time.monotonic() < deadline, f"等待超时: {sql}"
 
 
@@ -88,7 +104,7 @@ def test_photo_keeps_completed_outputs(tmp_path: Path) -> None:
             "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
             " WHERE a.name=? AND r.responsibility_key='start/' || a.id"
             " AND r.status IN (3,4)", ("shoot",),
-            timeout_s=min(30, max(0, deadline - time.monotonic())))
+            timeout_s=min(30, max(0, deadline - time.monotonic())), process=process, request_id="41", action="shoot")
         deployment.resume_clock()
         stdout, stderr = process.communicate(timeout=max(0, deadline - time.monotonic()))
         run = CliResult(process.returncode, stdout, stderr)
@@ -182,7 +198,7 @@ def test_timelapse_recovers_remaining_wait(tmp_path: Path) -> None:
         _await_row(
             state_db,
             "SELECT 1 FROM history_events WHERE event_type = 15"
-            " AND json_extract(body_json, '$.reason') = 1")
+            " AND json_extract(body_json, '$.reason') = 1", process=first, request_id="42", action="timelapse")
         deployment.resume_clock()
     finally:
         first.terminate()

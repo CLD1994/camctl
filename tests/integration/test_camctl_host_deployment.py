@@ -79,7 +79,7 @@ def test_shipped_deployment_guide_publishes_and_claims_same_report(
             [sys.executable, "-c", _ENTRY], receipt_root=runtime, target=launcher,
         )
     deployment = SimpleNamespace(
-        root=runtime, ready=ready, processing=processing, config_path=None,
+        root=runtime, ready=ready, processing=processing, config_path=None, state_db=runtime / "state.db",
     )
     demo = HostDemo(deployment, host_demo, launcher=str(launcher))
     demo.log_path = runtime / "host.log"
@@ -112,8 +112,9 @@ def test_shipped_deployment_guide_publishes_and_claims_same_report(
         assert query_state(runtime / "state.db", "SELECT status FROM actions") == [(1,)]
         plan.unlink()
         demo.stop()
+        failure = demo.watch_failures(request_id="1", expected_statuses={"检查报告": "SUCCEEDED"})
         demo.start(env=environment, use_default_paths=not custom_paths)
-        published, content = wait_for(completed_report, 30, "接入示例的报告动作未完成")
+        published, content = wait_for(completed_report, 30, "接入示例的报告动作未完成", failure=failure)
         demo.claim()
         claimed = processing / published.name
         assert claimed.exists(), f"CLI 发布到 {published.parent}，接入示例却领取 {ready}"

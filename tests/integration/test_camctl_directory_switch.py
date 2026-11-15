@@ -94,7 +94,7 @@ def test_new_binding_publishes_and_claims_after_explicit_init(tmp_path, host_dem
             str(new["staging"]), str(new["ready"]), str(new["processing"]))
     second = tmp_path / "second.json"
     _plan(second, "2", "新目录报告")
-    deployment = SimpleNamespace(root=tmp_path, ready=new["ready"], processing=new["processing"], config_path=config)
+    deployment = SimpleNamespace(root=tmp_path, ready=new["ready"], processing=new["processing"], config_path=config, state_db=state_db)
     demo = HostDemo(deployment, host_demo, launcher=str(launcher))
 
     def completed_report():
@@ -111,8 +111,9 @@ def test_new_binding_publishes_and_claims_after_explicit_init(tmp_path, host_dem
 
     try:
         demo.start()
+        failure = demo.watch_failures(request_id="2", expected_statuses={"新目录报告": "SUCCEEDED"})
         demo.submit(second)
-        published, content = wait_for(completed_report, 30, "新目录的报告动作没有完成")
+        published, content = wait_for(completed_report, 30, "新目录的报告动作没有完成", failure=failure)
         demo.claim()
         assert (new["processing"] / published.name).read_bytes() == content
         assert not published.exists()
