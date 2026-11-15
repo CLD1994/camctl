@@ -148,8 +148,8 @@
 - 归属：Q4/Q5 授予顺序（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
 - 测试：apps/camctl/tests/integration/scheduling/test_resources.py、apps/camctl/tests/integration/scheduling/test_recovery.py
-- 证据：`test_resources.py::test_grant_does_not_skip_dispatch_recheck`、`test_two_candidates_same_device_only_one_granted` 与 `test_earlier_candidate_wins_consistently` 覆盖候选复查、同设备互斥和排序；`test_recovery.py::test_not_dispatched_activity_releases`、`test_ended_activity_releases`、`test_rejected_without_effect_releases`、`test_late_observation_keeps_new_owner_occupancy` 覆盖可靠释放及迟到旧观察不覆盖新归属。路线图阶段 3 也记录同会话释放后下一动作推进。上述分区尚未把候选取消、活动释放、保留结束、下一候选授予及提前／重复／迟到通知组合为同一竞争序列。
-- 未核验前提：W-05 所列候选取消、释放、保留结束与下一候选授予之间的组合竞争及通知交接仍待联合注入；路线图阶段 3 调度竞争项跟踪该启动责任范围。
+- 证据：`test_resources.py::test_grant_and_prevented_result_preserve_ticket_and_attempt_count` 覆盖真实授予及未派发结果保存后的原票据和次数；`test_grant_rejects_window_and_terminal_states` 覆盖授予前窗口及取消状态拒绝，`test_two_candidates_same_device_only_one_granted` 与 `test_earlier_candidate_wins_consistently` 覆盖同设备互斥和排序。`test_recovery.py::test_not_dispatched_activity_releases`、`test_ended_activity_releases`、`test_rejected_without_effect_releases`、`test_late_observation_keeps_new_owner_occupancy` 覆盖可靠释放及迟到旧观察不覆盖新归属。路线图阶段3也记录同会话释放后下一动作推进；这些结果不证明授予后取消阻止实际派发。
+- 未核验前提：授予后取消的实际派发，以及W-05所列取消、释放、保留结束与下一候选授予之间的组合竞争及通知交接仍待联合验证；路线图阶段3调度竞争项跟踪该启动责任范围。
 
 #### 验收 W-06
 - 原文：[验收 W-06](database/consistency-verification.md#等待与来源结束)（归属变化中断与三路径恢复一致）。
@@ -193,7 +193,7 @@
 - 归属：Q5 资源判定（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
 - 测试：apps/camctl/tests/integration/scheduling/test_resources.py、apps/camctl/tests/integration/scheduling/test_recovery.py
-- 证据：`test_resources.py::test_grant_does_not_skip_dispatch_recheck`、`test_two_candidates_same_device_only_one_granted`、`test_earlier_candidate_wins_consistently` 覆盖派发前复查、同设备互斥和排序；`test_recovery.py::test_not_dispatched_activity_releases`、`test_ended_activity_releases`、`test_rejected_without_effect_releases` 与 `test_late_observation_keeps_new_owner_occupancy` 覆盖可靠释放和迟到旧观察不覆盖新归属。仓储层查询计划已由持久化 P6 收口核对，调度侧未完成工作查询计划未单独核对。
+- 证据：`test_resources.py::test_two_candidates_same_device_only_one_granted` 与 `test_earlier_candidate_wins_consistently` 覆盖同设备互斥和排序；`test_recovery.py::test_not_dispatched_activity_releases`、`test_ended_activity_releases`、`test_rejected_without_effect_releases` 与 `test_late_observation_keeps_new_owner_occupancy` 覆盖可靠释放和迟到旧观察不覆盖新归属。仓储层查询计划已由持久化P6收口核对，调度侧未完成工作查询计划未单独核对。这些仓储结果不替代真实派发前复查。
 - 未核验前提：调度查询的实际索引与查询计划核对，归路线图阶段 7 规模验证行。
 
 #### 验收 W-17
