@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from ..bootstrap.test_output_binding_changes import environment  # noqa: F401
 from ..support.outputs import output_operation, prepare_cancel_target
 from ..support.output_planning import EventSequence, capture_operation
 from ..support.database import business_database, database_path
@@ -238,23 +239,98 @@ async def test_release_requires_owner_terminal(work_env):
 
 
 @pytest.mark.asyncio
-async def test_release_requires_stopped_operations(work_env):
-    """存储格式包含未结束尝试时拒绝释放；真实线程另行验证。"""
-    owned, roots, qualification = work_env
-    _cancel_public_delivery(owned, qualification)
-    run_id = _row(owned, "SELECT id FROM operation_runs WHERE copy_id=?",
-                  qualification.copy_id)[0]
-    marker = _last_event(owned)
-    owned.connection.execute(
-        "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
-        " intent_event_id, max_attempts_used, effect_state)"
-        " VALUES (9001, ?, 2, 1, ?, 3, 1)",
-        (run_id, marker))
-    owned.connection.commit()
-    outcome = _release(owned, qualification.target_file_id)
-    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(outcome.error, ConsistencyError)
-    assert _file_state(owned, qualification.target_file_id)[:2] == (1, 1)
+async def test_release_requires_stopped_operations(environment, monkeypatch):
+    """存储格式专项：交付投影提前终态时，真实未结束 READ 仍禁止释放。"""
+    import os
+    from ..bootstrap.test_output_binding_changes import (
+        Catalog, _CONTENT as photo, _NOW as now, _read_registry, _save_photos,
+    )
+    from ..support.outputs import obtain_factory, submit_output_document
+    from camctl.outputs.obtain_flow import advance_obtain
+
+    cfg, owned, context, driver = environment
+    await _save_photos(cfg, owned, context, driver)
+    source_id, = owned.connection.execute(
+        "SELECT id FROM actions WHERE device_id='cam-a'").fetchone()
+    accepted = await submit_output_document(context.database, catalog=Catalog(), occurred_at=now, body={
+        "request_id": "2", "created_at": "2026-01-15 08:00:00", "name": "取回照片",
+        "actions": [{"name": "取回", "type": "obtain_action_outputs",
+            "scheduled_at": "2026-01-15 09:00:00",
+            "params": {"source": {"action_instance_id": str(source_id)}}}],
+    })
+    assert accepted.plan_id is not None, accepted
+    action_id, = owned.connection.execute(
+        "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+    roots = BoundDirectories(staging=Path(cfg.paths.staging))
+    for directory in (cfg.paths.staging, cfg.paths.ready, cfg.paths.processing):
+        Path(directory).mkdir(parents=True, exist_ok=True)
+    executor = FileTaskExecutor(Supervisor())
+    runtime = obtain_factory(
+        devices=cfg.devices, drivers=_read_registry(driver), staging=roots.staging,
+        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
+        occurred_at=lambda: now + 20, monotonic_ns=lambda: 0,
+        segment_size=len(photo), file_executor=executor)(context.database)
+    entered, release = threading.Event(), threading.Event()
+    paths = []
+    actual_open = os.open
+
+    def hold_hash(path, flags, *args, **kwargs):
+        if (isinstance(path, (str, Path)) and Path(path).is_absolute()
+                and Path(path).parent == roots.staging / "deliveries"
+                and flags & os.O_ACCMODE == os.O_RDONLY and not entered.is_set()):
+            paths.append(Path(path))
+            entered.set()
+            assert release.wait(10), "测试未放行实际摘要计算"
+        return actual_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", hold_hash)
+    running = asyncio.create_task(advance_obtain(runtime))
+    waiter = asyncio.create_task(asyncio.to_thread(entered.wait, 5))
+    original_status = delivery_id = None
+    try:
+        done, _ = await asyncio.wait({waiter, running}, timeout=5, return_when=asyncio.FIRST_COMPLETED)
+        if running in done:
+            await running
+            raise AssertionError("实际读取未到摘要阶段便结束")
+        assert waiter in done and waiter.result(), "实际读取未到摘要阶段"
+        file_id, delivery_id, copy_id = owned.connection.execute(
+            "SELECT f.id,d.id,c.id FROM intermediate_files f"
+            " JOIN file_copies c ON c.target_file_id=f.id"
+            " JOIN deliveries d ON d.id=c.delivery_id WHERE d.action_id=?", (action_id,)).fetchone()
+        assert paths == [_work_path(roots, owned, file_id)]
+        assert paths[0].read_bytes() == photo
+        attempts, maximum, timeout, interval, number, status, intent, result = owned.connection.execute(
+            "SELECT r.attempts_used,r.max_attempts_used,r.timeout_s_json,r.retry_interval_s_json,"
+            "a.attempt_no,a.status,a.intent_event_id,a.result_json FROM operation_runs r JOIN operation_attempts a"
+            " ON a.run_id=r.id WHERE r.copy_id=?", (copy_id,)).fetchone()
+        assert (attempts, maximum, number, status, result) == (1, 3, 1, 1, None)
+        assert timeout is not None and interval is not None
+        assert owned.connection.execute("SELECT COUNT(*) FROM history_events WHERE id=?", (intent,)).fetchone() == (1,)
+        prepare_cancel_target(owned, catalog=Catalog(), now=now + 30, action_id=action_id, request_id="4")
+        original_status, = owned.connection.execute(
+            "SELECT status FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+        # 只破坏交付投影：模拟错误的提前终态，使释放事务到达未结束尝试守卫。
+        # READ 原意图、预算、次数、文件与取消事实均来自正式入口。
+        owned.connection.execute("UPDATE deliveries SET status=7 WHERE id=?", (delivery_id,))
+        owned.connection.commit()
+        before = tuple(owned.connection.iterdump())
+        outcome = OutputsRepository().save_retention_release(
+            RetentionRelease(file_id, now + 40), new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(outcome.error, ConsistencyError)
+        assert str(outcome.error) == f"中间文件 {file_id} 仍有 1 个未结束操作尝试"
+        assert not owned.connection.in_transaction and tuple(owned.connection.iterdump()) == before
+        assert _file_state(owned, file_id)[:2] == (1, 1)
+        assert paths[0].read_bytes() == photo
+    finally:
+        if original_status is not None:
+            owned.connection.execute("UPDATE deliveries SET status=? WHERE id=?", (original_status, delivery_id))
+            owned.connection.commit()
+        release.set()
+        await asyncio.wait_for(asyncio.shield(running), 10)
+        settled = await asyncio.wait_for(asyncio.shield(executor.drain_required()), 10)
+        assert not settled.failed
+        await asyncio.gather(waiter, return_exceptions=True)
 
 
 @pytest.mark.asyncio

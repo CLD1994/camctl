@@ -5,132 +5,194 @@ import os
 import sys
 from dataclasses import replace
 from datetime import datetime, timezone
-from decimal import Decimal
 from pathlib import Path
 import threading
 from types import SimpleNamespace
 
 import pytest
 
-from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.host_files.tasks import FileTaskExecutor
-from camctl.outputs.copy import (
-    CompletionContext, CopyContext, SegmentContext, complete_copy,
-    copy_next_segment, prepare_copy,
-)
+from camctl.host_files.models import BoundDirectories
 from camctl.outputs.handoff import DeliveryContext, DeliveryPhase, publish_delivery
 from camctl.outputs.work_files import WorkFileSingleOutcome, clean_one_work_file
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.session.supervision import Supervisor
 
-from .test_copy_segments import (
-    _ByteStream, _CONTENT, _drive,
-    local_read, read_targets, segment_env,  # noqa: F401
-)
+from .test_copy_segments import _CONTENT
 from ..support.database import business_database, database_path
 from ..support.public_delivery_cases import prepare_public_delivery
 from ..support.outputs import submit_output_document
+from ..bootstrap.test_output_binding_changes import environment  # noqa: F401
 from ..capture.result_consumer_fixtures import ResultCatalog
 from .test_qualification import _NOW
-from .test_work_files import _cancel_delivery, _context, _file_state
+from .test_work_files import _context, _file_state
 from .test_work_file_execution import _wait_finished, _wait_started
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("purpose", ["delivery", "internal"])
 @pytest.mark.parametrize("stage", ["prepare", "segment", "hash"])
 async def test_shared_file_operation_keeps_qualification_until_actual_end(
-        segment_env, tmp_path, monkeypatch, stage):
-    owned, roots, qualification = segment_env
-    async with business_database(database_path(owned)) as database:
-        file_id, copy_id = qualification.target_file_id, qualification.copy_id
-        owned.connection.execute("UPDATE device_files SET checksum_support=3 WHERE id=501")
-        owned.connection.commit()
-        repository = OutputsRepository()
+        environment, capture_resources, tmp_path, monkeypatch, purpose, stage):
+    """真实拍摄来源上的交付或检查副本在取消后仍由原文件任务持有。"""
+    from ..bootstrap.test_output_binding_changes import (
+        Catalog, _NOW as now, _read_registry, _save_photos,
+    )
+    from ..capture.test_action6_segmented_normal import Action6RecordCatalog
+    from ..support.bootstrap_read_cases import inspection_case
+    from ..support.outputs import obtain_factory, prepare_cancel_target
+    from ..support.segment_inspection_cases import inspection_source
+    from camctl.outputs.obtain_flow import advance_obtain
+
+    source = world = None
+    read_sessions, segment_paths = [], []
+
+    def observe_sessions(driver):
+        actual = driver.open_read
+
+        async def open_read(*args, **kwargs):
+            session = await actual(*args, **kwargs)
+            read_sessions.append(session)
+            if stage == "segment":
+                actual_read = session.read_chunk
+
+                def read_chunk(limit):
+                    assert len(segment_paths) == 1
+                    hold(segment_paths[0])
+                    return actual_read(limit)
+
+                monkeypatch.setattr(session, "read_chunk", read_chunk)
+            return session
+
+        monkeypatch.setattr(driver, "open_read", open_read)
+
+    if purpose == "delivery":
+        cfg, owned, context, driver = environment
+        await _save_photos(cfg, owned, context, driver)
+        source_id, = owned.connection.execute(
+            "SELECT id FROM actions WHERE device_id='cam-a'").fetchone()
+        accepted = await submit_output_document(context.database, catalog=Catalog(), occurred_at=now, body={
+            "request_id": "2", "created_at": "2026-01-15 08:00:00", "name": "取回照片",
+            "actions": [{"name": "取回", "type": "obtain_action_outputs",
+                "scheduled_at": "2026-01-15 09:00:00",
+                "params": {"source": {"action_instance_id": str(source_id)}}}],
+        })
+        assert accepted.plan_id is not None, accepted
+        action_id, = owned.connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()
+        database = context.database
+        observe_sessions(driver)
+        roots = BoundDirectories(staging=Path(cfg.paths.staging))
         executor = FileTaskExecutor(Supervisor())
-        started, release = threading.Event(), threading.Event()
-        actual_threads = []
-        loop_thread = threading.get_ident()
-        session = None
+        for directory in (cfg.paths.staging, cfg.paths.ready, cfg.paths.processing):
+            Path(directory).mkdir(parents=True, exist_ok=True)
+        factory = obtain_factory(
+            devices=cfg.devices, drivers=_read_registry(driver), staging=roots.staging,
+            ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing),
+            occurred_at=lambda: now + 20, monotonic_ns=lambda: 0,
+            segment_size=len(_CONTENT), file_executor=executor)
+        runtime = factory(database)
+        operation = advance_obtain(runtime)
+        catalog, target_directory = Catalog(), "deliveries"
+    else:
+        directory = tmp_path / "inspection"
+        directory.mkdir()
+        source = await inspection_source(directory, count=1)
+        world = await inspection_case(source, capture_resources)
+        owned, database, roots, executor = world.owned, world.database, world.roots, world.executor
+        observe_sessions(world.driver)
+        action_id = world.ref.action_id
+        now = world.wall[0]
+        from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
+        from camctl.capture.segment_inspections import inspect_segment
+        from camctl.devices.drivers.registry import DriverRegistry
+        factory = session_capture_assembly(
+            devices=world.config.devices, drivers=DriverRegistry((world.entry,)),
+            results=world.results, staging=roots.staging, wait_config=execution_wait_config,
+            wall_us=lambda: world.wall[0], monotonic_ns=lambda: 7_000_000_000,
+            probe_request=world.probe_request, repair_request=world.repair_request,
+            segment_size=len(_CONTENT), file_executor=executor, **world.collections)
+        capture = await factory(database, "cam-1")
+        operation = inspect_segment(capture.media, world.request)
+        catalog, target_directory = Action6RecordCatalog(), "recording-inputs"
 
-        def hold():
-            actual_threads.append(threading.get_ident())
-            if threading.get_ident() == loop_thread:
-                raise OSError("实际文件操作不能在事件循环中等待")
-            started.set()
-            assert release.wait(10), "测试未放行实际文件调用"
+    started, release = threading.Event(), threading.Event()
+    loop_thread = threading.get_ident()
+    actual_threads, selected_paths = [], []
+    actual_open = os.open
 
-        class HeldSource:
-            def __getattr__(self, name):
-                return getattr(session, name)
+    def hold(path):
+        selected_paths.append(path)
+        actual_threads.append(threading.get_ident())
+        if threading.get_ident() == loop_thread:
+            raise OSError("实际文件操作不能在事件循环中等待")
+        started.set()
+        assert release.wait(10), "测试未放行实际文件调用"
 
-            def read_chunk(self, limit):
-                hold()
-                return session.read_chunk(limit)
+    def matches(path):
+        return (isinstance(path, (str, Path)) and Path(path).is_absolute()
+                and Path(path).parent == roots.staging / target_directory)
 
-        if stage == "prepare":
-            operation = prepare_copy(copy_id, CopyContext(
-                repository, database, roots, _NOW + 20, executor=executor))
-        elif stage == "segment":
-            await prepare_copy(copy_id, CopyContext(repository, database, roots, _NOW + 1))
-            session = ReadSession(SourceFile("501", {}, len(_CONTENT)), 0,
-                                  _ByteStream(_CONTENT), Decimal("10"))
-            operation = copy_next_segment(copy_id, SegmentContext(
-                repository, database, roots, _NOW + 20, len(_CONTENT), HeldSource(),
-                executor=executor))
-        else:
-            await _drive(owned, roots, copy_id, segment_size=len(_CONTENT))
-            operation = complete_copy(copy_id, CompletionContext(
-                repository, database, roots, _NOW + 20, executor=executor))
+    def open_file(path, flags, *args, **kwargs):
+        selected = matches(path)
+        if selected and not started.is_set() and (
+                (stage == "prepare" and flags & os.O_CREAT)
+                or (stage == "hash" and flags & os.O_ACCMODE == os.O_RDONLY)):
+            hold(Path(path))
+        fd = actual_open(path, flags, *args, **kwargs)
+        if selected and stage == "segment" and flags & os.O_ACCMODE == os.O_RDWR:
+            segment_paths.append(Path(path))
+        return fd
 
-        relative, = owned.connection.execute(
-            "SELECT relative_path FROM intermediate_files WHERE id=?", (file_id,)).fetchone()
-        target = roots.staging / relative
-        actual_open = os.open
-
-        def hold_target(path, flags, *args, **kwargs):
-            selected = (isinstance(path, (str, Path)) and Path(path) == target
-                        and ((stage == "prepare" and flags & os.O_CREAT)
-                             or (stage == "hash" and flags & os.O_ACCMODE == os.O_RDONLY)))
-            if selected:
-                hold()
-            return actual_open(path, flags, *args, **kwargs)
-
-        monkeypatch.setattr(os, "open", hold_target)
-
-        running = asyncio.create_task(operation)
-        try:
-            await _wait_started(started, running)
-            assert executor.unfinished_files() == (file_id,)
-            if qualification.delivery_id is not None:
-                _cancel_delivery(owned, qualification.delivery_id)
-            else:
-                owned.connection.execute("UPDATE actions SET status=6,cancel_requested=1 WHERE id=11")
-                owned.connection.commit()
-            before = _file_state(owned, file_id)
-            result = await clean_one_work_file(file_id, replace(_context(database, roots), executor=executor))
-            assert result.outcome is WorkFileSingleOutcome.KEPT
-            assert _file_state(owned, file_id) == before
-            running.cancel()
-            for _ in range(5):
-                await asyncio.sleep(0)
-            assert not running.done()
-            assert owned.connection.execute("SELECT 1").fetchone() == (1,)
-            assert executor.unfinished_files() == (file_id,)
-            release.set()
-            await _wait_finished(running)
-            with pytest.raises(asyncio.CancelledError):
-                await running
-            assert executor.unfinished_files() == ()
-            assert actual_threads and all(value != loop_thread for value in actual_threads)
-        finally:
-            release.set()
-            await _wait_finished(running)
-            await asyncio.gather(running, return_exceptions=True)
-            if session is not None:
-                session.request_stop()
-                read_end = asyncio.create_task(session.wait_stopped())
-                await _wait_finished(read_end)
-                await read_end
+    monkeypatch.setattr(os, "open", open_file)
+    running = asyncio.create_task(operation)
+    try:
+        await _wait_started(started, running)
+        assert len(selected_paths) == 1
+        if stage in ("segment", "hash"):
+            assert len(read_sessions) == 1
+        relative = selected_paths[0].relative_to(roots.staging).as_posix()
+        file_id, = owned.connection.execute(
+            "SELECT id FROM intermediate_files WHERE relative_path=?", (relative,)).fetchone()
+        assert executor.unfinished_files() == (file_id,)
+        prepare_cancel_target(owned, catalog=catalog, now=now + 30,
+                              action_id=action_id, request_id="4")
+        assert owned.connection.execute(
+            "SELECT cancel_requested FROM actions WHERE id=?", (action_id,)).fetchone() == (1,)
+        before = _file_state(owned, file_id)
+        result = await clean_one_work_file(file_id, replace(
+            _context(database, roots, occurred_at=now + 40), executor=executor))
+        assert result.outcome is WorkFileSingleOutcome.KEPT
+        assert _file_state(owned, file_id) == before
+        running.cancel()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not running.done()
+        assert await database.read(lambda worker: worker.connection.execute("SELECT 1").fetchone()) == (1,)
+        assert executor.unfinished_files() == (file_id,)
+        release.set()
+        await _wait_finished(running)
+        with pytest.raises(asyncio.CancelledError):
+            await running
+        assert executor.unfinished_files() == ()
+        assert actual_threads and all(value != loop_thread for value in actual_threads)
+    finally:
+        release.set()
+        await _wait_finished(running)
+        await asyncio.gather(running, return_exceptions=True)
+        drain = asyncio.create_task(executor.drain_required())
+        await _wait_finished(drain)
+        settled = await drain
+        assert not settled.failed
+        for session in read_sessions:
+            session.request_stop()
+            read_end = asyncio.create_task(session.wait_stopped())
+            await _wait_finished(read_end)
+            assert (await read_end).stopped
+        if world is not None:
+            await world.close()
+        if source is not None:
+            source[0].connection.close()
 
 
 @pytest.mark.asyncio
