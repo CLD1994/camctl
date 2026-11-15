@@ -10,6 +10,7 @@
 
 import asyncio
 import hashlib
+import sqlite3
 from contextlib import closing
 from dataclasses import replace
 from decimal import Decimal
@@ -31,6 +32,7 @@ from camctl.outputs.copy import (
     VerificationSave, complete_copy, prepare_copy,
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
+from camctl.outputs.handoff import DeliveryContext, DeliveryDirectories, DeliveryHandoffError, publish_delivery
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -42,6 +44,7 @@ from .test_copy_segments import _CONTENT, _drive, _target_path
 from .test_local_read import local_read  # noqa: F401
 from .test_qualification import _NOW
 from .test_read_associations import read_targets  # noqa: F401
+from ..operations.test_result_reuse import _FaultConnection
 
 
 _CONTENT_DIGEST = hashlib.sha256(_CONTENT).hexdigest()
@@ -156,6 +159,40 @@ def test_matched_copy_prepares_and_releases_source(complete_env):
     assert _events(owned, 23, 2) == 1
     assert _events(owned, 21, 3) == 1
     assert _events(owned, 26, 2) == 1
+    transactions = _row(owned,
+        "SELECT COUNT(DISTINCT transaction_id) FROM history_events WHERE "
+        "(event_type=22 AND json_extract(body_json, '$.reason')=3) OR "
+        "(event_type=26 AND json_extract(body_json, '$.reason')=2)")[0]
+    assert transactions == 1
+
+
+def test_unconfirmed_read_blocks_publication_with_actual_reason(complete_env, tmp_path):
+    """完整副本不代替原 READ 结果；拒绝时文件仍在原处。"""
+    owned, roots, qualification = complete_env
+    assert _complete(owned, roots, qualification.copy_id).phase is CompletionPhase.PREPARED
+    ready, processing = tmp_path / "ready", tmp_path / "processing"
+    ready.mkdir()
+    processing.mkdir()
+    directories = DeliveryDirectories(roots.staging, ready, processing)
+    with pytest.raises(DeliveryHandoffError) as caught:
+        asyncio.run(output_operation(
+            owned, publish_delivery, qualification.delivery_id, DeliveryContext,
+            repository=OutputsRepository(), directories=directories, occurred_at=_NOW + 10))
+    assert caught.value.stage == "read_result_unconfirmed"
+    assert _target_path(roots, owned, qualification.target_file_id).read_bytes() == _CONTENT
+    assert not tuple(ready.iterdir()) and not tuple(processing.iterdir())
+
+
+def test_changed_target_length_cannot_be_saved_as_complete(complete_env):
+    owned, roots, qualification = complete_env
+    _target_path(roots, owned, qualification.target_file_id).write_bytes(_CONTENT[:-1])
+    with pytest.raises(CopyCompletionError) as caught:
+        _complete(owned, roots, qualification.copy_id)
+    assert caught.value.stage == "host_length_mismatch"
+    assert _row(owned, "SELECT verification_state,target_sha256 FROM file_copies WHERE id=?",
+                qualification.copy_id) == (1, None)
+    assert _row(owned, "SELECT size_bytes,sha256 FROM intermediate_files WHERE id=?",
+                qualification.target_file_id) == (None, None)
 
 
 def test_prepared_commit_releases_source(complete_env, monkeypatch):
@@ -501,6 +538,13 @@ def test_save_prepared_key_recovers_first_response(complete_env):
     request = PreparedRequest(
         copy_id=qualification.copy_id, target_sha256=_CONTENT_DIGEST,
         size_bytes=10, occurred_at=_NOW + 6)
+    verification = VerificationSave(
+        copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
+        target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 6)
+    before = tuple(owned.connection.iterdump())
+    rejected = repository.save_prepared(replace(request, verification=verification), key, owned)
+    assert rejected.kind is DbOutcomeKind.ROLLED_BACK
+    assert tuple(owned.connection.iterdump()) == before
     first = repository.save_prepared(request, key, owned)
     assert first.kind is DbOutcomeKind.COMPLETED, first.error
     assert first.value.prepared.source_dependency_released is True
@@ -510,6 +554,76 @@ def test_save_prepared_key_recovers_first_response(complete_env):
     assert tuple(owned.connection.iterdump()) == before
     changed = repository.save_prepared(replace(request, size_bytes=9), key, owned)
     assert changed.kind is DbOutcomeKind.ROLLED_BACK
+
+
+@pytest.mark.parametrize("environment", ["complete_env", "internal_complete_env"])
+def test_completion_commit_visibility_and_lost_receipt(environment, request):
+    """另一连接在提交前后看到完整状态；丢失回执后按原键核实。"""
+    owned, roots, qualification = request.getfixturevalue(environment)
+    verification = VerificationSave(
+        copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
+        target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 5)
+    command = PreparedRequest(qualification.copy_id, _CONTENT_DIGEST, 10, _NOW + 5,
+                              verification=verification)
+    database_path = owned.connection.execute("PRAGMA database_list").fetchone()[2]
+    key = new_operation_key()
+    observed = []
+
+    def facts(connection):
+        return connection.execute(
+            "SELECT c.verification_state,c.target_sha256,f.size_bytes,f.sha256"
+            " FROM file_copies c JOIN intermediate_files f ON f.id=c.target_file_id"
+            " WHERE c.id=?", (qualification.copy_id,)).fetchone()
+
+    class LostReceipt(_FaultConnection):
+        def execute(self, sql, parameters=()):
+            if sql == "COMMIT":
+                with closing(sqlite3.connect(database_path)) as observer:
+                    observed.append(facts(observer))
+                result = self._connection.execute(sql, parameters)
+                raise sqlite3.OperationalError("提交完成但回执丢失")
+            return self._connection.execute(sql, parameters)
+
+    repository = OutputsRepository()
+    lost = replace(owned, connection=LostReceipt(owned.connection, "unused"))
+    unknown = repository.save_prepared(command, key, lost)
+    assert unknown.kind is DbOutcomeKind.UNKNOWN, unknown.error
+    assert observed == [(1, None, None, None)]
+    assert facts(owned.connection) == (3, _CONTENT_DIGEST, 10, _CONTENT_DIGEST)
+    before = tuple(owned.connection.iterdump())
+    recovered = repository.save_prepared(command, key, owned)
+    assert recovered.kind is DbOutcomeKind.COMPLETED, recovered.error
+    assert recovered.value.prepared.copy_id == qualification.copy_id
+    assert recovered.value.prepared.source_dependency_released is (environment == "complete_env")
+    assert tuple(owned.connection.iterdump()) == before
+    wrong = repository.save_prepared(replace(command, occurred_at=_NOW + 6,
+        verification=replace(verification, occurred_at=_NOW + 6)), key, owned)
+    assert wrong.kind is DbOutcomeKind.ROLLED_BACK
+    assert tuple(owned.connection.iterdump()) == before
+
+
+@pytest.mark.parametrize("environment", ["complete_env", "internal_complete_env"])
+def test_completion_rollback_reuses_same_full_request(environment, request):
+    owned, _, qualification = request.getfixturevalue(environment)
+    verification = VerificationSave(
+        copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
+        target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 5)
+    command = PreparedRequest(qualification.copy_id, _CONTENT_DIGEST, 10, _NOW + 5,
+                              verification=verification)
+    key = new_operation_key()
+    repository = OutputsRepository()
+    before = tuple(owned.connection.iterdump())
+    fault = _FaultConnection(owned.connection, "INSERT INTO entity_event_links")
+    rolled_back = repository.save_prepared(command, key, replace(owned, connection=fault))
+    assert rolled_back.kind is DbOutcomeKind.ROLLED_BACK
+    assert tuple(owned.connection.iterdump()) == before
+    result = repository.save_prepared(command, key, owned)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value.prepared.copy_id == qualification.copy_id
+    assert _row(owned, "SELECT verification_state,target_sha256 FROM file_copies WHERE id=?",
+                qualification.copy_id) == (3, _CONTENT_DIGEST)
+    assert _row(owned, "SELECT size_bytes,sha256 FROM intermediate_files WHERE id=?",
+                qualification.target_file_id) == (10, _CONTENT_DIGEST)
 
 
 # ---- 正式守卫 ----

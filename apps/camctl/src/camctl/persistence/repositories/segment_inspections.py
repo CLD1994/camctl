@@ -79,6 +79,7 @@ class InspectionCopyFacts:
     inspection_state: int
     retention_state: int
     cleanup_state: int
+    prepared: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,15 +419,52 @@ def read_inspection_copy_facts(inspection_id: int, owned) -> InspectionCopyFacts
         validate_relative_file_path(FilePurpose.RECORDING_INPUT, target_id, path)
     except PathRuleError as error:
         raise ConsistencyError("检查副本路径与固定输入身份不一致") from error
+    prepared = False
     if verification in (int(_COPY_VERIFICATION.MATCHED),
                         int(_COPY_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE)):
-        if (committed != source_size or target_size != source_size
-                or target_digest_file != target_digest or target_digest is None):
+        if committed != source_size or target_digest is None:
             raise ConsistencyError("已通过校验的检查副本缺少完整目标字节事实")
+        prepared = target_size == source_size and target_digest_file == target_digest
+        if not prepared:
+            if (target_size is not None or target_digest_file is not None
+                    or not _legacy_verification_before_file(connection, copy_id, verification,
+                                                            source_digest, target_digest)):
+                raise ConsistencyError("已通过校验的检查副本缺少完整目标字节事实")
     return InspectionCopyFacts(
         inspection_id, action_id, set_id, inspection["member_id"], source_file,
         copy_id, target_id, path, source_size, committed, source_digest, target_digest,
-        verification, inspection["state"], retention, cleanup)
+        verification, inspection["state"], retention, cleanup, prepared)
+
+
+def _legacy_verification_before_file(connection, copy_id, state, source, target):
+    """旧格式单独提交校验且尚未保存文件事实时，允许原责任继续收尾。"""
+    from camctl.history.validators import validate_event_structure
+    from camctl.persistence.fact_reads import read_event
+    from camctl.outputs.copy import verification_result_error
+
+    if verification_result_error(state=state, source=source, target=target, error=None):
+        return False
+    event_id = connection.execute(
+        "SELECT id FROM history_events WHERE event_type=?"
+        " AND json_extract(body_json,'$.reason')=?"
+        " AND json_extract(body_json,'$.rows[0].table')='file_copies'"
+        " AND json_extract(body_json,'$.rows[0].id')=? ORDER BY id DESC LIMIT 1",
+        (load_event_registry()["events"]["COPY_CHANGED"]["id"],
+         load_event_registry()["events"]["COPY_CHANGED"]["branches"]["VERIFY"]["reason"], copy_id),
+    ).fetchone()
+    if event_id is None:
+        return False
+    record = read_event(connection, event_id[0])
+    event = record.event
+    if (validate_event_structure(event)[:2] != ("COPY_CHANGED", "VERIFY")
+            or record.transaction.first_event_id != record.transaction.last_event_id
+            or len(event.rows) != 1):
+        return False
+    row = event.rows[0]
+    return (row.table == "file_copies" and row.row_id == copy_id
+            and row.after.values.get("verification_state") == state
+            and row.after.values.get("target_sha256", target) == target
+            and row.after.values.get("source_sha256", source) == source)
 
 
 def read_inspection_for_member(action_id: int, member_id: int, owned) -> InspectionMemberFacts:

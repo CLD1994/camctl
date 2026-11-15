@@ -4,6 +4,8 @@ from decimal import Decimal
 import hashlib
 import os
 from pathlib import Path
+import sqlite3
+from contextlib import closing
 
 import pytest
 import pytest_asyncio
@@ -11,6 +13,7 @@ import pytest_asyncio
 from camctl.capture.media import MediaPolicy
 from camctl.capture.media_flow import DriverReadSessions, MediaFlow
 from camctl.capture.segment_inspections import SegmentInspectionPhase, SegmentInspectionRequest, inspect_segment
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.host_files.models import BoundDirectories
@@ -91,6 +94,107 @@ async def test_complete_copy_and_saved_metric_reused(inspection_world, metric, e
     assert driver.offsets == [0]
     assert digest.calls == 1
     assert tools.requests == [frames]
+
+
+async def test_legacy_verification_continues_before_inspection(inspection_world, monkeypatch):
+    """按旧历史格式准备已校验、未保存目标文件事实的检查副本。"""
+    from camctl.outputs.copy import CompletionContext, CompletionPhase, complete_copy
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+    from camctl.persistence.repositories.outputs import OutputsRepository
+    from ..support.outputs import output_operation
+
+    owned, roots, _, build, _, runtime = inspection_world
+    flow, request, driver, digest, tools = build()
+    original = OutputsRepository.save_prepared
+    legacy = []
+
+    def make_legacy(repository, command, key, current):
+        connection = current.connection
+        file_id, = connection.execute("SELECT target_file_id FROM file_copies WHERE id=?",
+                                      (command.copy_id,)).fetchone()
+        before = connection.execute(
+            "SELECT size_bytes,sha256,last_event_id,change_count FROM intermediate_files WHERE id=?",
+            (file_id,)).fetchone()
+        outcome = original(repository, command, key, current)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        transaction_id, first, last = connection.execute(
+            "SELECT id,first_event_id,last_event_id FROM history_transactions WHERE operation_key=?",
+            (str(key),)).fetchone()
+        assert last == first + 1
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DELETE FROM report_entity_changes WHERE event_id=?", (last,))
+        connection.execute("DELETE FROM entity_event_links WHERE event_id=?", (last,))
+        connection.execute("UPDATE intermediate_files SET size_bytes=?,sha256=?,last_event_id=?,change_count=? WHERE id=?",
+                           (*before, file_id))
+        connection.execute("UPDATE history_transactions SET last_event_id=? WHERE id=?", (first, transaction_id))
+        connection.execute("DELETE FROM history_events WHERE id=?", (last,))
+        connection.commit()
+        legacy.append((command, file_id, key))
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("旧格式准备完成"))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(OutputsRepository, "save_prepared", make_legacy)
+        with pytest.raises(ConsistencyError):
+            await inspect_segment(flow, request())
+    assert len(legacy) == 1
+    command, file_id, original_key = legacy[0]
+    copy_id = command.copy_id
+    facts = read_inspection_for_member(request().action_id, request().member_id, owned).copy
+    assert facts.copy_id == copy_id and not facts.prepared
+    assert tools.requests == [] and driver.offsets == [0] and digest.calls == 1
+    before = tuple(owned.connection.iterdump())
+    recovered = OutputsRepository().save_verification(command.verification, original_key, owned)
+    assert recovered.kind is DbOutcomeKind.COMPLETED, recovered.error
+    assert tuple(owned.connection.iterdump()) == before
+
+    # 一项文件事实存在而另一项缺失不是旧格式的合法中间状态。
+    owned.connection.execute("UPDATE intermediate_files SET size_bytes=? WHERE id=?", (len(_CONTENT), file_id))
+    owned.connection.commit()
+    with pytest.raises(ConsistencyError):
+        read_inspection_for_member(request().action_id, request().member_id, owned)
+    owned.connection.execute("UPDATE intermediate_files SET size_bytes=NULL WHERE id=?", (file_id,))
+    owned.connection.commit()
+
+    step = await output_operation(owned, complete_copy, copy_id, CompletionContext,
+        repository=OutputsRepository(), roots=roots, occurred_at=runtime.wall_us(), max_recopies=1)
+    assert step.phase is CompletionPhase.PREPARED
+    facts = read_inspection_for_member(request().action_id, request().member_id, owned).copy
+    assert facts.prepared and facts.copy_id == copy_id and facts.target_file_id == file_id
+    assert driver.offsets == [0] and digest.calls == 1
+
+
+async def test_inspection_copy_visibility_across_completion_commit(inspection_world, monkeypatch):
+    """检查事实读取在真实提交前后分别看到未准备和完整副本。"""
+    from camctl.persistence.repositories.outputs import OutputsRepository
+    from camctl.persistence.runtime import OwnedConnection
+    from ..operations.test_result_reuse import _FaultConnection
+
+    owned, _, _, build, _, _ = inspection_world
+    flow, request, driver, digest, tools = build()
+    original = OutputsRepository.save_prepared
+    path = owned.connection.execute("PRAGMA database_list").fetchone()[2]
+    observed = []
+
+    def save(repository, command, key, current):
+        class ObserveCommit(_FaultConnection):
+            def execute(self, sql, parameters=()):
+                if sql == "COMMIT":
+                    with closing(sqlite3.connect(path)) as connection:
+                        facts = read_inspection_for_member(
+                            request().action_id, request().member_id,
+                            OwnedConnection(connection, current.metadata)).copy
+                        observed.append((facts.prepared, facts.verification_state))
+                return self._connection.execute(sql, parameters)
+        return original(repository, command, key,
+                        replace(current, connection=ObserveCommit(current.connection, "unused")))
+
+    monkeypatch.setattr(OutputsRepository, "save_prepared", save)
+    step = await inspect_segment(flow, request())
+    assert step.phase is SegmentInspectionPhase.COMPLETED
+    assert observed == [(False, int(enum_for("file_copies.verification_state").NOT_PERFORMED))]
+    facts = read_inspection_for_member(request().action_id, request().member_id, owned).copy
+    assert facts.prepared and facts.copy_id == step.copy_id
+    assert driver.offsets == [0] and digest.calls == 1 and tools.requests == [False]
 
 
 async def test_two_members_have_independent_copies(inspection_world):

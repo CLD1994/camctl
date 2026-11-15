@@ -29,7 +29,7 @@ from camctl.history.validators import EventValidationError
 from camctl.host_files.io import DirectorySyncStage
 from camctl.outputs.handoff import (
     DeliveryContext, DeliveryHandoffError,
-    DeliveryPhase, IntentDisposition, PublicationIntentRequest, PublicationSaveRequest,
+    DeliveryPhase, IntentDisposition, IntentSaveOutcome, PublicationIntentRequest, PublicationSaveRequest,
     UnconfirmedFailureSave, publish_delivery,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -150,6 +150,47 @@ def test_canceled_owner_skips_intent(prepared_env):
                 qualification.delivery_id)[0] == 3
     assert _events(owned, 23, 3) == 0
     assert _staging_copy(roots, owned, qualification.target_file_id).exists()
+
+
+@pytest.mark.parametrize("reason", [None, "unexpected_reason"])
+def test_unknown_intent_rejection_remains_distinguishable(prepared_env, monkeypatch, reason):
+    owned, roots, directories, qualification = prepared_env
+
+    def rejected(self, request, key, current):
+        return DbOutcome(DbOutcomeKind.COMPLETED, IntentSaveOutcome(IntentDisposition.SKIPPED, reason=reason))
+
+    monkeypatch.setattr(OutputsRepository, "save_publication_intent", rejected)
+    with pytest.raises(DeliveryHandoffError) as caught:
+        _publish(owned, directories, qualification.delivery_id)
+    assert caught.value.stage == "owner_reason_unknown"
+    assert repr(reason) in caught.value.detail
+    assert _staging_copy(roots, owned, qualification.target_file_id).read_bytes() == _CONTENT
+    assert not tuple(directories.ready.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_publication_without_pending_read_reports_error(prepared_env, monkeypatch):
+    """提前发布且没有原读取责任可接续时，取回入口交付实际错误。"""
+    from camctl.devices.drivers.registry import DriverRegistry
+    from camctl.outputs.obtain_flow import advance_obtain
+    from ..support.capture import capture_database
+    from ..support.outputs import obtain_factory
+
+    owned, roots, directories, qualification = prepared_env
+
+    def rejected(self, request, key, current):
+        return DbOutcome(DbOutcomeKind.COMPLETED,
+                         IntentSaveOutcome(IntentDisposition.SKIPPED, reason="read_result_unconfirmed"))
+
+    monkeypatch.setattr(OutputsRepository, "save_publication_intent", rejected)
+    factory = obtain_factory(devices={}, drivers=DriverRegistry(()), staging=roots.staging,
+        ready=directories.ready, processing=directories.processing,
+        occurred_at=lambda: _NOW + 10, monotonic_ns=lambda: 0)
+    with pytest.raises(DeliveryHandoffError) as caught:
+        await advance_obtain(factory(await capture_database(owned)))
+    assert caught.value.stage == "read_result_unconfirmed"
+    assert _staging_copy(roots, owned, qualification.target_file_id).read_bytes() == _CONTENT
+    assert not tuple(directories.ready.iterdir())
 
 
 # ---- 发布各边界的失败与恢复 ----

@@ -422,8 +422,9 @@ class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
         async def save(context, copy_id, stage, request, repository, description):
             calls.append((stage, request.state, request.source_sha256, request.target_sha256))
             return SimpleNamespace(kind="completed", value=SimpleNamespace(disposition="saved"))
-        async def prepared(copy_id, context, digest):
-            calls.append(("prepared", digest))
+        async def prepared(copy_id, context, digest, *, size_bytes, verification):
+            calls.append(("prepared", digest, verification.state,
+                          verification.source_sha256, verification.target_sha256))
             return "prepared"
         async def recopy(*args): raise AssertionError("没有本次上限不能登记重拷")
         def decide(facts):
@@ -433,7 +434,7 @@ class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
             return callback(*args)
         enum = SimpleNamespace(MISMATCHED=4, MATCHED=3, FAILED=6, SOURCE_CHECKSUM_UNAVAILABLE=5)
         namespace = {"asyncio": SimpleNamespace(to_thread=execute), "FileRef": lambda **kwargs: object(),
-            "hash_target": lambda *args: SimpleNamespace(error=None, digest=hashes[0]),
+            "hash_target": lambda *args: SimpleNamespace(error=None, digest=hashes[0], size_bytes=10),
             "SourceChecksumSupport": SimpleNamespace(SUPPORTED="supported"),
             "_VERIFICATION": enum, "VerificationSave": lambda **kwargs: SimpleNamespace(**kwargs),
             "DbOutcomeKind": SimpleNamespace(COMPLETED="completed"),
@@ -458,7 +459,7 @@ class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
         calls.clear()
         hashes[0] = "source"
         self.assertEqual(await namespace["_verify_and_finish"](9, context, facts), "prepared")
-        self.assertEqual(calls, [("verification", 3, "source", "source"), ("prepared", "source")])
+        self.assertEqual(calls, [("prepared", "source", 3, "source", "source")])
 
 
 class MissingConfigGuardTests(unittest.TestCase):

@@ -126,7 +126,7 @@ async def test_default_session_stops_on_unknown_verification_commit(pipeline, ca
         locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4"),)})
     world = await consumer_world(pipeline, capture_resources, results=results)
     actual_factory = capture_assembly.session_capture_assembly
-    actual_save = OutputsRepository.save_verification
+    actual_save = OutputsRepository.save_prepared
     saves = []
 
     def factory(**options):
@@ -148,7 +148,7 @@ async def test_default_session_stops_on_unknown_verification_commit(pipeline, ca
 
     monkeypatch.setattr(capture_assembly, "session_capture_assembly", factory)
     monkeypatch.setattr(lifecycle, "SystemClock", lambda: SimpleNamespace(utc_micros=lambda: world.wall[0]))
-    monkeypatch.setattr(OutputsRepository, "save_verification", save)
+    monkeypatch.setattr(OutputsRepository, "save_prepared", save)
     deps = lifecycle.build_runtime(CommandMode.RUN, world.config, catalog=_Catalog())
     try:
         assert deps.startup_error is None

@@ -186,6 +186,8 @@ DEVICE 照片的有限复用交付也使用 `source_intermediate_file_id` 指向
 
 `MATCHED`、`MISMATCHED`、`SOURCE_CHECKSUM_UNAVAILABLE` 要求完整可靠长度与目标摘要；其中 `MATCHED` 要求源摘要相等，`MISMATCHED` 要求不等，`SOURCE_CHECKSUM_UNAVAILABLE` 仅限驱动明确不提供源摘要且可靠读取条件成立。普通交付准备完成仅允许 `MATCHED` 或 `SOURCE_CHECKSUM_UNAVAILABLE`；内部输入副本也必须满足同样字节条件。文件媒体错误另由检查表达。
 
+新的成功完整性申请在一笔事务内依次保存原有 `COPY_CHANGED/VERIFY` 与 `INTERMEDIATE_FILE_CHANGED/LIFECYCLE` 事件；普通交付还在同一事务保存 `DELIVERY_CHANGED/PREPARE` 和取回源依赖解除事件。各事件沿用既有字段和版本，事务中的校验事件先于文件事件，完整申请的副本身份、摘要、长度和事实时刻用于原操作键的核实。旧事务可能只有 `COPY_CHANGED/VERIFY`：其校验事实与原副本及摘要一致、目标文件长度和摘要都尚未保存时，允许沿原身份补存文件事实；只有一项缺失或事实矛盾仍按状态库错误处理。
+
 重拷事务保存额外轮次消耗、`committed_bytes = 0`、`reset_state = RESET_PENDING`，共同清除 `read_end_event_id`、本轮目标摘要和校验结果。随后实际截断并同步目标，保存 `READY`，再启动读取。任何中断都按原轮次继续，不能用旧文件长度或旧结束引用跳过重置及读取。已有读取失败保留，新增读取尝试仍消耗原文件累计预算。
 
 ### 当前轮次的完整读取结束依据

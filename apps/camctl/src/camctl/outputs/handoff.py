@@ -29,6 +29,7 @@ from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.models import BoundDirectories, FileRef
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.copy import CopyTargetRef
+from camctl.outputs.rejections import rejection_stage as _owner_stage
 from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.session.supervision import Supervisor
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
@@ -492,14 +493,6 @@ class DeliveryHandoffError(RuntimeError):
         self.detail = detail
 
 
-_OWNER_ERROR_STAGES = {"cancel_requested": "owner_canceled",
-                       "owner_not_running": "owner_not_running"}
-
-
-def _owner_stage(reason: str | None) -> str:
-    return _OWNER_ERROR_STAGES.get(reason or "", "owner_not_running")
-
-
 @dataclass(frozen=True)
 class DeliveryDirectories:
     """一次交付交接涉及的三个实际目录。"""
@@ -615,7 +608,7 @@ async def _save_intent(delivery_id: int, context: DeliveryContext) -> IntentSave
     result = outcome.value
     if result.disposition is IntentDisposition.SKIPPED:
         raise DeliveryHandoffError(
-            _owner_stage(result.reason), "发起责任不再执行")
+            _owner_stage(result.reason), f"发布意图被拒绝: {result.reason!r}")
     return result
 
 

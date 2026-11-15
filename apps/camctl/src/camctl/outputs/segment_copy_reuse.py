@@ -69,7 +69,8 @@ def copy_is_reusable(facts) -> bool:
         return False
     inspection_state = enum_for("segment_inspections.state")
     return (
-        facts.inspection_state == int(inspection_state.COMPLETED)
+        facts.prepared
+        and facts.inspection_state == int(inspection_state.COMPLETED)
         and facts.verification_state in (
             int(_COPY_VERIFICATION.MATCHED),
             int(_COPY_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
@@ -293,6 +294,7 @@ def read_bound_check_copy_identity(
         facts = read_inspection_for_member(
             source_action_id, member_id, owned)
         if (facts.inspection is None or facts.copy is None
+                or not facts.copy.prepared
                 or facts.copy.inspection_state != int(enum_for("segment_inspections.state").COMPLETED)
                 or facts.copy.verification_state not in (
                     int(_COPY_VERIFICATION.MATCHED),

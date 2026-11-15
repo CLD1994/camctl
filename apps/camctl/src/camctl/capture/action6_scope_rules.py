@@ -178,7 +178,7 @@ class Action6CheckedPrefix:
             if (inspection is None or inspection.state != int(inspections.COMPLETED)
                     or inspection.target_json != {'metric': self.target.metric.value, 'value': self.target.value}
                     or copy is None or copy.inspection_state != int(inspections.COMPLETED)
-                    or copy.verification_state not in trusted or copy.committed_bytes != copy.source_size
+                    or not copy.prepared or copy.verification_state not in trusted or copy.committed_bytes != copy.source_size
                     or copy.target_sha256 is None):
                 raise ConsistencyError('Action6 已确认前缀必须引用同目标、完整校验的检查副本')
             document = inspection.result_json

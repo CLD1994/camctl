@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from camctl.persistence.models import db_failure
+from camctl.contracts.values import ConsistencyError
 
 from dataclasses import dataclass
 from typing import AsyncIterable, Awaitable, Callable, Iterable
@@ -220,6 +221,9 @@ def _saved_inspection_without_media(existing):
     saved = existing.inspection
     if saved is None or saved.state == int(enum_for("segment_inspections.state").PENDING):
         return None
+    if (saved.state == int(enum_for("segment_inspections.state").COMPLETED)
+            and (existing.copy is None or not existing.copy.prepared)):
+        raise ConsistencyError("已完成的分段检查缺少完整输入副本")
     return _step_from_ref(saved, None if existing.copy is None else existing.copy.copy_id)
 
 

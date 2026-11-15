@@ -932,16 +932,16 @@ async def test_deferred_photo_obtain_downloads_each_role_and_records_delivery_by
         if timing == "read_end":
             from camctl.persistence.models import DbOutcome, DbOutcomeKind
             from camctl.persistence.repositories.outputs import OutputsRepository
-            original_verify = OutputsRepository.save_verification
+            original_verify = OutputsRepository.save_prepared
 
             def fail_verification(repository, request, key, current):
-                if request.copy_id == 1:
+                if request.copy_id == 1 and request.verification is not None:
                     verification_saves.append((request, key))
                     if len(verification_saves) == 1:
                         return DbOutcome(DbOutcomeKind.NOT_EXECUTED, error=OSError("校验保存回执失败"))
                 return original_verify(repository, request, key, current)
 
-            monkeypatch.setattr(OutputsRepository, "save_verification", fail_verification)
+            monkeypatch.setattr(OutputsRepository, "save_prepared", fail_verification)
         for _ in range(10):
             try:
                 await flow(context)

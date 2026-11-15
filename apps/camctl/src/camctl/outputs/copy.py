@@ -30,6 +30,7 @@ from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.logging_runtime.events import log_context
 from camctl.logging_runtime.models import LogLevel
 from camctl.operations.models import ErrorValue
+from camctl.outputs.rejections import rejection_stage as _owner_stage
 from camctl.host_files.io import (
     LocalSourceReader as LocalCopySource, PositionedWriter, hash_target, prepare_target,
     sync_target,
@@ -979,6 +980,7 @@ class PreparedRequest:
     target_sha256: str
     size_bytes: int
     occurred_at: int
+    verification: VerificationSave | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.copy_id)
@@ -989,6 +991,15 @@ class PreparedRequest:
         timestamp = UtcMicros(self.occurred_at)
         if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
             raise ValueError(f"事实时刻超出 SQLite 整数范围: {self.occurred_at!r}")
+        if self.verification is not None:
+            verification = self.verification
+            if (not isinstance(verification, VerificationSave)
+                    or verification.copy_id != self.copy_id
+                    or verification.target_sha256 != self.target_sha256
+                    or verification.occurred_at != self.occurred_at
+                    or verification.state not in (int(_VERIFICATION.MATCHED),
+                                                   int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE))):
+                raise ValueError("共同保存的校验事实与准备完成申请不一致")
 
 
 @dataclass(frozen=True)
@@ -1101,14 +1112,6 @@ class PreparedSaveOutcome:
     reason: str | None = None
 
 
-_OWNER_ERROR_STAGES = {"cancel_requested": "owner_canceled",
-                       "owner_not_running": "owner_not_running"}
-
-
-def _owner_stage(reason: str | None) -> str:
-    return _OWNER_ERROR_STAGES.get(reason or "", "owner_not_running")
-
-
 def _require_completed(outcome, stage_failed: str, stage_unknown: str) -> None:
     """仓储结果不是完成时按分区保留阶段诊断。"""
     if outcome.kind is DbOutcomeKind.COMPLETED:
@@ -1168,6 +1171,9 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
     hashed = await asyncio.to_thread(hash_target, ref, context.roots)
     if hashed.error is not None or hashed.digest is None:
         raise CopyCompletionError("host_digest_failed", hashed.error or "未知失败")
+    if hashed.size_bytes != facts.source_size:
+        raise CopyCompletionError(
+            "host_length_mismatch", f"本地文件长度 {hashed.size_bytes} 与固定源长度 {facts.source_size} 不一致")
     source_sha256, source_error, source_diagnostic = facts.source_sha256, None, None
     if source_sha256 is None \
             and facts.source_support is SourceChecksumSupport.SUPPORTED:
@@ -1197,7 +1203,7 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
             context.repository.save_verification, "拷贝校验结果保存")
         if (outcome.kind is DbOutcomeKind.COMPLETED
                 and outcome.value.disposition is VerificationDisposition.SKIPPED):
-            raise CopyCompletionError(_owner_stage(outcome.value.reason), "发起责任不再执行")
+            raise CopyCompletionError(_owner_stage(outcome.value.reason), f"保存被拒绝: {outcome.value.reason!r}")
         _require_completed(outcome, "verification_save_failed", "verification_save_unknown")
         if read_exhausted:
             raise CopyCompletionError("read_attempts_exhausted", "原读取次数已耗尽，不能登记新的照片重拷")
@@ -1235,19 +1241,19 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
         target_sha256=hashed.digest, error_json=error_json,
         occurred_at=context.occurred_at,
     )
-    outcome = await _save_completion_business(context, copy_id, "verification", request,
-        context.repository.save_verification, "拷贝校验结果保存")
-    if outcome.kind is DbOutcomeKind.COMPLETED \
-            and outcome.value.disposition is VerificationDisposition.SKIPPED:
-        raise CopyCompletionError(
-            _owner_stage(outcome.value.reason), "发起责任不再执行")
-    _require_completed(outcome, "verification_save_failed", "verification_save_unknown")
     if save_state == int(_VERIFICATION.FAILED):
+        outcome = await _save_completion_business(context, copy_id, "verification", request,
+            context.repository.save_verification, "拷贝校验结果保存")
+        if outcome.kind is DbOutcomeKind.COMPLETED \
+                and outcome.value.disposition is VerificationDisposition.SKIPPED:
+            raise CopyCompletionError(_owner_stage(outcome.value.reason), f"保存被拒绝: {outcome.value.reason!r}")
+        _require_completed(outcome, "verification_save_failed", "verification_save_unknown")
         error = CopyCompletionError("verification_failed", str(decision.error))
         if source_diagnostic is not None:
             record_error(error, stage="source_verification", state=source_diagnostic)
         raise error
-    return await _save_prepared(copy_id, context, hashed.digest)
+    return await _save_prepared(copy_id, context, hashed.digest,
+                                size_bytes=hashed.size_bytes, verification=request)
 
 
 async def _register_recopy(copy_id, context, facts, target_sha256: str,
@@ -1277,7 +1283,7 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
         _require_completed(outcome, "recopy_register_failed", "recopy_register_unknown")
     result = outcome.value
     if result.disposition is RecopyDisposition.SKIPPED:
-        raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
+        raise CopyCompletionError(_owner_stage(result.reason), f"保存被拒绝: {result.reason!r}")
     if result.disposition is RecopyDisposition.EXHAUSTED:
         error = exhausted or RecopyExhausted(context.max_recopies, facts.recopies_used)
         record_error(error, stage="checksum_exhausted", state=context.diagnostic,
@@ -1286,14 +1292,15 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
     return CompletionStep(phase=CompletionPhase.RECOPY_REGISTERED, recopy=result)
 
 
-async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep:
+async def _save_prepared(copy_id, context, target_sha256: str, *, size_bytes=None, verification=None) -> CompletionStep:
     """保存准备完成事实；与解除取回源依赖共同提交。"""
     facts = await context.database.read(
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
     request = PreparedRequest(
         copy_id=copy_id, target_sha256=target_sha256,
-        size_bytes=facts.source_size, occurred_at=context.occurred_at,
+        size_bytes=facts.source_size if size_bytes is None else size_bytes,
+        occurred_at=context.occurred_at, verification=verification,
     )
     outcome = await _save_completion_business(context, copy_id, "prepared", request,
         context.repository.save_prepared, "拷贝准备完成保存")
@@ -1301,7 +1308,7 @@ async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep
         _require_completed(outcome, "prepared_save_failed", "prepared_save_unknown")
     result = outcome.value
     if result.disposition is PreparedDisposition.SKIPPED:
-        raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
+        raise CopyCompletionError(_owner_stage(result.reason), f"保存被拒绝: {result.reason!r}")
     assert result.prepared is not None
     return CompletionStep(phase=CompletionPhase.PREPARED, prepared=result.prepared)
 

@@ -91,7 +91,7 @@ def inspection(metric, *, value, reason=None):
 def verified_copy():
     completed = int(enum_for('segment_inspections.state').COMPLETED)
     matched = int(enum_for('file_copies.verification_state').MATCHED)
-    return SimpleNamespace(inspection_state=completed, verification_state=matched,
+    return SimpleNamespace(inspection_state=completed, verification_state=matched, prepared=True,
                            committed_bytes=10, source_size=10, target_sha256='hash')
 
 

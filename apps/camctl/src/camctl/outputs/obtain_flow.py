@@ -673,6 +673,23 @@ async def _publish_delivery(
         except DeliveryHandoffError as error:
             if error.stage in ("owner_canceled", "owner_not_running"):
                 return
+            if error.stage == "read_result_unconfirmed":
+                def read_responsibility(owned):
+                    with closing(owned.connection.execute(
+                        "SELECT c.id,r.id,c.target_file_id FROM file_copies c LEFT JOIN operation_runs r"
+                        " ON r.copy_id=c.id AND r.kind=3 WHERE c.delivery_id=?",
+                        (delivery_id,))) as cursor:
+                        return cursor.fetchall()
+                rows = await runtime.database.read(read_responsibility)
+                if len(rows) == 1:
+                    copy_id, run_id, target_file_id = rows[0]
+                    if (copy_id in runtime.pending_read_ends
+                            or copy_id in runtime.continuing_read_tickets
+                            or any(identity[0] == copy_id for identity in runtime.pending_read_business)
+                            or (runtime.file_executor is not None
+                                and target_file_id in runtime.file_executor.unfinished_files())
+                            or any(identity[0] == run_id for identity in runtime.pending_read_results)):
+                        return
             raise
     if result.phase not in (
             DeliveryPhase.PUBLISHED, DeliveryPhase.FAILED_FINAL,
@@ -1309,7 +1326,7 @@ async def _resume_local_delivery_end(current, held, original_runtime, assembly):
 def _photo_pending_copy_save(runtime, copy_id):
     """原实际读取、校验、重拷和重置申请先按原键收妥。"""
     return any((copy_id, stage) in runtime.pending_read_business
-               for stage in ("read_end", "copy_verification", "copy_recopy", "copy_reset", "photo_read_start"))
+               for stage in ("read_end", "copy_verification", "copy_prepared", "copy_recopy", "copy_reset", "photo_read_start"))
 
 
 async def _copy_delivery(

@@ -64,14 +64,13 @@ def _held_original(owned, runtime, reader, *, source_checksum_supported=False):
     assert progress[0] == progress[1]
     ends = [end for actual, end in reader.ends if actual == ticket]
     assert ends and ends[-1].stopped and ends[-1].error is None
-    # 源端能力来自真实声明登记；支持时所需摘要已由真实 digest 保存。
+    # 源端能力来自真实声明登记；支持时摘要已取得，但共同保存回滚。
     support = enum_for('device_files.checksum_support')
     assert owned.connection.execute('SELECT f.checksum_support FROM file_copies c JOIN device_files f ON f.id=c.source_device_file_id WHERE c.id=?',
         (int(ticket.target_id),)).fetchone() == (int(support.SUPPORTED if source_checksum_supported else support.UNSUPPORTED),)
     if source_checksum_supported:
-        import hashlib
         assert owned.connection.execute('SELECT source_sha256,target_sha256 FROM file_copies WHERE id=?',
-            (int(ticket.target_id),)).fetchone() == (hashlib.sha256(reader.content).hexdigest(),) * 2
+            (int(ticket.target_id),)).fetchone() == (None, None)
     return ticket, progress
 
 

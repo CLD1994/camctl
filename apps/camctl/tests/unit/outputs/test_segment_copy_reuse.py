@@ -44,6 +44,7 @@ class CopyFacts:
     source_size: int
     retention_state: int
     cleanup_state: int
+    prepared: bool = True
 
 
 def test_only_completed_verified_full_required_copy_is_reusable():
@@ -64,6 +65,7 @@ def test_only_completed_verified_full_required_copy_is_reusable():
         complete, inspection_state=int(inspections.PENDING)))
     assert not copy_is_reusable(replace(complete, verification_state=int(verifications.MISMATCHED)))
     assert not copy_is_reusable(replace(complete, committed_bytes=127))
+    assert not copy_is_reusable(replace(complete, prepared=False))
     assert not copy_is_reusable(replace(complete, retention_state=int(retention.RELEASABLE)))
     assert not copy_is_reusable(replace(complete, cleanup_state=int(cleanup.COMPLETED)))
 
@@ -74,6 +76,7 @@ def _usable_copy():
     retention = enum_for("intermediate_files.retention_state")
     cleanup = enum_for("intermediate_files.cleanup_state")
     return SimpleNamespace(
+        prepared=True,
         inspection_state=int(inspections.COMPLETED),
         verification_state=int(verifications.MATCHED),
         committed_bytes=128,

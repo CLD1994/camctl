@@ -32,7 +32,7 @@ async def test_file_stage_wrapper_keeps_original_database_error(boundary, contro
         def rejected(self, request, key, worker):
             self.calls.append((request, key))
             return outcome
-        save_verification = rejected
+        save_prepared = rejected
         save_publication_intent = rejected
         save_retention_release = rejected
     port = SavePort()
@@ -60,7 +60,7 @@ async def test_file_stage_wrapper_keeps_original_database_error(boundary, contro
     else:
         assert caught.value.__cause__ is original
         assert caught.value.stage == {
-            copy: 'verification_save_unknown', handoff: 'intent_save_unknown',
+            copy: 'prepared_save_unknown', handoff: 'intent_save_unknown',
             work_files: 'retention_release_failed',
         }[boundary]
     assert db_outcome_for(caught.value) is outcome

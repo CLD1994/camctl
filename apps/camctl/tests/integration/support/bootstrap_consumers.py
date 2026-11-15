@@ -467,7 +467,7 @@ async def held_default_read(pipeline, resources, monkeypatch, stage, after_commi
 
     ends, finishes, verifications = [], [], []
     actual_end, actual_finish = read_end.save_read_end, OperationRepository.finish_attempt
-    actual_verification = OutputsRepository.save_verification
+    actual_verification = OutputsRepository.save_prepared
 
     def submit(method, request, key, owned, inputs, target):
         inputs.append((request, key))
@@ -498,7 +498,7 @@ async def held_default_read(pipeline, resources, monkeypatch, stage, after_commi
 
     monkeypatch.setattr(read_end, "save_read_end", save_end)
     monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
-    monkeypatch.setattr(OutputsRepository, "save_verification", verification)
+    monkeypatch.setattr(OutputsRepository, "save_prepared", verification)
     with pytest.raises(ConsistencyError):
         await run_recording_media(world.runtime.media, 1, 1, world.source_id)
     assert len(world.reader.requests) == len(world.ends) == 1

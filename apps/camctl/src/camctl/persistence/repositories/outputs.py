@@ -3303,23 +3303,7 @@ class _IntegritySaveCommand(_CopyCompletionTablesMixin):
                     VerificationDisposition.SKIPPED, copy["verification_state"],
                     "owner_not_running"),
                 read_only=True)
-        before = {"verification_state": copy["verification_state"]}
-        after = {"verification_state": command.state}
-        if copy["source_sha256"] is None and command.source_sha256 is not None:
-            before["source_sha256"] = None
-            after["source_sha256"] = command.source_sha256
-        if (copy["read_end_event_id"] is not None and copy["slot_device_id"] is not None
-                and command.source_sha256 is not None):
-            before["slot_device_id"] = copy["slot_device_id"]
-            after["slot_device_id"] = None
-        if command.target_sha256 != copy["target_sha256"]:
-            before["target_sha256"] = copy["target_sha256"]
-            after["target_sha256"] = command.target_sha256
-        if command.error_json is not None and not json_equal(
-                command.error_json, copy["verification_error_json"]):
-            before["verification_error_json"] = copy["verification_error_json"]
-            after["verification_error_json"] = command.error_json
-        row = _update("file_copies", copy["id"], before, after)
+        row = _build_verification_row(copy, command)
         allocation = scope.allocate(1)
         event = _envelope(
             allocation.first_event_id, allocation.txn_id,
@@ -3361,6 +3345,26 @@ class _IntegritySaveCommand(_CopyCompletionTablesMixin):
             events=(), owners={}, state_rows={}, read_only=True,
             result=VerificationResult(VerificationDisposition.SAVED, self._command.state),
         )
+
+
+def _build_verification_row(copy, command):
+    before = {"verification_state": copy["verification_state"]}
+    after = {"verification_state": command.state}
+    if copy["source_sha256"] is None and command.source_sha256 is not None:
+        before["source_sha256"] = None
+        after["source_sha256"] = command.source_sha256
+    if (copy["read_end_event_id"] is not None and copy["slot_device_id"] is not None
+            and command.source_sha256 is not None):
+        before["slot_device_id"] = copy["slot_device_id"]
+        after["slot_device_id"] = None
+    if command.target_sha256 != copy["target_sha256"]:
+        before["target_sha256"] = copy["target_sha256"]
+        after["target_sha256"] = command.target_sha256
+    if command.error_json is not None and not json_equal(
+            command.error_json, copy["verification_error_json"]):
+        before["verification_error_json"] = copy["verification_error_json"]
+        after["verification_error_json"] = command.error_json
+    return _update("file_copies", copy["id"], before, after)
 
 
 class _RecopyCommand(_CopyCompletionTablesMixin):
@@ -3594,7 +3598,7 @@ class _PreparedSaveCommand(_CopyCompletionTablesMixin):
     _TABLES = (
         "file_copies", "intermediate_files", "deliveries", "obtain_items",
         "obtain_source_selections", "action_dependencies", "recording_processing",
-        "actions",
+        "segment_inspections", "actions",
     )
 
     def __init__(self, request: PreparedRequest, key: OperationKey) -> None:
@@ -3611,24 +3615,35 @@ class _PreparedSaveCommand(_CopyCompletionTablesMixin):
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(saved, connection)
         request = self._request
         copy = self._load_copy(connection, request.copy_id)
         self._require_full_progress(copy)
-        if copy["verification_state"] not in (
+        verification = request.verification
+        pending_verification = verification is not None and copy["verification_state"] in (
+            int(_VERIFICATION.NOT_PERFORMED), int(_VERIFICATION.RUNNING))
+        if pending_verification:
+            if (copy["source_sha256"] is not None and verification.source_sha256 is not None
+                    and copy["source_sha256"] != verification.source_sha256):
+                raise ConsistencyError("登记源摘要与已保存的源摘要不一致")
+        elif verification is not None:
+            raise ConsistencyError("校验事实已经保存，须沿已有事实申请准备完成")
+        elif copy["verification_state"] not in (
             int(_VERIFICATION.MATCHED),
             int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
         ):
             raise ConsistencyError(
                 "副本完成字节校验前不能准备完成:"
                 f" {copy['verification_state']!r}")
-        if copy["target_sha256"] != request.target_sha256:
+        if not pending_verification and copy["target_sha256"] != request.target_sha256:
             raise ConsistencyError("准备完成申请的主机摘要与已保存校验不一致")
         if copy["source_size"] != request.size_bytes:
             raise ConsistencyError("准备完成申请的完整长度与固定源长度不一致")
         target = row_facts(connection, "intermediate_files", copy["target_file_id"])
         if target is None:
             raise ConsistencyError(f"拷贝的目标中间文件缺失: {copy['target_file_id']}")
+        if pending_verification and (target["size_bytes"] is not None or target["sha256"] is not None):
+            raise ConsistencyError("未校验的拷贝已有完整文件事实")
         self._state["intermediate_files"][target["id"]] = target
         self._owners[("intermediate_files", target["id"])] = (
             "intermediate_file", target["id"],
@@ -3693,14 +3708,18 @@ class _PreparedSaveCommand(_CopyCompletionTablesMixin):
                 PreparedSaveOutcome(
                     PreparedDisposition.SKIPPED, reason="owner_not_running"),
                 read_only=True)
-        specs = [(
+        specs = []
+        if pending_verification:
+            specs.append((_COPY_CHANGED_EVENT, _VERIFY_REASON,
+                          (_build_verification_row(copy, verification),)))
+        specs.append((
             _INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON,
             (_update(
                 "intermediate_files", target["id"],
                 {"size_bytes": target["size_bytes"], "sha256": target["sha256"]},
                 {"size_bytes": request.size_bytes, "sha256": request.target_sha256},
             ),),
-        )]
+        ))
         prepared = PreparedCopy(
             copy_id=copy["id"], target_file_id=target["id"],
             size_bytes=request.size_bytes, sha256=request.target_sha256,
@@ -3749,9 +3768,17 @@ class _PreparedSaveCommand(_CopyCompletionTablesMixin):
             ),
         ), read_only=True)
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
+    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
         """原键恢复首次准备完成响应；已提交事实不重复保存。"""
         types = [(event["type"], event["reason"]) for event in saved]
+        verification = self._request.verification
+        if verification is not None:
+            if not types or types[0] != (_COPY_CHANGED_EVENT, _VERIFY_REASON):
+                raise TransactionError("原共同保存缺少校验事实")
+            _IntegritySaveCommand(verification, self._key)._reuse(saved[:1], connection)
+            saved, types = saved[1:], types[1:]
+        elif types and types[0] == (_COPY_CHANGED_EVENT, _VERIFY_REASON):
+            raise TransactionError("原共同保存要求完整校验申请")
         expected = [
             (_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON),
             (_DELIVERY_CHANGED_EVENT, _PREPARE_REASON),
@@ -4369,6 +4396,7 @@ class _ReadSourceFallbackCommand:
                 or check_copy["source_device_file_id"] != output["device_file_id"]
                 or bound.copy.target_file_id != current_file_id
                 or bound.copy.source_device_file_id != output["device_file_id"]
+                or not bound.copy.prepared
                 or bound.copy.inspection_state != int(_SEGMENT_INSPECTION_STATE.COMPLETED)
                 or bound.copy.verification_state not in (
                     int(_VERIFICATION.MATCHED),
@@ -7491,6 +7519,15 @@ def _copy_guard(event, context) -> None:
                                               error=after.get("verification_error_json"))
             if error is not None:
                 raise EventValidationError(error)
+            if (copy.get("inspection_id") is not None and state in (
+                    int(_VERIFICATION.MATCHED), int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE))):
+                before_file = context.state_rows.get("intermediate_files", {}).get(copy.get("target_file_id"))
+                file = context.transaction_rows.get("intermediate_files", {}).get(copy.get("target_file_id"))
+                if (before_file is None or before_file.get("size_bytes") is not None
+                        or before_file.get("sha256") is not None
+                        or file is None or file.get("size_bytes") != copy.get("source_size")
+                        or file.get("sha256") != target):
+                    raise EventValidationError("检查副本的校验和完整文件事实必须共同保存")
         return
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RECOPY_REASON:
         for row in event.rows:
