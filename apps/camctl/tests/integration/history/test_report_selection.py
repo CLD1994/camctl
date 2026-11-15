@@ -499,10 +499,31 @@ def _actual_plans(path, statements):
             for statement in statements]
 
 
+def _report_directory_uses_range_index(sql, plan):
+    """逐个核对实际语句中的报告目录引用及其查询计划。"""
+    import re
+    from collections import Counter
+
+    sources = re.findall(
+        r'\b(?:FROM|JOIN)\s+(?:"report_entity_changes"|report_entity_changes)'
+        r'(?:\s+(?:AS\s+)?("[A-Za-z_]\w*"|[A-Za-z_]\w*))?', sql, re.IGNORECASE)
+    reserved = {'indexed', 'not', 'where', 'join', 'left', 'cross', 'inner', 'order', 'group', 'limit'}
+    aliases = Counter((name.strip('"').lower() if name and name.lower() not in reserved
+                       else 'report_entity_changes') for name in sources)
+    accesses = []
+    for row in plan:
+        match = re.match(r'^(SEARCH|SCAN)\s+(?:"([A-Za-z_]\w*)"|([A-Za-z_]\w*))(?=\s|$)', row, re.IGNORECASE)
+        if match and (match.group(2) or match.group(3)).lower() in aliases:
+            accesses.append((match.group(1).upper(), (match.group(2) or match.group(3)).lower(), row))
+    return bool(aliases) and Counter(alias for _, alias, _ in accesses) == aliases and all(
+        operation == 'SEARCH' and 'report_changes_by_sequence' in row
+        and 'entity_type=?' in row and 'change_seq>?' in row and 'change_seq<?' in row
+        for operation, _, row in accesses)
+
+
 @pytest.mark.asyncio
 async def test_small_window_uses_index_after_physical_report_directory_growth(finished_photo, tmp_path, monkeypatch):
     """同一窄窗口在真实目录增长前后选中相同对象，并观察实际查询。"""
-    import re
     import time
     from camctl.history.queries import report_target_types
 
@@ -574,7 +595,6 @@ async def test_small_window_uses_index_after_physical_report_directory_growth(fi
             assert action['kind'] == 'candidate', name
             assert action['rows'] == [(1, 1)], name
             plan = _actual_plans(state, [action])[0]
-            accesses = [row for row in plan if re.search(r'\b(?:SEARCH|SCAN) c\b', row)]
             print('REPORT_DIRECTORY_GROWTH', {
                 'database': name, 'window': (from_wm, to_wm),
                 'boundary': (small_boundary if name == 'small' else large_boundary),
@@ -584,10 +604,7 @@ async def test_small_window_uses_index_after_physical_report_directory_growth(fi
                 'sql': action['sql'], 'parameters': action['parameters'], 'rows': action['rows'],
                 'vm_steps_estimate': action['vm_steps_estimate'], 'vm_granularity': 100,
                 'plan': plan}, flush=True)
-            assert accesses and all('SEARCH' in row and 'report_changes_by_sequence' in row
-                                    and 'entity_type=?' in row
-                                    and 'change_seq>?' in row and 'change_seq<?' in row
-                                    for row in accesses), (name, plan)
+            assert _report_directory_uses_range_index(action['sql'], plan), (name, plan)
         verification = comparison + time.perf_counter() - verification_started
         print('REPORT_DIRECTORY_GROWTH_PHASE', {'preparation_s': preparation,
               'reading_s': reading, 'verification_s': verification}, flush=True)
