@@ -17,7 +17,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.capture.handlers import capture_handler
-from ..support.result_cases import begin_result_attempt, ResultPageFault
+from ..support.result_cases import begin_result_attempt
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from .result_consumer_fixtures import consumer_world, RESULT_EVIDENCE
 from .test_baseline_start import _prepared, owned, _SCHEDULED
@@ -243,50 +243,6 @@ async def test_new_file_in_previously_empty_declared_directory_is_in_difference(
     page = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
     assert [identity for identity, _ in page.file_ids] == [new]
     assert [entry.identity for entry in page.page.entries] == [old, new]
-
-
-@pytest.mark.parametrize("mode", ["projection", "commit_before", "commit_after"])
-async def test_page_and_first_discovery_fault_reuses_original_key_after_reopen(tmp_path, mode):
-    from camctl.persistence.business import BusinessDatabase
-
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
-    path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
-    ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
-    request = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
-    faults = []
-
-    def open_fault_connection():
-        opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        fault = ResultPageFault(opened.connection, mode)
-        faults.append(fault)
-        return replace(opened, connection=fault)
-
-    database = await BusinessDatabase.open(open_fault_connection)
-    metadata = database.metadata
-    try:
-        owner = result_pages.ResultPageSaveOwner()
-        original = owner.begin(request)
-        receipt = await owner.save(runtime.capture, database)
-        assert receipt.kind is not DbOutcomeKind.COMPLETED
-        assert not faults[0].armed and owner.pending == original
-        with pytest.raises(ConsistencyError):
-            owner.take()
-        await database.close()
-        database = await BusinessDatabase.open(lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()))
-        assert database.metadata == metadata
-        # 核实原页只访问状态库，拥有者仍保留实际调用与原时刻。
-        receipt = await owner.resume_save(runtime.capture, database)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        ref = owner.take()
-        assert await database.read(lambda owned: owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone()) == (1,)
-        pages = await database.read(lambda owned: runtime.capture.read_result_pages(ticket, None, 1, owned))
-        assert pages.items[0].ref == ref and pages.items[0].occurred_at == request.occurred_at
-        assert pages.items[0].page.outcome == request.outcome.outcome
-        assert await database.read(lambda owned: owned.connection.execute(
-            "SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone()) == (1,)
-    finally:
-        await database.close()
-        owned.connection.close()
 
 
 async def test_original_first_page_key_remains_exact_after_later_pages(tmp_path):

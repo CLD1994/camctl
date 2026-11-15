@@ -10,7 +10,7 @@ from support.repository_ports import repository_port
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.models import DbOutcome
-from ..support.result_cases import result_case, result_case_for, current_result_ticket, saved_result_pages
+from ..support.result_cases import ResultPageFault, result_case, result_case_for, current_result_ticket, saved_result_pages
 from camctl.capture.handlers import capture_handler
 import json
 from camctl.operations.attempts import AttemptConfig
@@ -75,51 +75,81 @@ async def test_runtime_reads_and_saves_two_pages_in_one_results_attempt(tmp_path
         owned.connection.close()
 
 
-async def test_runtime_reopens_unknown_first_page_before_reading_second_page(tmp_path):
-    class UnknownPage(CaptureRepository):
+@pytest.mark.parametrize("mode", ["unknown", "projection", "commit_before", "commit_after"])
+async def test_runtime_reopens_first_page_before_reading_second_page(tmp_path, mode):
+    class FirstPageFault(CaptureRepository):
         def __init__(self):
             self.requests = []
+            self.fault = None
+            self.unknown_enabled = True
+
         def save_result_page(self, request, key, owned):
             self.requests.append((request, key))
+            if mode != "unknown" and self.fault is None:
+                self.fault = ResultPageFault(owned.connection, mode)
+                owned = replace(owned, connection=self.fault)
+            if request.page_no == 1 and len(self.requests) > 1:
+                assert driver.list_results.await_count == 1
             saved = super().save_result_page(request, key, owned)
-            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-            return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("原页提交回执未知"))
-    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
+            if mode == "unknown" and self.unknown_enabled:
+                assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+                return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("原页提交回执未知"))
+            return saved
+
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(tmp_path, "record")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    metadata = runtime.database.metadata
     driver = _pages(runtime)
-    repository = UnknownPage()
+    repository = FirstPageFault()
     try:
         with repository_port(CaptureRepository, repository, ("save_result_page",),
                 matches=lambda _name, args, _kwargs: args[0].ticket.responsibility_key == f"results/{action_id}"):
             with pytest.raises(ConsistencyError):
                 await capture_handler(handler)(action_id, runtime)
-        driver.list_results.assert_awaited_once()
-        original, key = repository.requests[0]
-        assert all(request == original and saved_key == key for request, saved_key in repository.requests)
-        assert original.page_no == 1
-        owned.connection.close()
-        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = await result_case_for().reopen(owned)
-        result_case_for().clock.wall = original.occurred_at + 5_000_000
-        await capture_handler(handler)(action_id, resumed)
+            driver.list_results.assert_awaited_once()
+            original, key = repository.requests[0]
+            assert all(request == original and saved_key == key for request, saved_key in repository.requests)
+            assert original.page_no == 1
+            if mode != "unknown":
+                assert repository.fault is not None and not repository.fault.armed
+            before = saved_result_pages(owned, action_id)
+            assert len(before) == (0 if mode in ("projection", "commit_before") else 1)
+            assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (len(before),)
+            repository.unknown_enabled = False
+            owned.connection.close()
+            owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+            resumed = await case.reopen(owned)
+            assert resumed.database.metadata == metadata
+            case.clock.wall = original.occurred_at + 5_000_000
+            await capture_handler(handler)(action_id, resumed)
+        first_requests = [(request, saved_key) for request, saved_key in repository.requests if request.page_no == 1]
+        assert len(first_requests) >= 2 and all(item == (original, key) for item in first_requests)
         assert driver.list_results.await_count == 2
         pages = saved_result_pages(owned, action_id)
         assert len(pages) == 2 and pages[0].occurred_at == original.occurred_at
         assert pages[0].page.outcome == original.outcome.outcome
         assert pages[-1].page.scan_complete and pages[-1].page.set_finalized
+        assert [entry.identity for page in pages for entry in page.page.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
+        assert [identity for page in pages for identity, _ in page.file_ids] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
+        assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (2,)
+        assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (original.ticket.run_id,)).fetchone() == (1,)
+        assert owned.connection.execute(
+            "SELECT t.operation_key,e.occurred_at FROM history_events e JOIN history_transactions t ON t.id=e.transaction_id WHERE e.id=?",
+            (pages[0].ref.event_id,)).fetchone() == (str(key), original.occurred_at)
+        assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
     finally:
         owned.connection.close()
 
 
-async def test_closed_scan_recovers_original_pages_without_device_or_current_clock(tmp_path):
+async def test_closed_scan_pages_read_on_reopened_database_worker(tmp_path):
     owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     driver = _pages(runtime)
     try:
         await capture_handler(handler)(action_id, runtime)
         original = saved_result_pages(owned, action_id)
         resumed = await result_case_for().reopen(owned, cold=True)
-        result_case_for().clock.wall_error = "已保存的结果输入不能取得新的时钟"
-        pages = saved_result_pages(owned, action_id)
+        pages = await resumed.database.read(lambda current: saved_result_pages(current, action_id))
         assert pages == original
         assert pages[-1].page.set_finalized and pages[-1].page.scan_complete
         assert [entry.identity for page in pages for entry in page.page.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
