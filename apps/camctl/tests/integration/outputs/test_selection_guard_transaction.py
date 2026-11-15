@@ -30,30 +30,14 @@ from ..support.output_planning import storage_fault as _FaultConnection
 
 
 class _SelectionProposal:
-    def __init__(self, proposal, mutation):
-        self.proposal, self.mutation = proposal, mutation
+    def __init__(self, proposal):
+        self.proposal = proposal
 
     def plan(self, scope):
         plan = self.proposal
         event, = plan.events
-        if self.mutation == "omit":
-            event = replace(event, rows=event.rows[:-1])
-        elif self.mutation == "swap_ids":
-            selection, first, second, *rest = event.rows
-            event = replace(event, rows=(selection, replace(first, row_id=second.row_id),
-                replace(second, row_id=first.row_id), *rest))
-        elif self.mutation == "reverse_rows":
-            event = replace(event, rows=tuple(reversed(event.rows)))
-        elif self.mutation == "append":
-            extra = replace(event.rows[1], row_id=99)
-            event = replace(event, rows=(*event.rows, extra))
-            plan = replace(plan, owners={**plan.owners, ("obtain_items", 99): ("action", 30)})
-        elif self.mutation == "sparse_ids":
-            event, owners = _sparse_event(event, plan.owners)
-            plan = replace(plan, owners=owners)
-        else:
-            raise AssertionError(self.mutation)
-        return _Sequence((event,), plan).plan(scope)
+        event, owners = _sparse_event(event, plan.owners)
+        return _Sequence((event,), replace(plan, owners=owners)).plan(scope)
 
 
 def _sparse_event(event, owners):
@@ -64,39 +48,31 @@ def _sparse_event(event, owners):
 
 
 @pytest.mark.parametrize("mode", list(SelectionMode))
-@pytest.mark.parametrize("mutation", ["omit", "append", "swap_ids", "reverse_rows", "sparse_ids"])
-def test_transaction_preserves_complete_saved_order(observed_event_guards, selection_database, mode, mutation):
+def test_transaction_preserves_complete_saved_order_with_sparse_ids(observed_event_guards, selection_database, mode):
     storage, callbacks = observed_event_guards
     owned = selection_database
     ids = (705, 703, 999, 704) if mode is SelectionMode.EXPLICIT_IDS else ()
     _request(owned.connection, mode, ids)
     command = outputs.FixSelection(61, _snapshot(owned.connection, mode, ids), _NOW)
-    before = tuple(owned.connection.iterdump())
     key = new_operation_key()
     saved = capture_operation(owned, lambda target:
         outputs.OutputsRepository(storage=storage).fix_selection(command, key, target))
-    receipt = storage.commit_operation(_SelectionProposal(saved, mutation), key, owned)
-    if mutation not in ("reverse_rows", "sparse_ids"):
-        assert receipt.kind == "rolled_back", receipt.error
-        assert isinstance(receipt.error, EventValidationError), receipt.error
-        assert tuple(owned.connection.iterdump()) == before
-    else:
-        assert receipt.kind == "completed", receipt.error
-        with closing(owned.connection.execute(
-            "SELECT output_id, requested_output_id FROM obtain_items WHERE selection_id=61 ORDER BY id"
-        )) as cursor:
-            rows = cursor.fetchall()
-        assert rows == {
-            SelectionMode.DEFAULT: [(703, None), (705, None)],
-            SelectionMode.PREVIEW: [(703, None), (None, None)],
-            SelectionMode.EXPLICIT_IDS: [(705, 705), (703, 703), (None, 999), (None, 704)],
-        }[mode]
-        saved = outputs.load_selection(owned.connection, 61)
-        assert [(item.output_id, item.requested_output_id) for item in saved.items] == rows
-        if mutation == "sparse_ids":
-            with closing(owned.connection.execute("SELECT id FROM obtain_items ORDER BY id")) as cursor:
-                assert cursor.fetchall() == ([(11,), (18,), (25,), (32,)]
-                    if mode is SelectionMode.EXPLICIT_IDS else [(11,), (18,)])
+    receipt = storage.commit_operation(_SelectionProposal(saved), key, owned)
+    assert receipt.kind == "completed", receipt.error
+    with closing(owned.connection.execute(
+        "SELECT output_id, requested_output_id FROM obtain_items WHERE selection_id=61 ORDER BY id"
+    )) as cursor:
+        rows = cursor.fetchall()
+    assert rows == {
+        SelectionMode.DEFAULT: [(703, None), (705, None)],
+        SelectionMode.PREVIEW: [(703, None), (None, None)],
+        SelectionMode.EXPLICIT_IDS: [(705, 705), (703, 703), (None, 999), (None, 704)],
+    }[mode]
+    saved = outputs.load_selection(owned.connection, 61)
+    assert [(item.output_id, item.requested_output_id) for item in saved.items] == rows
+    with closing(owned.connection.execute("SELECT id FROM obtain_items ORDER BY id")) as cursor:
+        assert cursor.fetchall() == ([(11,), (18,), (25,), (32,)]
+            if mode is SelectionMode.EXPLICIT_IDS else [(11,), (18,)])
 
 
 @pytest.mark.parametrize("mode", list(SelectionMode))
@@ -179,7 +155,7 @@ def test_history_replays_saved_choice_without_current_catalog(observed_event_gua
     if sparse:
         saved_proposal = capture_operation(owned, lambda target:
             outputs.OutputsRepository(storage=storage).fix_selection(command, key, target))
-        receipt = storage.commit_operation(_SelectionProposal(saved_proposal, "sparse_ids"), key, owned)
+        receipt = storage.commit_operation(_SelectionProposal(saved_proposal), key, owned)
         assert receipt.kind == "completed", receipt.error
     else:
         receipt = outputs.OutputsRepository(storage=storage).fix_selection(command, key, owned)

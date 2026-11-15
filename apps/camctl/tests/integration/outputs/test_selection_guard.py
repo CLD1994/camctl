@@ -1,5 +1,6 @@
 """正式选择事件以原请求、完整当前事实和保存后的条目次序为准。"""
 
+from contextlib import closing
 from copy import deepcopy
 from dataclasses import replace
 
@@ -25,6 +26,32 @@ def _proposal(owned, mode=SelectionMode.DEFAULT, *, storage=None):
     plan = capture_operation(owned, lambda target: outputs.OutputsRepository(storage=storage).fix_selection(
         outputs.FixSelection(61, snapshot, _NOW), new_operation_key(), target))
     return plan.events[0], plan
+
+
+@pytest.fixture(scope="module")
+def _selection_sources(tmp_path_factory):
+    # 两种请求分别通过真实仓储形成完整提案，关闭数据库后复用静态事实。
+    sources = {}
+    for mode in (SelectionMode.DEFAULT, SelectionMode.EXPLICIT_IDS):
+        resource = family_database.__wrapped__(tmp_path_factory.mktemp(f"selection-{mode.name}"))
+        try:
+            family = next(resource)
+            owned = selection_database.__wrapped__(family)
+            sources[mode] = _proposal(owned, mode)
+        finally:
+            resource.close()
+    return sources
+
+
+@pytest.fixture
+def selection_source(_selection_sources):
+    def copy_source(mode=SelectionMode.DEFAULT):
+        event, proposal = _selection_sources[mode]
+        event, events, owners, state, future = deepcopy((event, proposal.events, proposal.owners,
+                                                         proposal.state_rows, proposal.transaction_rows))
+        return event, replace(proposal, events=events, owners=owners, state_rows=state,
+                              transaction_rows=future)
+    return copy_source
 
 
 def _change_item(event, index=0, **values):
@@ -57,8 +84,13 @@ def test_registered_guard_accepts_complete_saved_request(selection_database, mod
 def test_event_row_order_does_not_change_persisted_selection_order(selection_database, mode):
     event, context = _proposal(selection_database, mode)
     _commit_selection(selection_database, replace(event, rows=tuple(reversed(event.rows))), context)
+    with closing(selection_database.connection.execute(
+        "SELECT output_id, requested_output_id FROM obtain_items WHERE selection_id=61 ORDER BY id"
+    )) as cursor:
+        rows = cursor.fetchall()
     saved = outputs.load_selection(selection_database.connection, 61)
-    assert [(item.output_id, item.requested_output_id) for item in saved.items] == {
+    assert [(item.output_id, item.requested_output_id) for item in saved.items] == rows
+    assert rows == {
         SelectionMode.DEFAULT: [(703, None), (705, None)],
         SelectionMode.PREVIEW: [(703, None), (None, None)],
         SelectionMode.EXPLICIT_IDS: [(705, 705), (703, 703), (None, 999), (None, 704)],
@@ -100,8 +132,8 @@ def test_registered_guard_rejects_selection_facts_not_derived_from_request(selec
     ("obtain_items", "selection_id", 61),
     ("output_origins", "original_output_id", 701),
 ])
-def test_registered_guard_rejects_uncovered_reads(selection_database, table, column, identity):
-    event, context = _proposal(selection_database, SelectionMode.EXPLICIT_IDS)
+def test_registered_guard_rejects_uncovered_reads(selection_source, table, column, identity):
+    event, context = selection_source(SelectionMode.EXPLICIT_IDS)
     ranges = dict(context.read_coverage.ranges)
     ranges[table, column] = ranges[table, column] - {identity}
     with pytest.raises(EventValidationError):
@@ -119,16 +151,16 @@ def test_registered_guard_rejects_uncovered_reads(selection_database, table, col
     ("outputs", 703, {"availability": 3}),
     ("device_files", 502, {"original_device_file_id": 505}),
 ])
-def test_registered_guard_uses_current_eligibility_and_selection_facts(selection_database, table, identity, changes):
-    event, context = _proposal(selection_database)
+def test_registered_guard_uses_current_eligibility_and_selection_facts(selection_source, table, identity, changes):
+    event, context = selection_source()
     context.state_rows[table][identity].update(changes)
     with pytest.raises(EventValidationError):
         validate_event(event, context)
 
 
 @pytest.mark.parametrize("status", [1, 2, 4])
-def test_current_old_item_prevents_first_fix(selection_database, status):
-    event, context = _proposal(selection_database)
+def test_current_old_item_prevents_first_fix(selection_source, status):
+    event, context = selection_source()
     context.state_rows["obtain_items"][99] = {"selection_id": 61, "status": status}
     with pytest.raises(EventValidationError):
         validate_event(event, context)
@@ -138,8 +170,8 @@ def test_current_old_item_prevents_first_fix(selection_database, status):
     {"check_state": 2}, {"repair_state": 3}, {"repair_state": 4},
     {"discard_state": 2}, {"discard_state": 3},
 ])
-def test_unfinished_current_processing_prevents_fix(selection_database, changes):
-    event, context = _proposal(selection_database)
+def test_unfinished_current_processing_prevents_fix(selection_source, changes):
+    event, context = selection_source()
     context.state_rows["recording_processing"] = {51: {
         "action_id": 11, "check_state": 1, "repair_state": 2, "discard_state": 1, **changes}}
     with pytest.raises(EventValidationError):
@@ -150,8 +182,8 @@ def test_unfinished_current_processing_prevents_fix(selection_database, changes)
     ("actions", 30), ("actions", 11), ("obtain_source_selections", 61),
     ("action_dependencies", 41), ("device_files", 501), ("intermediate_files", 801),
 ])
-def test_future_rows_cannot_supply_current_selection_facts(selection_database, table, identity):
-    event, context = _proposal(selection_database)
+def test_future_rows_cannot_supply_current_selection_facts(selection_source, table, identity):
+    event, context = selection_source()
     future = deepcopy(context.state_rows)
     del context.state_rows[table][identity]
     with pytest.raises(EventValidationError):
@@ -170,8 +202,8 @@ def test_future_rows_cannot_supply_current_selection_facts(selection_database, t
     ("action_dependencies", 41, {"depends_on_action_id": True}),
     ("outputs", 704, {"source_action_id": True}),
 ])
-def test_future_eligible_facts_do_not_override_current_ineligibility(selection_database, table, identity, changes):
-    event, context = _proposal(selection_database, SelectionMode.EXPLICIT_IDS)
+def test_future_eligible_facts_do_not_override_current_ineligibility(selection_source, table, identity, changes):
+    event, context = selection_source(SelectionMode.EXPLICIT_IDS)
     future = deepcopy(context.state_rows)
     context.state_rows[table][identity].update(changes)
     with pytest.raises(EventValidationError):
@@ -180,8 +212,8 @@ def test_future_eligible_facts_do_not_override_current_ineligibility(selection_d
 
 @pytest.mark.parametrize("column", ["check_state", "repair_state", "discard_state"])
 @pytest.mark.parametrize("invalid", [None, True, "1", 99])
-def test_invalid_processing_state_is_not_completed(selection_database, column, invalid):
-    event, context = _proposal(selection_database)
+def test_invalid_processing_state_is_not_completed(selection_source, column, invalid):
+    event, context = selection_source()
     context.state_rows["recording_processing"] = {51: {
         "action_id": 11, "check_state": 1, "repair_state": 2, "discard_state": 1, column: invalid}}
     with pytest.raises(EventValidationError):
@@ -189,15 +221,15 @@ def test_invalid_processing_state_is_not_completed(selection_database, column, i
 
 
 @pytest.mark.parametrize("check,repair,discard", [(1, 2, 1), (3, 5, 1), (4, 6, 4), (5, 7, 5)])
-def test_finished_processing_states_permit_selection(selection_database, check, repair, discard):
-    event, context = _proposal(selection_database)
+def test_finished_processing_states_permit_selection(selection_source, check, repair, discard):
+    event, context = selection_source()
     context.state_rows["recording_processing"] = {51: {
         "action_id": 11, "check_state": check, "repair_state": repair, "discard_state": discard}}
     validate_event(event, context)
 
 
-def test_multiple_current_processing_records_are_not_one_completed_responsibility(selection_database):
-    event, context = _proposal(selection_database)
+def test_multiple_current_processing_records_are_not_one_completed_responsibility(selection_source):
+    event, context = selection_source()
     context.state_rows["recording_processing"] = {
         identity: {"action_id": 11, "check_state": 1, "repair_state": 2, "discard_state": 1}
         for identity in (51, 52)}

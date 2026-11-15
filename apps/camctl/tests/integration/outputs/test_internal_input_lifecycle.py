@@ -94,12 +94,26 @@ def test_started_processing_reuses_complete_input(prepared, stage, original_key)
     assert tuple(owned.connection.iterdump()) == before
 
 
+@pytest.fixture(scope="module")
+def _creation_source(tmp_path_factory):
+    # 来源由真实授予生成，关闭数据库后才交给静态事实测试。
+    resource = internal_read.__wrapped__(tmp_path_factory.mktemp("internal-creation"))
+    try:
+        owned, command = next(resource)
+        plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(
+            command, new_operation_key(), target))
+        return event_case(plan, 22)
+    finally:
+        resource.close()
+
+
 @pytest.fixture
-def creation(internal_read):
-    owned, command = internal_read
-    plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(
-        command, new_operation_key(), target))
-    return event_case(plan, 22)
+def creation(_creation_source):
+    event, proposal = _creation_source
+    event, events, owners, state, future = deepcopy((event, proposal.events, proposal.owners,
+                                                     proposal.state_rows, proposal.transaction_rows))
+    return event, replace(proposal, events=events, owners=owners, state_rows=state,
+                          transaction_rows=future)
 
 
 @pytest.mark.parametrize("field,value", [("check_state", 2), ("check_state", 3),
