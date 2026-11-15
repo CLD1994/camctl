@@ -57,8 +57,8 @@ CREATE TABLE report_entity_changes (
     UNIQUE (entity_type, entity_id, event_id),
     FOREIGN KEY (event_id, change_seq) REFERENCES history_events(id, change_seq) DEFERRABLE INITIALLY DEFERRED
 ) STRICT;
-CREATE INDEX report_changes_by_sequence ON report_entity_changes(entity_type, change_seq, entity_id);
-CREATE INDEX report_changes_by_entity ON report_entity_changes(entity_type, entity_id, change_seq);
+CREATE INDEX report_changes_by_sequence ON report_entity_changes(entity_type, change_seq, entity_id, event_id);
+CREATE INDEX report_changes_by_entity ON report_entity_changes(entity_type, entity_id, change_seq, event_id);
 
 CREATE TABLE entity_snapshots (
     id INTEGER PRIMARY KEY CHECK (id > 0),

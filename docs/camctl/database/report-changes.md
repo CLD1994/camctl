@@ -92,10 +92,10 @@
 
 ```sql
 CREATE INDEX report_changes_by_sequence
-ON report_entity_changes(entity_type, change_seq, entity_id);
+ON report_entity_changes(entity_type, change_seq, entity_id, event_id);
 
 CREATE INDEX report_changes_by_entity
-ON report_entity_changes(entity_type, entity_id, change_seq);
+ON report_entity_changes(entity_type, entity_id, change_seq, event_id);
 ```
 
 对象与事件的唯一性仍由目录定义保证。两种索引都只覆盖候选选择所需的列；对象历史恢复继续使用独立的恢复目录，不将报告索引当作历史恢复索引。

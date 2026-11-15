@@ -608,6 +608,12 @@ def _prepare_statistics_copy(source, destination, statistics):
     from camctl.resources import resource_bytes
     from ..support.database import SCHEMA_RESOURCES
 
+    # 固定样本保留生成时的格式；在独立副本应用当前权威索引定义。
+    index_names = ('report_changes_by_sequence', 'report_changes_by_entity')
+    history_schema = resource_bytes('sql/history.sql').decode('utf-8')
+    index_sql = {name: next(line for line in history_schema.splitlines()
+                            if line.startswith(f'CREATE INDEX {name} '))
+                 for name in index_names}
     empty_stats = None
     if statistics == 'empty_analyzed':
         with closing(sqlite3.connect(destination, uri=True)) as connection:
@@ -641,16 +647,23 @@ def _prepare_statistics_copy(source, destination, statistics):
         with closing(sqlite3.connect(f'{source.resolve().as_uri()}?mode=ro', uri=True)) as original:
             with closing(sqlite3.connect(destination)) as connection:
                 original.backup(connection)
+                for name in index_names:
+                    connection.execute(f'DROP INDEX {name}')
+                    connection.execute(index_sql[name])
                 if statistics == 'representative_analyzed':
                     connection.execute('ANALYZE')
-                    connection.commit()
+                connection.commit()
 
     with closing(sqlite3.connect(f'{destination.resolve().as_uri()}?mode=ro', uri=True)) as connection:
         connection.execute('ATTACH DATABASE ? AS source', (f'{source.resolve().as_uri()}?mode=ro',))
-        schemas = lambda db: connection.execute(
+        schemas = lambda db: [row for row in connection.execute(
             f"SELECT type,name,tbl_name,sql FROM {db}.sqlite_schema "
             "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+            if row[1] not in index_names]
         assert schemas('main') == schemas('source')
+        for name in index_names:
+            sql = connection.execute('SELECT sql FROM main.sqlite_schema WHERE name=?', (name,)).fetchone()
+            assert sql == (index_sql[name].rstrip(';'),)
         tables = [row[0] for row in connection.execute(
             "SELECT name FROM source.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
         for table in tables:
@@ -850,10 +863,15 @@ def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_
     candidate_access = [row for row in plans[0] if 'report_changes_by_sequence' in row]
     if not candidate_access or not all('SEARCH' in row and 'COVERING INDEX' in row for row in candidate_access):
         problems.append(('candidate_not_covering', plans[0]))
+    if not _report_directory_uses_range_index(records[0]['sql'], plans[0]):
+        problems.append(('candidate_not_range_search', plans[0]))
     for page, plan in enumerate(plans[1:], 1):
         access = [row for row in plan if 'report_changes_by_entity' in row]
         if not access or not all('SEARCH' in row and 'COVERING INDEX' in row for row in access):
             problems.append((f'page_{page}_not_covering', plan))
+        if not access or not all('entity_type=?' in row and 'entity_id=?' in row
+                                 and 'change_seq>?' in row and 'change_seq<?' in row for row in access):
+            problems.append((f'page_{page}_not_range_search', plan))
         if any('TEMP B-TREE FOR DISTINCT' in row or 'TEMP B-TREE FOR ORDER BY' in row for row in plan):
             problems.append((f'page_{page}_temporary_sort', plan))
     assert not problems, problems
