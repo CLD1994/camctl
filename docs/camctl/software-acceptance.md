@@ -1524,10 +1524,10 @@
 - 原文：[验收 P-05](database/consistency-verification.md#报告对象分页的具体查询验证)（分页期间提交新事件的冻结范围不变）。
 - 结论：部分覆盖
 - 归属：R 生成（reporting 计划）。
-- 生产入口：apps/camctl/src/camctl/reporting/generation.py
+- 生产入口：apps/camctl/src/camctl/reporting/generation.py、apps/camctl/src/camctl/persistence/repositories/history.py
 - 测试：apps/camctl/tests/integration/reporting/test_generation.py、apps/camctl/tests/integration/reporting/test_freeze_reuse.py、apps/camctl/tests/integration/reporting/test_result_error_generation.py、apps/camctl/tests/integration/history/test_report_selection.py
-- 证据：已有后续提交前后打开旧H、不同批量及缓冲下重建同一报告字节、ACK后原冻结答复不变，以及查询错误／取消关闭选择和数据库重开后重建的分层验证。
-- 未核验前提：这些分层结果尚未证明全部P-05交叉。读取进行中的旧对象变化／新对象提交、大范围续页间提交、ACK或缓存命中后的完整字节对照，以及候选失败后由新报告进程沿原身份/H重建，须按实际行为分别核验；不能从旧记录或不存在的旧测试文件推定已全部覆盖。当前补强与边界见[工作记录](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
+- 证据：有界选择在首批交付后，真实保存旧动作的新状态、新产物及新计划，再续读和冷打开原H，入选身份集合均保持正确；不同批量及缓冲下重建旧报告字节、ACK后原冻结答复、查询错误／取消关闭选择及数据库重开后重建另有分层验证。
+- 未核验前提：大范围续页间提交、ACK或缓存命中后的完整字节对照，以及候选失败后由新报告进程沿原身份/H重建仍须分别核验。已有分层结果不等于这些交叉已验证，当前有界页间选择也不证明完整报告字节。当前补强与边界见[工作记录](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
 
 #### 验收 P-06
 - 原文：[验收 P-06](database/consistency-verification.md#报告对象分页的具体查询验证)（候选峰值与完整选择工作量）。
@@ -1536,7 +1536,7 @@
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
 - 测试：apps/camctl/tests/integration/persistence/test_repositories.py、apps/camctl/tests/integration/history/test_complete_history.py、apps/camctl/tests/integration/history/test_report_selection.py
 - 证据：批分离与不可变批次已覆盖（persistence 计划 P5 收口验证记录）；代表性样本上候选扫描每批不超过固定批量、分页取得的候选集合与独立全量选择一致、半数晚于边界的候选被窗口过滤（history 计划 H7 验证记录，Windows 开发机）。
-- 未核验前提：已有批次上界、分页完整性及固定4200动作的完整选择工作量记录。实际公开选择在受观察的SQLite连接上未读事件／快照正文，也未记录主库修改尝试；此读取边界已核。候选驻留峰值及不同游标／生产筛选入口、分布的矩阵仍不完整，不能据局部通过认定全部覆盖或程序内存有界。
+- 未核验前提：已有批次上界、分页完整性、固定4200动作的完整选择工作量，以及同一会话中五类型／父对象游标交错的独立性见证。五类型的受观察SQLite连接未读事件／快照正文，也未记录主库修改尝试；此读取边界已核。候选驻留峰值及更大规模／其他筛选条件下的访问成本仍未全部核实，不能据小样本游标或局部批分离通过认定整体验收及程序内存有界。
 
 ## 九、跨模块契约场景
 
