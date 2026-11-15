@@ -375,6 +375,7 @@ class _StatementProbe:
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
                 self._statement_reads = None
+                self._reads_by_sql = {}
                 self.set_authorizer(self._authorize)
 
             def _authorize(self, action, table, column, database, _source):
@@ -418,6 +419,11 @@ class _StatementProbe:
                     raise
                 finally:
                     self._statement_reads = None
+                if reads:
+                    self._reads_by_sql[sql] = frozenset(reads)
+                else:
+                    # SQLite 可复用本连接已准备的语句而不再调用 authorizer。
+                    reads = set(self._reads_by_sql.get(sql, ()))
                 columns = cursor.description or ()
                 if any(table == 'report_entity_changes' for table, _ in reads) and len(columns) in (1, 2):
                     record = {'kind': 'candidate' if len(columns) == 2 else 'page',
@@ -436,6 +442,45 @@ class _StatementProbe:
             return original_connect(database, *args, **kwargs)
 
         monkeypatch.setattr(sqlite3, 'connect', connect)
+
+
+def test_statement_probe_observes_cached_sql_on_each_connection(tmp_path, monkeypatch):
+    """真实 SQLite 复用语句时仍逐次记录输入和取行。"""
+    import sqlite3
+    from contextlib import closing
+    from types import SimpleNamespace
+
+    path = tmp_path / 'probe.db'
+    with closing(sqlite3.connect(path)) as connection:
+        connection.executescript(
+            'CREATE TABLE report_entity_changes(entity_type INTEGER,entity_id INTEGER);'
+            'INSERT INTO report_entity_changes VALUES(1,7);'
+            'CREATE TABLE unrelated(a INTEGER,b INTEGER); INSERT INTO unrelated VALUES(1,7);')
+        connection.commit()
+    probe = _StatementProbe(SimpleNamespace(path=path), monkeypatch)
+    uri = f'{path.resolve().as_uri()}?mode=ro'
+    sql = 'SELECT entity_type,entity_id FROM report_entity_changes WHERE entity_id>?'
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
+        assert connection.execute(sql, (0,)).fetchall() == [(1, 7)]
+        assert connection.execute(sql, (7,)).fetchall() == []
+        assert connection.execute(sql, (6,)).fetchall() == [(1, 7)]
+        other = 'SELECT a,b FROM unrelated WHERE b>?'
+        assert connection.execute(other, (0,)).fetchall() == [(1, 7)]
+        assert connection.execute(other, (7,)).fetchall() == []
+        assert connection.execute('SELECT entity_id FROM report_entity_changes WHERE entity_id=?', (7,)).fetchall() == [(7,)]
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute(sql, ())
+        assert connection.execute(sql, (0,)).fetchall() == [(1, 7)]
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
+        assert connection.execute(sql, (7,)).fetchall() == []
+        assert connection.execute(sql, (0,)).fetchall() == [(1, 7)]
+
+    assert [(record['kind'], record['parameters'], record['rows']) for record in probe.statements] == [
+        ('candidate', (0,), [(1, 7)]), ('candidate', (7,), []), ('candidate', (6,), [(1, 7)]),
+        ('page', (7,), [(7,)]), ('candidate', (0,), [(1, 7)]),
+        ('candidate', (7,), []), ('candidate', (0,), [(1, 7)]),
+    ]
+    assert ('main', 'unrelated', 'a') in probe.reads
 
 
 def _prepare_statistics_copy(source, destination, statistics):
@@ -707,8 +752,9 @@ def test_actual_report_query_work_for_page_sizes(report_selection_sample, monkey
     with monkeypatch.context() as patch:
         probe = _StatementProbe(repository, patch)
         started = time.perf_counter()
-        with repository.open_report_selection(request) as selection:
-            actual = _read(selection, 'action', 2)
+        with repository.report_read_scope():
+            with repository.open_report_selection(request) as selection:
+                actual = _read(selection, 'action', 2)
         reading = time.perf_counter() - started
     started = time.perf_counter()
     assert actual == list(range(4, 4204))
