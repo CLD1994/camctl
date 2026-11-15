@@ -385,44 +385,33 @@ class TestGenerateReportFile:
     ):
         from types import SimpleNamespace
 
-        started = time.perf_counter()
         owned, tmp_path = environment
         await _submit(owned, tmp_path, "1")
         await _finish_action(owned)
         report = _freeze(owned)
         frozen = (report.report_id, report.boundary.last_event_id,
                   report.from_wm, report.to_wm, report.format_version)
-        def frozen_row():
+        def read_frozen_definition():
             return owned.connection.execute(
                 "SELECT id,frozen_event_id,from_wm,to_wm,format_version FROM reports WHERE id=?",
                 (report.report_id,)).fetchone()
-        assert frozen_row() == frozen
+        assert read_frozen_definition() == frozen
         assert owned.connection.execute(
             "SELECT acknowledged_wm,acknowledged_report_id FROM runtime_state").fetchone() == (0, None)
         assert report.to_wm > 0
-        preparation = time.perf_counter() - started
-
-        started = time.perf_counter()
         first = generate_report_file(_spec(tmp_path, report, name="staging/first.json"))
         first_bytes = first.path.read_bytes()
         assert (first.size_bytes, first.sha256) == (len(first_bytes), hashlib.sha256(first_bytes).hexdigest())
         document = json.loads(first_bytes)
         assert (document['report_id'], document['from_wm'], document['to_wm']) == (
             str(report.report_id), report.from_wm, report.to_wm)
-        first_generation = time.perf_counter() - started
-
-        started = time.perf_counter()
         # 冻结后的新计划在窗口外；读取批次与写出缓冲不改变报告字节。
         await _submit(owned, tmp_path, "2")
-        later_changes = time.perf_counter() - started
-        started = time.perf_counter()
         second = generate_report_file(
             _spec(tmp_path, report, name="staging/second.json"))
         assert second.path.read_bytes() == first_bytes
-        second_generation = time.perf_counter() - started
 
         # 以已受理请求重送 ACK，真实受理事务吸收确认后重建原报告。
-        started = time.perf_counter()
         latest_wm = owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0]
         assert latest_wm > report.to_wm
         plans_before = owned.connection.execute("SELECT id,request_id FROM plans ORDER BY id").fetchall()
@@ -438,23 +427,14 @@ class TestGenerateReportFile:
                 report.to_wm, report.report_id)
         assert owned.connection.execute("SELECT id,request_id FROM plans ORDER BY id").fetchall() == plans_before
         assert owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone() == (latest_wm,)
-        assert frozen_row() == frozen
-        ack_seconds = time.perf_counter() - started
+        assert read_frozen_definition() == frozen
 
-        started = time.perf_counter()
         third = generate_report_file(_spec(
             tmp_path, report, name="staging/third.json",
             entity_batch_size=1, event_batch_size=1), buffer_size=3)
         assert third.path.read_bytes() == first_bytes
         assert first.path.read_bytes() == first_bytes
-        assert frozen_row() == frozen
-        print('REPORT_ACK_REGENERATION', {'preparation_s': preparation,
-              'first_generation_s': first_generation, 'second_generation_s': second_generation,
-              'later_changes_s': later_changes, 'ack_s': ack_seconds,
-              'third_generation_s': time.perf_counter() - started,
-              'report_id': report.report_id, 'frozen_event_id': report.boundary.last_event_id,
-              'from_wm': report.from_wm, 'to_wm': report.to_wm,
-              'ack_disposition': ack.ack_disposition.value, 'ack_watermark': ack.ack_watermark}, flush=True)
+        assert read_frozen_definition() == frozen
 
     async def test_window_diagnostics_are_written(self, environment):
         owned, tmp_path = environment
