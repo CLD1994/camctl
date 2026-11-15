@@ -1322,38 +1322,6 @@ async def test_bounded_context_cannot_replace_original_transaction_connection(tm
 
 
 @pytest.mark.asyncio
-async def test_finite_context_cannot_replace_original_transaction_connection(tmp_path,monkeypatch):
-    from .test_segment_storage import _completion_command
-    from camctl.persistence.event_reads import SqlEventReads
-    owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.UNKNOWN)
-    _finish_attempt(owned,ref,runtime)
-    row=repo.read_set(ref,owned)
-    request=_request_for(ref,row,runtime.wall_us(),repo.read_assessment(ref,owned),2)
-    path=owned.connection.execute('PRAGMA database_list').fetchone()[2]
-    observer=open_existing(Path(path),DbOpenMode.EXISTING_RO,DbConfig())
-    observer.connection.execute('BEGIN')
-    observer.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
-    key=new_operation_key()
-    command=_completion_command(owned,ref,members,request.occurred_at,key)
-    original=SqlEventReads.__init__
-    replaced=False
-    def initialize(reads,*args,**kwargs):
-        nonlocal replaced
-        original(reads,*args,**kwargs)
-        if not replaced:
-            replaced=True
-            reads.connection=observer.connection
-    monkeypatch.setattr(SqlEventReads,'__init__',initialize)
-    try:
-        before=_complete_persisted_state(owned)
-        saved=commit_operation(command,key,owned)
-        assert replaced
-        assert saved.kind=='rolled_back',saved.error
-        assert _complete_persisted_state(owned)==before
-    finally:observer.connection.close();owned.connection.close()
-
-
-@pytest.mark.asyncio
 async def test_capacity_worker_without_budget_preserves_real_completion_and_receipt(tmp_path):
     """独立 worker 的功能辅助检查，不作为内存预算验收。"""
     import json

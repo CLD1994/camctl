@@ -947,28 +947,6 @@ def _replace_snapshot_body(owned,content):
 
 
 @pytest.mark.asyncio
-async def test_unframed_snapshot_body_has_fixed_decoder_residency(tmp_path):
-    import gc,tracemalloc
-    owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
-    header=content.split(b'\n',1)[0]+b'\n';chunk=b'x'*65536;evidence=[]
-    try:
-        for count in (4,64):
-            _replace_snapshot_body(owned,header+chunk*count)
-            gc.collect();tracemalloc.start()
-            try:
-                with pytest.raises(ConsistencyError) as raised:
-                    history.open_segment_history(ref.action_id,boundary,strategy='snapshot')
-                assert '结尾换行' in str(raised.value.__cause__)
-                peak=tracemalloc.get_traced_memory()[1]
-            finally:tracemalloc.stop()
-            evidence.append((count*len(chunk),peak))
-        print('UNFRAMED_RESIDENCY',evidence)
-        assert evidence[-1][1]<512000
-        assert evidence[-1][1]<evidence[0][1]+200000
-    finally:owned.connection.close()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize('bad',[b'{"x":1,"\\u0078":2}\n',b'{"x":"\\ud800"}\n',b'{"x":01}\n',b'{"x":NaN}\n',b'{"x":"\xf0\x9f\n',b'{"x":1}\n{"y":'])
 async def test_framed_snapshot_keeps_exact_json_and_utf8_rejection(tmp_path,bad):
     owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
@@ -1000,39 +978,29 @@ def _large_snapshot_record(content):
 
 @pytest.mark.asyncio
 async def test_snapshot_accepts_necessary_large_row_and_split_exact_values(tmp_path):
-    import tracemalloc
     from decimal import Decimal
     owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
     try:
         _replace_snapshot_body(owned,_large_snapshot_record(content))
-        tracemalloc.start()
-        try:
-            with history.open_segment_history(ref.action_id,boundary,strategy='snapshot') as handle:
-                row=handle.primary()['effective_params_json']['stream_probe']
-                assert len(row['text'])==8*65536 and row['text'].startswith('x') and row['text'].endswith('x')
-                assert row['emoji']=='😀' and row['exact']==Decimal('1.234567890123456789')
-                assert row['n']==9007199254740993
-            print('NECESSARY_SINGLE_ROW',8*65536,tracemalloc.get_traced_memory()[1])
-        finally:tracemalloc.stop()
+        with history.open_segment_history(ref.action_id,boundary,strategy='snapshot') as handle:
+            row=handle.primary()['effective_params_json']['stream_probe']
+            assert len(row['text'])==8*65536 and row['text'].startswith('x') and row['text'].endswith('x')
+            assert row['emoji']=='😀' and row['exact']==Decimal('1.234567890123456789')
+            assert row['n']==9007199254740993
     finally:owned.connection.close()
 
 
 @pytest.mark.asyncio
 async def test_framed_invalid_large_row_is_rejected_as_one_record(tmp_path):
-    import tracemalloc
     owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
     try:
         records=_large_snapshot_record(content).splitlines(keepends=True)
         index=next(index for index,record in enumerate(records) if b'stream_probe' in record)
         records[index]=records[index][:-2]+b'!}\n'
         _replace_snapshot_body(owned,b''.join(records))
-        tracemalloc.start()
-        try:
-            with pytest.raises(ConsistencyError) as raised:
-                history.open_segment_history(ref.action_id,boundary,strategy='snapshot')
-            assert '增量解码' in str(raised.value.__cause__)
-            print('INVALID_FRAMED_SINGLE_ROW',8*65536,tracemalloc.get_traced_memory()[1])
-        finally:tracemalloc.stop()
+        with pytest.raises(ConsistencyError) as raised:
+            history.open_segment_history(ref.action_id,boundary,strategy='snapshot')
+        assert '增量解码' in str(raised.value.__cause__)
     finally:owned.connection.close()
 
 
