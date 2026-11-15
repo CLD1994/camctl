@@ -22,6 +22,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -102,7 +103,7 @@ def _generate_source_video(target: Path) -> None:
 
 
 def _probe_media_facts(path: Path) -> tuple[Decimal, set[str]]:
-    """以真实 ffprobe 读取时长与视频编码名（无重编码断言依据）。"""
+    """以真实 ffprobe 读取时长与视频编码名。"""
     completed = subprocess.run(
         ["ffprobe", "-v", "error",
          "-show_entries", "format=duration:stream=codec_type:stream=codec_name",
@@ -117,6 +118,48 @@ def _probe_media_facts(path: Path) -> tuple[Decimal, set[str]]:
         if stream.get("codec_type") == "video"}
     assert codecs, payload
     return duration, codecs
+
+
+def _observe_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """在外部工具边界记录参数，然后执行真实 ffmpeg。"""
+    real_ffmpeg = shutil.which("ffmpeg")
+    assert real_ffmpeg is not None
+    tools_dir = tmp_path / "media-tools"
+    tools_dir.mkdir()
+    log = tmp_path / "ffmpeg-argv.jsonl"
+    wrapper = tools_dir / "ffmpeg"
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        f"with open({str(log)!r}, 'a', encoding='utf-8') as output:\n"
+        "    print(json.dumps(sys.argv[1:]), file=output)\n"
+        f"os.execv({real_ffmpeg!r}, [{real_ffmpeg!r}, *sys.argv[1:]])\n",
+        encoding="utf-8")
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tools_dir}{os.pathsep}{os.environ['PATH']}")
+    return log
+
+
+def _assert_stream_copy(log: Path) -> None:
+    calls = [json.loads(line) for line in log.read_text("utf-8").splitlines()]
+    assert len(calls) == 1, calls
+    args = calls[0]
+    codec_options = [arg for arg in args if arg in ("-c", "-codec", "-vcodec", "-acodec", "-scodec")
+                     or arg.startswith(("-c:", "-codec:"))]
+    assert codec_options == ["-c"], args
+    assert args[args.index("-c") + 1] == "copy", args
+
+
+def _assert_target_duration(duration: Decimal) -> None:
+    assert Decimal("3") <= duration < Decimal("4.5"), duration
+
+
+def _decode_media(path: Path) -> None:
+    completed = subprocess.run(
+        [shutil.which("ffmpeg"), "-v", "error", "-xerror", "-i", str(path),
+         "-map", "0", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=120)
+    assert completed.returncode == 0, completed.stderr
 
 
 def _ready_report(deployment: Deployment) -> dict:
@@ -232,8 +275,8 @@ def _wait_business_past(deployment: Deployment, moment: datetime) -> None:
 def _assert_repaired_delivery(deployment: Deployment) -> None:
     """修复成品的交付事实：默认取回只选修复成品，字节与登记一致。
 
-    交付文件必须是真实媒体：时长裁剪到目标附近（严格短于源）、编
-    码名与源一致证明无重新编码；字节摘要与提升的修复输出登记相等。
+    交付文件必须是真实媒体：时长至少达到目标且严格短于源，编码
+    名与源一致并可完整解码；字节摘要与提升的修复输出登记相等。
     """
     state_db = deployment.state_db
     assert _query(
@@ -245,8 +288,9 @@ def _assert_repaired_delivery(deployment: Deployment) -> None:
     delivered = _delivered_files(deployment.ready)
     assert len(delivered) == 1, delivered
     duration, codecs = _probe_media_facts(delivered[0])
-    assert Decimal("2.5") <= duration < Decimal("4.5"), duration
+    _assert_target_duration(duration)
     assert codecs == {"h264"}, codecs
+    _decode_media(delivered[0])
     registered = _query(
         state_db,
         "SELECT i.size_bytes, i.sha256 FROM outputs o"
@@ -261,7 +305,7 @@ def _assert_repaired_delivery(deployment: Deployment) -> None:
 
 @_MEDIA_TOOLS
 def test_insufficient_timing_checks_repairs_and_delivers(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """计时证据不足的检查链：受限会话保守停止保存等待阶段，正常会
     话拷贝原片以真实 ffprobe 确认时长、超过门槛后无重编码修复，修
@@ -277,6 +321,8 @@ def test_insufficient_timing_checks_repairs_and_delivers(
     assert source_duration == Decimal(_SOURCE_DURATION_S)
     assert source_codecs == {"h264"}
 
+    _decode_media(source)
+    ffmpeg_log = _observe_ffmpeg(tmp_path, monkeypatch)
     content = source.read_bytes()
     spec = stub_driver_spec(
         {"1": [video_file("clip-1", size_bytes=len(content))]},
@@ -328,6 +374,7 @@ def test_insufficient_timing_checks_repairs_and_delivers(
     assert basis["reason"] == 2
     # 门槛秒数是实际比较门槛：目标时长（3 秒）加修复余量（0.5 秒）。
     assert Decimal(str(basis["threshold_s"])) == Decimal("3.5")
+    _assert_stream_copy(ffmpeg_log)
     _assert_repaired_delivery(deployment)
 
     report = _ready_report(deployment)
@@ -355,6 +402,8 @@ def test_excess_recording_repairs_without_probing(
 
     source = tmp_path / "source.mp4"
     _generate_source_video(source)
+    _decode_media(source)
+    ffmpeg_log = _observe_ffmpeg(tmp_path, monkeypatch)
     content = source.read_bytes()
     spec = stub_driver_spec(
         {"1": [video_file("clip-1", size_bytes=len(content))]},
@@ -401,6 +450,7 @@ def test_excess_recording_repairs_without_probing(
     assert Decimal(elapsed_ns) / Decimal(1_000_000_000) > Decimal("3.5")
     # 门槛秒数与判定使用的实际比较门槛一致：目标加余量，不只余量。
     assert Decimal(str(basis["threshold_s"])) == Decimal("3.5")
+    _assert_stream_copy(ffmpeg_log)
     _assert_repaired_delivery(deployment)
 
     report = _ready_report(deployment)
