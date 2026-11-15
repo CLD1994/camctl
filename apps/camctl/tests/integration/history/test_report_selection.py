@@ -340,7 +340,24 @@ class _StatementProbe:
         original_connect = sqlite3.connect
         path = repository.path.resolve()
         self.statements = []
+        self.reads = set()
+        self.blobs = []
+        self.main_writes = []
         probe = self
+        write_actions = {
+            sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+            sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_CREATE_TABLE,
+            sqlite3.SQLITE_CREATE_TRIGGER, sqlite3.SQLITE_CREATE_VIEW,
+            sqlite3.SQLITE_DROP_INDEX, sqlite3.SQLITE_DROP_TABLE,
+            sqlite3.SQLITE_DROP_TRIGGER, sqlite3.SQLITE_DROP_VIEW,
+            sqlite3.SQLITE_CREATE_VTABLE, sqlite3.SQLITE_DROP_VTABLE,
+            sqlite3.SQLITE_REINDEX, sqlite3.SQLITE_ANALYZE,
+        }
+        persistent_pragmas = {
+            'application_id', 'user_version', 'schema_version', 'journal_mode',
+            'auto_vacuum', 'default_cache_size', 'encoding', 'page_size',
+        }
+        maintenance_pragmas = {'incremental_vacuum', 'wal_checkpoint'}
 
         class ObservedCursor(sqlite3.Cursor):
             def fetchall(self):
@@ -355,14 +372,33 @@ class _StatementProbe:
                         self.connection.set_progress_handler(None, 0)
 
         class ObservedConnection(sqlite3.Connection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._statement_reads = None
+                self.set_authorizer(self._authorize)
+
+            def _authorize(self, action, table, column, database, _source):
+                if action == sqlite3.SQLITE_READ:
+                    probe.reads.add((database, table, column))
+                    if self._statement_reads is not None:
+                        self._statement_reads.add((table, column))
+                elif (database == 'main' and action in write_actions
+                      or action == sqlite3.SQLITE_ALTER_TABLE and table == 'main'
+                      or action == sqlite3.SQLITE_PRAGMA and database in (None, 'main')
+                      and table and (table.lower() in maintenance_pragmas
+                                     or table.lower() in persistent_pragmas and column is not None)):
+                    probe.main_writes.append((action, table, column, database))
+                return sqlite3.SQLITE_OK
+
+            def blobopen(self, table, column, row, /, *, readonly=False, name='main'):
+                probe.blobs.append((name, table, column, readonly))
+                if name == 'main' and not readonly:
+                    probe.main_writes.append(('blobopen', table, column, name))
+                return super().blobopen(table, column, row, readonly=readonly, name=name)
+
             def execute(self, sql, parameters=(), /):
                 reads = set()
                 steps = [0]
-
-                def authorize(action, table, column, _database, _source):
-                    if action == sqlite3.SQLITE_READ:
-                        reads.add((table, column))
-                    return sqlite3.SQLITE_OK
 
                 def advance():
                     steps[0] += 100
@@ -371,7 +407,7 @@ class _StatementProbe:
                     return 0
 
                 record = None
-                self.set_authorizer(authorize)
+                self._statement_reads = reads
                 self.set_progress_handler(advance, 100)
                 cursor = self.cursor(factory=ObservedCursor)
                 try:
@@ -381,7 +417,7 @@ class _StatementProbe:
                     cursor.close()
                     raise
                 finally:
-                    self.set_authorizer(None)
+                    self._statement_reads = None
                 columns = cursor.description or ()
                 if any(table == 'report_entity_changes' for table, _ in reads) and len(columns) in (1, 2):
                     record = {'kind': 'candidate' if len(columns) == 2 else 'page',
@@ -681,8 +717,16 @@ def test_actual_report_query_work_for_page_sizes(report_selection_sample, monkey
     pages = [record for record in records if record['kind'] == 'page']
     assert len(pages) == (4200 + page_size - 1) // page_size
     assert all(len(record['rows']) <= page_size + 1 for record in pages)
+    assert ('main', 'report_entity_changes', 'entity_type') in probe.reads
+    selected_reads = {(table, column) for database, table, column in probe.reads if database == 'main'}
+    selected_reads.update((table, column) for database, table, column, _ in probe.blobs if database == 'main')
+    assert ('history_events', 'body_json') not in selected_reads
+    assert ('entity_snapshots', 'content') not in selected_reads
+    assert not probe.main_writes
     print('REPORT_PAGE_WORK', {'page_size': page_size, 'reading_s': reading,
           'verification_s': time.perf_counter() - started, 'queries': len(records),
+          'observed_reads': sorted(probe.reads, key=repr), 'blob_opens': probe.blobs,
+          'main_write_attempts': probe.main_writes,
           'candidate_vm_estimate': records[0]['vm_steps_estimate'],
           'page_vm_total_estimate': sum(record['vm_steps_estimate'] for record in pages),
           'page_vm_first_estimate': pages[0]['vm_steps_estimate'], 'page_vm_last_estimate': pages[-1]['vm_steps_estimate'],
