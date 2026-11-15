@@ -353,10 +353,13 @@ class TestCleanupCancel:
         # 等待流程推进到删除调用挂起后，取消才到达。
         entered = asyncio.create_task(driver.entered.wait())
         try:
-            done, _ = await asyncio.wait((task, entered), return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait(
+                (task, entered), timeout=5, return_when=asyncio.FIRST_COMPLETED)
             if task in done:
                 result = await task
                 pytest.fail(f"删除调用尚未开始，业务已结束: {result!r}")
+            if entered not in done:
+                pytest.fail("等待删除调用开始超时")
             from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
             try:
                 _apply_cleanup_cancel(owned, 30)

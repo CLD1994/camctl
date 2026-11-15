@@ -32,10 +32,11 @@ from .test_qualification import _seed_action
 _NOW = 1_750_000_000_000_000
 
 
-def _environment(tmp_path: Path, *, explicit: bool = True):
+def _environment(tmp_path: Path, request, *, explicit: bool = True):
     target = tmp_path / "state.db"
     _create_valid_database(target)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+    request.addfinalizer(owned.connection.close)
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(
@@ -124,18 +125,17 @@ class TestTargetSetGuard:
             owned, outputs, lambda target: outputs.OutputsRepository().fix_cleanup_targets(
                 FixCleanupTargets(30, _NOW), new_operation_key(), target))
 
-    def test_explicit_fix_accepts_matching_request_set(self, tmp_path: Path):
-        owned = _environment(tmp_path)
+    def test_explicit_fix_accepts_matching_request_set(self, tmp_path: Path, request):
+        owned = _environment(tmp_path, request)
         proposal = self._fix_proposal(owned)
         _commit_proposal(owned, proposal, proposal.events)
         assert owned.connection.execute(
             "SELECT requested_output_id, output_id FROM cleanup_items WHERE action_id=30"
         ).fetchall() == [(701, None)]
-        owned.connection.close()
 
     @pytest.mark.parametrize("requested", [(999,), (701, 999), ()])
-    def test_explicit_fix_rejects_mismatched_sets(self, tmp_path, requested):
-        owned = _environment(tmp_path)
+    def test_explicit_fix_rejects_mismatched_sets(self, tmp_path, requested, request):
+        owned = _environment(tmp_path, request)
         proposal = self._fix_proposal(owned, requested if requested == (701, 999) else (701,))
         event = proposal.events[0]
         if requested == (701, 999):
@@ -154,10 +154,9 @@ class TestTargetSetGuard:
         _commit_proposal(owned, proposal, (event,), rejection=(
             "清理目标固定必须创建清理成员" if not requested
             else "精确清理成员与原请求及机内照片配对不一致"))
-        owned.connection.close()
 
-    def test_initial_item_values_must_be_unresolved(self, tmp_path):
-        owned = _environment(tmp_path)
+    def test_initial_item_values_must_be_unresolved(self, tmp_path, request):
+        owned = _environment(tmp_path, request)
         proposal = self._fix_proposal(owned)
         event = proposal.events[0]
         row = event.rows[1]
@@ -165,12 +164,11 @@ class TestTargetSetGuard:
             **row.after.values, "restriction_state": 2}))
         _commit_proposal(owned, proposal, (replace(event, rows=(event.rows[0], broken)),),
                          rejection="restriction_state=2 不在允许范围")
-        owned.connection.close()
 
-    def test_range_fix_checks_source_membership(self, tmp_path):
+    def test_range_fix_checks_source_membership(self, tmp_path, request):
         from camctl.outputs.cleanup_flow import FixCleanupTargets
 
-        owned = TestFixCleanupTargetsCommand._scope_environment(tmp_path)
+        owned = TestFixCleanupTargetsCommand._scope_environment(tmp_path, request)
         TestFixCleanupTargetsCommand._processing_completed(owned)
         proposal = capture_scoped_operation(
             owned, outputs, lambda target: outputs.OutputsRepository().fix_cleanup_targets(
@@ -185,14 +183,13 @@ class TestTargetSetGuard:
         assert owned.connection.execute(
             "SELECT requested_output_id FROM cleanup_items WHERE action_id=30"
         ).fetchall() == [(701,)]
-        owned.connection.close()
 
-    def test_fail_branch_creates_no_members(self, tmp_path):
+    def test_fail_branch_creates_no_members(self, tmp_path, request):
         from camctl.cancellation.models import CancelTarget, FailCancelTargets
         from camctl.cancellation.targets import missing_target_error
         from camctl.persistence.repositories import cancellation
 
-        owned = _environment(tmp_path)
+        owned = _environment(tmp_path, request)
         cleanup = self._fix_proposal(owned)
         connection = owned.connection
         connection.execute(
@@ -217,15 +214,14 @@ class TestTargetSetGuard:
             "SELECT status,target_selection_state FROM actions WHERE id=31").fetchone() == (4, 3)
         assert connection.execute("SELECT COUNT(*) FROM cleanup_items").fetchone() == (0,)
         assert connection.execute("SELECT COUNT(*) FROM cancel_items").fetchone() == (0,)
-        connection.close()
 
 
 class TestCleanupMemberGuard:
-    def test_progress_requires_fixed_target_set(self, tmp_path):
+    def test_progress_requires_fixed_target_set(self, tmp_path, request):
         from camctl.outputs.cleanup_flow import ProgressCleanupItem, RestrictCleanupItem
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = _environment(tmp_path)
+        owned = _environment(tmp_path, request)
         connection = owned.connection
         connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
         connection.commit()
@@ -245,12 +241,11 @@ class TestCleanupMemberGuard:
         connection.commit()
         _commit_proposal(owned, proposal, proposal.events)
         assert connection.execute("SELECT status FROM cleanup_items WHERE id=90").fetchone() == (3,)
-        connection.close()
 
-    def test_restrict_confirms_output_once_from_null(self, tmp_path):
+    def test_restrict_confirms_output_once_from_null(self, tmp_path, request):
         from camctl.outputs.cleanup_flow import RestrictCleanupItem
 
-        owned = _environment(tmp_path)
+        owned = _environment(tmp_path, request)
         owned.connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
         owned.connection.commit()
         proposal = capture_scoped_operation(
@@ -272,9 +267,8 @@ class TestCleanupMemberGuard:
         assert owned.connection.execute(
             "SELECT output_id, status, restriction_state FROM cleanup_items WHERE id=90"
         ).fetchone() == (701, 2, 2)
-        owned.connection.close()
 
-    def test_terminal_member_requires_final_event_and_basis(self, tmp_path):
+    def test_terminal_member_requires_final_event_and_basis(self, tmp_path, request):
         from decimal import Decimal
         from camctl.devices.bindings import DeviceBinding
         from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
@@ -291,7 +285,7 @@ class TestCleanupMemberGuard:
         from camctl.persistence.models import DbOutcomeKind
         from camctl.persistence.repositories.file_batches import FileBatchRepository
 
-        owned = _environment(tmp_path)
+        owned = _environment(tmp_path, request)
         connection = owned.connection
         connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
         connection.commit()
@@ -368,14 +362,13 @@ class TestCleanupMemberGuard:
             "SELECT status,outcome,final_event_id FROM cleanup_items WHERE id=90").fetchone()
         assert (status, outcome, final_event) == (4, 1, member.event_id)
         assert connection.execute("SELECT presence_state FROM device_files WHERE id=501").fetchone() == (3,)
-        connection.close()
 
-    def test_absence_basis_accepts_device_file_absent(self, tmp_path):
+    def test_absence_basis_accepts_device_file_absent(self, tmp_path, request):
         from camctl.outputs.cleanup_flow import (
             CleanupOutcomeChoice, FinishCleanupItem, RestrictCleanupItem)
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = _environment(tmp_path)
+        owned = _environment(tmp_path, request)
         connection = owned.connection
         connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
         connection.commit()
@@ -393,13 +386,12 @@ class TestCleanupMemberGuard:
         assert connection.execute(
             "SELECT status, outcome FROM cleanup_items WHERE id=90"
         ).fetchone() == (4, 3)
-        connection.close()
 
-    def test_single_deleting_handler_per_output(self, tmp_path):
+    def test_single_deleting_handler_per_output(self, tmp_path, request):
         from camctl.outputs.cleanup_flow import ProgressCleanupItem, RestrictCleanupItem
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = _environment(tmp_path)
+        owned = _environment(tmp_path, request)
         connection = owned.connection
         connection.execute("UPDATE actions SET target_selection_state=2 WHERE id=30")
         connection.commit()
@@ -430,13 +422,12 @@ class TestCleanupMemberGuard:
         connection.commit()
         _commit_proposal(owned, proposal, proposal.events)
         assert connection.execute("SELECT status FROM cleanup_items WHERE id=90").fetchone() == (3,)
-        connection.close()
 
 
 class TestFixCleanupTargetsCommand:
     @staticmethod
-    def _environment(tmp_path):
-        owned = _environment(tmp_path)
+    def _environment(tmp_path, request):
+        owned = _environment(tmp_path, request)
         # 守卫用例预置的成员不参与命令流程。
         owned.connection.execute("DELETE FROM cleanup_items")
         owned.connection.commit()
@@ -447,11 +438,11 @@ class TestFixCleanupTargetsCommand:
 
         return OutputsRepository()
 
-    def test_explicit_fix_creates_members_for_resolvable_targets(self, tmp_path):
+    def test_explicit_fix_creates_members_for_resolvable_targets(self, tmp_path, request):
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path)
+        owned = self._environment(tmp_path, request)
         repository = self._repository()
         from camctl.outputs.cleanup_flow import (
             CleanupTargetsDisposition, FixCleanupTargets)
@@ -469,11 +460,11 @@ class TestFixCleanupTargetsCommand:
         ).fetchone() == (2,)
 
     def test_missing_targets_become_terminal_and_all_missing_fails_action(
-            self, tmp_path):
+            self, tmp_path, request):
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path)
+        owned = self._environment(tmp_path, request)
         owned.connection.execute(
             "UPDATE actions SET input_fields_json = ? WHERE id = 30",
             (json.dumps({"params": {"output_ids": ["701", "999"]}}),))
@@ -500,11 +491,11 @@ class TestFixCleanupTargetsCommand:
             "SELECT status, target_selection_state FROM actions WHERE id = 30"
         ).fetchone() == (2, 2)
 
-    def test_all_missing_fails_action_with_registered_error(self, tmp_path):
+    def test_all_missing_fails_action_with_registered_error(self, tmp_path, request):
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path)
+        owned = self._environment(tmp_path, request)
         owned.connection.execute(
             "UPDATE actions SET input_fields_json = ? WHERE id = 30",
             (json.dumps({"params": {"output_ids": ["999"]}}),))
@@ -523,11 +514,11 @@ class TestFixCleanupTargetsCommand:
             "SELECT status, error_code FROM cleanup_items"
             " WHERE action_id = 30").fetchone() == (5, 1)
 
-    def test_original_key_resend_restores_first_response(self, tmp_path):
+    def test_original_key_resend_restores_first_response(self, tmp_path, request):
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path)
+        owned = self._environment(tmp_path, request)
         repository = self._repository()
         from camctl.outputs.cleanup_flow import (
             CleanupTargetsDisposition, FixCleanupTargets)
@@ -545,11 +536,11 @@ class TestFixCleanupTargetsCommand:
             FixCleanupTargets(30, _NOW + 1_000_000), key, owned)
         assert late.kind is DbOutcomeKind.ROLLED_BACK, late.error
 
-    def test_already_fixed_returns_members_without_new_history(self, tmp_path):
+    def test_already_fixed_returns_members_without_new_history(self, tmp_path, request):
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path)
+        owned = self._environment(tmp_path, request)
         repository = self._repository()
         from camctl.outputs.cleanup_flow import (
             CleanupTargetsDisposition, FixCleanupTargets)
@@ -568,9 +559,9 @@ class TestFixCleanupTargetsCommand:
         ) == before
 
     @staticmethod
-    def _scope_environment(tmp_path):
+    def _scope_environment(tmp_path, request):
         """范围清理动作：params.source 请求，固定来源为动作 11。"""
-        owned = _environment(tmp_path, explicit=False)
+        owned = _environment(tmp_path, request, explicit=False)
         owned.connection.execute("DELETE FROM cleanup_items")
         owned.connection.execute(
             "UPDATE actions SET input_fields_json = ? WHERE id = 30",
@@ -595,39 +586,36 @@ class TestFixCleanupTargetsCommand:
             FixCleanupTargets(30, _NOW), new_operation_key(), owned)
 
     @pytest.mark.parametrize("unfinished_sibling", [False, True])
-    def test_empty_scope_finishes_action_and_eligible_plan(self, tmp_path, unfinished_sibling):
+    def test_empty_scope_finishes_action_and_eligible_plan(self, tmp_path, unfinished_sibling, request):
         from camctl.outputs.cleanup_flow import CleanupTargetsDisposition, FixCleanupTargets
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._scope_environment(tmp_path)
+        owned = self._scope_environment(tmp_path, request)
         connection = owned.connection
-        try:
-            connection.execute("DELETE FROM outputs WHERE id=701")
-            self._processing_completed(owned)
-            connection.execute("UPDATE plans SET status=2 WHERE id=1")
-            if unfinished_sibling:
-                _seed_action(connection, 12, 1, action_type=7, status=1)
-            connection.commit()
-            before_plan = plan_before(connection, 1)
-            key = new_operation_key()
-            result = self._repository().fix_cleanup_targets(FixCleanupTargets(30, _NOW), key, owned)
-            assert result.kind is DbOutcomeKind.COMPLETED, result.error
-            assert result.value.disposition is CleanupTargetsDisposition.SAVED
-            assert result.value.item_ids == ()
-            assert connection.execute("SELECT status,target_selection_state FROM actions WHERE id=30").fetchone() == (3, 2)
-            assert connection.execute("SELECT COUNT(*) FROM cleanup_items WHERE action_id=30").fetchone() == (0,)
-            assert_action_plan(connection, 30, 1, key, action_status=3,
-                               previous_plan=before_plan, completed=not unfinished_sibling)
-            if unfinished_sibling:
-                assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
-        finally:
-            connection.close()
+        connection.execute("DELETE FROM outputs WHERE id=701")
+        self._processing_completed(owned)
+        connection.execute("UPDATE plans SET status=2 WHERE id=1")
+        if unfinished_sibling:
+            _seed_action(connection, 12, 1, action_type=7, status=1)
+        connection.commit()
+        before_plan = plan_before(connection, 1)
+        key = new_operation_key()
+        result = self._repository().fix_cleanup_targets(FixCleanupTargets(30, _NOW), key, owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.disposition is CleanupTargetsDisposition.SAVED
+        assert result.value.item_ids == ()
+        assert connection.execute("SELECT status,target_selection_state FROM actions WHERE id=30").fetchone() == (3, 2)
+        assert connection.execute("SELECT COUNT(*) FROM cleanup_items WHERE action_id=30").fetchone() == (0,)
+        assert_action_plan(connection, 30, 1, key, action_status=3,
+                           previous_plan=before_plan, completed=not unfinished_sibling)
+        if unfinished_sibling:
+            assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
 
-    def test_scope_fix_waits_until_source_terminal(self, tmp_path):
+    def test_scope_fix_waits_until_source_terminal(self, tmp_path, request):
         from camctl.persistence.models import DbOutcomeKind
         from camctl.outputs.cleanup_flow import CleanupTargetsDisposition
 
-        owned = self._scope_environment(tmp_path)
+        owned = self._scope_environment(tmp_path, request)
         owned.connection.execute("UPDATE actions SET status = 2 WHERE id = 11")
         owned.connection.commit()
         outcome = self._fix(self._repository(), owned)
@@ -644,11 +632,11 @@ class TestFixCleanupTargetsCommand:
             "SELECT target_selection_state FROM actions WHERE id = 30"
         ).fetchone() == (1,)
 
-    def test_scope_fix_waits_until_source_processing_completed(self, tmp_path):
+    def test_scope_fix_waits_until_source_processing_completed(self, tmp_path, request):
         from camctl.persistence.models import DbOutcomeKind
         from camctl.outputs.cleanup_flow import CleanupTargetsDisposition
 
-        owned = self._scope_environment(tmp_path)
+        owned = self._scope_environment(tmp_path, request)
         self._processing_completed(owned)
         owned.connection.execute(
             "UPDATE recording_processing SET discard_state = 2 WHERE id = 51")
@@ -660,11 +648,11 @@ class TestFixCleanupTargetsCommand:
             "SELECT COUNT(*) FROM cleanup_items WHERE action_id = 30"
         ).fetchone() == (0,)
 
-    def test_scope_fix_enumerates_outputs_of_fixed_sources(self, tmp_path):
+    def test_scope_fix_enumerates_outputs_of_fixed_sources(self, tmp_path, request):
         from camctl.persistence.models import DbOutcomeKind
         from camctl.outputs.cleanup_flow import CleanupTargetsDisposition
 
-        owned = self._scope_environment(tmp_path)
+        owned = self._scope_environment(tmp_path, request)
         # 同来源第二产物与外来源产物：只枚举本动作固定来源的产物。
         owned.connection.execute(
             "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
@@ -708,9 +696,9 @@ class TestFixCleanupTargetsCommand:
 
 class TestFinishCleanupAction:
     @staticmethod
-    def _environment(tmp_path, *, items, cancel_requested=0):
+    def _environment(tmp_path, request, *, items, cancel_requested=0):
         """目标已固定的清理动作与给定状态的成员；第二产物支撑混合结果。"""
-        owned = _environment(tmp_path)
+        owned = _environment(tmp_path, request)
         owned.connection.execute("DELETE FROM cleanup_items")
         owned.connection.execute(
             "UPDATE actions SET target_selection_state = 2,"
@@ -750,10 +738,10 @@ class TestFinishCleanupAction:
             FinishCleanupAction(30, occurred_at),
             key or new_operation_key(), owned)
 
-    def test_failed_member_fails_action_with_registered_error(self, tmp_path):
+    def test_failed_member_fails_action_with_registered_error(self, tmp_path, request):
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path, items=[
+        owned = self._environment(tmp_path, request, items=[
             (91, 701, 701, 4, 4, 1, 1, None, None),
             (92, 702, 702, 5, 4, None, 1, 3,
              '{"output_id":"702","max_attempts":1,"attempts_used":1}'),
@@ -774,65 +762,59 @@ class TestFinishCleanupAction:
             "SELECT status FROM plans WHERE id = 1").fetchone() == (3,)
 
     @pytest.mark.parametrize("unfinished_sibling", [False, True])
-    def test_all_succeeded_completes_action(self, tmp_path, unfinished_sibling):
+    def test_all_succeeded_completes_action(self, tmp_path, unfinished_sibling, request):
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path, items=[
+        owned = self._environment(tmp_path, request, items=[
             (91, 701, 701, 4, 4, 1, 1, None, None),
         ])
         connection = owned.connection
-        try:
-            connection.execute("UPDATE plans SET status=2 WHERE id=1")
-            if unfinished_sibling:
-                _seed_action(connection, 12, 1, action_type=7, status=1)
-            connection.commit()
-            before_plan = plan_before(connection, 1)
-            key = new_operation_key()
-            outcome = self._finish(self._repository(), owned, key=key)
-            assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-            assert connection.execute(
-                "SELECT status, error_code FROM actions WHERE id = 30"
-            ).fetchone() == (3, None)
-            assert_action_plan(connection, 30, 1, key, action_status=3,
-                               previous_plan=before_plan, completed=not unfinished_sibling)
-            if unfinished_sibling:
-                assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
-        finally:
-            connection.close()
+        connection.execute("UPDATE plans SET status=2 WHERE id=1")
+        if unfinished_sibling:
+            _seed_action(connection, 12, 1, action_type=7, status=1)
+        connection.commit()
+        before_plan = plan_before(connection, 1)
+        key = new_operation_key()
+        outcome = self._finish(self._repository(), owned, key=key)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert connection.execute(
+            "SELECT status, error_code FROM actions WHERE id = 30"
+        ).fetchone() == (3, None)
+        assert_action_plan(connection, 30, 1, key, action_status=3,
+                           previous_plan=before_plan, completed=not unfinished_sibling)
+        if unfinished_sibling:
+            assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
 
     @pytest.mark.parametrize("unfinished_sibling", [False, True])
-    def test_canceled_cleanup_finishes_action_and_eligible_plan(self, tmp_path, unfinished_sibling):
+    def test_canceled_cleanup_finishes_action_and_eligible_plan(self, tmp_path, unfinished_sibling, request):
         from camctl.outputs.cleanup_flow import FinishCanceledCleanupAction
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path, cancel_requested=1, items=[
+        owned = self._environment(tmp_path, request, cancel_requested=1, items=[
             (91, 701, 701, 4, 4, 1, 1, None, None),
         ])
         connection = owned.connection
-        try:
-            connection.execute("UPDATE plans SET status=2 WHERE id=1")
-            if unfinished_sibling:
-                _seed_action(connection, 12, 1, action_type=7, status=1)
-            connection.commit()
-            before_plan = plan_before(connection, 1)
-            key = new_operation_key()
-            result = self._repository().finish_canceled_cleanup(
-                FinishCanceledCleanupAction(30, _NOW), key, owned)
-            assert result.kind is DbOutcomeKind.COMPLETED, result.error
-            assert result.value.action_status == 6
-            assert connection.execute("SELECT status,cancel_requested FROM actions WHERE id=30").fetchone() == (6, 1)
-            assert connection.execute("SELECT status FROM cleanup_items WHERE id=91").fetchone() == (4,)
-            assert_action_plan(connection, 30, 1, key, action_status=6,
-                               previous_plan=before_plan, completed=not unfinished_sibling)
-            if unfinished_sibling:
-                assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
-        finally:
-            connection.close()
+        connection.execute("UPDATE plans SET status=2 WHERE id=1")
+        if unfinished_sibling:
+            _seed_action(connection, 12, 1, action_type=7, status=1)
+        connection.commit()
+        before_plan = plan_before(connection, 1)
+        key = new_operation_key()
+        result = self._repository().finish_canceled_cleanup(
+            FinishCanceledCleanupAction(30, _NOW), key, owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.action_status == 6
+        assert connection.execute("SELECT status,cancel_requested FROM actions WHERE id=30").fetchone() == (6, 1)
+        assert connection.execute("SELECT status FROM cleanup_items WHERE id=91").fetchone() == (4,)
+        assert_action_plan(connection, 30, 1, key, action_status=6,
+                           previous_plan=before_plan, completed=not unfinished_sibling)
+        if unfinished_sibling:
+            assert connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (1,)
 
-    def test_unfinished_member_rejects_finish(self, tmp_path):
+    def test_unfinished_member_rejects_finish(self, tmp_path, request):
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path, items=[
+        owned = self._environment(tmp_path, request, items=[
             (91, 701, 701, 2, 2, None, None, None, None),
         ])
         outcome = self._finish(self._repository(), owned)
@@ -840,10 +822,10 @@ class TestFinishCleanupAction:
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id = 30").fetchone() == (2,)
 
-    def test_cancel_requested_rejects_finish(self, tmp_path):
+    def test_cancel_requested_rejects_finish(self, tmp_path, request):
         from camctl.persistence.models import DbOutcomeKind
 
-        owned = self._environment(tmp_path, cancel_requested=1, items=[
+        owned = self._environment(tmp_path, request, cancel_requested=1, items=[
             (91, 701, 701, 4, 4, 1, 1, None, None),
         ])
         outcome = self._finish(self._repository(), owned)
@@ -851,12 +833,12 @@ class TestFinishCleanupAction:
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id = 30").fetchone() == (2,)
 
-    def test_original_key_resend_restores_first_response(self, tmp_path):
+    def test_original_key_resend_restores_first_response(self, tmp_path, request):
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.models import DbOutcomeKind
         from camctl.outputs.cleanup_flow import CleanupActionDisposition
 
-        owned = self._environment(tmp_path, items=[
+        owned = self._environment(tmp_path, request, items=[
             (91, 701, 701, 4, 4, 1, 1, None, None),
         ])
         repository = self._repository()
@@ -870,11 +852,11 @@ class TestFinishCleanupAction:
         late = self._finish(repository, owned, occurred_at=_NOW + 1_000_000, key=key)
         assert late.kind is DbOutcomeKind.ROLLED_BACK
 
-    def test_terminal_new_key_recovers_without_new_history(self, tmp_path):
+    def test_terminal_new_key_recovers_without_new_history(self, tmp_path, request):
         from camctl.persistence.models import DbOutcomeKind
         from camctl.outputs.cleanup_flow import CleanupActionDisposition
 
-        owned = self._environment(tmp_path, items=[
+        owned = self._environment(tmp_path, request, items=[
             (91, 701, 701, 4, 4, 1, 1, None, None),
         ])
         repository = self._repository()

@@ -453,17 +453,29 @@ async def test_waiter_cancel_keeps_delete_owner_until_actual_return_is_saved(env
 
     driver.delete = controlled_delete
     waiter = asyncio.create_task(delete_source_file(runtime, item_id))
-    await asyncio.wait_for(started.wait(), 2)
-    waiter.cancel()
-    await asyncio.wait_for(interrupted.wait(), 2)
-    waiter.cancel()
-    assert not waiter.done()
-    assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 3
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, item_id)
-    release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await waiter
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        waiter.cancel()
+        await asyncio.wait_for(interrupted.wait(), 2)
+        waiter.cancel()
+        assert not waiter.done()
+        assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 3
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(runtime, item_id)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(waiter), 5)
+    finally:
+        import sys
+        primary_error = sys.exception()
+        release.set()
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(asyncio.gather(waiter, return_exceptions=True)), 5)
+        except BaseException as cleanup_error:
+            if primary_error is None:
+                raise
+            primary_error.add_note(f"等待删除任务收场失败: {cleanup_error!r}")
     assert len(driver.deletes) == 1
     assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 4
     from camctl.bootstrap.cleanup_assembly import cleanup_flow
