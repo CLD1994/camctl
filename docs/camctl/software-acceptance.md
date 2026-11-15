@@ -1534,9 +1534,9 @@
 - 结论：部分覆盖
 - 归属：P5 批分离与 H7 规模测量（persistence 计划、history 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
-- 测试：apps/camctl/tests/integration/persistence/test_repositories.py、apps/camctl/tests/integration/history/test_complete_history.py
+- 测试：apps/camctl/tests/integration/persistence/test_repositories.py、apps/camctl/tests/integration/history/test_complete_history.py、apps/camctl/tests/integration/history/test_report_selection.py
 - 证据：批分离与不可变批次已覆盖（persistence 计划 P5 收口验证记录）；代表性样本上候选扫描每批不超过固定批量、分页取得的候选集合与独立全量选择一致、半数晚于边界的候选被窗口过滤（history 计划 H7 验证记录，Windows 开发机）。
-- 未核验前提：已有批次上界、分页完整性和部分公开入口观察；候选峰值、完整选择工作量及不同游标／生产筛选入口的矩阵仍不完整，不能据基础查询或局部批分离通过认定全部覆盖。
+- 未核验前提：已有批次上界、分页完整性及固定4200动作的完整选择工作量记录。实际公开选择在受观察的SQLite连接上未读事件／快照正文，也未记录主库修改尝试；此读取边界已核。候选驻留峰值及不同游标／生产筛选入口、分布的矩阵仍不完整，不能据局部通过认定全部覆盖或程序内存有界。
 
 ## 九、跨模块契约场景
 
