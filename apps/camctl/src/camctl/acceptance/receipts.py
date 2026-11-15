@@ -8,6 +8,7 @@ from camctl.acceptance.service import AcceptanceResult, AckDisposition, PlanDisp
 from camctl.contracts.json_encoding import encode_exact_json
 from camctl.contracts.json_values import parse_exact_json
 from camctl.persistence.atomic import TransactionError
+from camctl.persistence.fact_reads import read_operation_transaction
 
 
 _VERSION = 1
@@ -55,12 +56,12 @@ def _table_exists(connection):
 
 
 def recover_result(connection, key, command):
-    txn = connection.execute("SELECT id FROM history_transactions WHERE operation_key = ?", (str(key),)).fetchone()
-    if txn is None:
+    transaction = read_operation_transaction(connection, key)
+    if transaction is None:
         return None
     if not _table_exists(connection):
         raise TransactionError("原受理事务缺少完整答复依据，请先升级数据库；无法恢复原答复")
-    row = connection.execute("SELECT version, request_identity, result_json FROM acceptance_receipts WHERE transaction_id = ?", txn).fetchone()
+    row = connection.execute("SELECT version, request_identity, result_json FROM acceptance_receipts WHERE transaction_id = ?", (transaction.txn_id,)).fetchone()
     if row is None:
         raise TransactionError("原事务缺少受理申请和完整答复依据，无法恢复原答复")
     version, identity, encoded = row

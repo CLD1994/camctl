@@ -402,3 +402,36 @@ def test_receipt_write_failure_rolls_back_business_changes(environment):
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     for table in ("plans", "actions", "history_transactions", "history_events", "acceptance_receipts"):
         assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
+
+
+def test_original_key_rejects_incomplete_history_even_when_receipt_exists(environment):
+    from camctl.contracts.values import ConsistencyError
+
+    connection, _ = environment
+    key = new_operation_key()
+    body = _plan_body()
+    first = _process(body, connection, key)
+    assert first.kind is DbOutcomeKind.COMPLETED
+    txn_id, first_event, last_event = connection.execute(
+        "SELECT id, first_event_id, last_event_id FROM history_transactions WHERE operation_key = ?",
+        (str(key),),
+    ).fetchone()
+    assert first_event < last_event
+    # 后续完整事务成为当前边界，使检查必须针对原键的事务组。
+    assert _process(_plan_body(request_id="43"), connection).kind is DbOutcomeKind.COMPLETED
+    assert connection.execute(
+        "SELECT COUNT(*) FROM acceptance_receipts WHERE transaction_id = ?", (txn_id,)
+    ).fetchone() == (1,)
+    # 模拟已提交历史成员损坏；保留完成记录和事务首尾，验证恢复不能伪报成功。
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        connection.execute("DELETE FROM history_events WHERE id = ?", (first_event,))
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+    recovered = _process(body, connection, key)
+    assert recovered.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(recovered.error, ConsistencyError)
+    assert "成员与首尾范围不一致" in str(recovered.error)
+    assert connection.execute(
+        "SELECT COUNT(*) FROM acceptance_receipts WHERE transaction_id = ?", (txn_id,)
+    ).fetchone() == (1,)
