@@ -201,7 +201,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
         )
         demo = HostDemo(deployment, host_demo, launcher=str(camctl))
         monkeypatch.chdir(package.root)
-        capture_status = {"capture": status.upper()}
+        capture_status = {"capture": "RUNNING"}
         failure = _watch_request(demo, plan, capture_status)
         demo.start(env=environment)
         demo.submit(plan)
@@ -215,6 +215,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             "START 尚未可靠保存",
             failure=failure,
         )
+        capture_status["capture"] = status.upper()
         if scenario == "overrun":
             demo.stop()
             demo = HostDemo(deployment, host_demo, launcher=str(camctl))
