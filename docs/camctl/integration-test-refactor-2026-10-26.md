@@ -150,7 +150,7 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 
 状态中的“待测量”表示有实际代码依据、但尚未测出各阶段占比及收益；“待方案核实”表示已定位具体内部依赖，但没有确认等价改法，不能直接删除或宣布需要新接口。数量仅描述当前明确的参数实例，不是全仓剩余用例数或完成率。旧静态候选、动态别名及未逐项核对的协作关系不作为已证实待改对象。
 
-后续按现有具体待办推进，不重新普查已经读完的文件。媒体、结果、来源及读取汇总的本批修正已经接入；C123—C126 的真实文件取消、存储拒绝及异常收场已完成核对和接入。根跨组件 C131—C145 按实际资源责任、错误观察和媒体判据实施，C140 已完成；C131／C132、C134—C144的本批修正已完成，C133的按本次请求提前报错和C145的公开时钟观察仍需处理，长验证先核必要范围与成本，不默认重跑完整参数矩阵。C68 的正式性能矩阵、B66 和 C145 继续待核，D8 的内部输入未来排期目标等待讨论。R1—R5 等生产事项在用户休息期间只记录，待其返回后统一解决。
+后续按现有具体待办推进，不重新普查已经读完的文件。媒体、结果、来源及读取汇总的本批修正已经接入；C123—C126 的真实文件取消、存储拒绝及异常收场已完成核对和接入。根跨组件 C131—C145 按实际资源责任、错误观察和媒体判据实施，C140 已完成；C131／C132、C134—C144的本批修正已完成，C133的按本次请求提前报错和C145的公开时钟观察仍需处理，长验证先核必要范围与成本，不默认重跑完整参数矩阵。B66已按一次实测有依据保留；C68的正式性能矩阵继续待核，C133与C145正在三个隔离工作区推进，D8 的内部输入未来排期目标等待讨论。R1—R5 等生产事项在用户休息期间只记录，待其返回后统一解决。
 
 ### 已核实完成，应从旧待办关闭
 
@@ -262,7 +262,7 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 | B63 | selection_guard 与 selection_guard_transaction 有三模式乘四变异共十二个相同真实拒绝事务。 | 已完成，接入 `a2e657e5`；十二等价实例已有完整承接，三 sparse_ids 及实际有序行验证保留 | 保留前者错误、事务结束及完整回滚，后者保留独有 sparse_ids 三分区；清理闲置变异分支，历史、关系及其他矩阵保留。验证两完整文件，不按名称相似删除。 |
 | B64 | selection_guard 的五十五个静态变体各自重复建库、预跑并读取全库事实。 | 已完成，接入 `a2e657e5`；DEFAULT／EXPLICIT_IDS 各一次真实来源，五十五原静态实例保持 | DEFAULT／EXPLICIT 各生成一次合法完整只读基线并关闭来源，每例独立复制提案和可变事实；全部输入、当前／未来事实和覆盖证明保持，真实事务拒绝另保留。先核资源边界，不直接迁单元；完整文件验证。 |
 | B65 | persistence/motor_transactions 的一项历史恢复与 motor/history_reports 的同前态三路径恢复重复。 | 已完成，接入 `50b5ff38`；同形旧边界及完整投影由 motor 三路径承接，重复单例移除，两个完整文件通过 | 相同 NOW+1、78 字节发送、旧意图和新结果由更强三路径完整预期承接，移除前者单例；其他真实事务／原键／未知恢复保持，验证两个完整文件，未测收益。 |
-| B66 | camera_demo_transport 三组共三十五输入只解释人工工具返回，却逐项创建本地脚本。 | 静态成本候选，待核纯归一化边界 | 先核测试支持的响应归一化能否作为纯局部契约承接原三十五输入；真实摘要、元数据、字节流、分页、分块及删除仍保留工具协作。未测收益，不为此增加缓存或生产接口。 |
+| B66 | camera_demo_transport 三组共三十五输入逐项创建本地脚本，但工具返回由替身交付。 | 已核并有依据保留；35项pytest0.42秒、墙钟0.785秒 | 实际组合正式脚本生成、命令解析、本地脚本写入与测试传输适配器的精确识别；不启动外部工具。这点成本不足以支持另增接口、目录或运行入口，保留全部输入与真实工具专项，不把替身分区说成真实ADB验收。 |
 | C16 | `test_binding_canceled_result_transactions.py` 的投影故障以 SQL 文本前缀匹配 operation_runs。 | 已完成并独立评审，接入 `394d6141`；真实表级授权故障明确命中，完整九项通过 | 用既有 SQLite 表级故障，明确命中；保留 RESULTS 已／未开始、全库回滚、原 STOP／尝试不变和重开原键。验证完整文件，不改旧通用替身的其他消费者。 |
 | C17 | recording_stop、timelapse_finish、residual_winddown、obtain_flow 四文件有 `close_runtime` 位于 finally 外，断言或原任务异常会跳过装配关闭。 | 已完成并独立评审，`b6e28b6a`；后发现 cleanup_flow 的旧取消导入遗漏，`8fa23a14` 修正并完成该消费者完整补验 | 原任务有界收场后仍保证装配关闭，保留主错误及收场错误的诊断。核对四文件所有同类会话段；验证完整文件，并以一次临时失败出口核对实际关闭。 |
 | C18 | `test_recording_stop.py` 的截止唤醒专项用 0.05 秒睡眠推测中央循环已进入长等待。 | 已完成并独立评审，接入 `b6e28b6a`；原保护与真实时钟保持，完整录像文件五项通过 | 从注入的公开通知等待入口取得实际等待事实，再交付 START；保留真实单调钟、0.2 秒目标、30 秒轮询和原两秒保护。先验证节点，再验证完整文件。 |
@@ -1037,7 +1037,7 @@ Python 的收集与执行均为 **10,791 个唯一主节点：10,786 项通过�
 | C136、C143及host_wait部分C144，`4cd44ffa` | process_recovery 五个完整函数；host_wait_failures 两个完整函数 | 最后联合运行16项通过，pytest73.91秒、墙钟74.632秒、退出零。之后只调整C136读取代码，最终五函数八项补验通过，69.07／69.786秒、退出零；没有重跑未受影响host_wait。半行探针10.000秒按期失败；后代继续持有stderr时，20,000字节原诊断0.087秒内返回。正文失败与SQL异常检查确认精确孩子和连接关闭。首次临时探针误判正文异常文案、首次计时器缺失分别退出一／127，均非项目功能失败；预算委派无错误并回收，非Linux分支未验证。 |
 | C134、C135，`019d37bd`及`5783d833` | test_camctl_media_roundtrip 的 `test_insufficient_timing_checks_repairs_and_delivers`、`test_excess_recording_repairs_without_probing` | 两项通过，pytest38.48秒、启动器墙钟39.205秒、退出零；源片和成品完整解码，实际修复命令为-c copy -t 3。真实2.6秒视频和libx264重编码被窄反例拒绝，检查墙钟0.7秒。最后只调整等价编码选项判据，十项临时检查通过、外层0.267秒；没有重复真实链。首次遗漏PYTHONPATH导致插件未导入，退出非零、0.630秒，目标尚未执行。预算委派正常回收。 |
 | C138、C139，`494692ba` | 完整 test_camctl_session_recovery.py | 六项通过，pytest126.84秒、墙钟127.554秒、退出零；委派无错误且回收。窄准备失败检查创建两个真实进程后在第三次创建抛错，前两个进程和管道均关闭；不冒充完整业务故障链。未运行全量或真机。 |
-| C141、C144照片部分，`8c59ddc4` | test_hasselblad_photo_roundtrip 的 `test_hasselblad_history_observer_rejects_middle_event_as_boundary`、`test_installed_hasselblad_photo_roundtrip[raw-host-1-1500]`、`test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-1-1500]`；test_hasselblad_photo_parameters 的 `test_installed_hasselblad_parameter_validation_agrees_across_consumers` | 首次为三项通过、一项客户端依赖准备失败，pytest160.07秒、墙钟160.766秒、退出一；参数目标尚未执行。补齐匹配锁文件的只读依赖后仅补参数节点，一项通过、31.50／32.159秒、退出零，临时链接移除。两准备／SQL故障探针通过，22.85／23.625秒，原异常、host和连接关闭均核实，探针时尚未启动Node；正常链的host／Node／CLI及后代收场后均不存在。直接探针首次因预算权限在装配阶段失败，改正式启动器后通过；各委派已回收，未重跑十二组矩阵。 |
+| C141、C144照片部分，`8c59ddc4` | test_hasselblad_photo_roundtrip 的 `test_hasselblad_history_observer_rejects_middle_event_as_boundary`、`test_installed_hasselblad_photo_roundtrip[raw-host-1-1500]`、`test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-1-1500]`；test_hasselblad_photo_parameters 的 `test_installed_hasselblad_parameter_validation_agrees_across_consumers` | 首次为三项通过、一项客户端依赖准备失败，pytest160.07秒、墙钟160.766秒、退出一；参数节点未完成。补齐匹配锁文件的只读依赖后仅补参数节点，一项通过、31.50／32.159秒、退出零，临时链接移除。两准备／SQL故障探针通过，22.85／23.625秒，原异常、host和连接关闭均核实，探针时尚未启动Node；正常链的host／Node／CLI及后代收场后均不存在。直接探针首次因预算权限在装配阶段失败，改正式启动器后通过；各委派已回收，未重跑十二组矩阵。 |
 | C142，基于`56ad7074`的测试辅助差异 | test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded] | 一项通过，pytest81.70秒、启动器墙钟82.283秒、退出零；委派无错误且回收。start与submit两错误出口的窄检查各启动真实子进程，原异常保持，新进程和三管道均关闭，检查墙钟0.005秒；此窄检查用测试拥有者替身承接，不宣称完整C／CLI故障链。其他七参数未重复运行。 |
 | C137，基于 `9fb12d82` 的构造失败收场差异 | test_camctl_motor_notifications.py::test_client_export_host_callback_report_import_boundaries | 一项通过，pytest34.47秒、启动器墙钟35.040秒、退出零；2GiB合计预算委派无错误且已回收。首次同节点在客户端导出时因缺tsx准备失败，构造器尚未执行，pytest19.96秒、退出一；随后复用锁文件一致的已有客户端依赖，只补原节点，没有安装或修改共用依赖。临时两分区使用真实子进程，初始化观察失败后进程和三管道均结束，原异常保持；关闭后另抛错时仍保留原异常并附注，检查墙钟0.007秒、退出零。该窄检查不冒充完整C初始化故障链。 |
 
@@ -1046,6 +1046,8 @@ Python 的收集与执行均为 **10,791 个唯一主节点：10,786 项通过�
 | C140、A7 | 根 `test_device_capability_declarations.py::test_installed_source_change_keeps_accepted_execution_definition`，真实构建及安装 | 最终一项通过，pytest 13.71 秒、启动器墙钟 14.336 秒、退出零。使用既有 2GiB 合计预算委派，启动器无错误、专属组回收；此结果只验证所选功能，不作为新的容量或严格无交换验收。观察 SQL 抛出原异常的临时检查确认连接实际关闭，原异常保持；移除重复日志保存前的单项另有一项通过、pytest 14.21 秒，不与最终结果相加。 |
 
 根 README 的 OSMO 普通录像恢复说明已与当前正式单文件配置及成功结果对齐；该文案核对未追加 OSMO 回归。
+
+B66在`5783d833`仅执行一次定向测量：camera_demo_transport 的 `test_run_normalizes_only_digest_marker_and_preserves_tool_facts`、`test_run_keeps_noncanonical_or_unsuccessful_digest_results`、`test_run_keeps_matching_output_from_other_scripts`，35项通过，pytest0.42秒、外层0.785秒、退出零，最慢十个阶段均低于5毫秒显示门槛；首次资源同步0.056秒另计。三十五份实际脚本没有执行，未启动Bash／ADB／CLI或子进程，未修改源码、未安排第二轮。
 
 process_recovery 正向选择 `test_next_run_waits_for_old_group_settlement`、`test_abnormal_restart_keeps_shared_budget`、`test_unknown_scan_keeps_call_and_pending_request`、`test_early_reap_never_signals_stale_group_or_starts_run`、`test_original_group_does_not_kill_parallel_submit_or_other_groups`。host_wait_failures 选择 `test_host_exit_does_not_wait_for_descendant_to_close_output`、`test_wait_limits_incompatible_terminal_to_requested_actions`。原文件的其他未修改节点没有重复运行。
 
