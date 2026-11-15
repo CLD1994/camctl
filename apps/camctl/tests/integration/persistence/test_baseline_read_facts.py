@@ -544,6 +544,11 @@ async def test_not_called_requires_format_v10_without_changing_v9(owned, tmp_pat
     with pytest.raises(DatabaseUnsupportedFormatError):
         capture.save_baseline_read_not_called(request, intent.result_save_key, old)
     assert capture.read_baseline_call_result(first.call_id, old) is None
+    # 有意保留过期连接元数据，验证独立守卫仍读取同事务中的实际格式。
+    with pytest.raises(DatabaseUnsupportedFormatError):
+        capture.save_baseline_read_not_called(request, intent.result_save_key, owned)
+    assert not owned.connection.in_transaction
+    assert capture.read_baseline_call_result(first.call_id, old) is None
     assert capture.read_baseline_call(first.call_id, first.boundary, old) == first
     assert owned.connection.execute('SELECT format_version FROM database_metadata').fetchone() == (9,)
 
@@ -552,12 +557,13 @@ async def test_not_called_requires_format_v10_without_changing_v9(owned, tmp_pat
 async def test_not_called_cannot_replace_existing_result(owned, tmp_path, previous):
     from camctl.capture.baseline_models import BaselineReadNotCalledSave, BaselineReadReturn, BaselineReadUnconfirmedSave
     from camctl.contracts.pages import Page
-    from camctl.devices.directory import DirectoryRead
+    from camctl.devices.directory import DirectoryCursor, DirectoryRead
     intent = await _intent(owned, tmp_path)
     capture = CaptureRepository()
     first = capture.save_baseline_read_intent(intent, intent.call_key, owned).value
     if previous == 'returned':
-        request = BaselineReadReturn(first.call_id, _SCHEDULED + 1, None, DirectoryRead(None, None, Page((), None)))
+        request = BaselineReadReturn(first.call_id, _SCHEDULED + 1, None, DirectoryRead(None, None,
+            Page((), DirectoryCursor(intent.binding, intent.directories, 1, None))))
         saved = capture.save_baseline_read_return(request, intent.result_save_key, owned)
     else:
         request = BaselineReadUnconfirmedSave(first.call_id, _SCHEDULED + 1)
