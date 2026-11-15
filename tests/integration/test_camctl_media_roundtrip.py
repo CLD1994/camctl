@@ -144,10 +144,17 @@ def _assert_stream_copy(log: Path) -> None:
     calls = [json.loads(line) for line in log.read_text("utf-8").splitlines()]
     assert len(calls) == 1, calls
     args = calls[0]
-    codec_options = [arg for arg in args if arg in ("-c", "-codec", "-vcodec", "-acodec", "-scodec")
-                     or arg.startswith(("-c:", "-codec:"))]
-    assert codec_options == ["-c"], args
-    assert args[args.index("-c") + 1] == "copy", args
+    # 此样本只含一条视频流；按参数顺序取最后一个适用于该流的编码选项。
+    video_codec = None
+    for index, arg in enumerate(args):
+        if arg in ("-c", "-codec", "-c:v", "-codec:v", "-vcodec"):
+            assert args.index("-i") + 1 < index < len(args) - 1, args
+            video_codec = args[index + 1]
+        elif arg in ("-acodec", "-scodec", "-dcodec") or arg.startswith(
+            ("-c:", "-codec:", "-c=", "-codec=")
+        ):
+            pytest.fail(f"无法确认编码选项对输出流的作用: {args}")
+    assert video_codec == "copy", args
 
 
 def _assert_target_duration(duration: Decimal) -> None:
