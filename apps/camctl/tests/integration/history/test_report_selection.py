@@ -499,6 +499,100 @@ def _actual_plans(path, statements):
             for statement in statements]
 
 
+@pytest.mark.asyncio
+async def test_small_window_uses_index_after_physical_report_directory_growth(finished_photo, tmp_path, monkeypatch):
+    """同一窄窗口在真实目录增长前后选中相同对象，并观察实际查询。"""
+    import re
+    import time
+    from camctl.history.queries import report_target_types
+
+    started = time.perf_counter()
+    owned, small_path = finished_photo
+    _submit_many(owned, 3, 1)
+    from_wm = _to_wm(owned.connection)
+    await _finish_many(owned, 4)
+    to_wm = _to_wm(owned.connection)
+    small_boundary = _boundary(owned.connection)
+    large_dir = tmp_path / 'large'
+    large_dir.mkdir()
+    with open_corpus(large_dir) as (large_connection, large_state, watermarks):
+        preparation = time.perf_counter() - started
+        verification_started = time.perf_counter()
+        assert (from_wm, to_wm) == watermarks[:2]
+        action_type = report_target_types()['action']
+
+        def facts(connection):
+            total = connection.execute('SELECT COUNT(*) FROM report_entity_changes').fetchone()[0]
+            actions = connection.execute(
+                'SELECT COUNT(*) FROM report_entity_changes WHERE entity_type=?', (action_type,)).fetchone()[0]
+            window = connection.execute(
+                'SELECT entity_type,entity_id,event_id,change_seq FROM report_entity_changes '
+                'WHERE change_seq>? AND change_seq<=? ORDER BY entity_type,entity_id,event_id',
+                (from_wm, to_wm)).fetchall()
+            return total, actions, window
+
+        small_facts = facts(owned.connection)
+        large_facts = facts(large_connection)
+        assert large_facts[0] - small_facts[0] > 4200
+        assert large_facts[1] - small_facts[1] > 4200
+        assert small_facts[2] == large_facts[2]
+        assert small_facts[2]
+        large_boundary = _boundary(large_connection)
+        assert max(row[2] for row in small_facts[2]) <= small_boundary.last_event_id
+        assert max(row[2] for row in large_facts[2]) <= large_boundary.last_event_id
+        comparison = time.perf_counter() - verification_started
+
+        observations = []
+        reading = 0.0
+        for name, state, boundary in (
+                ('small', small_path / 'state.db', small_boundary),
+                ('large', large_state, large_boundary)):
+            repository = HistoryRepository(state)
+            request = ReportScopeRequest(boundary, from_wm, to_wm, 7)
+            with monkeypatch.context() as patch:
+                probe = _StatementProbe(repository, patch)
+                read_started = time.perf_counter()
+                with repository.open_report_selection(request) as selection:
+                    first = selection.read_page('action', parent_id=1)
+                    action_queries = len(probe.statements)
+                    again = selection.read_page('action', parent_id=1)
+                    after_repeat = len(probe.statements)
+                    outputs = _read(selection, 'output', 1)
+                    plans = _read(selection, 'plan')
+                reading += time.perf_counter() - read_started
+            observations.append((name, state, first, again, action_queries, after_repeat,
+                                 outputs, plans, probe.statements))
+
+        verification_started = time.perf_counter()
+        for name, state, first, again, action_queries, after_repeat, outputs, plans, records in observations:
+            assert first.items == again.items == (1,), name
+            assert first.next_cursor is None and again.next_cursor is None, name
+            assert outputs == [1, 2, 3, 4], name
+            assert plans == [1], name
+            assert action_queries == after_repeat == 1, name
+            action = records[0]
+            assert action['kind'] == 'candidate', name
+            assert action['rows'] == [(1, 1)], name
+            plan = _actual_plans(state, [action])[0]
+            accesses = [row for row in plan if re.search(r'\b(?:SEARCH|SCAN) c\b', row)]
+            print('REPORT_DIRECTORY_GROWTH', {
+                'database': name, 'window': (from_wm, to_wm),
+                'boundary': (small_boundary if name == 'small' else large_boundary),
+                'directory_rows': small_facts[0] if name == 'small' else large_facts[0],
+                'action_rows': small_facts[1] if name == 'small' else large_facts[1],
+                'window_associations': len(small_facts[2]), 'action_candidate_queries': action_queries,
+                'sql': action['sql'], 'parameters': action['parameters'], 'rows': action['rows'],
+                'vm_steps_estimate': action['vm_steps_estimate'], 'vm_granularity': 100,
+                'plan': plan}, flush=True)
+            assert accesses and all('SEARCH' in row and 'report_changes_by_sequence' in row
+                                    and 'entity_type=?' in row
+                                    and 'change_seq>?' in row and 'change_seq<?' in row
+                                    for row in accesses), (name, plan)
+        verification = comparison + time.perf_counter() - verification_started
+        print('REPORT_DIRECTORY_GROWTH_PHASE', {'preparation_s': preparation,
+              'reading_s': reading, 'verification_s': verification}, flush=True)
+
+
 @pytest.mark.parametrize('statistics', ['none', 'empty_analyzed', 'representative_analyzed'])
 def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_path, monkeypatch, statistics):
     """三种统计状态均观察报告实际执行的首批和续页。"""
