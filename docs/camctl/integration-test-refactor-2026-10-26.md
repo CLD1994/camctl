@@ -390,7 +390,7 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 | C143 | host 提前退出专项在 1.5 秒回复检查后未结束自己创建的两秒孩子。 | 已完成，接入2c497fda | 先完成原1.5秒快回复及错误检查，再按本次PID和Linux启动身份等待孩子结束；超时仅处理该句柄。两个参数和正文失败出口通过，非Linux的POSIX分支未验证。 |
 | C144 | 根照片 _rows／内存反例、照片参数观察、host_wait 合成数据库没有确定关闭连接。 | 已完成，接入2c497fda、c58bb09b | host_wait、照片_rows、内存反例及参数观察均显式关闭；需要事务的两处保留原事务上下文。普通／恢复／参数／内存实际消费者及SQL异常出口通过，范围分别记录。 |
 | C145 | OSMO 时间消费见证要求调用栈含生产私有名并固定源码行。 | 已完成，接入445207c3 | 通过公开session_capture_assembly的UTC／单调钟回调标记真实拍摄消费，安装版来源、同PID／epoch、冻结双读数及跨真实0.5秒均保留；报告的general时钟不能代替。三个时间目标及正反例通过，移除私有函数／栈／源码行绑定；原目标和等待不变。 |
-| V1 | 按具体风险复核本清单涉及的公开接口、覆盖承接和测试维护成本；核对其余旧记录是否还有具体未关闭事项。 | 已完成的具体修改与保留决定均已复核；十六组件及根 Python／Node 的正文详审已补齐，R5、新具体修正和 D7 等边界尚未闭合；全目标仍由 Q1、Q2 推进 | 每项都有保留、重构、合并、删除或明确暂缓的结论，说明实际审查边界；不能仅按关键词、历史候选文件数或局部通过宣布全仓审查完成。 |
+| V1 | 按具体风险复核本清单涉及的公开接口、覆盖承接和测试维护成本；核对其余旧记录是否还有具体未关闭事项。 | 已接入的修改与保留决定均已复核；十六组件及根 Python／Node 的正文详审已补齐，D7已闭合。C68、D5／D6／D9和生产事项仍有未决部分，全目标由Q1、Q2继续推进 | 按当前具体未决事项说明实际审查边界；不能仅按关键词、历史候选文件数或局部通过宣布全仓审查完成。 |
 | V2 | 各批完成实际影响范围验证，最后运行约定完整 camctl、根 Python／Node 及容量范围，记录准确源码、耗时和收场。 | 已完成；`1aa6ae18` 的统一回归全部通过，85 任务自然退出零，唯一节点及预算已核对，本轮构建与成功材料已释放。B5、B6 后续完整文件补验单列 | 区分整轮、完整文件补验、未运行和环境失败，不重复累计同一节点，不改写旧冻结全量退出码；同工作量报告收益，及时提交、集成及释放工作区和已解决临时材料。 |
 
 A1 的两个参数和 A2 的一个实例已按批准取舍移除，这不是全仓剩余用例数。B1、B2、B4 已完成测量、实施及完整影响范围验证，B3 已测量并说明保留理由。C1—C3 是三组具体边界问题，合计参数数不代表缺陷数，也不预设最终删减数量。进度只在上表更新，不另建平行完成清单。
@@ -401,7 +401,7 @@ A1 的两个参数和 A2 的一个实例已按批准取舍移除，这不是全�
 
 C85 尚待处理的观察连接准备包括：OSV 的 prepared_input、prepared_repair、_successful_osv_repair、promoted、_stopped_world；host_photo_flow._world、media_retry_fixtures 的 capture_database 前段；STOP 的 _page_world、_confirmed_world、_ready 和 _recording_consumer；共享 ResultCase.world 及 result_confirmation 的 _environment／_concluded；outputs 的 _prepared_selection、_real_environment、_aggregate_role_world、_six_form_environment 及摘要夹具工厂。各项从取得连接起承担失败关闭责任，成功才转交。C88 另保留 media_execution／media_processing 的普通出口及 result_error_diagnostics 的 RESULTS 参数普通和失败出口；它们不能由只关闭 worker 的会话作用域承接。
 
-C99 的 recording_start_runtime、recording_start_release、recording_start_save_boundary、stop_confirmed_with_error、stop_current_budget 已接入 `08476b61`，原一秒等保护保持；与已登记的结果页、媒体及原生分段等待一起按各自业务准备和期限核对。C101 的 SourceStream.cancel 同类范围还包括 source_digest_failure_settlement 的 _ReadStream 及其 read_diagnostics、digest_diagnostics、default_exclusions 消费者。C80 的有界上下文方法还须应用 source_resolution_batches 的异连接反例，D6 有限形式的待决范围保持。
+C99 的 recording_start_runtime、recording_start_release、recording_start_save_boundary、stop_confirmed_with_error、stop_current_budget 已接入 `08476b61`，原一秒等保护保持。C101 的 SourceStream.cancel 已承接 source_digest_failure_settlement 及其 read_diagnostics、digest_diagnostics、default_exclusions 消费者；C80 的有界上下文也已应用 source_resolution_batches 的异连接反例。两者的实际验证见对应批次记录，D6 有限形式的待决范围保持，不将这些已接入范围继续列为待做。
 
 2026-11-15，以 `71c25de2` 的已跟踪源码为准，六个只读审查任务按文件和实际职责完成范围分组。该基线有 16 个组件目录的 535 个 `test_*.py`，根目录另有 32 个 Python 测试文件和 4 个 Node 文件。后续 B10、B11 将三个完整局部测试文件迁入单元层，`523bdeb4` 的组件集成文件为 532 个；B17、B20、B30 及 B33 后共有七个完整文件迁入单元层，`9a4e143b` 的实际组件集成文件为 528 个。B39、B41 后再有两个完整局部文件迁入单元层，`a07721db` 的实际组件集成文件为 526 个；B47 再迁出一份完整文件，`27dda0b1` 为 525 个。下表保留范围核对时的基线口径，迁移进度只在原待办更新。共用准备、适配器和工厂沿其消费者核对，不计作额外测试文件。执行清单仍从实际源码发现，不另维护固定运行名单。
 
@@ -478,6 +478,7 @@ C33 的路径校验只解析持久化身份与路径文字，不访问文件系�
 | D6 | 有限 CommandPlan 的读取上下文由内核建立，调用方不能传入另一连接；旧测试替换具体读取类并改写 connection，制造本次写事务去另一连接核对事实的错误。 | 调用及覆盖核对已完成，原测试保留待讨论。有界形式经已有 context 回调验证同一拒绝检查及真实回滚；有限形式没有等价公开输入，当前只验证内核构造对象被测试改绑后的拒绝。删去会减少有限构造路径的这一内部反例，不等于丢失全部异连接／回滚覆盖；不为保留它擅加生产入口。 |
 | D7 | 结果页保存拥有者的三个旧集成分区依赖内部待保存状态。 | 已由正式消费者与既有局部测试分层承接，接入 f7e6e47c。正式 handler 保留原 UNKNOWN 并增加真实投影失败／提交前失败／提交后丢回执，核原完整申请、键、时刻、原页可靠前禁止续页及唯一历史；旧三个私有集成分区移除，不新增生产接口。 |
 | D8 | 录像停止、原片写完后，内部复制的当前UTC早于原录像排期时如何解释。 | 已核现行时钟规格并保留有效分区：启动检查允许可信读数不晚于已有下界，v1不持续监测运行中墙钟跳变，历史先后不按UTC大小判断。测试明确为墙钟回拨，保持已保存来源和原排期，验证not_due、零读取及无输入文件；不新增生产接口或改变时钟规则。 |
+| D9 | `test_large_window_releases_candidates_and_keyset_pages_do_not_rescan_window` 有三处旧断言，要求续页或稀疏查询的 SQLite 指令观察值小于首次大范围查询的八分之一。现行 P-04 要求避免重复扫描，并未规定这个比例；该比例从测试首次加入时存在，未找到独立判据依据。 | 原三处检查保留，待与 C68 的性能判据一并讨论。已有实际语句、索引范围寻址和工作量记录可以承接部分目标，但直接移除比例会减少自动拒绝成本回归的能力；不能仅因新见证通过就默默删除，也不能将局部 SQL 指令比例作为程序总耗时或内存标准。 |
 | P1 | 大规模测试准备在正式受理路径耗时明显增长；800 动作的一次线程 CPU 诊断中，逐动作创建校验器 4802 次、检查格式规则 4806 次，输入规则校验是该样本的主要热点。 | 生产性能候选，未修改。后续核对固定规则的复用边界，保留动态规则、精确数字、默认值和错误分类；不把小样本的诊断比例外推为 21600 档的精确分摊，也不据 SQLite execute 自身 CPU 推断全部数据库时间。 |
 | R1 | `persistence/executor.py` 仍通过默认线程池执行数据库线程的 `join`；共享文件池占满时确认退出可能排队。 | 已核代码风险，用户已同意将精确交叉移出日常自动验证；保持分层覆盖，单独交接，不恢复高维护测试来掩盖风险。 |
 | R2 | 输出仓储返回 `read_result_unconfirmed`，发布入口未保留该原因并默认显示 `owner_not_running`。 | 已核原因映射缺失，作为生产诊断问题单独交接；发布资格仍须阻止结果未确认的文件，不能为了测试改成允许发布。 |
