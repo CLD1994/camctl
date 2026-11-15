@@ -331,6 +331,149 @@ class _QueryProbe:
         monkeypatch.setattr(sqlite3, 'connect', connect)
 
 
+class _StatementProbe:
+    """记录真实报告选择语句，包括 execute 和取行期间的 SQLite 指令。"""
+
+    def __init__(self, repository, monkeypatch):
+        import sqlite3
+
+        original_connect = sqlite3.connect
+        path = repository.path.resolve()
+        self.statements = []
+        probe = self
+
+        class ObservedCursor(sqlite3.Cursor):
+            def fetchall(self):
+                record = getattr(self, 'record', None)
+                try:
+                    rows = super().fetchall()
+                    if record is not None:
+                        record['rows'] = [tuple(row) for row in rows]
+                    return rows
+                finally:
+                    if record is not None:
+                        self.connection.set_progress_handler(None, 0)
+
+        class ObservedConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=(), /):
+                reads = set()
+                steps = [0]
+
+                def authorize(action, table, column, _database, _source):
+                    if action == sqlite3.SQLITE_READ:
+                        reads.add((table, column))
+                    return sqlite3.SQLITE_OK
+
+                def advance():
+                    steps[0] += 100
+                    if record is not None:
+                        record['vm_steps'] = steps[0]
+                    return 0
+
+                record = None
+                self.set_authorizer(authorize)
+                self.set_progress_handler(advance, 100)
+                cursor = self.cursor(factory=ObservedCursor)
+                try:
+                    cursor.execute(sql, parameters)
+                except BaseException:
+                    self.set_progress_handler(None, 0)
+                    cursor.close()
+                    raise
+                finally:
+                    self.set_authorizer(None)
+                columns = cursor.description or ()
+                if any(table == 'report_entity_changes' for table, _ in reads) and len(columns) in (1, 2):
+                    record = {'kind': 'candidate' if len(columns) == 2 else 'page',
+                              'sql': sql, 'parameters': tuple(parameters),
+                              'vm_steps': steps[0], 'reads': reads}
+                    cursor.record = record
+                    probe.statements.append(record)
+                else:
+                    self.set_progress_handler(None, 0)
+                return cursor
+
+        def connect(database, *args, **kwargs):
+            if _same_readonly_database(database, kwargs.get('uri'), path):
+                assert 'factory' not in kwargs
+                kwargs['factory'] = ObservedConnection
+            return original_connect(database, *args, **kwargs)
+
+        monkeypatch.setattr(sqlite3, 'connect', connect)
+
+
+def _prepare_statistics_copy(source, destination, statistics):
+    """从已核验固定样本准备独立副本，不改变来源库。"""
+    import sqlite3
+    from contextlib import closing
+    from camctl.resources import resource_bytes
+    from ..support.database import SCHEMA_RESOURCES
+
+    empty_stats = None
+    if statistics == 'empty_analyzed':
+        with closing(sqlite3.connect(destination, uri=True)) as connection:
+            connection.execute('PRAGMA foreign_keys=ON')
+            assert connection.execute('PRAGMA foreign_keys').fetchone() == (1,)
+            assert connection.execute('PRAGMA journal_mode=WAL').fetchone() == ('wal',)
+            for schema in SCHEMA_RESOURCES:
+                connection.executescript(resource_bytes(schema).decode('utf-8'))
+            tables = [row[0] for row in connection.execute(
+                "SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+            for table in tables:
+                name = '"' + table.replace('"', '""') + '"'
+                assert connection.execute(f'SELECT COUNT(*) FROM main.{name}').fetchone() == (0,), table
+            connection.execute('ANALYZE')
+            empty_stats = connection.execute('SELECT tbl,idx,stat FROM sqlite_stat1 ORDER BY tbl,idx').fetchall()
+            assert all(int(row[2].split()[0]) == 0 for row in empty_stats)
+            connection.execute('ATTACH DATABASE ? AS source', (f'{source.resolve().as_uri()}?mode=ro',))
+            tables = [row[0] for row in connection.execute(
+                "SELECT name FROM source.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+            connection.execute('BEGIN')
+            connection.execute('PRAGMA defer_foreign_keys=ON')
+            for table in tables:
+                name = '"' + table.replace('"', '""') + '"'
+                columns = [row[1] for row in connection.execute(f'PRAGMA main.table_xinfo({name})') if row[6] == 0]
+                column_names = ', '.join('"' + column.replace('"', '""') + '"' for column in columns)
+                connection.execute(f'INSERT INTO main.{name} ({column_names}) SELECT {column_names} FROM source.{name}')
+            assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
+            connection.commit()
+            assert connection.execute('SELECT tbl,idx,stat FROM sqlite_stat1 ORDER BY tbl,idx').fetchall() == empty_stats
+    else:
+        with closing(sqlite3.connect(f'{source.resolve().as_uri()}?mode=ro', uri=True)) as original:
+            with closing(sqlite3.connect(destination)) as connection:
+                original.backup(connection)
+                if statistics == 'representative_analyzed':
+                    connection.execute('ANALYZE')
+                    connection.commit()
+
+    with closing(sqlite3.connect(f'{destination.resolve().as_uri()}?mode=ro', uri=True)) as connection:
+        connection.execute('ATTACH DATABASE ? AS source', (f'{source.resolve().as_uri()}?mode=ro',))
+        schemas = lambda db: connection.execute(
+            f"SELECT type,name,tbl_name,sql FROM {db}.sqlite_schema "
+            "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+        assert schemas('main') == schemas('source')
+        tables = [row[0] for row in connection.execute(
+            "SELECT name FROM source.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for table in tables:
+            name = '"' + table.replace('"', '""') + '"'
+            assert connection.execute(f'SELECT COUNT(*) FROM main.{name}').fetchone() == connection.execute(
+                f'SELECT COUNT(*) FROM source.{name}').fetchone(), table
+            assert connection.execute(f'SELECT * FROM main.{name} EXCEPT SELECT * FROM source.{name} LIMIT 1').fetchone() is None, table
+            assert connection.execute(f'SELECT * FROM source.{name} EXCEPT SELECT * FROM main.{name} LIMIT 1').fetchone() is None, table
+        assert connection.execute('PRAGMA integrity_check').fetchone() == ('ok',)
+        assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert connection.execute('PRAGMA journal_mode').fetchone() == ('wal',)
+        has_stats = bool(connection.execute(
+            "SELECT 1 FROM main.sqlite_schema WHERE name='sqlite_stat1'").fetchone())
+        assert has_stats == (statistics != 'none')
+        if statistics == 'empty_analyzed':
+            assert connection.execute('SELECT tbl,idx,stat FROM sqlite_stat1 ORDER BY tbl,idx').fetchall() == empty_stats
+        elif statistics == 'representative_analyzed':
+            stat = connection.execute(
+                "SELECT stat FROM sqlite_stat1 WHERE idx='report_changes_by_sequence'").fetchone()
+            assert stat is not None and int(stat[0].split()[0]) >= 4200
+
+
 @pytest.fixture
 def report_selection_sample(tmp_path):
     """每个消费者取得独立只读副本；关闭时核对来源和副本未改变。"""
@@ -345,6 +488,96 @@ def report_selection_sample(tmp_path):
             closing_started = time.perf_counter()
     print('CORPUS_CLOSE', {'seconds': time.perf_counter() - closing_started,
                            'scope': '关闭连接并重核来源和副本摘要'}, flush=True)
+
+
+def _actual_plans(path, statements):
+    import sqlite3
+    from contextlib import closing
+    with closing(sqlite3.connect(f'{path.resolve().as_uri()}?mode=ro', uri=True)) as connection:
+        return [tuple(row[3] for row in connection.execute(
+            'EXPLAIN QUERY PLAN ' + statement['sql'], statement['parameters']))
+            for statement in statements]
+
+
+@pytest.mark.parametrize('statistics', ['none', 'empty_analyzed', 'representative_analyzed'])
+def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_path, monkeypatch, statistics):
+    """三种统计状态均观察报告实际执行的首批和续页。"""
+    import time
+
+    source_connection, source, _ = report_selection_sample
+    started = time.perf_counter()
+    state = tmp_path / f'{statistics}.db'
+    _prepare_statistics_copy(source, state, statistics)
+    preparation = time.perf_counter() - started
+    request = ReportScopeRequest(_boundary(source_connection), 0, _to_wm(source_connection), 100)
+    repository = HistoryRepository(state)
+    with monkeypatch.context() as patch:
+        probe = _StatementProbe(repository, patch)
+        started = time.perf_counter()
+        with repository.open_report_selection(request) as selection:
+            first = selection.read_page('action', parent_id=2)
+            second = selection.read_page('action', parent_id=2, cursor=first.next_cursor)
+        reading = time.perf_counter() - started
+    started = time.perf_counter()
+    records = probe.statements
+    assert first.items == tuple(range(4, 104))
+    assert first.next_cursor is not None
+    assert second.items == tuple(range(104, 204))
+    assert second.next_cursor is not None
+    assert [record['kind'] for record in records] == ['candidate', 'page', 'page']
+    assert [row[0] for row in records[1]['rows']] == list(range(4, 105))
+    assert [row[0] for row in records[2]['rows']] == list(range(104, 205))
+    assert first.next_cursor.after_id == 103
+    assert second.next_cursor.after_id == 203
+    plans = _actual_plans(state, records)
+    print('REPORT_STATISTICS', {'statistics': statistics, 'preparation_s': preparation,
+          'reading_s': reading, 'verification_s': time.perf_counter() - started,
+          'sqlite': __import__('sqlite3').sqlite_version,
+          'statements': [(record['kind'], record['sql'], record['parameters'], len(record['rows']),
+                          record['vm_steps'], plan) for record, plan in zip(records, plans)],
+          'vm_granularity': 100}, flush=True)
+    problems = []
+    candidate_access = [row for row in plans[0] if 'report_changes_by_sequence' in row]
+    if not candidate_access or not all('SEARCH' in row and 'COVERING INDEX' in row for row in candidate_access):
+        problems.append(('candidate_not_covering', plans[0]))
+    for page, plan in enumerate(plans[1:], 1):
+        access = [row for row in plan if 'report_changes_by_entity' in row]
+        if not access or not all('SEARCH' in row and 'COVERING INDEX' in row for row in access):
+            problems.append((f'page_{page}_not_covering', plan))
+        if any('TEMP B-TREE FOR DISTINCT' in row or 'TEMP B-TREE FOR ORDER BY' in row for row in plan):
+            problems.append((f'page_{page}_temporary_sort', plan))
+    assert not problems, problems
+
+
+@pytest.mark.parametrize('page_size', [100, 7])
+def test_actual_report_query_work_for_page_sizes(report_selection_sample, monkeypatch, page_size):
+    """固定范围完整读出 4200 个动作，分别记录每次真实查询的工作量。"""
+    import time
+
+    connection, state, _ = report_selection_sample
+    request = ReportScopeRequest(_boundary(connection), 0, _to_wm(connection), page_size)
+    repository = HistoryRepository(state)
+    with monkeypatch.context() as patch:
+        probe = _StatementProbe(repository, patch)
+        started = time.perf_counter()
+        with repository.open_report_selection(request) as selection:
+            actual = _read(selection, 'action', 2)
+        reading = time.perf_counter() - started
+    started = time.perf_counter()
+    assert actual == list(range(4, 4204))
+    records = probe.statements
+    assert [record['kind'] for record in records].count('candidate') == 1
+    pages = [record for record in records if record['kind'] == 'page']
+    assert len(pages) == (4200 + page_size - 1) // page_size
+    assert all(len(record['rows']) <= page_size + 1 for record in pages)
+    print('REPORT_PAGE_WORK', {'page_size': page_size, 'reading_s': reading,
+          'verification_s': time.perf_counter() - started, 'queries': len(records),
+          'candidate_vm': records[0]['vm_steps'],
+          'page_vm_total': sum(record['vm_steps'] for record in pages),
+          'page_vm_first': pages[0]['vm_steps'], 'page_vm_last': pages[-1]['vm_steps'],
+          'page_vm_min': min(record['vm_steps'] for record in pages),
+          'page_vm_max': max(record['vm_steps'] for record in pages),
+          'vm_granularity': 100}, flush=True)
 
 
 @pytest.mark.asyncio
