@@ -46,6 +46,7 @@ from camctl.persistence.repositories.capture import CaptureRepository, CheckDeci
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.transaction_fixtures import decorate_transaction_command
+from .task_cleanup import close_observer
 
 
 _NOW = 1_750_000_000_000_000
@@ -55,11 +56,12 @@ _PROCESSED_EVENT = 19
 
 
 @pytest.fixture
-def environment(tmp_path: Path):
+def environment(tmp_path: Path, request):
     """camera_record 动作与初始处理行；另备各类原片核对反例。"""
     target = tmp_path / "state.db"
     _create_valid_database(target)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+    request.addfinalizer(lambda: close_observer(owned))
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(

@@ -9,10 +9,8 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from contextlib import closing
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -23,9 +21,11 @@ from camctl.capture.input_copy import (
     obtain_recording_input,
 )
 from camctl.capture.media import SaveDisposition, SaveReceipt
+from camctl.capture.files import FileChecksumSave
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.contracts.values import new_operation_key
 from camctl.devices.read_session import ReadSession, SourceFile
-from camctl.host_files.models import BoundDirectories, FilePurpose
+from camctl.host_files.models import BoundDirectories
 from camctl.outputs.copy import (
     CompletionContext,
     CopyContext,
@@ -39,14 +39,12 @@ from camctl.outputs.copy import (
 from camctl.outputs.qualification import FileCandidate, OperationConfig
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from ..persistence.test_runtime import _create_valid_database
-from ..support.database import business_database
+from ..support.capture import capture_database
+from .media_data import _CONTENT, _NOW
+from .media_retry_fixtures import media_pipeline  # noqa: F401
 
 
-_NOW = 1_750_000_000_000_000
-_CONTENT = b"0123456789"
 _CONFIG = OperationConfig(max_attempts=3, timeout_s=Decimal("10"),
                           retry_interval_s=Decimal("0"))
 
@@ -151,103 +149,28 @@ class _Copies:
 
 
 @pytest_asyncio.fixture
-async def pipeline(tmp_path: Path):
-    """检查决定固定为需要检查的处理行、可靠原片与真实目录绑定。"""
-    target = tmp_path / "state.db"
-    _create_valid_database(target)
-    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)",
-        ("f" * 32,),
-    )
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
-    )
-    _seed_plan(connection, 1)
-    _seed_action(connection, 1, 1)
-    _seed_device_file(connection, 11)
-    _seed_processing(connection, 1, 1)
-    connection.commit()
-
-    staging = tmp_path / "staging"
-    for name in ("recording-inputs", "derived"):
-        (staging / name).mkdir(parents=True)
-    roots = BoundDirectories(staging=staging)
+async def pipeline(media_pipeline):
+    """由正式录像与来源事务准备原片，再通过真实复制端口取得输入。"""
+    owned, roots, source_id = media_pipeline
+    outcome = CaptureRepository().save_file_checksum(
+        FileChecksumSave(source_id, 2, _NOW + 1), new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     sessions = _Sessions(_CONTENT)
-    async with business_database(target) as database:
-        copies = _Copies(database, roots, _NOW + 10)
+    database = await capture_database(owned)
+    copies = _Copies(database, roots, _NOW + 10)
 
-        def context(**overrides):
-            values = dict(
-                action_id=1, processing_id=1, source_device_file_id=11,
-                target_extension="mp4", config=_CONFIG, segment_size=4,
-                staging=staging, copies=copies, sessions=sessions,
-                digest=_Digest(hashlib.sha256(_CONTENT).hexdigest()),
-                occurred_at=_NOW + 10,
-            )
-            values.update(overrides)
-            return InputContext(**values)
+    def context(**overrides):
+        values = dict(
+            action_id=1, processing_id=1, source_device_file_id=source_id,
+            target_extension="mp4", config=_CONFIG, segment_size=4,
+            staging=roots.staging, copies=copies, sessions=sessions,
+            digest=_Digest(hashlib.sha256(_CONTENT).hexdigest()),
+            occurred_at=_NOW + 10,
+        )
+        values.update(overrides)
+        return InputContext(**values)
 
-        try:
-            yield owned, roots, sessions, copies, context
-        finally:
-            owned.connection.close()
-
-
-def _seed_plan(connection, plan_id: int) -> None:
-    connection.execute(
-        "INSERT INTO plans (id, request_id, name, created_at, status,"
-        " created_event_id, last_event_id, change_count)"
-        " VALUES (?, ?, 'seed', ?, 1, 1, 1, 1)",
-        (plan_id, 4241 + plan_id, _NOW),
-    )
-
-
-def _seed_action(connection, action_id: int, plan_id: int) -> None:
-    connection.execute(
-        "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
-        " scheduled_at, group_name, input_fields_json, effective_params_json,"
-        " driver_id, max_delay_ms, execution_spec_json, status, execution_started,"
-        " cancel_requested, error_code, error_details_json, first_window_observed_at,"
-        " expiration_reason, source_resolution_state, resolved_source_plan_id,"
-        " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (?, ?, 0, 'rec', 2, 'cam-1', ?, NULL, '{}',"
-        " '{\"target_duration_s\": 60}', 'camctl-adb', 1000, '{}', 2, 1, 0, NULL,"
-        " NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
-        (action_id, plan_id, _NOW),
-    )
-
-
-def _seed_device_file(connection, file_id: int, *, checksum_support: int = 2) -> None:
-    connection.execute(
-        "INSERT INTO device_files (id, observer_action_id, source_action_id,"
-        " identity_key, locator_json, ownership_evidence_json, original_name,"
-        " media_type, role, original_device_file_id, pairing_evidence_json,"
-        " presence_state, completion_state, completion_evidence_json, size_bytes,"
-        " checksum_support, sha256, last_error_json, created_event_id,"
-        " last_event_id, change_count)"
-        " VALUES (?, 1, 1, ?, '{}', '{}', 'video.mp4', 'video/mp4', 2, NULL, NULL,"
-        " 2, 3, '{}', ?, ?, NULL, NULL, 1, 1, 1)",
-        (file_id, f"file-{file_id:04d}", len(_CONTENT), checksum_support),
-    )
-
-
-def _seed_processing(connection, processing_id: int, action_id: int) -> None:
-    connection.execute(
-        "INSERT INTO recording_processing (id, action_id, source_device_file_id,"
-        " check_state, check_decision, check_basis_json, media_json, repair_state,"
-        " repair_basis_json, repair_output_file_id, repair_error_json,"
-        " discard_state, discard_error_json)"
-        " VALUES (?, ?, 11, 1, 3, ?, '{}', 1, NULL, NULL, NULL, 1, NULL)",
-        (processing_id, action_id,
-         '{"reason": 2, "target_duration_ms": 60000}'),
-    )
+    yield owned, roots, sessions, copies, context
 
 
 def _row(owned, sql: str, *params):
@@ -303,14 +226,14 @@ async def test_verify_only_reentry_skips_session(pipeline) -> None:
     qualification = copies.repository.grant_file(
         FileCandidate(
             action_id=1, item_id=None, processing_id=1, output_id=None,
-            source_device_file_id=11, target_extension="mp4",
+            source_device_file_id=context().source_device_file_id, target_extension="mp4",
             delivery_extension=None, delivery_display_name=None,
             config=_CONFIG, occurred_at=_NOW + 10),
         new_operation_key(), owned)
     assert qualification.kind is DbOutcomeKind.COMPLETED, qualification.error
     copy_id = qualification.value.copy_id
     await copies.prepare(copy_id)
-    session = await sessions.open_session(11, 0)
+    session = await sessions.open_session(context().source_device_file_id, 0)
     try:
         while True:
             seg = await copies.transfer(copy_id, session, 4)
@@ -336,11 +259,9 @@ async def test_verify_only_reentry_skips_session(pipeline) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("media_pipeline", ["undecided"], indirect=True)
 async def test_undecided_check_waits(pipeline) -> None:
     owned, roots, sessions, copies, context = pipeline
-    owned.connection.execute(
-        "UPDATE recording_processing SET check_decision=1 WHERE id=1")
-    owned.connection.commit()
     step = await obtain_recording_input(context())
     assert step.phase is InputPhase.WAITING
     assert step.reason == "input_undecided"
@@ -350,11 +271,9 @@ async def test_undecided_check_waits(pipeline) -> None:
 
 @pytest.mark.asyncio
 async def test_future_schedule_waits(pipeline) -> None:
+    """输入时刻早于计划时刻时，资格入口仍须等待。"""
     owned, roots, sessions, copies, context = pipeline
-    owned.connection.execute(
-        "UPDATE actions SET scheduled_at=? WHERE id=1", (_NOW + 1_000_000,))
-    owned.connection.commit()
-    step = await obtain_recording_input(context())
+    step = await obtain_recording_input(context(occurred_at=_NOW - 999_990))
     assert step.phase is InputPhase.WAITING
     assert step.reason == "not_due"
     assert _input_row(owned) is None
@@ -421,9 +340,8 @@ async def test_owner_cancel_skips_progress_commit(pipeline) -> None:
     owned, roots, sessions, copies, context = pipeline
 
     def cancel_owner():
-        owned.connection.execute(
-            "UPDATE actions SET status=6, cancel_requested=1 WHERE id=1")
-        owned.connection.commit()
+        from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
+        _apply_public_cancel(owned, 1, _NOW + 10)
 
     sessions.on_open = cancel_owner
     step = await obtain_recording_input(context())

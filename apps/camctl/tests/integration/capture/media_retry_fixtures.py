@@ -1,5 +1,7 @@
 """媒体原申请验证使用真实受理、启动停止及文件归属历史。"""
 
+import sys
+
 from datetime import datetime, timezone
 from dataclasses import replace
 from decimal import Decimal
@@ -38,17 +40,18 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..bootstrap.test_media_assembly import _SessionDriver, _config
 from ..bootstrap.test_recording_stop import _RecordCatalog
 from .test_capture_contract import ResultsDouble, _entry
-from .test_input_copy import _CONTENT, _NOW
+from .media_data import _CONTENT, _EXECUTION_CONTENT, _NOW
 from .result_consumer_fixtures import _prepare_through_handler
 from ..support.capture import capture_database, capture_runtime
+from .task_cleanup import close_observer
 
 
 class _Catalog(_RecordCatalog):
     duration_s = Decimal("60")
 
 
-def original_recording_entry():
-    return replace(_entry("original-recording", size=len(_CONTENT)),
+def original_recording_entry(size=None):
+    return replace(_entry("original-recording", size=len(_CONTENT) if size is None else size),
         locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
 
 
@@ -66,24 +69,25 @@ _EVIDENCE = EvidenceRegistry((
 
 
 @pytest_asyncio.fixture
-async def media_pipeline(tmp_path, request):
+async def media_pipeline(tmp_path, request, capture_resources):
     mode = getattr(request, "param", None)
     osv = mode in ("osv", "osv-timing")
     timing = mode == "osv-timing"
+    content = _EXECUTION_CONTENT if mode == "execution" else _CONTENT
     name = "original.OSV" if osv else "original.mp4"
     locator = {"path": f"/DCIM/{name}"}
     cfg = _config(tmp_path)
     assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
     owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
-    database = await capture_database(owned)
-    repository, scheduling = CaptureRepository(), SchedulingRepository()
-    driver = _SessionDriver(_CONTENT)
-    registry = DriverRegistry((DriverEntry("camctl-adb", driver,
-        DriverDeclaration(control_supported=True, stop_supported=True, query_supported=False,
-            result_supported=False, read_supported=True, digest_supported=True, delete_supported=False),
-        _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
-    instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
+        database = await capture_database(owned)
+        repository, scheduling = CaptureRepository(), SchedulingRepository()
+        driver = _SessionDriver(content)
+        registry = DriverRegistry((DriverEntry("camctl-adb", driver,
+            DriverDeclaration(control_supported=True, stop_supported=True, query_supported=False,
+                result_supported=False, read_supported=True, digest_supported=True, delete_supported=False),
+            _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
+        instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         accepted = await accept_input(ParsedInput("media.json", {
             "request_id": "1", "created_at": instant, "name": "媒体原结果",
             "actions": [{"name": "录像", "type": "camera_record", "device_id": "cam-1",
@@ -98,17 +102,17 @@ async def media_pipeline(tmp_path, request):
         assert started.kind is DbOutcomeKind.COMPLETED, started.error
         wall, monotonic = [_NOW], [7_000_000_000]
         runtime = await capture_runtime(
-        database,
-        driver=driver,
-        evidence=_EVIDENCE,
-        devices=cfg.devices,
-        drivers=registry,
-        results=ResultsDouble({}),
-        staging=Path(cfg.paths.staging),
-        wait_config=lambda _action: None,
-        wall_us=lambda: wall[0],
-        monotonic_ns=lambda: monotonic[0],
-    )
+            database,
+            driver=driver,
+            evidence=_EVIDENCE,
+            devices=cfg.devices,
+            drivers=registry,
+            results=ResultsDouble({}),
+            staging=Path(cfg.paths.staging),
+            wait_config=lambda _action: None,
+            wall_us=lambda: wall[0],
+            monotonic_ns=lambda: monotonic[0],
+        )
         await capture_handler("camera_record")(1, runtime)
         wall[0] += 60_000_000
         monotonic[0] += 60_000_000_000
@@ -135,24 +139,30 @@ async def media_pipeline(tmp_path, request):
         source = repository.save_file_observation(FileObservationSave(observer_action_id, "original-recording", locator, _NOW, name, "video/mp4"), new_operation_key(), owned)
         assert source.kind is DbOutcomeKind.COMPLETED, source.error
         source_id = source.value.file_id
+        assert owned.connection.execute(
+            "SELECT identity_key FROM device_files WHERE id=?", (source_id,)
+        ).fetchone() == ('["cam-1","camctl-adb","original-recording"]',)
         # 仅复用替身的序列化，不建立 RESULTS 责任或执行运行时结果调用。
-        serialized = await ResultsDouble({1: (replace(original_recording_entry(), locator=locator, original_name=name,
+        serialized = await ResultsDouble({1: (replace(original_recording_entry(len(content)), locator=locator, original_name=name,
             format_id="osv" if osv else None),)}).list_round(
             AttemptTicket(1, "result", "1", "results/1", 1), timeout_s=Decimal("1"))
         original = observed_file(serialized.outcome.observations[0].data["entries"][0])
-        for save, command in (
+        commands = [
             (repository.save_file_presence, FilePresenceSave(source_id, 2, _NOW,
                 locator=locator)),
             (repository.save_file_ownership, OwnershipSave(source_id, 1, 1, 2,
                 {"task": "original-recording"}, _NOW)),
             (repository.save_file_completion, FileCompletionSave(source_id, 3, _NOW,
-                basis=1, observation=original.evidence, size_bytes=len(_CONTENT))),
+                basis=1, observation=original.evidence, size_bytes=len(content))),
             (repository.save_source_file, SourceFileSave(1, source_id, _NOW)),
             (repository.save_check_decision, CheckDecisionSave(1,
                 CheckDecisionChoice.NOT_NEEDED if timing else CheckDecisionChoice.REQUIRED,
                 CheckBasis(CheckReason.EXCESS_DURATION_CHECK if timing else CheckReason.INSUFFICIENT_TIMING,
                     60000, control_elapsed_ns=75_000_000_000 if timing else None), _NOW)),
-        ):
+        ]
+        if mode == "undecided":
+            commands.pop()
+        for save, command in commands:
             result = save(command, new_operation_key(), owned)
             assert result.kind is DbOutcomeKind.COMPLETED, result.error
         if timing:
@@ -167,7 +177,18 @@ async def media_pipeline(tmp_path, request):
         ).fetchone() == (2, 3)
         assert owned.connection.execute(
             "SELECT check_decision,check_state,repair_state,source_device_file_id"
-            " FROM recording_processing WHERE id=1").fetchone() == ((2, 1, 3, source_id) if timing else (3, 1, 1, source_id))
+            " FROM recording_processing WHERE id=1").fetchone() == ((2, 1, 3, source_id) if timing else
+                                             (1, 1, 1, source_id) if mode == "undecided" else
+                                             (3, 1, 1, source_id))
         yield owned, BoundDirectories(staging=Path(cfg.paths.staging)), source_id
     finally:
-        owned.connection.close()
+        active = sys.exception()
+        try:
+            try:
+                await capture_resources.close()
+            except BaseException as error:
+                if active is None:
+                    raise
+                active.add_note(f"拍摄资源收场失败：{error!r}")
+        finally:
+            close_observer(owned)

@@ -9,15 +9,17 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sys
 from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from camctl.capture.media_flow import CaptureProcessingSaves as _RepositorySaves
+from camctl.capture.input_copy import InputContext, InputPhase, obtain_recording_input
+from camctl.capture.files import FileChecksumSave
 from ..support.capture import capture_database
 
 from camctl.capture.media import (
@@ -54,13 +56,15 @@ from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
 from camctl.host_files.tasks import FileTaskExecutor, FileTaskId
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.session.supervision import Supervisor
 
-from ..persistence.test_runtime import _create_valid_database
+from .media_data import _EXECUTION_CONTENT, _NOW
+from .media_retry_fixtures import media_pipeline  # noqa: F401
+from .test_input_copy import _Copies, _Digest, _Sessions, _CONFIG
+
+pytestmark = pytest.mark.parametrize("media_pipeline", ["execution"], indirect=True)
 
 
-_NOW = 1_750_000_000_000_000
 _POLICY = MediaPolicy(repair_margin_s=Decimal("10"))
 
 _PROBE_BODY = """
@@ -110,106 +114,32 @@ def _tool(directory: Path, name: str, body: str) -> str:
     return str(launcher)
 
 
-@pytest.fixture
-def pipeline(tmp_path: Path):
-    """检查决定已固定为需要检查的处理行、输入副本与真实工具。"""
-    target = tmp_path / "state.db"
-    _create_valid_database(target)
-    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)",
-        ("f" * 32,),
-    )
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
-    )
-    _seed_plan(connection, 1)
-    _seed_action(connection, 1, 1)
-    _seed_device_file(connection, 11)
-    _seed_intermediate(
-        connection, 701, action=1, purpose=2, path="recording-inputs/701.mp4",
-        size=250, sha256="b" * 64)
-    _seed_processing(connection, 1, 1)
-    connection.commit()
-
-    staging = tmp_path / "staging"
-    (staging / "recording-inputs").mkdir(parents=True)
-    (staging / "derived").mkdir()
-    (staging / "recording-inputs" / "701.mp4").write_bytes(b"x" * 250)
+@pytest_asyncio.fixture
+async def pipeline(media_pipeline, tmp_path: Path):
+    """通过正式录像、来源及输入复制准备检查与修复使用的真实文件。"""
+    owned, roots, source_id = media_pipeline
+    outcome = CaptureRepository().save_file_checksum(
+        FileChecksumSave(source_id, 2, _NOW + 1), new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    content = _EXECUTION_CONTENT
+    copies = _Copies(await capture_database(owned), roots, _NOW + 10)
+    step = await obtain_recording_input(InputContext(
+        action_id=1, processing_id=1, source_device_file_id=source_id,
+        target_extension="mp4", config=_CONFIG, segment_size=1024,
+        staging=roots.staging, copies=copies, sessions=_Sessions(content),
+        digest=_Digest(hashlib.sha256(content).hexdigest()), occurred_at=_NOW + 10))
+    assert step.phase is InputPhase.INPUT_READY, step.error
+    assert (roots.staging / step.input_file.relative_path).read_bytes() == content
+    assert owned.connection.execute(
+        "SELECT size_bytes, sha256 FROM intermediate_files WHERE id=?",
+        (step.input_file.file_id,),
+    ).fetchone() == (len(content), hashlib.sha256(content).hexdigest())
     tools = _SubprocessTools(
-        staging,
+        roots.staging,
         probe_tool=_tool(tmp_path, "probe", _PROBE_BODY),
         repair_tool=_tool(tmp_path, "repair", _REPAIR_BODY),
     )
-    return owned, staging, tools
-
-
-def _seed_plan(connection, plan_id: int) -> None:
-    connection.execute(
-        "INSERT INTO plans (id, request_id, name, created_at, status,"
-        " created_event_id, last_event_id, change_count)"
-        " VALUES (?, ?, 'seed', ?, 1, 1, 1, 1)",
-        (plan_id, 4241 + plan_id, _NOW),
-    )
-
-
-def _seed_action(connection, action_id: int, plan_id: int) -> None:
-    connection.execute(
-        "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
-        " scheduled_at, group_name, input_fields_json, effective_params_json,"
-        " driver_id, max_delay_ms, execution_spec_json, status, execution_started,"
-        " cancel_requested, error_code, error_details_json, first_window_observed_at,"
-        " expiration_reason, source_resolution_state, resolved_source_plan_id,"
-        " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (?, ?, 0, 'rec', 2, 'cam-1', ?, NULL, '{}',"
-        " '{\"target_duration_s\": 60}', 'camctl-adb', 1000, '{}', 2, 1, 0, NULL,"
-        " NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
-        (action_id, plan_id, _NOW),
-    )
-
-
-def _seed_device_file(connection, file_id: int) -> None:
-    connection.execute(
-        "INSERT INTO device_files (id, observer_action_id, source_action_id,"
-        " identity_key, locator_json, ownership_evidence_json, original_name,"
-        " media_type, role, original_device_file_id, pairing_evidence_json,"
-        " presence_state, completion_state, completion_evidence_json, size_bytes,"
-        " checksum_support, sha256, last_error_json, created_event_id,"
-        " last_event_id, change_count)"
-        " VALUES (?, 1, 1, ?, '{}', '{}', 'video.mp4', 'video/mp4', 2, NULL, NULL,"
-        " 2, 3, '{}', 250, 3, NULL, NULL, 1, 1, 1)",
-        (file_id, f"file-{file_id:04d}"),
-    )
-
-
-def _seed_intermediate(connection, file_id: int, *, action: int, purpose: int,
-                       path: str, size: int | None, sha256: str | None) -> None:
-    connection.execute(
-        "INSERT INTO intermediate_files (id, owner_action_id, owner_delivery_id,"
-        " purpose, relative_path, retention_state, cleanup_state, size_bytes,"
-        " sha256, created_event_id, last_event_id, change_count)"
-        " VALUES (?, ?, NULL, ?, ?, 1, 1, ?, ?, 1, 1, 1)",
-        (file_id, action, purpose, path, size, sha256),
-    )
-
-
-def _seed_processing(connection, processing_id: int, action_id: int) -> None:
-    """检查决定固定为需要检查：目标 60 秒，修复决定未判定。"""
-    connection.execute(
-        "INSERT INTO recording_processing (id, action_id, source_device_file_id,"
-        " check_state, check_decision, check_basis_json, media_json, repair_state,"
-        " repair_basis_json, repair_output_file_id, repair_error_json,"
-        " discard_state, discard_error_json)"
-        " VALUES (?, ?, 11, 1, 3, ?, '{}', 1, NULL, NULL, NULL, 1, NULL)",
-        (processing_id, action_id,
-         '{"reason": 2, "target_duration_ms": 60000}'),
-    )
+    return owned, roots.staging, tools
 
 
 def _row(owned, sql: str, *params):
@@ -272,9 +202,9 @@ def _registered_repair_output(owned, action_id: int) -> int | None:
     return rows[0][0]
 
 
-def _input_ref(staging: Path) -> FileRef:
-    return FileRef(701, FilePurpose.RECORDING_INPUT,
-                   "recording-inputs/701.mp4", staging)
+def _input_ref(owned, staging: Path) -> FileRef:
+    file_id, path = _row(owned, "SELECT id, relative_path FROM intermediate_files WHERE purpose=2")
+    return FileRef(file_id, FilePurpose.RECORDING_INPUT, path, staging)
 
 
 
@@ -314,6 +244,7 @@ def _events(owned, event_type: int, reason: int) -> int:
     return _row(
         owned,
         "SELECT COUNT(*) FROM history_events WHERE event_type=?"
+        " AND id > (SELECT last_event_id FROM intermediate_files WHERE purpose=2)"
         " AND json_extract(body_json, '$.reason')=?",
         event_type, reason)[0]
 
@@ -334,7 +265,7 @@ async def test_check_pipeline_completes_with_decision(pipeline) -> None:
     """决定需要检查后：运行阶段、完成观察与修复决定按序共同保存。"""
     owned, staging, tools = pipeline
     step = await execute_check(CheckContext(
-        processing=_status(owned), input_file=_input_ref(staging),
+        processing=_status(owned), input_file=_input_ref(owned, staging),
         policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.CHECK_COMPLETED, step.error
@@ -365,7 +296,7 @@ async def test_check_pipeline_tool_failure_is_terminal(pipeline, tmp_path) -> No
     tools.probe_request = ProbeRequest(
         ffprobe=_tool(tmp_path, "probe-fail", _FAILING_PROBE_BODY))
     step = await execute_check(CheckContext(
-        processing=_status(owned), input_file=_input_ref(staging),
+        processing=_status(owned), input_file=_input_ref(owned, staging),
         policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.CHECK_TERMINAL
@@ -400,7 +331,7 @@ async def test_check_pipeline_audio_only_saves_unconfirmed(
             'print(json.dumps({"streams": [{"codec_type": "audio"}],'
             ' "format": {"duration": "75.125"}}))\n'))
     step = await execute_check(CheckContext(
-        processing=_status(owned), input_file=_input_ref(staging),
+        processing=_status(owned), input_file=_input_ref(owned, staging),
         policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.CHECK_TERMINAL
@@ -432,7 +363,7 @@ async def test_check_recovery_fixes_decision_from_saved_media(pipeline) -> None:
         outcome = repository.save_check_result(command, new_operation_key(), owned)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     step = await execute_check(CheckContext(
-        processing=_status(owned), input_file=_input_ref(staging),
+        processing=_status(owned), input_file=_input_ref(owned, staging),
         policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.FINISHED_DECISION_SAVED, step.error
@@ -474,17 +405,17 @@ async def test_repair_pipeline_registers_output_and_succeeds(pipeline) -> None:
     owned, staging, tools = pipeline
     await _seed_pending_repair(owned)
     step = await execute_repair(RepairContext(
-        processing=_status(owned), input_file=_input_ref(staging),
+        processing=_status(owned), input_file=_input_ref(owned, staging),
         extension="mp4", tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 20))
     assert step.phase is RepairExecutionPhase.SUCCEEDED, step.error
     output_id = _row(
         owned, "SELECT repair_output_file_id FROM recording_processing"
         " WHERE id=1")[0]
-    assert output_id == 702
-    output_path = staging / "derived" / "702.mp4"
+    assert output_id != _input_ref(owned, staging).file_id
+    output_path = staging / step.output_file.relative_path
     content = output_path.read_bytes()
-    assert content == b"repaired:" + b"x" * 250
+    assert content == b"repaired:" + _EXECUTION_CONTENT
     row = _row(
         owned,
         "SELECT purpose, owner_action_id, retention_state, cleanup_state,"
@@ -508,9 +439,9 @@ async def test_repair_pipeline_resumes_after_start(pipeline) -> None:
     started = repository.start_repair_output(
         RepairStart(1, "mp4", _NOW + 10), new_operation_key(), owned)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    assert started.value.file_id == 702
+    assert started.value.file_id != _input_ref(owned, staging).file_id
     step = await execute_repair(RepairContext(
-        processing=_status(owned), input_file=_input_ref(staging),
+        processing=_status(owned), input_file=_input_ref(owned, staging),
         extension="mp4", tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 20))
     assert step.phase is RepairExecutionPhase.SUCCEEDED, step.error
@@ -530,7 +461,7 @@ async def test_repair_pipeline_failure_saves_error(pipeline, tmp_path) -> None:
         ffmpeg=_tool(tmp_path, "repair-fail", _REPAIR_BODY),
         output_args=("--fail",))
     step = await execute_repair(RepairContext(
-        processing=_status(owned), input_file=_input_ref(staging),
+        processing=_status(owned), input_file=_input_ref(owned, staging),
         extension="mp4", tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 20))
     assert step.phase is RepairExecutionPhase.FAILED_SAVED, step.error
@@ -561,13 +492,15 @@ async def test_start_repair_output_registers_file_and_running(pipeline) -> None:
         RepairStart(1, "mp4", _NOW + 10), key, owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     assert outcome.value.disposition is ProcessingDisposition.SAVED
-    assert (outcome.value.file_id, outcome.value.relative_path) == (
-        702, "derived/702.mp4")
+    output_id = outcome.value.file_id
+    output_path = f"derived/{output_id}.mp4"
+    assert output_id != _input_ref(owned, staging).file_id
+    assert outcome.value.relative_path == output_path
     row = _row(
         owned,
         "SELECT purpose, owner_action_id, relative_path, retention_state,"
-        " cleanup_state, size_bytes, sha256 FROM intermediate_files WHERE id=702")
-    assert row == (4, 1, "derived/702.mp4", 1, 1, None, None)
+        " cleanup_state, size_bytes, sha256 FROM intermediate_files WHERE id=?", output_id)
+    assert row == (4, 1, output_path, 1, 1, None, None)
     assert _row(
         owned, "SELECT repair_state FROM recording_processing WHERE id=1")[0] == 4
     assert _event_types(owned, _txn_of(owned, key)) == [
@@ -578,7 +511,7 @@ async def test_start_repair_output_registers_file_and_running(pipeline) -> None:
     assert reuse.kind is DbOutcomeKind.COMPLETED, reuse.error
     assert reuse.value.disposition is ProcessingDisposition.ALREADY
     assert (reuse.value.file_id, reuse.value.relative_path) == (
-        702, "derived/702.mp4")
+        output_id, output_path)
 
 
 def _txn_of(owned, key) -> int:
@@ -607,11 +540,12 @@ async def test_complete_repair_output_saves_bytes_and_success(pipeline) -> None:
     started = repository.start_repair_output(
         RepairStart(1, "mp4", _NOW + 10), new_operation_key(), owned)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    content = b"repaired:" + b"x" * 250
-    (staging / "derived" / "702.mp4").write_bytes(content)
+    content = b"repaired:" + _EXECUTION_CONTENT
+    output_id = started.value.file_id
+    (staging / started.value.relative_path).write_bytes(content)
     key = new_operation_key()
     outcome = repository.complete_repair_output(
-        RepairSuccess(1, 702, len(content),
+        RepairSuccess(1, output_id, len(content),
                       hashlib.sha256(content).hexdigest(), _NOW + 20),
         key, owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
@@ -619,12 +553,12 @@ async def test_complete_repair_output_saves_bytes_and_success(pipeline) -> None:
         owned,
         "SELECT repair_state, repair_output_file_id, size_bytes, sha256"
         " FROM recording_processing, intermediate_files"
-        " WHERE recording_processing.id=1 AND intermediate_files.id=702")
-    assert row == (5, 702, len(content), hashlib.sha256(content).hexdigest())
+        " WHERE recording_processing.id=1 AND intermediate_files.id=?", output_id)
+    assert row == (5, output_id, len(content), hashlib.sha256(content).hexdigest())
     assert _event_types(owned, _txn_of(owned, key)) == [(26, 2), (19, 2)]
 
     reuse = repository.complete_repair_output(
-        RepairSuccess(1, 702, len(content),
+        RepairSuccess(1, output_id, len(content),
                       hashlib.sha256(content).hexdigest(), _NOW + 20),
         key, owned)
     assert reuse.kind is DbOutcomeKind.COMPLETED, reuse.error
@@ -642,7 +576,7 @@ async def test_complete_repair_output_rejects_mismatched_file(pipeline) -> None:
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
     before = tuple(owned.connection.iterdump())
     outcome = repository.complete_repair_output(
-        RepairSuccess(1, 701, 250, "b" * 64, _NOW + 20),
+        RepairSuccess(1, _input_ref(owned, staging).file_id, len(_EXECUTION_CONTENT), hashlib.sha256(_EXECUTION_CONTENT).hexdigest(), _NOW + 20),
         new_operation_key(), owned)
     assert outcome.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(outcome.error, ConsistencyError)
@@ -657,7 +591,7 @@ async def test_complete_repair_output_rejects_without_start(pipeline) -> None:
     repository = CaptureRepository()
     before = tuple(owned.connection.iterdump())
     outcome = repository.complete_repair_output(
-        RepairSuccess(1, 702, 250, "b" * 64, _NOW + 20),
+        RepairSuccess(1, _input_ref(owned, staging).file_id + 1, len(_EXECUTION_CONTENT), hashlib.sha256(_EXECUTION_CONTENT).hexdigest(), _NOW + 20),
         new_operation_key(), owned)
     assert outcome.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(outcome.error, ConsistencyError)

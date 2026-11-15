@@ -15,9 +15,11 @@ from camctl.host_files.models import FileObservation, FileObservationKind
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.session.supervision import Supervisor
 from ..support.capture import capture_database
+from ..support.task_wait import wait_for_signal, settle_tasks
 
 from .test_media_execution import (
-    _NOW, _POLICY, _RepositorySaves, _input_ref, _seed_pending_repair, _status,
+    _NOW, _POLICY, _RepositorySaves, _input_ref, _registered_repair_output,
+    _seed_pending_repair, _status,
     pipeline,  # noqa: F401
 )
 from .media_retry_fixtures import media_pipeline  # noqa: F401
@@ -79,6 +81,7 @@ class _SaveBoundary(_RepositorySaves):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("media_pipeline", ["execution"], indirect=True)
 @pytest.mark.parametrize("operation", ["check", "repair"])
 @pytest.mark.parametrize("save_failed", [False, True])
 async def test_canceled_media_keeps_actual_result_and_original_save(pipeline, operation, save_failed):
@@ -89,16 +92,20 @@ async def test_canceled_media_keeps_actual_result_and_original_save(pipeline, op
     tools = _PausedTools(executor)
     saves = _SaveBoundary(await capture_database(owned), save_failed)
     if operation == "check":
-        call = execute_check(CheckContext(_status(owned), _input_ref(staging), _POLICY,
+        call = execute_check(CheckContext(_status(owned), _input_ref(owned, staging), _POLICY,
             tools, saves, _NOW + 30, executor=executor))
-        expected_files = (701,)
+        expected_files = (_input_ref(owned, staging).file_id,)
     else:
-        call = execute_repair(RepairContext(_status(owned), _input_ref(staging), "mp4",
+        call = execute_repair(RepairContext(_status(owned), _input_ref(owned, staging), "mp4",
             tools, saves, _NOW + 30, executor=executor))
-        expected_files = (701, 702)
+        expected_files = None
     running = asyncio.create_task(call)
     try:
-        await asyncio.wait_for(tools.started.wait(), 1)
+        await wait_for_signal(tools.started, running, timeout=1)
+        if operation == "repair":
+            output_id = _registered_repair_output(owned, 1)
+            assert output_id is not None
+            expected_files = (_input_ref(owned, staging).file_id, output_id)
         assert executor.unfinished_files() == expected_files
         running.cancel()
         for _ in range(5):
@@ -107,6 +114,7 @@ async def test_canceled_media_keeps_actual_result_and_original_save(pipeline, op
         assert executor.unfinished_files() == expected_files
         assert owned.connection.execute("SELECT COUNT(*) FROM recording_processing").fetchone() == (1,)
         tools.release.set()
+        await settle_tasks(running, timeout=1)
         with pytest.raises(asyncio.CancelledError) as canceled:
             await running
         assert len(saves.actual_results) == 1
@@ -119,7 +127,7 @@ async def test_canceled_media_keeps_actual_result_and_original_save(pipeline, op
             assert owned.connection.execute("SELECT repair_state FROM recording_processing").fetchone() == (6,)
     finally:
         tools.release.set()
-        await asyncio.gather(running, return_exceptions=True)
+        await settle_tasks(running, timeout=1)
 
 
 @pytest.mark.asyncio

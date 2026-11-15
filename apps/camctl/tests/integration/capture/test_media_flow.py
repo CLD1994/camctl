@@ -27,6 +27,7 @@ from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.outputs.copy import SourceDigest, SourceDigestReader
 
 from ..support.capture import capture_database
+from ..support.task_wait import settle_tasks
 from .test_input_copy import _CONTENT, pipeline  # noqa: F401  环境夹具
 from .media_retry_fixtures import media_pipeline  # noqa: F401
 from ..support.capture_media_cases import MediaCase, ScriptTools, media_cases  # noqa: F401
@@ -49,7 +50,7 @@ class _Stream:
         self._position += len(chunk)
         return chunk
 
-    def stop(self) -> None:
+    def cancel(self) -> None:
         self._stopped = True
 
     def close(self) -> None:
@@ -201,12 +202,12 @@ class TestRunRecordingMedia:
             assert decision[0] == 4
             assert tools.calls == ["probe", "repair"]
             (tools.directory / "release-repair").touch()
-            step = await asyncio.wait_for(task, 5)
+            step = await asyncio.wait_for(asyncio.shield(task), 5)
             assert step.phase is RepairExecutionPhase.SUCCEEDED, step
             assert (roots.staging / step.output_file.relative_path).read_bytes() == tools.content
         finally:
             (tools.directory / "release-repair").touch()
-            await asyncio.gather(task, return_exceptions=True)
+            await settle_tasks(task, timeout=5)
 
     async def test_status_loader_reads_saved_facts(self, pipeline):
         owned = pipeline[0]
@@ -241,7 +242,7 @@ class _FailingStream:
     def read(self, limit: int) -> bytes:
         raise RuntimeError("传输中断")
 
-    def stop(self) -> None:
+    def cancel(self) -> None:
         return None
 
     def close(self) -> None:

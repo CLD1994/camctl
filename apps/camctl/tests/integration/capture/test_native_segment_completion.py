@@ -35,6 +35,7 @@ from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
 from ..persistence.test_segment_file_pairing import _entry
 from ..support.native_capture_cases import native_world, request_cancel
 from ..support.result_cases import ResultCase
+from ..support.task_wait import wait_for_signal, settle_tasks
 from .result_consumer_fixtures import result_driver
 
 pytestmark = pytest.mark.asyncio
@@ -165,11 +166,13 @@ async def test_native_recovery_before_first_result_page_keeps_result_unknown(tmp
         case.clock.monotonic = 6_200_000_000
         task = asyncio.create_task(capture_handler(handler)(aid, runtime))
         try:
-            await asyncio.wait_for(entered.wait(), 2)
+            await wait_for_signal(entered, task, timeout=2)
         finally:
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
+            if not task.done():
+                task.cancel()
+            await settle_tasks(task, timeout=2)
+        with pytest.raises(asyncio.CancelledError):
+            await task
         horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
         resumed = await case.reopen(owned, cold=True, assembly_options={
             "recovery_boundary": RecoveryBoundary.HOST_LOCAL_SETTLED,
