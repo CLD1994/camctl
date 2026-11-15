@@ -10,10 +10,25 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
+
+from camctl.capture.models import ActivityObservationSave, WaitCompletedSave
+from camctl.capture.timelapse import WaitKind, WaitPlan
+from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
+from camctl.operations.attempts import AttemptConfig, AttemptFinish, RunFinish, RunOutcome
+from camctl.operations.models import (
+    AttemptStatus, CallOutcome, EffectState, EvidenceValue,
+    Settlement, SettlementBasis,
+)
+from camctl.operations.validation import validate_outcome
+from camctl.persistence.repositories.timelapse import ScheduleWait, TimelapseRepository
+from camctl.persistence.repositories.scheduling import GrantOutcome, GrantRequest, SchedulingRepository
+from camctl.scheduling.rules import LaunchWindow
 
 from camctl.capture.files import (
     FileCompletionSave,
@@ -240,16 +255,39 @@ class TestCreateObservation:
     def test_write_failure_rolls_back_and_retry_succeeds(self, tmp_path: Path):
         owned = _environment(tmp_path)
         try:
-            from dataclasses import replace
-            from ..operations.test_result_reuse import _FaultConnection
             repository = CaptureRepository()
             key = new_operation_key()
-            failing = replace(
-                owned, connection=_FaultConnection(owned.connection, "INSERT INTO device_files"))
-            outcome = repository.save_file_observation(_observation(), key, failing)
+            command = _observation()
+            before = tuple(owned.connection.iterdump())
+            denied = []
+
+            def authorize(action, table, _column, _database, _source):
+                if action == sqlite3.SQLITE_INSERT and table == "device_files":
+                    denied.append(table)
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            owned.connection.set_authorizer(authorize)
+            try:
+                outcome = repository.save_file_observation(command, key, owned)
+            finally:
+                owned.connection.set_authorizer(None)
+            assert denied == ["device_files"]
             assert outcome.kind is DbOutcomeKind.ROLLED_BACK, outcome.error
-            retry = repository.save_file_observation(_observation(), key, owned)
+            assert isinstance(outcome.error, sqlite3.DatabaseError)
+            assert outcome.error.sqlite_errorcode == sqlite3.SQLITE_AUTH
+            assert not owned.connection.in_transaction
+            assert tuple(owned.connection.iterdump()) == before
+            retry = repository.save_file_observation(command, key, owned)
             assert retry.kind is DbOutcomeKind.COMPLETED, retry.error
+            assert retry.value.created is True
+            assert owned.connection.execute(
+                "SELECT id FROM device_files").fetchall() == [(retry.value.file_id,)]
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM history_events WHERE event_type = 17").fetchone() == (1,)
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM history_transactions WHERE operation_key = ?", (key,)
+            ).fetchone() == (1,)
         finally:
             owned.connection.close()
 
@@ -447,43 +485,92 @@ class TestCompletionFacts:
     def test_time_and_outputs_references_saved_wait_completion(self, tmp_path: Path):
         owned = _environment(tmp_path)
         try:
+            # 按存储格式准备旧定义，然后由正式仓储保存启动意图、发送与等待。
+            spec = {"duration_based": True, "wait_after_send": True,
+                    "end_control": 1, "stop_supported": True, "start_return_meaning": 1,
+                    "completion_mode": 2, "target_duration_ms": 600000,
+                    "result_wait_margin_ms": 0, "video_result_mode": "single_file"}
+            owned.connection.execute(
+                "UPDATE actions SET type = 3, execution_spec_json = ? WHERE id = 11",
+                (json.dumps(spec),))
             owned.connection.execute(
                 "INSERT INTO device_activities (id, action_id, task_key,"
                 " state_query_supported, stop_supported, safe_repeat_stop,"
                 " start_return_meaning, completion_mode, ownership_mode,"
                 " output_scope_json, baseline_state, dispatch_state,"
-                " activity_state, occupancy_state, result_set_state,"
-                " wait_completed_event_id)"
-                " VALUES (11, 11, ?, 1, 1, 1, 1, 2, 1, '{}', 1, 2, 2, 1, 1, 1)",
-                ("a" * 32,),
-            )
+                " activity_state, occupancy_state, result_set_state, completion_basis)"
+                " VALUES (11, 11, ?, 1, 1, 1, 1, 2, 1, '{}', 1, 1, 1, 1, 1, 1)",
+                ("a" * 32,))
             owned.connection.commit()
+            granted = SchedulingRepository().grant_start(
+                GrantRequest("cam-1", 11, LaunchWindow(_NOW, _NOW + 1_000_000),
+                             _NOW, AttemptConfig(1, Decimal("30")), _NOW),
+                new_operation_key(), owned)
+            assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+            assert granted.value.outcome is GrantOutcome.GRANTED
+            ticket = granted.value.ticket
+            contracts = EvidenceRegistry((
+                EvidenceContract("operation_returned", 1, "control", frozenset()),
+                EvidenceContract("timelapse_sent", 1, "control", frozenset({"activity_id"}),
+                                 identity_field="activity_id"),
+            ))
+            result = CallOutcome(
+                status=AttemptStatus.SUCCEEDED, error=None, effect=EffectState.CONFIRMED,
+                settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("operation_returned", 1, {})),
+                observations=(DeviceObservation("timelapse_sent", 1, {"activity_id": "11"}),))
+            sent = CaptureRepository().finish_start_result(
+                AttemptFinish(ticket, validate_outcome(ticket, result, contracts), _NOW,
+                              run_finish=RunFinish(RunOutcome.SUCCEEDED)),
+                ActivityObservationSave(11, _NOW, sent_at=_NOW), new_operation_key(), owned)
+            assert sent.kind is DbOutcomeKind.COMPLETED, sent.error
+            due = _NOW + 600_000_000
+            waits = TimelapseRepository()
+            scheduled = waits.schedule_wait(
+                ScheduleWait(11, WaitPlan(WaitKind.WAIT_THEN_CHECK, due), 0, 0, _NOW),
+                new_operation_key(), owned)
+            assert scheduled.kind is DbOutcomeKind.COMPLETED, scheduled.error
+            completed = waits.complete_wait(WaitCompletedSave(11, due), new_operation_key(), owned)
+            assert completed.kind is DbOutcomeKind.COMPLETED, completed.error
+            wait_id = completed.value.event_id
+            assert owned.connection.execute(
+                "SELECT sent_at, expected_check_at, wait_completed_event_id"
+                " FROM device_activities WHERE id = 11").fetchone() == (_NOW, due, wait_id)
+            assert owned.connection.execute(
+                "SELECT event_type, json_extract(body_json, '$.reason')"
+                " FROM history_events WHERE id = ?", (wait_id,)).fetchone() == (15, 3)
             repository = CaptureRepository()
-            file_id = _created_file(owned, repository)
+            file_id = _created_file(owned, repository, replace(_observation(), occurred_at=due))
             good = repository.save_file_completion(
                 FileCompletionSave(
-                    file_id=file_id, state=3, occurred_at=_NOW, basis=2,
+                    file_id=file_id, state=3, occurred_at=due, basis=2,
                     observation={"waited": True}, size_bytes=10,
-                    activity_id=11, wait_completed_event_id=1,
+                    activity_id=11, wait_completed_event_id=wait_id,
                 ), new_operation_key(), owned)
             assert good.kind is DbOutcomeKind.COMPLETED, good.error
-            other_id = _created_file(owned, repository, _observation(
-                identity="task-a/second.mp4", locator={"path": "/DCIM/second.mp4"}))
+            other_id = _created_file(owned, repository, replace(_observation(
+                identity="task-a/second.mp4", locator={"path": "/DCIM/second.mp4"}),
+                occurred_at=due))
+            before = tuple(owned.connection.iterdump())
             wrong_reference = repository.save_file_completion(
                 FileCompletionSave(
-                    file_id=other_id, state=3, occurred_at=_NOW, basis=2,
+                    file_id=other_id, state=3, occurred_at=due, basis=2,
                     observation={"waited": True}, size_bytes=11,
-                    activity_id=11, wait_completed_event_id=2,
+                    activity_id=11, wait_completed_event_id=1,
                 ), new_operation_key(), owned)
             assert wrong_reference.kind is DbOutcomeKind.ROLLED_BACK, wrong_reference.error
             assert isinstance(wrong_reference.error, ConsistencyError)
+            assert not owned.connection.in_transaction
+            assert tuple(owned.connection.iterdump()) == before
             no_activity = repository.save_file_completion(
                 FileCompletionSave(
-                    file_id=other_id, state=3, occurred_at=_NOW, basis=2,
+                    file_id=other_id, state=3, occurred_at=due, basis=2,
                     observation={"waited": True}, size_bytes=11,
-                    activity_id=99, wait_completed_event_id=1,
+                    activity_id=99, wait_completed_event_id=wait_id,
                 ), new_operation_key(), owned)
             assert no_activity.kind is DbOutcomeKind.ROLLED_BACK, no_activity.error
+            assert isinstance(no_activity.error, ConsistencyError)
+            assert not owned.connection.in_transaction
+            assert tuple(owned.connection.iterdump()) == before
         finally:
             owned.connection.close()
 

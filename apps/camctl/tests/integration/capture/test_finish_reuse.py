@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from camctl.capture.media import RecordingFailure
@@ -26,6 +24,13 @@ from camctl.outputs.catalog import (
 )
 from .test_recording_finish import _environment, _finish, _original_draft, _NOW
 
+
+
+@pytest.fixture
+def owned(tmp_path, request):
+    owned = _environment(tmp_path)
+    request.addfinalizer(owned.connection.close)
+    return owned
 
 
 def _repository() -> CaptureRepository:
@@ -61,8 +66,7 @@ def _assert_completed(outcome):
     return outcome.value
 
 
-def test_same_key_resend_recovers_first_result(tmp_path: Path) -> None:
-    owned = _environment(tmp_path)
+def test_same_key_resend_recovers_first_result(owned) -> None:
     repository = _repository()
     key = new_operation_key()
     first = _assert_completed(repository.finish_capture(_finish(), key, owned))
@@ -79,8 +83,7 @@ def test_same_key_resend_recovers_first_result(tmp_path: Path) -> None:
     assert tuple(owned.connection.iterdump()) == dump_before
 
 
-def test_same_key_resend_rejects_different_moment(tmp_path: Path) -> None:
-    owned = _environment(tmp_path)
+def test_same_key_resend_rejects_different_moment(owned) -> None:
     repository = _repository()
     key = new_operation_key()
     _assert_completed(repository.finish_capture(_finish(), key, owned))
@@ -93,8 +96,7 @@ def test_same_key_resend_rejects_different_moment(tmp_path: Path) -> None:
     assert isinstance(outcome.error, TransactionError)
 
 
-def test_same_key_resend_rejects_different_outputs(tmp_path: Path) -> None:
-    owned = _environment(tmp_path)
+def test_same_key_resend_rejects_different_outputs(owned) -> None:
     repository = _repository()
     key = new_operation_key()
     _assert_completed(repository.finish_capture(_finish(), key, owned))
@@ -103,9 +105,8 @@ def test_same_key_resend_rejects_different_outputs(tmp_path: Path) -> None:
     assert isinstance(outcome.error, TransactionError)
 
 
-def test_same_key_resend_rejects_branch_mismatch(tmp_path: Path) -> None:
+def test_same_key_resend_rejects_branch_mismatch(owned) -> None:
     """首次保存成功终态：同一操作键不能改按失败终态重送。"""
-    owned = _environment(tmp_path)
     repository = _repository()
     key = new_operation_key()
     _assert_completed(repository.finish_capture(_finish(), key, owned))
@@ -115,9 +116,8 @@ def test_same_key_resend_rejects_branch_mismatch(tmp_path: Path) -> None:
 
 
 def test_new_key_after_terminal_recovers_without_reregistering(
-        tmp_path: Path) -> None:
+        owned) -> None:
     """提交未知后的新键：动作已终态时不重新登记，恢复既有身份。"""
-    owned = _environment(tmp_path)
     repository = _repository()
     first = _assert_completed(
         repository.finish_capture(_finish(), new_operation_key(), owned))
@@ -133,8 +133,7 @@ def test_new_key_after_terminal_recovers_without_reregistering(
 
 
 def test_new_key_after_terminal_rejects_appended_outputs(
-        tmp_path: Path) -> None:
-    owned = _environment(tmp_path)
+        owned) -> None:
     repository = _repository()
     _assert_completed(
         repository.finish_capture(_finish(), new_operation_key(), owned))
@@ -145,8 +144,7 @@ def test_new_key_after_terminal_rejects_appended_outputs(
     assert tuple(owned.connection.iterdump()) == dump_before
 
 
-def test_failure_finish_resend_and_recovery(tmp_path: Path) -> None:
-    owned = _environment(tmp_path)
+def test_failure_finish_resend_and_recovery(owned) -> None:
     repository = _repository()
     key = new_operation_key()
     first = _assert_completed(
@@ -166,9 +164,8 @@ def test_failure_finish_resend_and_recovery(tmp_path: Path) -> None:
 
 
 def test_same_key_resend_rejects_different_failure_details(
-        tmp_path: Path) -> None:
+        owned) -> None:
     """同一错误码但 details 不同：首次事实权威，重送按身份冲突拒绝。"""
-    owned = _environment(tmp_path)
     repository = _repository()
     key = new_operation_key()
     _assert_completed(repository.finish_capture(
@@ -183,9 +180,8 @@ def test_same_key_resend_rejects_different_failure_details(
     assert isinstance(outcome.error, TransactionError)
 
 
-def test_batch_preview_registration_resend_recovers(tmp_path: Path) -> None:
+def test_batch_preview_registration_resend_recovers(owned) -> None:
     """同批配对登记的重送恢复：原片与预览身份按输入次序恢复。"""
-    owned = _environment(tmp_path)
     owned.connection.execute(
         "UPDATE device_files SET original_device_file_id=11,"
         " pairing_evidence_json='{}' WHERE id=12")
@@ -210,9 +206,8 @@ def test_batch_preview_registration_resend_recovers(tmp_path: Path) -> None:
     assert again.output_ids == first.output_ids
 
 
-def test_failure_recovery_rejects_different_error(tmp_path: Path) -> None:
+def test_failure_recovery_rejects_different_error(owned) -> None:
     """已保存失败终态：新键按其他错误码或成功分支重送被拒绝。"""
-    owned = _environment(tmp_path)
     repository = _repository()
     _assert_completed(
         repository.finish_capture(

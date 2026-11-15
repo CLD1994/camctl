@@ -97,12 +97,13 @@ class _Cleaning:
 
 
 @pytest.fixture
-def environment(tmp_path: Path):
+def environment(tmp_path: Path, request):
     """已取消的录像动作：处理行挂起收场，两个动作归属中间文件在位。"""
     target = tmp_path / "state.db"
     _create_valid_database(target)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
     connection = owned.connection
+    request.addfinalizer(connection.close)
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(
         "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
@@ -139,11 +140,8 @@ async def discard_environment(environment):
     owned, roots = environment
     with closing(owned.connection.execute("PRAGMA database_list")) as cursor:
         path = Path(next(row[2] for row in cursor if row[1] == "main"))
-    try:
-        async with business_database(path) as database:
-            yield owned, roots, database
-    finally:
-        owned.connection.close()
+    async with business_database(path) as database:
+        yield owned, roots, database
 
 
 def _seed_plan(connection, plan_id: int) -> None:
