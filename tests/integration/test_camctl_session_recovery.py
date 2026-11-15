@@ -15,8 +15,11 @@ import json
 import shutil
 import sqlite3
 import time
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 from camctl_fixtures import (
     CliResult,
@@ -31,6 +34,27 @@ from camctl_fixtures import (
 
 #: 设备侧视频内容；长度与 video_file 条目的 size_bytes 一致。
 _CLIP_CONTENT = ("clip-payload-" * 700)[:8192]
+
+
+@pytest.fixture
+def start_owned_camctl():
+    """从创建成功起负责本次 CLI 及其输出管道。"""
+    def close_process(process):
+        try:
+            if process.poll() is None:
+                terminate_process_tree(process)
+        finally:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+
+    with ExitStack() as stack:
+        def start(deployment, *args, **kwargs):
+            process = deployment.start_camctl(*args, **kwargs)
+            stack.callback(close_process, process)
+            return process
+
+        yield start
 
 
 def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
@@ -129,7 +153,7 @@ def _past_schedule(seconds: int) -> str:
     return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
+def test_process_restart_resumes_interrupted_work(tmp_path: Path, start_owned_camctl) -> None:
     """run 进程执行中被终止：已保存事实不丢，下一个会话恢复剩余等
     待并完成迟到提交的新计划；运行间配置重载不破坏既有事实。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -160,7 +184,7 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
     # 止（真实重启，不是会话正常退出）；终止不落在启动调用在途的
     # 窗口内，避免把未保存的调用结果留给恢复语义之外的状态。
     deployment.freeze_at(shoot_at)
-    first = deployment.start_camctl(
+    first = start_owned_camctl(deployment,
         "run", "--config", str(deployment.config_path), driver=spec)
     state_db = deployment.state_db
     _await_row(
@@ -240,7 +264,7 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
     assert statuses == {"timelapse": "succeeded", "shoot": "succeeded"}
 
 
-def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
+def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned_camctl) -> None:
     """启动调用在途时进程被终止：恢复会话不重复启动、不补造发送时
     间，按无法确认失败收场；同设备后续动作不被遗留活动阻塞，会话
     正常退出。"""
@@ -267,7 +291,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
     assert submitted.exit_code == 0, submitted.stderr
 
     deployment.freeze_at(shoot_at)
-    first = deployment.start_camctl(
+    first = start_owned_camctl(deployment,
         "run", "--config", str(deployment.config_path), driver=spec)
     state_db = deployment.state_db
     start_deadline = time.monotonic() + 30
@@ -313,7 +337,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
     (deployment.gates / "control.gate").write_text("", encoding="utf-8")
     deployment.freeze_at(photo_at)
     deadline = time.monotonic() + 180
-    recovering = deployment.start_camctl(
+    recovering = start_owned_camctl(deployment,
         "run", "--config", str(deployment.config_path), driver=spec)
     recovered = _resume_after_capture_start(
         deployment, recovering, "shoot", deadline=deadline)
@@ -354,7 +378,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
     assert statuses == {"timelapse": "failed", "shoot": "succeeded"}
 
 
-def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
+def test_concurrent_submits_and_duplicate_identity(tmp_path: Path, start_owned_camctl) -> None:
     """并发 submit 交错执行互不干扰；同请求身份重送不重复受理。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
@@ -389,7 +413,7 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
     # 三个提交进程交错执行：两份不同计划并发受理，同一正文（同请求
     # 身份）重送表达提交结果未知的请求重送。
     processes = [
-        deployment.start_camctl(
+        start_owned_camctl(deployment,
             "submit", str(path), "--config", str(deployment.config_path),
             driver=spec)
         for path in (first_path, second_path, second_path)]
@@ -407,7 +431,7 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
 
     deployment.freeze_at(shoot_at)
     deadline = time.monotonic() + 180
-    process = deployment.start_camctl(
+    process = start_owned_camctl(deployment,
         "run", "--config", str(deployment.config_path), driver=spec)
     run = _resume_after_capture_start(
         deployment, process, ("shoot-a", "shoot-b"), deadline=deadline)
@@ -420,7 +444,7 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
 
 
 def test_future_action_waits_and_past_window_expires(
-        tmp_path: Path) -> None:
+        tmp_path: Path, start_owned_camctl) -> None:
     """驻留会话等到未来时间再启动；窗口已过的动作按过期收场。"""
     deployment = Deployment(tmp_path)
     initialized = deployment.camctl(
@@ -430,6 +454,7 @@ def test_future_action_waits_and_past_window_expires(
     spec = stub_driver_spec({"1": [photo_file("shot-1")]})
 
     # 本例核对真实 CLI 的时间窗口；客户端导出由完整交付链独立覆盖。
+    scheduled_at = future_schedule(15)
     future_path = deployment.write_plan({
         "request_id": "1",
         "created_at": "2026-01-15 08:00:00",
@@ -439,7 +464,7 @@ def test_future_action_waits_and_past_window_expires(
             "type": "camera_take_photo",
             "device_id": "cam-1",
             # 给真实 CLI 冷启动与首轮报告留出准备时间；启动窗口仍为五秒。
-            "scheduled_at": future_schedule(15),
+            "scheduled_at": scheduled_at,
             "params": {"type": "single_shot"},
             "policy": {"max_delay_ms": 5000},
         }],
@@ -452,9 +477,23 @@ def test_future_action_waits_and_past_window_expires(
     state_db = deployment.state_db
     # 会话把未到时动作计入未完成责任并驻留：到时前动作保持待执行，
     # 不被提前执行或判过期。
-    session = deployment.start_camctl(
+    assert not list(deployment.ready.glob("status-report-*.json"))
+    session = start_owned_camctl(deployment,
         "run", "--config", str(deployment.config_path), driver=spec)
-    _await_status(state_db, "shoot-future", 1)
+    schedule = datetime.strptime(scheduled_at, "%Y-%m-%d %H:%M:%S").replace(
+        tzinfo=timezone.utc)
+    while True:
+        assert session.poll() is None, "本次会话在发布初始报告前退出"
+        assert datetime.now(timezone.utc) < schedule, "排期前未收到初始报告"
+        reports = [json.loads(path.read_text(encoding="utf-8"))
+                   for path in deployment.ready.glob("status-report-*.json")]
+        if any(action["name"] == "shoot-future" and action["status"] == "pending"
+               for report in reports for plan in report["plans"]
+               for action in plan["actions"]):
+            break
+        time.sleep(0.01)
+    assert session.poll() is None
+    assert datetime.now(timezone.utc) < schedule
     assert _query(
         state_db, "SELECT status FROM actions WHERE name = 'shoot-future'"
     ) == [(1,)]
@@ -513,7 +552,7 @@ def test_future_action_waits_and_past_window_expires(
 
 
 def test_report_failure_preserves_device_work_and_redelivers(
-        tmp_path: Path) -> None:
+        tmp_path: Path, start_owned_camctl) -> None:
     """报告文件交接失败不阻止设备动作：动作与计划按事实终态，报告
     责任保留并由后续会话补交付。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -551,7 +590,7 @@ def test_report_failure_preserves_device_work_and_redelivers(
 
     deployment.freeze_at(shoot_at)
     deadline = time.monotonic() + 180
-    process = deployment.start_camctl(
+    process = start_owned_camctl(deployment,
         "run", "--config", str(deployment.config_path), driver=spec)
     failing = _resume_after_capture_start(
         deployment, process, "shoot", deadline=deadline)
@@ -580,7 +619,7 @@ def test_report_failure_preserves_device_work_and_redelivers(
     assert saved["saved_report_ids"] == [report["report_id"]]
 
 
-def test_late_result_preserves_terminal_decision(tmp_path: Path) -> None:
+def test_late_result_preserves_terminal_decision(tmp_path: Path, start_owned_camctl) -> None:
     """设备定义改变与迟到文件不改写已确定结果：集合核实失败的动作
     保持终态与无产物事实。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -603,7 +642,7 @@ def test_late_result_preserves_terminal_decision(tmp_path: Path) -> None:
 
     deployment.freeze_at(shoot_at)
     deadline = time.monotonic() + 180
-    process = deployment.start_camctl(
+    process = start_owned_camctl(deployment,
         "run", "--config", str(deployment.config_path), driver=empty_spec)
     first = _resume_after_capture_start(
         deployment, process, "timelapse", deadline=deadline)
