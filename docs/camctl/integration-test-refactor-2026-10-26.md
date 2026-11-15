@@ -150,7 +150,7 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 
 状态中的“待测量”表示有实际代码依据、但尚未测出各阶段占比及收益；“待方案核实”表示已定位具体内部依赖，但没有确认等价改法，不能直接删除或宣布需要新接口。数量仅描述当前明确的参数实例，不是全仓剩余用例数或完成率。旧静态候选、动态别名及未逐项核对的协作关系不作为已证实待改对象。
 
-后续按既有具体待办推进，不再对已完成正文详审的范围重新做一轮普查：先处理剩余媒体／结果／来源组的 C85、C88、C99、C101—C102、C113、C116、C123 等准备与实际收场；来源与汇总的 C107—C112、C124—C127 及 B66 随其独立责任继续。根跨组件 C131—C145 按资源拥有者、具体错误观察、时间与媒体判据分组实施，启动长验证前先核实际必要范围与预计成本。C68 的正式性能矩阵、D7 的结果页拥有者承接及 C145 的活跃时间消费边界继续保持未决，不擅自减少其目标；R1—R5 等生产事项在用户休息期间只记录，待其返回后统一讨论，其他明确测试工作继续。
+后续按现有具体待办推进，不重新普查已经读完的文件。媒体、结果、来源及读取汇总的本批修正已经接入；C123—C126 的真实文件取消与异常收场继续完成最后核对。根跨组件 C131—C145 按实际资源责任、错误观察和媒体判据实施，C140 已完成；C131、C132、C136、C143 正在隔离工作区处理，长验证先核必要范围与成本，不默认重跑完整参数矩阵。C68 的正式性能矩阵、B66 和 C145 继续待核，D8 的内部输入未来排期目标等待讨论。R1—R5 等生产事项在用户休息期间只记录，待其返回后统一解决。
 
 ### 已核实完成，应从旧待办关闭
 
@@ -332,10 +332,10 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 | C82 | cache_queries、software_recovery_structure、software_recovery_upgrade 把 SQLite 事务上下文误当成连接关闭。 | 已完成，接入 `79339f8d`；三文件显式连接关闭并保留原事务语义 | 保持原事务提交／回滚，以 closing 或 finally 显式关闭，包括双内存库和备份观察连接；验证三个完整文件及失败出口，不据静态缺口宣称实测泄漏。 |
 | C83 | cache_queries 对枚举与登记要求同一 Python 对象，尚无正式对象身份契约，SQL 结构读取又与固定类型不同。 | 已完成，接入 `79339f8d`；固定值由单元承接，SQL结构及实际查询保持集成 | 固定定义读取按单元例外评估承接，结构资源定位／内容保留真实集成；以实际值与相应缓存契约核对，不把对象身份当普通业务不变量。 |
 | C84 | baseline_prepare 与 baseline_read_owner 等待门闩时不同时观察原任务失败，部分等待没有保护期限。 | 已完成，接入 `c6e11b72`；两个完整文件及门闩前失败／放门前断言失败的实际收场通过 | 同时等待目标信号及原任务终态，任务提前结束交付原错误；保护期限不代替业务同步。失败先放门再等待真实资源收场，双取消、原返回／错误、双键、时刻及占用保持；验证两个完整文件和窄失败出口。 |
-| C85 | baseline_cases、Action6 normal/recovery，以及后查 OSV 输入／修复／提升和分段恢复准备，在取得观察连接后、交还前出错时没有明确关闭。 | 最初三个帮助函数已接入 `c6e11b72` 并补验；新增 STOP 的四处准备已接入 `08476b61` 并核异常关闭；OSV、照片、媒体、结果与来源组仍待修正 | 从获得连接起承担关闭责任，成功才转交；错误出口关闭原连接并保留原错误，worker 与文件责任仍由原作用域实际收场。核对全部直接消费者后安排窄验证，不将静态缺口写成已观察泄漏。 |
+| C85 | baseline_cases、Action6 normal/recovery，以及后查 OSV 输入／修复／提升和分段恢复准备，在取得观察连接后、交还前出错时没有明确关闭。 | 已补齐已登记准备函数及来源调用者，接入 e19b285b、94786696、63c471f6、bbfba524、e07797ea | 观察连接从取得起负责关闭，成功才转交；OSV、照片、媒体、结果、来源及首次关闭后重开两条连接分别核验。实际范围与失败出口见本阶段新增验证，不把 worker 关闭当成观察连接关闭。 |
 | C86 | file_observation 的等待引用正例将准备事件 1 当作真实等待完成，未形成相应发送和到期历史。 | 已完成，接入 `27dda0b1`；真实启动／发送／安排／到期及实际等待事件引用通过，两个反例全库回滚 | 通过最小正式仓储形成发送、安排及到期事实，使用实际等待事件；匹配、错引用及缺活动三分区保留，拒绝后核对全库不变。保持旧定义目标，不添加原生等待要求；验证完整文件。 |
 | C87 | file_observation 的写入故障绑定 INSERT SQL 前缀，未明确证明故障命中和原错误。 | 已完成，接入 `27dda0b1`；SQLite 表级授权确实命中，原错误码、完整回滚与原键重试通过 | 标准 SQLite 授权边界拒绝 device_files 写入并确认命中，核对事务结束、完整回滚及同申请同 key 恢复后的唯一文件／历史；验证完整文件，不改通用旧故障工具的其他消费者。 |
-| C88 | finish_reuse 十个消费者与 discard 四个消费者未确定关闭独立观察连接。 | 已完成，接入 `27dda0b1`；两个完整文件及临时失败后的实际连接关闭通过；后查 media_execution.pipeline 与 media_processing.environment 及前者 result_owner 消费者仍需补齐关闭 | 本文件取得连接即登记 finalizer 或 yield fixture，覆盖正常和断言异常；保持 worker 先收场、观察连接随后关闭，不改其他文件共用准备。验证两个完整文件。 |
+| C88 | finish_reuse 十个消费者与 discard 四个消费者未确定关闭独立观察连接。 | 已完成；媒体输入与结果消费者补齐，接入 94786696、63c471f6 | 原 finish_reuse／discard 结果沿用；媒体夹具拥有正常与失败出口，RESULTS 诊断分支关闭自己取得的连接。输入、工具、实际结果及其他诊断夹具责任不变。 |
 | C89 | check_current_budget 仅核旧尝试部分字段和历史 ID，不能发现原配置、发生时刻或正文被改写。 | 已完成，接入 `59373435`；原尝试配置及完整历史行在恢复和终态上调后保持 | 保存原尝试完整行及原历史完整行，恢复后比较原记录或前缀；保持提高、降低、终态后提高三个阶段，验证完整文件，不增加重复矩阵。 |
 | C90 | 六份清理查询测试及 segment_query 在正式工厂之后改写 operations、outputs 或 monotonic_ns，恢复支持也搬运内部仓储字段。 | 已完成，接入 `6457a401`；七个文件及共享消费者的公开仓储端口、时间回调和原恢复责任已验证 | 以已有 repository_port 观察／注错公开保存方法，时间由工厂回调传入；原 COMMIT 前后、三个消费者、原申请／键／时刻、重开、零重复调用与同／冷会话分区保持，验证实际完整消费者。 |
 | C91 | delete_rejected_error_graph 和 cleanup_residual_recovery 使用照片 SQL 改修复成品的存储准备来验证功能流程；后者 QUERY 没有实际未知 DELETE。 | 已完成，接入 `9f2dc607`；三个 outputs 文件使用真实修复成品及合法未知 DELETE→QUERY，最终诊断完整补验通过 | 复用既有真实修复与登记，从实际产物取得身份；真实 unlink 故障经公开删除形成查询责任。保留主机删除／查询、HOST_POWER_CYCLE、原票据、字节及监督／数据库错误组合。outputs/result_error_diagnostics 已确认同类功能消费者； |
@@ -346,24 +346,24 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 | C96 | cleanup_member_reuse_rejection 接受 None 或任意非完成结果，只比较历史数量。 | 已完成，接入 `10c45273`；明确回滚分类、事务结束、完整数据库不变与输入标签均验证 | 逐输入检查明确回滚分类、事务结束及完整相关成员／限制／流程／尝试／历史不变，错误标明输入；保留所有键、目标、结果依据及原输入成功复用。完整文件验证。 |
 | C97 | copy_segments 的保存 UNKNOWN 由不提交的替身返回，却允许 committed=4，且不观察是否继续下一段。 | 已完成，接入 `10c45273`；两载体仅首段读取／写入，保存一次，原异常、零数据库进度及零段事件通过 | 两载体均核保存一次、仅首段读取和写入、数据库零进度及零段事件，原 UNKNOWN 和异常阶段保持；真实提交前后专项独立保留，验证完整文件。 |
 | C98 | copy_resume 根据生产保存的 purpose 反推期望目录，两种输入被误建为同用途也可通过。 | 已完成，接入 `10c45273`；用途及目录由测试输入独立确定，实际文件存在；值表示修正后两个参数通过 | 从 delivery／internal 输入独立确定用途与目录，再比较保存事实及实际位置；CREATE 与真实文件保持，验证完整文件。 |
-| C99 | record_file_completion_wait 的放门后错误跳过关闭；media_flow、media_result_owner、native_segment_completion 也有提前失败观察或最终等待无界的同类问题。 | 静态核实，待修正 | 同时观察门及原任务，有界等待且嵌套 finally 真正关闭；保留五秒等待、三次 RESULTS／十秒调用／两秒间隔、STOP 一次及新旧契约两分区。完整文件及门前／放门后错误出口窄检查。 |
+| C99 | record_file_completion_wait 的放门后错误跳过关闭；media_flow、media_result_owner、native_segment_completion 也有提前失败观察或最终等待无界的同类问题。 | 已完成，接入 94786696、63c471f6 | 门闩与原任务同时观察，先放门，再有界确认任务结束，嵌套关闭实际资源；原业务等待、RESULTS 次数及新旧契约保持。完整实际消费者及错误出口已验证。 |
 | C100 | photo 两项仓储测试额外调用手写输入的独立分类函数，分类不消费前半段保存结果；拒绝授予被描述为未调用驱动。 | 已完成，接入 `12c9989c`；仓储责任准确命名，原分类字段组合由已有单元补齐承接 | 真实仓储授予／尝试／拒绝及零尝试保留，名称准确限定责任；与已有 unit/capture/test_photo 的声明完成及取消分区逐项核对等价后移除重复分类，不宣称真实调用方零派发。验证两个完整文件。 |
-| C101 | media_flow 的两个 SourceStream 替身提供 stop 而未实现正式 cancel。 | 静态核实，待适配 | 按 SourceStream 约定实现 cancel，保持读取唤醒和关闭分别表达；完整 media_flow 与实际导入 ReadDriverDouble 的 media_result_retry 验证，不据静态缺口声称当前必失败。 |
-| C102 | input_copy／media_execution 的设备文件身份不符合确定 JSON 格式，后者可靠输入摘要与实际字节不符，功能前态由空历史及 SQL 拼出。 | 静态核实，待核最窄合法准备 | 先修明确非法身份及摘要，再核已有 media_pipeline 能否形成最小正式来源；execute_check／execute_repair／obtain_recording_input 的既有双端口契约保留，不绕 CLI。续传、VERIFY、取消、重拷、工具、音频、修复与原子性分区保留。 |
+| C101 | media_flow 的两个 SourceStream 替身提供 stop 而未实现正式 cancel。 | 已完成，接入 94786696、bbfba524 | media_flow 两个流及 source_digest_failure_settlement 流实现正式 cancel；媒体重试及实际摘要诊断消费者通过，不改变真实读取和关闭责任。 |
+| C102 | input_copy／media_execution 的设备文件身份不符合确定 JSON 格式，后者可靠输入摘要与实际字节不符，功能前态由空历史及 SQL 拼出。 | 合法来源、身份及摘要已修正；内部输入的未来排期分区仍按 D8 待讨论 | 通过正式录像、来源与真实复制形成输入，保留双端口和原失败／恢复分区。未来排期用例仍使用早于已完成历史的时间，不能当合法业务前态或本项全部完成。 |
 | C103 | read_preparation_settlement 仍替换内部 DownloadWorkspace、观察／清空 fd，并调用内部票据协调函数。 | 已完成，接入 `c3c25429`、`e9f86412`；标准文件故障与正式票据观察，两个关闭未知场景由实际独立进程结束责任 | 标准打开／fstat／close 边界限定本目标，原票据由实际入参及正式存储行核对；关闭未确认用例独立进程以实际退出结束责任，不重置内部拥有者。八准备故障及四等待／取消、原票据／次数／错误／字节保持；先窄节点再完整文件。 |
 | C104 | read_preparation_settlement 推进任务创建后，准备或断言异常没有统一放门并等待原任务。 | 已完成，接入 `c3c25429`；创建任务即纳入放门／实际等待，完整消费者和准备失败出口通过 | 从 task 创建起登记 finally，放开 start／release 后有界等待真实任务和文件责任，主要异常保持；不靠兜底取消制造正常通过。保留原同步保护和业务预算，完整文件及 ready 后准备失败检查。 |
 | C105 | result_error_diagnostics 的 QUERY 驱动返回合法缺席，却替换真实校验器来人工抛 TypeError。 | 已完成，接入 `9f2dc607`；真实校验拒绝非法收场证据，异常链、原票据、唯一 ERROR 及零重复查询通过 | 由 query_file 提交真实契约会拒绝的返回，保留真实校验、原异常链、唯一 ERROR、原尝试与未保存结果；任意异常对象传播如需局部契约由单元承担，不保留人为文案要求。验证完整文件。 |
 | C106 | support/outputs 的 read_test_runtime 接受外部 file_executor 后，finally 仍只排空新建的空 supervisor。 | 已完成，接入 `c3c25429`；实际外部执行器 drain，三个消费者及真实文件任务异常出口通过 | 用现有公开 executor.drain_required 等待实际执行器；保持正常停止、真实写错、原尝试未完及诊断。核 read_diagnostics、read_error_details、read_preparation_settlement 实际消费者，异常出口核真实任务结束，不改生产。 |
-| C107 | obtain_diagnostics 在建档和可靠复制后改写 copy 源摘要，原来源及建档历史仍是另一摘要。 | 静态核实，待合法前态 | 首次 grant 前确定原期望摘要，使源、拷贝及原历史一致，再由读取字节形成不符；保留真实重拷、register_recopy 保存错误、耗尽两分区、原错误及轮次次数。验证完整文件和实际共享夹具消费者。 |
-| C108 | read_discovery 的 waiting 汇总把已有完整条目的选择改为 pending，违反共同保存规则。 | 静态核实，待合法来源 | 原多条目来源保持 fixed，另建有合法来源关系、无条目的 pending；保留 unresolved／mixed／empty／failed 和原规模，使用正式存储格式即可，验证完整文件。 |
-| C109 | read_discovery 的候选规模检查只比较总数，漏一个又重一个仍可通过。 | 静态核实，待独立完整身份 | 从最初建档与每次真实 grant 返回取得预期，核逐页完整有序身份、无重复及单页上界；原 12／120、批量 1／3、弱引用、游标和全库不变保持，完整文件及临时漏／重复反例。 |
-| C110 | read_discovery 的不全量构造断言只看返回对象没有 items/sources 字段，不能发现临时全量读取。 | 静态核实，待真实交付观察 | 在标准 SQLite 实际取行边界确认汇总仅交付有限聚合结果，并保留独立业务计数、131 项及五分类；不绑 SQL 文本和别名，也不扩大为内存增长或整体预算验收。验证完整文件。 |
-| C111 | read_discovery 的内存 SQLite with 只结束事务，没有关闭连接。 | 静态核实，待显式关闭 | 增加 closing／finally，原事务上下文及多持有者错误不变；目标和一次异常出口观察，不据静态缺口称已实测耗尽。 |
-| C112 | read_discovery 等十秒空闲信号，不同时观察 run_session 提前失败。 | 静态核实，待同时观察 | 同等成功保护内观察目标 signal 与原任务，失败立即交付；finally 实际取消收场保持，验证三期限分区及一个提前失败检查，不改业务等待预算。 |
-| C113 | host_photo_flow 通过 runtime.capture 实例字段安装收场提交前／后故障。 | 静态核实，待公开仓储端口 | repository_port 限定原动作并执行真实保存和原故障；保留一次相机调用、仍运行、占用差别、零提前产物和重送成功，完整文件验证。 |
+| C107 | obtain_diagnostics 在建档和可靠复制后改写 copy 源摘要，原来源及建档历史仍是另一摘要。 | 已完成，接入 847d9c4e | 期望摘要在首次 grant 前确定，源、拷贝与建档历史一致；真实字节不符触发重拷及原保存错误，两种耗尽分区和共享消费者通过。 |
+| C108 | read_discovery 的 waiting 汇总把已有完整条目的选择改为 pending，违反共同保存规则。 | 已完成，接入 847d9c4e | 完整条目所属来源保持 fixed，另建有依赖且无条目的 pending；原五分类、132 条总条目及业务结果保持，完整文件通过。 |
+| C109 | read_discovery 的候选规模检查只比较总数，漏一个又重一个仍可通过。 | 已完成，接入 847d9c4e | 从原两份建档及实际 grant 取得独立预期，逐页核完整有序身份、无重复和单页上界；原12／120及批量1／3不减，重复身份临时反例通过。 |
+| C110 | read_discovery 的不全量构造断言只看返回对象没有 items/sources 字段，不能发现临时全量读取。 | 已完成，接入 847d9c4e | 标准 SQLite 游标记录实际交付的有限聚合行和标量内容，原新增131条及五分类保持；最终五分类补验通过。此项不作为内存增长或整个程序容量验收。 |
+| C111 | read_discovery 的内存 SQLite with 只结束事务，没有关闭连接。 | 已完成，接入 847d9c4e | closing 显式关闭内存连接，原事务及多持有者拒绝保持；完整文件通过。 |
+| C112 | read_discovery 等十秒空闲信号，不同时观察 run_session 提前失败。 | 已完成，接入 847d9c4e | 原十秒保护内同时观察等待信号和会话任务，提前失败立即交付，信号等待者及真实会话均收场；三期限及临时提前失败检查通过。 |
+| C113 | host_photo_flow 通过 runtime.capture 实例字段安装收场提交前／后故障。 | 已完成，接入 e19b285b | 通过 repository_port 拦截公开 conclude_activity，限定原动作；原提交前／后未知、一次相机调用、活动占用及重送结果保持，完整文件通过。原测试未约定的同键要求没有额外加入。 |
 | C114 | result_device_completion 的两边界活动恢复及 timelapse_host_timer 的主机停止三路径主要彼此比较或由恢复结果裁剪成员。 | 已完成，接入 `50b5ff38`；两边界活动与主机停止完整所属行／次数分别独立核对，目标事务 H 经只读独立评审确认，漏 RESULTS 反例确实失败 | 在对应真实事务边界按 SQL 所属关系保存完整目标业务行／身份及相应位置计数；各路径先与独立预期比较。前者限定活动，两主机参数保留起始快照、目标 H、结束种子，不能以恢复结果生成成员。窄漏行反例及实际完整影响范围。 |
 | C115 | recording_start 的窗口后确认只推进单调锚点，UTC 始终在原窗口内。 | 已完成，接入 `3f381298`；同一测试墙钟从派发时的窗口内推进到确认前的窗口后，原结果及锚点保持 | 驱动入口确认窗口内，返回前推进同一可变 UTC 至原窗口后；保留原窗口／时长／锚点及真实 START 保存，无真实睡眠。完整文件及错误二次验窗反例。 |
-| C116 | result_scan_runtime 创建重开运行时却仅直接读仓储，时钟故障没有经过受测消费者。 | 静态核实，待目标核实 | 分清仓储跨 worker 读取和消费者接回闭合轮次；目标是消费者时形成真实未消费交接后实际推进，核原页／结果／调用／时间，不能在已终态上空推进冒充恢复。相邻完成轮次场景已有真实推进但时钟保护范围也须准确；暂不直接删。 |
+| C116 | result_scan_runtime 创建重开运行时却仅直接读仓储，时钟故障没有经过受测消费者。 | 已完成，接入 f7e6e47c | 闭合轮次用例实际经重开后的数据库 worker 读取完整原页，名称与证明范围一致；消费者原页补存由 D7 的真实四分区承担，不把无操作的时钟故障当恢复证明。 |
 | C117 | stop_close_save_recovery 替换内部 check_binding 记录调用顺序。 | 已完成，接入 `50b5ff38`；内部绑定顺序 spy 移除，原申请／key／时刻、历史组、零新设备调用和九故障分区保持 | 保留真实后来绑定变化、原 STOP 申请／key／时刻、完整历史和设备零新增调用的独立证据；移除内部 spy，普通／取消、保存成员及三故障九分区保持，完整文件验证。 |
 | C118 | segment_inspections、timelapse_completed_return、timelapse_host_timer、software_recovery 在 drain／close／收场断言后才关闭下一资源。 | 已完成，分别接入 `462a4304`、`50b5ff38`；实际执行器／线程先收场，各观察连接及后续本次资源均由 finally 保证关闭 | 按本次实际所有权以嵌套 finally 保证每项必要关闭，正文与收场错误保持；不改变业务分区。验证实际完整文件及一次关闭报错后后续资源仍关闭，容量和跨组件不扩跑。 |
 | C119 | software_recovery 用 sqlite3.connect 的事务上下文准备 V2，却未关闭连接。 | 已完成，接入 `50b5ff38`；V2 格式准备保留原事务并显式关闭连接，完整恢复文件通过 | 外层 closing 保持原事务及旧格式缺表准备，完整文件与异常出口检查，格式验证本身有效。 |
@@ -371,7 +371,7 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 | C124 | work_files 从已成功结束 READ 的合法交付后插入 RUNNING 尝试，却缺相应次数、配置及真实意图，还借用取消事件。 | 静态核实，待合法前态 | 使用正式操作入口形成真实未结束尝试，或按完整操作存储格式构造并准确限定为存储拒绝；核实际拒绝原因，不能任意 ConsistencyError 即通过。生命周期不可达则登记保障分类，暂不删，完整文件验证。 |
 | C125 | source_cleanup 五个功能消费者用空历史、SQL 已完成录像及固定成员作为清理前态。 | 静态核实，待正式来源 | 真实来源及正式 prepare_cleanup_member 形成合法目标，仍直接验证窄 delete_source_file；缺席、未知后 QUERY、仍在重试、两预算耗尽及终态幂等保持，替身改用动态成员身份。完整文件及实际共享消费者验证。 |
 | C126 | shared_file_ownership 的 prepare／segment／hash 六分区改内部函数并 SQL 保存取消。 | 静态核实，待正式阶段与取消 | 用合法交付／内部输入，在原文件或源读取边界保持原阶段，再由正式取消保存事实。六分区、文件保护、原连接可用、实际结束及释放不减；若确有阶段接口缺口单独登记，不删参数或加测试专用入口。与 C123 一起验证完整文件。 |
-| C127 | source_digest_failure_settlement 三个自建文件执行器只在正常路径 drain。 | 静态核实，待真实收场 | 从实际执行器创建起登记 finally，重开 worker 前先结束旧责任；真实进程中断、EOF 恢复及原票据／READ_END 身份保持。完整文件和一次中途错误出口，不能以关闭观察连接代替文件／线程结束。 |
+| C127 | source_digest_failure_settlement 三个自建文件执行器只在正常路径 drain。 | 已完成，接入 bbfba524 | 自建监督器从创建后覆盖准备与执行出口，重开数据库前先结束旧文件责任；原进程中断、EOF、票据及 READ_END 保持。完整文件和中途异常探针通过。 |
 | C128 | availability_errors 两个内存 SQLite 未显式关闭；motor 诊断夹具在受理和窗口断言之后才进入关闭作用域。 | 已完成，接入 `5c2d470a`；两个内存 SQL 及诊断夹具关闭责任明确，完整文件与准备中断实际关闭检查通过 | SQL 格式专项用 closing 保留原事务，诊断夹具从取得观察连接起保证收场；完整定义文件与两个诊断消费者及一次准备失败检查，不把静态缺口称实际耗尽。 |
 | C129 | notification_pipe 的填满管道及 EOF 读取、notification_error_facts 的 EOF 在回归时可阻塞 pytest 进程。 | 已完成，接入 `5c2d470a`；真实填满及 EOF 在独立进程中有外部十秒期限，未关写端反例按期失败并退出 | 保留真实管道、完整通知字节、三整数、满管道 would_block／零字节及短写后真 EOF，在有外部期限的独立进程验证并确认结束。不能将 EAGAIN 当 EOF；完整两个文件及未关写端的临时反例。 |
 | C130 | 电机管道文件在 supervisor.stop 抛错后跳过其余收场，普通文件和交接写端失败出口也缺明确拥有者。 | 已完成，接入 `5c2d470a`；本次进程及可确认身份的描述符逐层收场，停止抛错的实际出口检查通过 | 必要关闭逐层 finally，主错误和关闭错误保持；兜底只关本次仍拥有且身份已核的描述符，不能无条件重复关闭已交出的整数。与 C129 同负责人验证两个完整文件及停止抛错出口。 |
@@ -397,7 +397,7 @@ A1 的两个参数和 A2 的一个实例已按批准取舍移除，这不是全�
 
 ### 全范围审查的源码范围
 
-根跨组件也已按 `a45f9d63` 的 tracked 排序分三组完整阅读全部 32 份 Python 正文（11／11／10 份），另完整读完四份 Node 正文。原 B1—B3、B15 的保留和取舍不重开；新 B66、C131—C145 为尚待实施或核实的具体事项。此次只读审查没有启动分发构建、设备、预算或测试，不能当新回归或提速结论。根 README 对 OSMO 单文件恢复的说明仍引用旧未确认结果，与当前 single_file 成功及无 segment_sets 不符，后续随该说明范围修正，不为文档重复测试。
+根跨组件也已按 `a45f9d63` 的 tracked 排序分三组完整阅读全部 32 份 Python 正文（11／11／10 份），另完整读完四份 Node 正文。原 B1—B3、B15 的保留和取舍不重开；新 B66、C131—C145 为尚待实施或核实的具体事项。此次只读审查没有启动分发构建、设备、预算或测试，不能当新回归或提速结论。根 README 对 OSMO 单文件恢复的说明已与当前 single_file 成功及无 segment_sets 对齐；仅核对文案，没有为此重复测试。
 
 C85 尚待处理的观察连接准备包括：OSV 的 prepared_input、prepared_repair、_successful_osv_repair、promoted、_stopped_world；host_photo_flow._world、media_retry_fixtures 的 capture_database 前段；STOP 的 _page_world、_confirmed_world、_ready 和 _recording_consumer；共享 ResultCase.world 及 result_confirmation 的 _environment／_concluded；outputs 的 _prepared_selection、_real_environment、_aggregate_role_world、_six_form_environment 及摘要夹具工厂。各项从取得连接起承担失败关闭责任，成功才转交。C88 另保留 media_execution／media_processing 的普通出口及 result_error_diagnostics 的 RESULTS 参数普通和失败出口；它们不能由只关闭 worker 的会话作用域承接。
 
@@ -412,7 +412,7 @@ C99 的 recording_start_runtime、recording_start_release、recording_start_save
 | `acceptance` | 14 | 在 `d57594b7` 上完成十四份正文及关键支持详审；B33—B35、C35、C37 已实施并验证，validation 完整文件已迁入单元层，当前本目录为十三份。C36 的测试补强保留 R5 的真实原键恢复失败；不把旧全部通过或其他分区通过扩为当前恢复已验收。 |
 | `bootstrap` | 125 | 在 `c016a618` 上分六组完成全部正文及关键支持详审：拍摄恢复前组 20、后组 19、配置发布与目录 18、媒体清理 24、读取交付 27、会话日志 17。旧修复沿用其原证据，新问题分别由 A6、B22—B32、C16—C34 跟踪；详审本身未执行测试，后续实施、独立评审及具体补验在各行登记，未进行本目录整体动态验收。 |
 | `cancellation` | 16 | `0e15f0e5` 的十六份正文及关键支持已详审。B37、C38—C40 已处置，实际修改及共享支持的完整消费者补验通过；当前结果只承接这些边界，不将函数名或仓储重送检查扩成真实进程重启见证。 |
-| `capture` | 114 | 当前 113 份，已按排序分六组逐正文完整详审：前十九、20—38、39—57、58—76、77—95、96—113，必要支持及正式调用沿组追读。具体问题分别登记，已处理与未处理见各项；完整阅读不代表全部修改闭合，也不代表本目录新动态全绿。未发现新增确定生产缺陷，结果页拥有者的精确接口边界由 D7 待核。 |
+| `capture` | 114 | 当前 113 份，已按排序分六组逐正文完整详审：前十九、20—38、39—57、58—76、77—95、96—113，必要支持及正式调用沿组追读。具体问题分别登记，已处理与未处理见各项；完整阅读不代表全部修改闭合，也不代表本目录新动态全绿。未发现新增确定生产缺陷，结果页拥有者已按 D7 经正式消费者承接；内部输入的未来排期目标仍按 D8 待讨论。 |
 | `contracts` | 10 | 当前九份正文及必要支持已完整详审，实际源码架构扫描与公共定义／样例消费继续保留；B13／B17 既有分层保持，新两个内存库关闭由 C128 跟踪。阅读本身未执行测试。 |
 | `devices` | 18 | 十八份正文及支持已详审；B38、C42、C44—C46 已完成分层、标准文件故障、在途及期限核对，迁入单元和实际消费者验证通过；本轮没有设备硬件验收。 |
 | `history` | 21 | 在 `9bae1013` 上完成二十一份正文及关键支持详审；固定样本、真实生成、A2、已批准减少交叉和 D1 沿用。新 B47、B48、C66—C71 跟踪独立恢复预期、真实读取、观察连接、执行器收场及分层；未经动态验证，不据此认定生产错误。 |
@@ -476,7 +476,8 @@ C33 的路径校验只解析持久化身份与路径文字，不访问文件系�
 | D4 | 当前支持的相机按录像规格保证 STOP 可安全重复；未来只支持一次停止的录像驱动，尚不能经 CaptureTask／DriverDeclaration 和固定执行定义表达独立的 safe_repeat_stop。 | 已核规格与接口，属于未来能力表达缺口，未证实当前设备存在生产缺陷。本阶段不为测试新增接口；用户接受 C31 减少精确数据库组合，现有公开局部规则仍拒绝不安全重复停止。未来支持时须共同设计任务声明、首次冻结、活动能力及普通停止／取消／恢复／应急消费，不只改应急入口。 |
 | D5 | 损坏快照正文解析测试有 512000 字节峰值与 200000 字节差值门槛，已读契约只说明流式解析和 64KiB 缓冲，尚无这两个阈值的依据。 | 先核对历史批准与局部解析器目标；不套用 D1 处置，不扩大规模或另定阈值，不据此修改生产。 |
 | D6 | 有限 CommandPlan 的读取上下文由内核建立，尚无等价的调用方交付端口；旧测试改具体读取类来制造异连接。 | 先核该精确反例应由哪个单元／协议层承担；有界形式可用已有命令 context 回调。有限形式的覆盖取舍与必要接口调整需另行讨论，不为测试擅加生产入口。 |
-| D7 | result_page_history 三项保存拥有者测试直接观察 ResultPageSaveOwner.pending 等内部责任，没有正式集成边界依据。 | 现有单元承接局部拥有者，正式扫描消费者只证明真实提交后未知，尚未等价承接投影／提交前／提交后三分区。先核公开仓储与正式消费者的分层承接，保留原完整申请／key／时刻和禁止提前续页；暂不删，不新增生产观察接口。 |
+| D7 | 结果页保存拥有者的三个旧集成分区依赖内部待保存状态。 | 已由正式消费者与既有局部测试分层承接，接入 f7e6e47c。正式 handler 保留原 UNKNOWN 并增加真实投影失败／提交前失败／提交后丢回执，核原完整申请、键、时刻、原页可靠前禁止续页及唯一历史；旧三个私有集成分区移除，不新增生产接口。 |
+| D8 | 内部录像输入的未来排期测试，在录像与来源已经完成后仍提供早于该录像计划的当前时间；旧 SQL 改排期同样不是正常前态。 | 内部输入与录像共用动作及排期，可信时间早于排期不能先完成录像。独立未来取回属于另一动作，不能直接当等价承接；该精确分区保留待用户讨论其目标与分层，不改生产，也不声称它证明合法未来等待。 |
 | P1 | 大规模测试准备在正式受理路径耗时明显增长；800 动作的一次线程 CPU 诊断中，逐动作创建校验器 4802 次、检查格式规则 4806 次，输入规则校验是该样本的主要热点。 | 生产性能候选，未修改。后续核对固定规则的复用边界，保留动态规则、精确数字、默认值和错误分类；不把小样本的诊断比例外推为 21600 档的精确分摊，也不据 SQLite execute 自身 CPU 推断全部数据库时间。 |
 | R1 | `persistence/executor.py` 仍通过默认线程池执行数据库线程的 `join`；共享文件池占满时确认退出可能排队。 | 已核代码风险，用户已同意将精确交叉移出日常自动验证；保持分层覆盖，单独交接，不恢复高维护测试来掩盖风险。 |
 | R2 | 输出仓储返回 `read_result_unconfirmed`，发布入口未保留该原因并默认显示 `owner_not_running`。 | 已核原因映射缺失，作为生产诊断问题单独交接；发布资格仍须阻止结果未确认的文件，不能为了测试改成允许发布。 |
@@ -1011,6 +1012,21 @@ Python 的收集与执行均为 **10,791 个唯一主节点：10,786 项通过�
 结果核实并提交后，按实际来源释放本轮 29 个 host 构建目录及全部成功运行输出；任务源码、临时根、客户端候选、安装环境和私有缓存均已收场。本阶段两个实施工作区通过 Git 释放，分支和提交保留；未决原现场及后续内存研究材料保持原位，临时材料不进入版本控制。
 
 ### 本阶段新增验证
+
+以下组件批次均在独立工作区使用 Python 3.11.17，首次运行前同步一次资源；按组件目录分别顺序执行。命令使用 `PYTHONPATH="$PWD/apps/camctl/src:$PWD/apps/camctl/tests" python -m pytest -q`，文件名相对于 `apps/camctl/tests/integration/`；单元范围另行标明。各批次不是一次统一回归，不累加重叠节点，也没有测量稳定提速比例。
+
+| 2026-11-15 媒体、结果和来源批次 | 实际范围 | 结果与边界 |
+| --- | --- | --- |
+| C85、C88、C99、C101、C102 的媒体范围，`21da82c5` | capture 下完整 input_copy、media_execution、media_result_owner、media_flow、media_result_retry、native_segment_completion、media_processing、osv_probe_history、media_original_request、media_public_preparation；另选 result_error_diagnostics 的 `test_media_error_is_logged_when_original_request_is_retried`、`test_media_stopping_retains_actual_file_error` | 118 项通过，pytest 34.07 秒、墙钟 34.700 秒、退出零。最后增加身份与摘要准备断言后，前三个完整文件另有26项通过、8.64／9.196秒；bootstrap/read_discovery_default 的原默认批量单项一项通过、5.37／6.581秒。两处准备失败临时检查确认原异常与连接关闭，退出零。初次未声明源摘要能力及取消附注传递错误已修正并补验；D8 的非法时间前态仍未解决，不因该用例通过关闭它。 |
+| C85 的 OSV／照片准备及 C113，`e10abd9b` | capture 下完整 osv_input_failure、osv_success_proof、output_promotion、osv_promotion_recovery、record_segment_scope_recovery、host_photo_flow、media_tool_diagnostics、hasselblad_start_recovery、device_photo_flow | 271 项通过，pytest179.71秒、墙钟180.409秒、退出零。准备中断检查确认原异常、观察连接关闭及资源作用域退出，墙钟2.321秒、退出零。首次因临时目录安排主动中断的81项、退出二，不记为完整通过；临时检查的首次导入错误也不记为业务失败。 |
+| C85／C88 的结果连接及 C99，`2558d37d` | capture 下完整 result_confirmation、result_error_diagnostics、record_file_completion_wait、result_scan_recovery、result_scan_runtime | 140 项通过，pytest75.91秒、退出零，外层墙钟未记录，不补造。实际消费者另定向21项通过，13.89／14.569秒；file_fact_saves 一项通过、17项未选，1.94／2.521秒。最后将门后收场保护固定为30秒后，两门闩分区补验通过，2.31／2.839秒。临时错误检查缺少夹具的首次准备错误已修正，不并作全绿；本项不代表全部 capture 验收。 |
+| D7、C116，`7033ea6c` | capture 下完整 result_scan_runtime、result_page_history；另完整 unit/capture/test_result_page_saves.py、test_save_owner_handoff.py | 集成47项通过，pytest29.54秒、墙钟30.095秒；单元44项通过，2.79／3.251秒，均退出零。正式 handler 保留原未知及三个真实事务故障；同一工厂重开数据库后，先可靠保存原页再读取下一页，原请求／键／时刻与唯一历史、最终两页和一次尝试均保持。单元层承接局部拥有者规则；不声称进程死亡后可以恢复尚未持久化的内存。 |
+| C107—C112，`7fa632b8` | outputs 下完整 read_discovery、obtain_diagnostics、copy_complete | 60项通过，墙钟37.858秒、退出零；汇总观察器最后修改后五分类补验5项通过、4.163秒。诊断／汇总／临时检查组合有12项通过及两个临时准备错误，退出非零；补齐夹具后的重复身份与提前失败反例两项通过、2.602秒。原12／120候选和批量1／3、131条新增汇总输入保持；游标有限交付不代替内存容量验收。 |
+| C85、C101、C127 及 C80 有界来源上下文，`58eab21d`、`70696221` | outputs/sources、source_digest_failure_settlement，以及 source_resolution_batches 的明确函数和实际读取流消费者 | 首批完整 sources 18项／墙钟3.51秒、完整摘要收场7项／9.52秒；来源上下文等四函数15项／8.92秒，包含141来源的实际分页；读取流消费者8项／6.06秒，均退出零。调用者收场补齐后，完整 sources 18项／3.42秒，来源五函数18项／19.61秒，均退出零。五处准备失败检查确认原异常和连接关闭；未运行容量控制器。C80 的有限旧内部反例仍按D6待讨论。 |
+
+来源四函数为 `test_bound_port_from_another_connection_is_rejected`、`test_original_source_key_rechecks_original_h_after_later_work_and_new_ids`、`test_point_iteration_cannot_relabel_its_numeric_ids_as_actions`、`test_source_resolution_streams_bounded_events_and_returns_finite_result`。最后五函数为原键核实、`test_unknown_commit_recovers_same_source_request_and_ids_after_reopen`、`test_source_write_and_original_key_keep_bounded_pages`、`test_aggregate_role_is_revoked_when_page_assembly_fails`、`test_source_aggregate_pages_have_exact_current_ids_and_keep_point_roles`；其中20／200／600成员、每批四项的功能分页保持。
+
+读取流实际选择 `outputs/test_read_diagnostics.py` 的 `test_checksum_exhaustion_records_verification_error`、`test_normal_cancellation_before_dispatch_has_no_error_record`、`test_local_read_normal_stopped_result_is_not_error`，`test_digest_diagnostics.py::test_verification_failure_logs_original_digest_facts_once_before_save`，以及 `test_default_exclusions.py::test_obtain_runtime_consumes_saved_default_exclusions`。
 
 | 2026-11-15 根能力来源，基于 `f0d58feb` 的测试侧差异 | 实际范围 | 结果与边界 |
 | --- | --- | --- |
