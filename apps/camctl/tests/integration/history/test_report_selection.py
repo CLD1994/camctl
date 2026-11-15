@@ -180,8 +180,11 @@ async def test_independent_entry_rejects_missing_target_or_any_required_owner(
 
 @pytest.mark.asyncio
 async def test_all_five_targets_keep_pages_parent_filter_and_legal_empty(
-    two_item_world, tmp_path,
+    two_item_world, tmp_path, monkeypatch,
 ):
+    import time
+
+    started = time.perf_counter()
     world = two_item_world
     for item in world.item_ids:
         _grant_item(world, item)
@@ -191,6 +194,8 @@ async def test_all_five_targets_keep_pages_parent_filter_and_legal_empty(
     cases = [('plan', [(None, [1, 2])]), ('action', [(1, [1]), (2, [2]), (999, [])]),
              ('output', [(1, [1, 2]), (2, []), (999, [])]),
              ('delivery', [(1, []), (2, [1, 2]), (999, [])]), ('diagnostic', [(None, [1, 2])])]
+    preparation = time.perf_counter() - started
+    started = time.perf_counter()
     for entity, parents in cases:
         with world.history.open_report_selection(request) as selection:
             for parent, expected in parents:
@@ -198,6 +203,52 @@ async def test_all_five_targets_keep_pages_parent_filter_and_legal_empty(
         # 无窗口候选时，即使 caller 的父 ID 不存在也仍是合法空页。
         with world.history.open_report_selection(replace(request, from_wm=request.to_wm)) as selection:
             assert _read(selection, entity, 999 if parents[0][0] is not None else None) == []
+    original_checks = time.perf_counter() - started
+
+    groups = [(entity, parent, expected) for entity, parents in cases for parent, expected in parents]
+    found = {(entity, parent): [] for entity, parent, _ in groups}
+    cursors = {}
+    with monkeypatch.context() as patch:
+        probe = _StatementProbe(world.history, patch)
+        started = time.perf_counter()
+        with world.history.report_read_scope():
+            with world.history.open_report_selection(request) as selection:
+                for entity, parent, expected in groups:
+                    key = (entity, parent)
+                    page = selection.read_page(entity, parent_id=parent)
+                    assert page.items == tuple(expected[:1]), key
+                    assert (page.next_cursor is not None) == (len(expected) > 1), key
+                    found[key].extend(page.items)
+                    cursors[key] = page.next_cursor
+                # 交错续读不同类型；空页和单页再次穿插，不影响其他游标。
+                for _ in range(max(len(expected) for _, _, expected in groups) - 1):
+                    for entity, parent, expected in reversed(groups):
+                        key = (entity, parent)
+                        cursor = cursors[key]
+                        if cursor is None:
+                            page = selection.read_page(entity, parent_id=parent)
+                            assert page.items == tuple(expected[:1]) and page.next_cursor is None, key
+                            continue
+                        page = selection.read_page(entity, parent_id=parent, cursor=cursor)
+                        found[key].extend(page.items)
+                        cursors[key] = page.next_cursor
+        interleaved = time.perf_counter() - started
+    for entity, parent, expected in groups:
+        key = (entity, parent)
+        assert found[key] == expected, key
+        assert len(found[key]) == len(set(found[key])), key
+        assert cursors[key] is None, key
+    assert ('main', 'report_entity_changes', 'entity_type') in probe.reads
+    selected_reads = {(table, column) for database, table, column in probe.reads if database == 'main'}
+    selected_reads.update((table, column) for database, table, column, _ in probe.blobs if database == 'main')
+    assert ('history_events', 'body_json') not in selected_reads
+    assert ('entity_snapshots', 'content') not in selected_reads
+    assert not probe.main_writes
+    print('REPORT_CURSOR_INTERLEAVE', {'preparation_s': preparation,
+          'original_checks_s': original_checks, 'interleaved_s': interleaved,
+          'groups': len(groups), 'observed_statements': len(probe.statements),
+          'observed_reads': sorted(probe.reads, key=repr), 'blob_opens': probe.blobs,
+          'main_write_attempts': probe.main_writes}, flush=True)
 
 
 @pytest.mark.asyncio
