@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -267,7 +268,7 @@ def _tool_source():
 
 
 def _rows(db: Path, sql: str, params=()):
-    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(sql, params)]
 
@@ -282,7 +283,7 @@ def _history_observer():
 
 def test_hasselblad_history_observer_rejects_middle_event_as_boundary():
     observer = _history_observer()
-    with sqlite3.connect(":memory:") as connection:
+    with closing(sqlite3.connect(":memory:")) as connection, connection:
         connection.row_factory = sqlite3.Row
         connection.executescript("CREATE TABLE history_transactions(id,operation_key,first_event_id,last_event_id);"
                                  "INSERT INTO history_transactions VALUES(8,'original-key',20,22);")
@@ -702,8 +703,8 @@ class PhotoWorld:
 def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_demo, monkeypatch, case):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
-    world.start()
     try:
+        world.start()
         world.host.submit(world.export_photo(browser_prefix=case.name in FULL_UI_CASE_NAMES))
         report_path, report, capture = world.report("capture")
         assert "result" not in capture

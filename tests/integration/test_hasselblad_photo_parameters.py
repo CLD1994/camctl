@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from camctl_memory_plugin import run_test_command
 
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -376,7 +377,7 @@ def test_installed_hasselblad_parameter_validation_agrees_across_consumers(
     assert not installed_camctl.device_marker.exists(), "submit 前调用了设备工具"
     installed_camctl.cli("submit", str(plan_path), "--config", str(installed_camctl.config_path))
     assert not installed_camctl.device_marker.exists(), "submit 调用了设备工具"
-    with sqlite3.connect(installed_camctl.state_db) as connection:
+    with closing(sqlite3.connect(installed_camctl.state_db)) as connection, connection:
         rows = connection.execute(
             "SELECT p.id,p.request_id,a.name,a.type,a.device_id,a.input_fields_json,"
             "a.status,a.error_code,a.effective_params_json,a.driver_id "
