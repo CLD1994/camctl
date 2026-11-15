@@ -15,6 +15,7 @@ _READ_TRANSACTION_FUNCTIONS = {
     "module:read_segment_finish_scope",
     "module:segment_output_candidate",
     "module:read_result_file_input_from_reader",
+    "module:result_read_snapshot",
     "module:read_pairing_fact",
     "module:verify_ownership_from_result_page",
     "module:verify_result_file_pairing",
