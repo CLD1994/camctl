@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from camctl_memory_plugin import run_test_command
 
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -82,38 +83,33 @@ def package(tmp_path_factory):
     assert sys.version_info[:2] == (3, 11), "安装链使用部署版 Python 3.11"
     root = tmp_path_factory.mktemp("device-declarations-installed")
     package = Installed(root, root / "venv/bin/python", root / "pending.whl", _environment())
-    try:
-        package.run(["uv", "build", "--project", PROJECT, "--wheel", "--out-dir", root / "dist"])
-        wheels = list((root / "dist").glob("*.whl"))
-        assert len(wheels) == 1
-        package.wheel = wheels[0]
-        requirements = root / "requirements.txt"
-        package.run(["uv", "export", "--project", PROJECT, "--frozen", "--no-dev",
-                     "--no-emit-project", "-o", requirements])
-        package.run(["uv", "venv", "--python", sys.executable, root / "venv"])
-        package.run(["uv", "pip", "install", "--python", package.python,
-                     "--require-hashes", "-r", requirements])
-        package.run(["uv", "pip", "install", "--python", package.python,
-                     "--no-deps", package.wheel])
-        # 任意标识仍通过正式静态与运行登记的交叉约束，不提供导出替身。
-        for name in ("camctl_fixtures.py", "_capability_declaration_entry.py"):
-            target = "declaration_entry.py" if name.startswith("_") else name
-            shutil.copy2(REPO / "tests/integration" / name, root / target)
-        guard = root / "bin"
-        guard.mkdir()
-        for tool in ("adb", "hb_cli"):
-            executable = guard / tool
-            executable.write_text(
-                f"#!{package.python}\nfrom pathlib import Path\n"
-                f"Path({str(root / 'device-calls')!r}).write_text({tool!r})\n"
-                "raise SystemExit(91)\n", encoding="utf8")
-            executable.chmod(0o700)
-        package.environment["PATH"] = str(guard) + os.pathsep + package.environment["PATH"]
-        yield package
-    finally:
-        archive = REPO / ".local/acceptance/c5" / f"installed-{os.getpid()}"
-        if (root / "commands").exists():
-            shutil.copytree(root / "commands", archive, dirs_exist_ok=True)
+    package.run(["uv", "build", "--project", PROJECT, "--wheel", "--out-dir", root / "dist"])
+    wheels = list((root / "dist").glob("*.whl"))
+    assert len(wheels) == 1
+    package.wheel = wheels[0]
+    requirements = root / "requirements.txt"
+    package.run(["uv", "export", "--project", PROJECT, "--frozen", "--no-dev",
+                 "--no-emit-project", "-o", requirements])
+    package.run(["uv", "venv", "--python", sys.executable, root / "venv"])
+    package.run(["uv", "pip", "install", "--python", package.python,
+                 "--require-hashes", "-r", requirements])
+    package.run(["uv", "pip", "install", "--python", package.python,
+                 "--no-deps", package.wheel])
+    # 任意标识仍通过正式静态与运行登记的交叉约束，不提供导出替身。
+    for name in ("camctl_fixtures.py", "_capability_declaration_entry.py"):
+        target = "declaration_entry.py" if name.startswith("_") else name
+        shutil.copy2(REPO / "tests/integration" / name, root / target)
+    guard = root / "bin"
+    guard.mkdir()
+    for tool in ("adb", "hb_cli"):
+        executable = guard / tool
+        executable.write_text(
+            f"#!{package.python}\nfrom pathlib import Path\n"
+            f"Path({str(root / 'device-calls')!r}).write_text({tool!r})\n"
+            "raise SystemExit(91)\n", encoding="utf8")
+        executable.chmod(0o700)
+    package.environment["PATH"] = str(guard) + os.pathsep + package.environment["PATH"]
+    yield package
 
 
 @pytest.fixture(scope="module")
@@ -203,7 +199,7 @@ def test_installed_source_change_keeps_accepted_execution_definition(package, tm
     request = directory / "request.json"
     request.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf8")
     package.cli("submit", str(request), "--config", str(config))
-    with sqlite3.connect(directory / "state.db") as connection:
+    with closing(sqlite3.connect(directory / "state.db")) as connection:
         original = connection.execute("SELECT execution_spec_json FROM actions").fetchone()[0]
     assert json.loads(original)["output_storage"] == "host"
     _config(package, directory, host_storage="device")
@@ -213,7 +209,7 @@ def test_installed_source_change_keeps_accepted_execution_definition(package, tm
     plan["request_id"] = "81002"
     request.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf8")
     package.cli("submit", str(request), "--config", str(config))
-    with sqlite3.connect(directory / "state.db") as connection:
+    with closing(sqlite3.connect(directory / "state.db")) as connection:
         rows = connection.execute("SELECT execution_spec_json FROM actions ORDER BY id").fetchall()
     assert len(rows) == 2
     assert rows[0][0] == original
