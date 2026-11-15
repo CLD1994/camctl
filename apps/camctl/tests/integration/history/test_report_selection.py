@@ -900,6 +900,98 @@ def test_actual_report_query_work_for_page_sizes(report_selection_sample, monkey
 
 
 @pytest.mark.asyncio
+async def test_large_selection_keeps_old_boundary_across_page_commits(report_selection_sample, tmp_path):
+    """大计划首批交付后提交旧动作过期和新计划，旧 H 的续页保持不变。"""
+    from camctl.contracts.enums import enum_for
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.scheduling import (
+        ExpireActionRequest, ExpireOutcome, SchedulingRepository,
+    )
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+    source_connection, source, _ = report_selection_sample
+    original_ids = list(range(1, 4207))
+    assert [row[0] for row in source_connection.execute('SELECT id FROM actions ORDER BY id')] == original_ids
+    before = _boundary(source_connection)
+    before_wm = _to_wm(source_connection)
+    request = ReportScopeRequest(before, 0, before_wm, 100)
+    copy_dir = tmp_path / 'writable'
+    copy_dir.mkdir()
+    state = copy_dir / 'state.db'
+    _prepare_statistics_copy(source, state, 'none')
+    owned = open_existing(state, DbOpenMode.EXISTING_RW, DbConfig())
+
+    def read_actions(selection, parent, cursor=None):
+        result = []
+        for _ in range(43):
+            page = selection.read_page('action', parent_id=parent, cursor=cursor)
+            result.extend(page.items)
+            cursor = page.next_cursor
+            if cursor is None:
+                return result
+        pytest.fail(f'动作分页未在预期范围内结束: parent={parent}')
+
+    try:
+        connection = owned.connection
+        status_enum = enum_for('actions.status')
+        action = connection.execute(
+            'SELECT plan_id,status,execution_started,cancel_requested,scheduled_at,max_delay_ms '
+            'FROM actions WHERE id=4').fetchone()
+        assert action is not None
+        plan_id, status, execution_started, cancel_requested, scheduled_at, max_delay_ms = action
+        assert (plan_id, status, execution_started, cancel_requested) == (2, int(status_enum.PENDING), 0, 0)
+        assert connection.execute('SELECT id FROM device_activities WHERE action_id=4').fetchone() is None
+        assert connection.execute('SELECT id FROM operation_runs WHERE action_id=4').fetchone() is None
+        latest_time = connection.execute('SELECT MAX(occurred_at) FROM history_events').fetchone()[0]
+        expired_at = max(scheduled_at + max_delay_ms * 1000, latest_time) + 1
+        repository = HistoryRepository(state)
+        with repository.report_read_scope():
+            with repository.open_report_selection(request) as selection:
+                first = selection.read_page('action', parent_id=2)
+                assert first.items == tuple(range(4, 104))
+                assert first.next_cursor is not None
+
+                outcome = SchedulingRepository().expire_action(
+                    ExpireActionRequest(4, expired_at, expired_at), new_operation_key(), owned)
+                assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+                assert outcome.value.outcome is ExpireOutcome.EXPIRED, outcome.value
+                after_expire = _boundary(connection)
+                status, last_event = connection.execute(
+                    'SELECT status,last_event_id FROM actions WHERE id=4').fetchone()
+                assert status == int(status_enum.EXPIRED)
+                assert before.last_event_id < last_event <= after_expire.last_event_id
+                assert _to_wm(connection) > before_wm
+
+                await _submit(owned, copy_dir, '4')
+                after_submit = _boundary(connection)
+                assert after_submit.last_event_id > after_expire.last_event_id
+                assert connection.execute(
+                    'SELECT id FROM plans WHERE id=4 AND created_event_id>?',
+                    (before.last_event_id,)).fetchone() == (4,)
+                assert connection.execute(
+                    'SELECT id,plan_id FROM actions WHERE id=4207 AND created_event_id>?',
+                    (before.last_event_id,)).fetchone() == (4207, 4)
+
+                actions = list(first.items) + read_actions(selection, 2, first.next_cursor)
+                assert actions == list(range(4, 4204))
+                assert read_actions(selection, 1) == [1, 2, 3]
+                assert read_actions(selection, 3) == [4204, 4205, 4206]
+                assert read_actions(selection, 4) == []
+                assert _read(selection, 'plan') == [1, 2, 3]
+                assert repository.restore_primary_at_h('action', 4, before)['status'] == int(status_enum.PENDING)
+
+        with HistoryRepository(state).open_report_selection(request) as selection:
+            assert read_actions(selection, 1) == [1, 2, 3]
+            assert read_actions(selection, 2) == list(range(4, 4204))
+            assert read_actions(selection, 3) == [4204, 4205, 4206]
+            assert read_actions(selection, 4) == []
+            assert _read(selection, 'plan') == [1, 2, 3]
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
 async def test_real_source_preparation_preserves_large_report_selection(finished_photo):
     """真实受理与拍摄形成大窗口，并由历史公开入口独立核对。"""
     import time
