@@ -11139,6 +11139,7 @@
     }
   },
   "non_event_tables": {
+    "acceptance_receipts": "受理写事务共同保存原申请身份和首次完整答复，不作为业务事件的行修改目标。",
     "history_transactions": "由初始化、历史追加或派生目录维护负责，不作为业务事件的行修改目标。",
     "history_events": "由初始化、历史追加或派生目录维护负责，不作为业务事件的行修改目标。",
     "entity_event_links": "由初始化、历史追加或派生目录维护负责，不作为业务事件的行修改目标。",
@@ -11214,6 +11215,10 @@
     }
   },
   "structural_history_references": {
+    "acceptance_receipts.transaction_id": {
+      "target": "history_transactions.id",
+      "rule": "受理写事务与原申请及首次答复共同提交；按该事务核实原结果。"
+    },
     "history_transactions.first_event_id": {
       "target": "history_events.id",
       "rule": "本事务首条事件；全部事件连续且确实属于该事务。"

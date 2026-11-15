@@ -361,7 +361,9 @@ def main() -> None:
     for table, row in tables.items():
         verify(row[-1] == 1, f'{table} 使用 STRICT')
         cols = list(db.execute(f'PRAGMA table_xinfo({table})'))
-        verify([(r[1], r[2]) for r in cols if r[5]] == [('id', 'INTEGER')], f'{table} 的唯一主键为整数 id')
+        primary_key = 'transaction_id' if table == 'acceptance_receipts' else 'id'
+        verify([(r[1], r[2]) for r in cols if r[5]] == [(primary_key, 'INTEGER')],
+               f'{table} 的唯一主键为整数 {primary_key}')
         for fk in db.execute(f'PRAGMA foreign_key_list({table})'):
             verify(fk[2] in tables, f'{table} 外键目标存在')
             target = {r[1] for r in db.execute(f'PRAGMA table_xinfo({fk[2]})')}
@@ -376,6 +378,7 @@ def main() -> None:
            staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing')
     insert(db, 'runtime_state', id=1, acknowledged_wm=0)
     insert(db, 'history_transactions', id=1, operation_key='b' * 32, first_event_id=1, last_event_id=2)
+    insert(db, 'acceptance_receipts', transaction_id=1, version=1, request_identity='{}', result_json='{}')
     for event in (1, 2):
         insert(db, 'history_events', id=event, transaction_id=1, event_type=event, event_version=1,
                occurred_at=0, clock_status=2, change_seq=event, body_json='{}')
@@ -392,6 +395,7 @@ def main() -> None:
         if action_type == 8:
             row.update(scheduled_at=0,max_delay_ms=1000)
         insert(db, 'actions', **row)
+    insert(db, 'device_file_batches', id=1, action_id=1, device_id='camera', acquired_event_id=1)
     insert(db, 'auto_preview_links', id=1, obtain_action_id=2, source_action_id=1,
            parameter_type='photo', preview_support=1, is_valid=1)
     insert(db, 'action_dependencies', id=1, action_id=2, depends_on_action_id=1)
@@ -401,6 +405,9 @@ def main() -> None:
            ownership_mode=1, output_scope_json='{}', baseline_state=1, dispatch_state=3,
            activity_state=1, occupancy_state=1, completion_basis=1, result_set_state=1)
     insert(db, 'software_recoveries', id=1, action_id=1, activity_id=1, phase=1, state_json='{}')
+    insert(db, 'device_availability_checks', id=1, action_id=1, device_id='camera', driver_id='driver',
+           expected_identity_json='{}', resource_key='camera', rule_version=1, target_boundary_event_id=1)
+    insert(db, 'device_availability_targets', id=1, check_id=1, action_id=1, activity_id=1)
     insert(db, 'baseline_read_calls', id=1, created_event_id=1, action_id=1, activity_id=1,
            call_key='d' * 32, result_save_key='e' * 32, device_id='camera', driver_id='driver',
            directories_json='["/DCIM"]', timeout_s_json='0.0001', chunk_count=0, entry_count=0,
@@ -472,6 +479,12 @@ def main() -> None:
     db.commit()
     verify(list(db.execute('PRAGMA foreign_key_check')) == [], '全部表样本及共同建档引用在提交时有效')
     verify(all(db.execute(f'SELECT count(*) FROM {name}').fetchone()[0] for name in tables), '全部表都有结构样本')
+
+    # 按需照片的完整大小可以未知；其他来源的长度由所属业务规则校验。
+    with case(db):
+        db.execute('UPDATE device_files SET size_bytes=NULL WHERE id=1')
+        verify(db.execute('SELECT size_bytes FROM device_files WHERE id=1').fetchone()[0] is None,
+               '完整文件允许大小未知')
 
     with case(db):
         rejects(db, 'UPDATE baseline_read_calls SET state=2 WHERE id=1')
@@ -652,7 +665,9 @@ def main() -> None:
         'UPDATE cancel_items SET target_action_id=action_id WHERE id=1',
         'UPDATE cancel_items SET status=3 WHERE id=1',
         'UPDATE cancel_delivery_items SET status=4 WHERE id=1',
-        'UPDATE device_files SET size_bytes=NULL WHERE id=1',
+        'UPDATE device_files SET completion_state=1 WHERE id=1',
+        'UPDATE device_files SET completion_state=2 WHERE id=1',
+        "UPDATE device_files SET completion_state=4,last_error_json='{}' WHERE id=1",
         'UPDATE intermediate_files SET retention_state=2 WHERE id=1',
         'UPDATE outputs SET intermediate_file_id=1 WHERE id=1',
         'UPDATE deliveries SET status=5 WHERE id=1',

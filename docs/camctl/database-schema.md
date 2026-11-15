@@ -84,12 +84,14 @@
 | `baseline_read_calls` | [基准目录调用](database/operation-fields.md#基准目录调用) |
 | `device_activities` | [设备持续活动及可靠观察](database/operations-devices.md#设备活动记录) |
 | `recording_processing` | [录像内部检查和修复的决定、进度与结果](database/operations-devices.md#录像内部检查与修复记录) |
+| `device_file_batches` | [同机文件批次的取得与释放](database/file-fields.md#同机文件批次) |
 | `device_files` | [设备文件身份、归属及文件事实](database/outputs-files.md#设备文件记录) |
 | `file_copies` | [拷贝进度、重拷轮次与校验](database/outputs-files.md#文件拷贝记录) |
 | `intermediate_files` | [主机中间文件用途、保留及清理](database/outputs-files.md#中间文件记录) |
 | `state_syncs` | [显式状态同步责任](database/reports-runtime.md#状态同步记录) |
 | `runtime_state` | [累计确认、可信时间及清理继续位置](database/reports-runtime.md#全局运行状态) |
 | `history_events` | [权威历史事件](database/history.md#历史事件与事务分组) |
+| `acceptance_receipts` | [受理写事务的原申请与答复](database/history.md#受理事务答复) |
 | `history_transactions` | [历史事件的完整提交分组](database/history.md#历史事件与事务分组) |
 | `entity_event_links` | [实际变化对象的事件关联及计数](database/history.md#对象与事件关联) |
 | `report_entity_changes` | [按事件公开影响登记的报告对象目录](database/report-changes.md) |

@@ -84,13 +84,22 @@
       "details_schema": {
         "type": "object",
         "properties": {
-          "source_action_instance_id": { "$ref": "status-report.schema.json#/$defs/entity_id" },
-          "original_output_id": { "$ref": "status-report.schema.json#/$defs/entity_id" }
+          "source_action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "original_output_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
         },
-        "required": ["source_action_instance_id", "original_output_id"],
+        "required": [
+          "source_action_instance_id",
+          "original_output_id"
+        ],
         "additionalProperties": false
       },
-      "item_error_ids": { "obtain_items": 9 }
+      "item_error_ids": {
+        "obtain_items": 9
+      }
     },
     "output_not_found": {
       "stage": "output_selection",
