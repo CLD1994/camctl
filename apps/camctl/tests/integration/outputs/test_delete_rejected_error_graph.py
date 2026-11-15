@@ -3,7 +3,6 @@
 import asyncio
 from contextlib import asynccontextmanager
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 from camctl.bootstrap.cleanup_assembly import HostArtifacts
@@ -25,6 +24,8 @@ from camctl.session.supervision import Supervisor
 from support.repository_ports import repository_port
 from .test_cleanup_delete_save_recovery import _prepared, _configured
 from ..bootstrap.test_output_binding_changes import environment
+from ..support.recording_consumer_cases import recording_cases  # noqa: F401
+from ..support.repaired_cleanup_cases import repaired_cleanup  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -82,12 +83,10 @@ async def test_delete_save_control_keeps_original_identity_and_actual_result(env
 
 
 @asynccontextmanager
-async def _supervised_world(environment, outcome=None):
-    from ..bootstrap.test_cleanup_flow import _seed_repaired_artifact
-    owned, _, _, driver, item_id = await _prepared(environment)
-    cfg = environment[0]
-    output_id, = owned.connection.execute('SELECT output_id FROM cleanup_items WHERE id=?', (item_id,)).fetchone()
-    _seed_repaired_artifact(Path(cfg.paths.state_db), cfg, output_id)
+async def _supervised_world(repaired_cleanup, outcome=None):
+    environment, _, item_id, _, _, target, content, _ = repaired_cleanup
+    _, owned, _, driver = environment
+    assert target.read_bytes() == content
     supervisor = Supervisor()
     runtime = await _configured(environment, owned, driver, file_executor=FileTaskExecutor(supervisor))
     original = ValueError('original runner supervision failure')
@@ -114,8 +113,8 @@ async def _supervised_world(environment, outcome=None):
         await supervisor.drain_required()
 
 
-async def test_original_supervision_result_replay_logs_one_complete_graph(environment):
-    async with _supervised_world(environment) as (owned, runtime, item_id, original, saves, calls):
+async def test_original_supervision_result_replay_logs_one_complete_graph(repaired_cleanup):
+    async with _supervised_world(repaired_cleanup) as (owned, runtime, item_id, original, saves, calls):
         records = []
         with error_diagnostics_context(None, records.append):
             async with diagnostic_scope():
@@ -132,12 +131,12 @@ async def test_original_supervision_result_replay_logs_one_complete_graph(enviro
         assert owned.connection.execute('SELECT status FROM cleanup_items WHERE id=?', (item_id,)).fetchone() == (4,)
 
 
-async def test_database_control_and_supervision_error_keep_original_control(environment):
+async def test_database_control_and_supervision_error_keep_original_control(repaired_cleanup):
     control = asyncio.CancelledError('original database control')
     original_cause = OSError(5, 'original save failure')
     control.__cause__ = original_cause
     outcome = DbOutcome(DbOutcomeKind.UNKNOWN, error=original_cause, control=control)
-    async with _supervised_world(environment, outcome) as (_, runtime, item_id, original, saves, calls):
+    async with _supervised_world(repaired_cleanup, outcome) as (_, runtime, item_id, original, saves, calls):
         with pytest.raises(asyncio.CancelledError) as caught:
             await delete_source_file(runtime, item_id)
         assert caught.value is control and control.__cause__ is original_cause

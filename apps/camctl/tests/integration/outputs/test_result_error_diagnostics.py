@@ -24,7 +24,8 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from support.repository_ports import repository_port
-from ..bootstrap.test_cleanup_flow import _seed_repaired_artifact
+from ..support.recording_consumer_cases import recording_cases  # noqa: F401
+from ..support.repaired_cleanup_cases import repaired_cleanup, unknown_host_delete  # noqa: F401
 from ..bootstrap.test_output_binding_changes import environment, Catalog, _NOW, _save_photos, _registry
 from ..support.database import business_database, database_path
 from ..support.outputs import output_operation, prepare_cancel_target, submit_output_document
@@ -282,33 +283,68 @@ async def test_target_fixed_result_returns_and_logs_each_business_rejection(envi
     assert not driver.deletes and not driver.queries
 
 
-async def test_query_target_exception_graph_is_preserved(environment):
-    owned, _, runtime, driver, item_id = await _prepared(environment, before_query=True)
-    cfg = environment[0]
-    output, = owned.connection.execute('SELECT output_id FROM cleanup_items WHERE id=?', (item_id,)).fetchone()
-    _seed_repaired_artifact(Path(cfg.paths.state_db), cfg, output)
-    runtime = await _configured(environment, owned, driver)
+async def test_query_target_exception_graph_is_preserved(repaired_cleanup, monkeypatch):
+    from camctl.bootstrap.cleanup_assembly import HostArtifacts
+    actual_query = HostArtifacts.query_file
+    query_calls = []
+    async def query(host, request):
+        query_calls.append(request)
+        return await actual_query(host, request)
+    monkeypatch.setattr(HostArtifacts, "query_file", query)
+    environment, _, first_item, output_id, file_id, target, content, executor = repaired_cleanup
+    _, owned, _, driver = environment
+    # 第一条清理实际删除和查询均未确认，耗尽查询预算后形成失败终态。
+    from camctl.contracts.values import new_operation_key
+    from camctl.outputs.cleanup_flow import FinishCleanupAction
+    from .test_cleanup_query_save_recovery import _start_cleanup
+    first_action, = owned.connection.execute(
+        'SELECT action_id FROM cleanup_items WHERE id=?', (first_item,)).fetchone()
+    first_runtime = await _configured(environment, owned, driver, query_attempts=1,
+        file_executor=executor, wall=lambda: _NOW)
+    prior_records = []
+    with unknown_host_delete(target, query_unknown=True) as deletes, \
+            error_diagnostics_context(None, prior_records.append):
+        async with diagnostic_scope():
+            assert (await delete_source_file(first_runtime, first_item)).phase == 'query_unknown'
+            assert (await delete_source_file(first_runtime, first_item)).phase == 'failed'
+    assert len(deletes) == 1 and len(query_calls) == 1
+    finished = OutputsRepository().finish_cleanup_action(
+        FinishCleanupAction(first_action, _NOW), new_operation_key(), owned)
+    assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+    _, item_id = _start_cleanup(owned, output_id, '3')
+    runtime = await _configured(environment, owned, driver, file_executor=executor, wall=lambda: _NOW)
+    invalid_path = f"../{target.name}"
     class CorruptAfterIntent(OutputsRepository):
         tickets = []
         def begin_cleanup_attempt(self, request, key, worker):
             result = super().begin_cleanup_attempt(request, key, worker)
             if request.operation == 'query':
                 self.tickets.append(result.value.ticket)
-                worker.connection.execute("UPDATE intermediate_files SET relative_path='../900.jpg' WHERE id=900")
+                worker.connection.execute("UPDATE intermediate_files SET relative_path=? WHERE id=?", (invalid_path, file_id))
                 worker.connection.commit()
             return result
     port = CorruptAfterIntent()
     lines = []
     with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
-            matches=lambda name, args, kwargs: args[0].target.cleanup_item_id == item_id), \
+                matches=lambda name, args, kwargs: args[0].target.cleanup_item_id == item_id), \
             error_diagnostics_context(None, lines.append):
         async with diagnostic_scope():
             await delete_source_file(runtime, item_id)
-    assert len(lines) == 1
-    error = json.loads(lines[0])['run_error']
+    assert len(port.tickets) == len(query_calls) == 1
+    assert not driver.deletes and not driver.queries
+    assert target.read_bytes() == content
+    records = [json.loads(line) for line in lines]
+    assert [record['stage'] for record in records] == ['query']
+    record = records[0]
+    assert record['ticket']['attempt_id'] == port.tickets[0].attempt_id
+    assert record['ticket']['run_id'] == port.tickets[0].run_id
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_runs WHERE cleanup_item_id=? AND responsibility_key=?",
+        (item_id, f'delete/{item_id}')).fetchone() == (0,)
+    error = record['run_error']
     assert error['type'].endswith('.LocalArtifactTargetError')
-    assert error['cause'] is not None
-    assert '900.jpg' in error['cause']['message']
+    assert error['cause']['type'].endswith('.PathRuleError')
+    assert invalid_path in error['cause']['message']
 
 
 async def test_restored_saved_query_does_not_generate_old_error_again(environment):
@@ -336,31 +372,30 @@ async def test_restored_saved_query_does_not_generate_old_error_again(environmen
     assert restored == [] and len(calls) == 1
 
 
-async def test_query_validation_failure_retains_original_exception(monkeypatch, environment):
+async def test_query_validation_failure_retains_original_exception(environment):
     owned, runtime, driver, item_id, result, calls = await query_world(environment)
-    async def successful_query(request):
+    invalid = DeviceCallResult.from_outcome(replace(result.outcome,
+        status=AttemptStatus.SUCCEEDED, error=None, settlement=Settlement(SettlementBasis.OBSERVED,
+            EvidenceValue('unregistered_query_finish', 1, {}))))
+    async def invalid_query(request):
         calls.append(request)
-        return DeviceCallResult((DeviceObservation('file_presence', 1,
-            {'cleanup_item_id': str(item_id), 'present': False}),), None)
-    driver.query_file = successful_query
-    failure = TypeError('driver returned an invalid value')
-    from camctl.operations import validation as validation_module
-    validate = validation_module.validate_outcome
-    def validation(ticket, outcome, evidence):
-        if ticket.operation == 'query':
-            raise failure
-        return validate(ticket, outcome, evidence)
-    monkeypatch.setattr(validation_module, 'validate_outcome', validation)
+        return invalid
+    driver.query_file = invalid_query
     lines = []
     with error_diagnostics_context(None, lines.append):
-        with pytest.raises(OutcomeValidationError):
-            async with diagnostic_scope():
+        async with diagnostic_scope():
+            with pytest.raises(OutcomeValidationError) as caught:
                 await delete_source_file(runtime, item_id)
-        assert not lines
+            with pytest.raises(OutcomeValidationError) as repeated:
+                await delete_source_file(runtime, item_id)
+            assert not lines
+        assert str(repeated.value) == str(caught.value)
         await flush_diagnostics()
     assert len(lines) == len(calls) == 1
     record = json.loads(lines[0])
-    assert record['error']['type'] == 'builtins.TypeError'
-    assert record['error']['message'] == str(failure)
+    assert record['error']['type'].endswith('.OutcomeValidationError')
+    assert 'unregistered_query_finish' in record['error']['message']
+    assert record['error']['cause']['type'].endswith('.EvidenceError')
+    assert record['error']['message'] == str(caught.value)
     assert record['details']['ticket']['attempt_id'] == calls[0].ticket.attempt_id
     assert owned.connection.execute('SELECT a.status,a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key=?', (f'exists/{item_id}',)).fetchone() == (1, None)

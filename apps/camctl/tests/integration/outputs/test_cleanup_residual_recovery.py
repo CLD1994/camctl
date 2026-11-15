@@ -18,6 +18,8 @@ from .test_cleanup_delete_save_recovery import _FaultOutputs, _prepared, _config
 from ..support.capture import capture_database
 from ..support.outputs import cleanup_factory
 from ..bootstrap.test_output_binding_changes import _NOW, _registry, environment
+from ..support.recording_consumer_cases import recording_cases  # noqa: F401
+from ..support.repaired_cleanup_cases import repaired_cleanup, unknown_host_delete  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -182,59 +184,45 @@ async def _orphan_intent(environment, operation="delete"):
     )
 
 
-async def _orphan_intent_for_prepared(environment, prepared, operation, *, host_query=False):
-    from camctl.contracts.values import new_operation_key
-    from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
+async def _orphan_intent_for_prepared(environment, prepared, operation, *, host_query=False, file_executor=None):
     owned, context, runtime, driver, item_id = prepared
-    action_id, = owned.connection.execute(
-        "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    if operation == "delete" or not host_query:
-        from dataclasses import replace
-        class IntentSaved(Exception):
-            pass
-        class IntentBoundary(OutputsRepository):
-            ticket = None
-            original = None
-            def begin_cleanup_attempt(self, request, key, current):
-                receipt = super().begin_cleanup_attempt(request, key, current)
-                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-                assert receipt.value.ticket is not None
-                assert request.operation == operation
-                self.ticket = receipt.value.ticket
-                self.original = (request, key)
-                return replace(receipt, handoff_error=IntentSaved())
-        cfg = environment[0]
-        factory = session_cleanup_assembly(devices=cfg.devices, drivers=_registry(driver),
-            max_delete_attempts=3, max_query_attempts=3, staging=Path(cfg.paths.staging),
-            occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
-        runtime = await factory(await capture_database(owned))
-        boundary = IntentBoundary()
-        with repository_port(OutputsRepository, boundary, ("begin_cleanup_attempt",),
-                matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
-            with pytest.raises(IntentSaved):
-                await delete_source_file(runtime, item_id)
-        ticket = boundary.ticket
-        assert ticket is not None
-        if operation == "query":
-            from decimal import Decimal
-            request, key = boundary.original
-            assert (request.config.max_attempts, request.config.timeout_s,
-                    request.config.retry_interval_s) == (3, Decimal(10), Decimal(3))
-            assert request.occurred_at == _NOW
-            assert owned.connection.execute(
-                "SELECT operation_key FROM history_transactions WHERE operation_key=?",
-                (str(key),)).fetchone() == (str(key),)
-            assert not driver.queries and not driver.deletes
-    else:
-        member_runtime = await runtime.for_item(item_id)
-        request = AttemptIntent(operation=operation, action_id=action_id,
-            kind=OperationKind.CHECK_FILE_EXISTS,
-            target=AttemptTarget(cleanup_item_id=item_id), query_purpose=None,
-            config=member_runtime.query_config, occurred_at=_NOW)
-        result = runtime.outputs.begin_cleanup_attempt(request, new_operation_key(), owned)
-        assert result.kind is DbOutcomeKind.COMPLETED, result.error
-        ticket = result.value.ticket
-        assert ticket is not None
+    from dataclasses import replace
+    class IntentSaved(Exception):
+        pass
+    class IntentBoundary(OutputsRepository):
+        ticket = None
+        original = None
+        def begin_cleanup_attempt(self, request, key, current):
+            receipt = super().begin_cleanup_attempt(request, key, current)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            assert receipt.value.ticket is not None
+            assert request.operation == operation
+            self.ticket = receipt.value.ticket
+            self.original = (request, key)
+            return replace(receipt, handoff_error=IntentSaved())
+    cfg = environment[0]
+    factory = session_cleanup_assembly(devices=cfg.devices, drivers=_registry(driver),
+        max_delete_attempts=3, max_query_attempts=3, staging=Path(cfg.paths.staging),
+        occurred_at=lambda: _NOW, monotonic_ns=lambda: 0, file_executor=file_executor)
+    runtime = await factory(await capture_database(owned))
+    boundary = IntentBoundary()
+    with repository_port(OutputsRepository, boundary, ("begin_cleanup_attempt",),
+            matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id
+            and args[0].operation == operation):
+        with pytest.raises(IntentSaved):
+            await delete_source_file(runtime, item_id)
+    ticket = boundary.ticket
+    assert ticket is not None
+    if operation == "query":
+        from decimal import Decimal
+        request, key = boundary.original
+        assert (request.config.max_attempts, request.config.timeout_s,
+                request.config.retry_interval_s) == ((3, None, None) if host_query else (3, Decimal(10), Decimal(3)))
+        assert request.occurred_at == _NOW
+        assert owned.connection.execute(
+            "SELECT operation_key FROM history_transactions WHERE operation_key=?",
+            (str(key),)).fetchone() == (str(key),)
+        assert not driver.queries and not driver.deletes
     horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
     owned.connection.close()
     return context.open_connection(), context, driver, item_id, ticket, horizon
@@ -521,25 +509,28 @@ async def test_running_recovery_requires_each_original_qualification(
 
 @pytest.mark.parametrize("operation", ["delete", "query"])
 async def test_host_recovery_uses_independent_empty_local_file_evidence(
-    environment, operation,
-    capture_resources,
+    repaired_cleanup, operation, capture_resources, monkeypatch,
 ):
     import json
     from camctl.capture.recovery import RecoveryBoundary
-    from ..bootstrap.test_cleanup_flow import _seed_repaired_artifact
+    from camctl.bootstrap.cleanup_assembly import HostArtifacts
 
-    # 来源在授票据前可靠固定为主机；恢复不读取当前相机能力。
-    cfg = environment[0]
-    owned, _, runtime, _, item_id = await _prepared(environment)
-    output_id = owned.connection.execute(
-        "SELECT output_id FROM cleanup_items WHERE id=?", (item_id,)
-    ).fetchone()[0]
-    _seed_repaired_artifact(Path(cfg.paths.state_db), cfg, output_id)
-    owned, _, driver, item_id, ticket, horizon = await _orphan_intent_for_prepared(
-        environment,
-        (owned, environment[2], runtime, environment[3], item_id),
-        operation, host_query=operation == "query",
-    )
+    host_calls = []
+    for name in ("delete", "query_file"):
+        actual = getattr(HostArtifacts, name)
+        async def observe(host, request, *, method=name, call=actual):
+            host_calls.append((method, request.ticket))
+            return await call(host, request)
+        monkeypatch.setattr(HostArtifacts, name, observe)
+
+    environment, runtime, item_id, _, _, target, content, executor = repaired_cleanup
+    cfg, owned, context, driver = environment
+    with unknown_host_delete(target) as deletes:
+        owned, _, driver, item_id, ticket, horizon = await _orphan_intent_for_prepared(
+            environment, (owned, context, runtime, driver, item_id), operation,
+            host_query=operation == "query", file_executor=executor,
+        )
+    assert len(deletes) == (1 if operation == "query" else 0)
     try:
         runtime = await _stored_runtime(session_cleanup_assembly(
             devices={},
@@ -560,9 +551,9 @@ async def test_host_recovery_uses_independent_empty_local_file_evidence(
             "basis": "assumed",
             "evidence": {"type": "local_file_recovery", "version": 1, "data": {}},
         }
-        assert (
-            Path(cfg.paths.staging) / "derived/900.jpg"
-        ).read_bytes() == b"repaired-artifact"
+        assert target.read_bytes() == content
+        assert [name for name, _ in host_calls] == (["delete"] if operation == "query" else [])
+        assert not driver.deletes and not driver.queries
     finally:
         owned.connection.close()
 
