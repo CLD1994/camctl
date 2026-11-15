@@ -384,27 +384,16 @@ class SourceResultEntries:
     async def batches(self):
         cursor = None
         while True:
-            def read_batch(owned):
-                from camctl.persistence.repositories.result_pages import result_read_snapshot
-                with result_read_snapshot(owned.connection):
-                    page = self.repository.read_result_sources(self.ticket, cursor, 32, owned)
-                    current = {}
-                    if isinstance(self.current_entries, SavedResultEntries):
-                        identities = []
-                        for entry, _, _ in page.items:
-                            identities.append(entry.identity)
-                            if entry.paired_identity is not None:
-                                identities.append(entry.paired_identity)
-                        current = self.repository.read_result_file_inputs(
-                            self.current_entries.last_ref, identities, owned)
-                        if isinstance(self.current_entries, QualifiedResultEntries):
-                            current = {identity: value for identity, value in current.items()
-                                if self.current_entries.source_qualified
-                                and value[2] >= self.current_entries.lower_bound}
-                    return page, current
-
-            page, current = await self.database.read(read_batch,
+            current_ref = (self.current_entries.last_ref
+                if isinstance(self.current_entries, SavedResultEntries) else None)
+            page, current = await self.database.read(
+                lambda owned: self.repository.read_result_source_batch(
+                    self.ticket, cursor, 32, current_ref, owned),
                 description="读取一批已保存文件来源和当前观察")
+            if isinstance(self.current_entries, QualifiedResultEntries):
+                current = {identity: value for identity, value in current.items()
+                    if self.current_entries.source_qualified
+                    and value[2] >= self.current_entries.lower_bound}
             yield page.items, current
             if page.next_cursor is None:
                 return

@@ -2178,6 +2178,21 @@ class CaptureRepository:
         from .result_pages import read_source_inputs
         return read_source_inputs(ticket, cursor, batch, owned)
 
+    def read_result_source_batch(self, ticket, cursor, batch: int, current_ref, owned: OwnedConnection):
+        """在同一只读事务中读取来源文件和对应的当前观察。"""
+        from .result_pages import result_read_snapshot
+        with result_read_snapshot(owned.connection):
+            page = self.read_result_sources(ticket, cursor, batch, owned)
+            current = {}
+            if current_ref is not None:
+                identities = []
+                for entry, _, _ in page.items:
+                    identities.append(entry.identity)
+                    if entry.paired_identity is not None:
+                        identities.append(entry.paired_identity)
+                current = self.read_result_file_inputs(current_ref, identities, owned)
+            return page, current
+
     def read_saved_result_file_input(self, page, file_id, boundary, owned: OwnedConnection,
                                       *, pairing_fact_id=None):
         from .result_file_proofs import read_result_file_input_from_reader
