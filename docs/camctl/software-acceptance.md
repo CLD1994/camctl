@@ -1522,12 +1522,12 @@
 
 #### 验收 P-05
 - 原文：[验收 P-05](database/consistency-verification.md#报告对象分页的具体查询验证)（分页期间提交新事件的冻结范围不变）。
-- 结论：已覆盖
+- 结论：部分覆盖
 - 归属：R 生成（reporting 计划）。
 - 生产入口：apps/camctl/src/camctl/reporting/generation.py
-- 测试：apps/camctl/tests/integration/reporting/test_generation.py
-- 证据：reporting 计划分段验证记录（冻结范围与重建群）；I5 报告链固定字节。
-- 未核验前提：无
+- 测试：apps/camctl/tests/integration/reporting/test_generation.py、apps/camctl/tests/integration/reporting/test_freeze_reuse.py、apps/camctl/tests/integration/reporting/test_result_error_generation.py、apps/camctl/tests/integration/history/test_report_selection.py
+- 证据：已有后续提交前后打开旧H、不同批量及缓冲下重建同一报告字节、ACK后原冻结答复不变，以及查询错误／取消关闭选择和数据库重开后重建的分层验证。
+- 未核验前提：这些分层结果尚未证明全部P-05交叉。读取进行中的旧对象变化／新对象提交、大范围续页间提交、ACK或缓存命中后的完整字节对照，以及候选失败后由新报告进程沿原身份/H重建，须按实际行为分别核验；不能从旧记录或不存在的旧测试文件推定已全部覆盖。当前补强与边界见[工作记录](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
 
 #### 验收 P-06
 - 原文：[验收 P-06](database/consistency-verification.md#报告对象分页的具体查询验证)（候选峰值与完整选择工作量）。
@@ -1658,4 +1658,4 @@ Python 组件测试路径相对 `apps/camctl/tests/`；前两行未标出分类�
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：新增[九、跨模块契约场景](#九跨模块契约场景)十项映射并扩展 `tests/integration/test_camctl_acceptance_map.py` 检查器（场景清单解析自 verification.md 表格、字段与引用逐项校验、条目解析不再跨章节读取）；验收 68、P-03、P-04、P-06 依据 history 计划 H7 规模测量记录升级为已覆盖。`tests/integration/test_camctl_acceptance_map.py` 3 项全部通过。
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 全部通过；引用的模块测试文件与生产入口路径逐一核验存在。此前的最近全量回归见[集成计划验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i4-验证记录2026-10-07)（Windows 单元 3353、根跨组件 52+4 跳+342 子测试、bootstrap 87、session 82；WSL 单元 3352+1 跳、reporting 345 等）。
 - 2026-10-13（验收映射与当前 ARM 证据核对）：逐条复核 165 项的权威编号、结论、生产入口、测试入口和未核验前提，并复核十项跨模块场景；全部入口路径均存在。2026-10-12 的最新全量软件回归记录为单元测试 `5076 passed, 1 skipped`、16 个集成目录合计 `6209 passed, 3 skipped`；之后另有 capture 完整目录 `1088 passed`、主机照片专项 `19 passed`、收场恢复专项 `93 passed` 及安装版专项 `1 passed`（本次审阅未运行测试）。现场结果见[Hasselblad 软件及 ARM 验收](verification.md#hasselblad-主机单张接入的软件验证2026-10-12)和[ARM 真实拍摄与取回验收](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)，以及[Action6 普通录像现场确认](verification.md#action6-普通录像演示的现场验收2026-10-11)。Action6 普通录像和 Hasselblad 单张已通过各自记录的现场范围；Action6 原生延时、OSMO、V-02/V-04 所列的目标 SQLite 专项、第三方传输、目标资源及物理断电仍分别按上表和对应责任入口跟踪。
-- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部166条（数字条目72条、字母条目94条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。验收条目已覆盖 139 条、部分覆盖 25 条、开放 2 条；契约场景已覆盖8项、部分覆盖2项。SW-06 在真实默认消费者、SQL 授予及恢复中补齐 W-11 的逐项软件证据，因此将该项升级为已覆盖。O-07 的联合验收与 P-03 的实际覆盖索引要求仍开放。各部分覆盖和开放条目的未核验前提由各自映射及路线图跟踪。上述统计描述软件验收映射，目标设备工作流、目标性能及物理断电分别记录。
+- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部166条（数字条目72条、字母条目94条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。验收条目已覆盖 138 条、部分覆盖 26 条、开放 2 条；契约场景已覆盖8项、部分覆盖2项。SW-06 在真实默认消费者、SQL 授予及恢复中补齐 W-11 的逐项软件证据，因此将该项升级为已覆盖。O-07 的联合验收与 P-03 的实际覆盖索引要求仍开放。各部分覆盖和开放条目的未核验前提由各自映射及路线图跟踪。上述统计描述软件验收映射，目标设备工作流、目标性能及物理断电分别记录。
