@@ -716,7 +716,7 @@ def test_projection_row_validation_closes_connection_after_schema_error(monkeypa
         return sqlite3.SQLITE_OK
 
     created = _track_validation_connections(monkeypatch, authorizer=deny_schema_creation)
-    with pytest.raises(module.ProjectionRowValidationError) as caught:
+    with pytest.raises(module.ProjectionStorageError) as caught:
         with module.ProjectionRowValidator():
             pytest.fail("结构创建被拒绝时不应进入校验范围")
     assert denied, "SQLite 没有实际尝试创建校验结构"

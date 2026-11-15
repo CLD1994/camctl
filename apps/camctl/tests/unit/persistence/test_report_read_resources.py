@@ -12,7 +12,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories import history
 from camctl.persistence.runtime import (
     DatabaseMetadata, DatabaseUnsupportedFormatError, DbOpenMode,
-    DirectoryBindingError, OwnedConnection,
+    DirectoryBindingError, OwnedConnection, StateDatabaseError,
 )
 
 
@@ -175,9 +175,10 @@ def test_report_scope_closes_even_when_connection_close_fails(database):
     connection, _, _, _ = database
     connection.close.side_effect = sqlite3.OperationalError("close failed")
     repository = history.HistoryRepository(Path("/state.db"))
-    with pytest.raises(sqlite3.OperationalError):
+    with pytest.raises(StateDatabaseError) as caught:
         with repository.report_read_scope():
             pass
+    assert caught.value.__cause__ is connection.close.side_effect
     assert repository._report_connection is None
 
 

@@ -319,11 +319,12 @@ async def test_change_committed_during_report_failure_remains_a_trigger(mocker):
 
 
 @pytest.mark.parametrize("failed_stage", ["generate", "deliver"])
-async def test_ordinary_report_exception_is_saved_once_and_waits_new_change(mocker, failed_stage):
+@pytest.mark.parametrize("error_type", [RuntimeError, sqlite3.OperationalError])
+async def test_ordinary_report_exception_is_saved_once_and_waits_new_change(mocker, failed_stage, error_type):
     state = _ReportState(mocker)
     latest = 1
     state.context.report_change_wm = AsyncMock(side_effect=lambda: latest)
-    original = RuntimeError(f"{failed_stage} failed")
+    original = error_type(f"{failed_stage} failed")
     state.supervisor.generate.side_effect = state.generated
     failed_call = state.supervisor.generate if failed_stage == "generate" else state.delivery
     failed_call.side_effect = original
@@ -413,7 +414,6 @@ async def test_ordinary_failure_keeps_other_unattempted_reports_runnable(
 
 @pytest.mark.parametrize("failed_stage", ["generate", "deliver"])
 @pytest.mark.parametrize("failure", [StateDatabaseError("state failed"),
-                                     sqlite3.OperationalError("read failed"),
                                      ConsistencyError("history failed"),
                                      PublicProjectionError("projection failed"),
                                      BoundaryError("boundary failed"),

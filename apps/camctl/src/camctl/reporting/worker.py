@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import time
 from dataclasses import replace
@@ -184,7 +185,7 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
     先核验实际打开的数据库实例身份，再按冻结依据生成并同步
     staging 文件；文件按报告身份与字节摘要改用规范文件名，供发布
     编排直接交接。成功结果在文件写入、摘要计算与同步完成后发
-    出。任何失败都转换为分类结果，不向主进程抛出异常。
+    出。普通异常转换为分类结果；取消及其他控制异常保持原身份。
     """
     observed = job.instance_id
     try:
@@ -225,7 +226,7 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
             job_id=job.job_id, instance_id=observed,
             path=str(canonical), size_bytes=generated.size_bytes,
             sha256=generated.sha256)
-    except BaseException as error:
+    except Exception as error:
         failure = ResultFailureMessage(
             job_id=job.job_id, instance_id=observed,
             error_kind=classify_worker_error(error),
@@ -237,11 +238,17 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
 
 def _read_job_metadata(job: JobMessage) -> DatabaseMetadata:
     config = DbConfig(busy_timeout_ms=job.busy_timeout_ms)
-    owned = open_existing(Path(job.db_path), DbOpenMode.EXISTING_RO, config)
+    try:
+        owned = open_existing(Path(job.db_path), DbOpenMode.EXISTING_RO, config)
+    except OSError as error:
+        raise StateDatabaseError(f"状态库元信息连接打开失败: {error}") from error
     try:
         return owned.metadata
     finally:
-        owned.connection.close()
+        try:
+            owned.connection.close()
+        except sqlite3.Error as error:
+            raise StateDatabaseError(f"状态库元信息连接关闭失败: {error}") from error
 
 
 def worker_main(

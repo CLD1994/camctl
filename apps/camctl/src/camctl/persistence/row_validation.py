@@ -27,6 +27,10 @@ class ProjectionRowValidationError(ValueError):
     """完整投影行的类型、空值或列组合违反权威结构。"""
 
 
+class ProjectionStorageError(RuntimeError):
+    """完整行校验使用的临时存储不可用。"""
+
+
 @dataclass(frozen=True)
 class _UniqueIndex:
     name: str
@@ -58,7 +62,10 @@ class ProjectionRowValidator:
     def __enter__(self) -> ProjectionRowValidator:
         if self._connection is not None:
             raise ProjectionRowValidationError("完整行校验器不能重复进入读取范围")
-        connection = sqlite3.connect(str(self._storage_path) if self._storage_path is not None else ":memory:", isolation_level=None)
+        try:
+            connection = sqlite3.connect(str(self._storage_path) if self._storage_path is not None else ":memory:", isolation_level=None)
+        except sqlite3.Error as error:
+            raise ProjectionStorageError(f"完整行校验存储打开失败: {error}") from error
         try:
             if self._storage_path is not None:
                 configure_derived_connection(connection)
@@ -71,7 +78,7 @@ class ProjectionRowValidator:
         except BaseException as error:
             connection.close()
             if isinstance(error, sqlite3.Error):
-                raise ProjectionRowValidationError("完整行校验的权威结构无法创建") from error
+                raise ProjectionStorageError(f"完整行校验存储初始化失败: {error}") from error
             raise
         self._connection = connection
         return self
@@ -156,7 +163,7 @@ class ProjectionRowValidator:
         try:
             indexes = self._unique_indexes(table, columns)
         except sqlite3.Error as error:
-            raise ProjectionRowValidationError(f"表 {table} 的唯一索引无法建立") from error
+            raise ProjectionStorageError(f"完整行校验索引创建失败: {error}") from error
         keys = []
         with closing(connection.execute("SAVEPOINT validate_projection_row")):
             pass
@@ -170,9 +177,11 @@ class ProjectionRowValidator:
                         f"SELECT {selected}, CASE WHEN {index.predicate} THEN 1 ELSE 0 END"
                         f" FROM {_identifier(table)}")) as cursor:
                     keys.append((index, cursor.fetchone()))
-        except sqlite3.Error as error:
+        except sqlite3.IntegrityError as error:
             raise ProjectionRowValidationError(
                 f"{table}#{values.get('id')} 的完整行违反权威结构: {error}") from error
+        except sqlite3.Error as error:
+            raise ProjectionStorageError(f"完整行校验存储访问失败: {error}") from error
         finally:
             with closing(connection.execute("ROLLBACK TO validate_projection_row")):
                 pass
@@ -253,9 +262,11 @@ class ProjectionRowValidator:
                         f"INSERT INTO {index.cache_table} VALUES ({placeholders})", parameters)):
                     pass
             succeeded = True
-        except sqlite3.Error as error:
+        except sqlite3.IntegrityError as error:
             raise ProjectionRowValidationError(
                 f"{table}#{identity} 与对象内其他行的唯一键冲突: {error}") from error
+        except sqlite3.Error as error:
+            raise ProjectionStorageError(f"完整行校验唯一键存储访问失败: {error}") from error
         finally:
             if not succeeded:
                 with closing(connection.execute("ROLLBACK TO validate_projection_keys")):

@@ -1299,8 +1299,10 @@ async def test_read_failure_and_database_replacement_close_bound_session(finishe
             return original_connect(database, *args, **kwargs)
         with monkeypatch.context() as patch:
             patch.setattr(sqlite3, 'connect', failed_connection)
-            with pytest.raises(OSError, match='read page failure'):
+            from camctl.persistence.runtime import StateDatabaseError
+            with pytest.raises(StateDatabaseError) as caught:
                 selection.read_page('plan', cursor=cursor)
+            assert isinstance(caught.value.__cause__, OSError)
         assert len(attempts) == 1
         with pytest.raises(ConsistencyError):
             selection.read_page('plan')

@@ -190,3 +190,20 @@ async def test_publication_session_reads_injected_clock_at_each_write(monkeypatc
     assert await session.record_failure(1, {}) is outcome
     assert await session.settle_local(2, 1) is outcome
     assert recorded == [9_000_001, 9_000_002, 9_000_003, 9_000_004, 9_000_005]
+
+@pytest.mark.asyncio
+async def test_publication_session_identifies_state_database_write_failure():
+    import sqlite3
+    from unittest.mock import create_autospec
+    from camctl.persistence.business import BusinessDatabase
+    from camctl.persistence.runtime import StateDatabaseError
+    from camctl.reporting.publication import DbPublicationSession
+
+    database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
+    original = sqlite3.OperationalError('state write failed')
+    database.write.side_effect = original
+
+    with pytest.raises(StateDatabaseError) as caught:
+        await DbPublicationSession(database).prepare(1, object())
+
+    assert caught.value.__cause__ is original

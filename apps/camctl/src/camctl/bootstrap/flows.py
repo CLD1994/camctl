@@ -1096,6 +1096,14 @@ def _failed_report_ids(owned: Any) -> tuple[int, ...]:
         return tuple(int(row[0]) for row in cursor.fetchall())
 
 
+class _RecordedReportFailure(Exception):
+    """报告失败已经可靠保存；向报告日志边界交回原异常。"""
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__(str(original))
+
+
 @dataclass(frozen=True)
 class _ReportMaintenanceFlow:
     advance: Callable[[Any], Any]
@@ -1202,7 +1210,7 @@ def report_flow(
             StateDbFailure, DirectoryBindingError, DeviceConfigurationError, ClockBecameUntrusted,
         )
         state_errors = (
-            StateDatabaseError, sqlite3.Error, ConsistencyError,
+            StateDatabaseError, ConsistencyError,
             PublicProjectionError, BoundaryError, HistoryEventError, ReplayError,
             JsonParseError, SchemaRuleError,
         )
@@ -1293,7 +1301,7 @@ def report_flow(
             # 监督结果之外的普通生成错误也结束本次已冻结责任；
             # 保留原错误身份交给报告边界，不因下次轮询重新派发。
             await _record_failure(business, report_id, now_us, f"报告生成失败: {error}")
-            raise
+            raise _RecordedReportFailure(error) from error
         if generation.kind is GenerationOutcomeKind.STATE_FAILURE:
             failure = generation.failure
             detail = f"{failure.error_code}: {failure.error_message}"
@@ -1347,7 +1355,7 @@ def report_flow(
             raise StateDbFailure(f"报告 {report_id} 文件交接遇到状态库错误: {error}") from error
         except Exception as error:
             await _record_failure(business, report_id, now_us, f"报告文件交接失败: {error}")
-            raise
+            raise _RecordedReportFailure(error) from error
         if delivery.outcome is DeliveryOutcome.PUBLISHED:
             await _settle_covered_local_syncs(business, now_us)
             return None
@@ -1404,6 +1412,7 @@ def report_flow(
         first_round = not progress.started
         progress.started = True
         business = context.database
+        recorded_failure = None
         try:
             observer = getattr(context, "report_change_wm", None)
             scan_wm = await read_change_wm(observer) if start_actions and observer is not None else None
@@ -1461,8 +1470,12 @@ def report_flow(
                         record_error(error, stage="report_recovery_callback")
         except DirectoryBindingError:
             raise
+        except _RecordedReportFailure as failure:
+            recorded_failure = failure.original
         except (StateDatabaseError, sqlite3.Error, ConsistencyError,
                 DbEnqueueTimeoutError, DbExecutorError) as error:
             raise StateDbFailure(f"报告维护无法可靠读取或保存状态库事实: {error}") from error
+        if recorded_failure is not None:
+            raise recorded_failure
 
     return _ReportMaintenanceFlow(flow, should_advance)

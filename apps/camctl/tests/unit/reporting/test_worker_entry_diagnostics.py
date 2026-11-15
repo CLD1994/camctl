@@ -95,8 +95,8 @@ def test_stderr_failure_does_not_replace_the_original_job_result(mocker, job):
 
     result = worker.run_job(job)
 
-    assert result.error_code == "OSError"
-    assert result.error_kind is ErrorKind.REPORT
+    assert result.error_code == "StateDatabaseError"
+    assert result.error_kind is ErrorKind.STATE
     assert result.diagnostic_fallback == "stderr"
     stderr.assert_called_once()
 

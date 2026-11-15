@@ -58,6 +58,7 @@ from camctl.history.snapshots import (
     decode_snapshot,
 )
 from camctl.history.validators import EventContext, EventValidationError, _resolve_owner_spec
+from camctl.operations.error_diagnostics import attach_diagnostic_facts
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.models import (
     DbEnqueueTimeoutError,
@@ -70,12 +71,19 @@ from camctl.persistence.models import (
 )
 from camctl.persistence.runtime import (
     DatabaseMetadata, DbConfig, DbOpenMode, OwnedConnection, open_existing,
-    verify_directory_binding,
+    StateDatabaseError, verify_directory_binding,
 )
 from camctl.persistence.row_validation import ProjectionRowValidator
 from camctl.persistence.repositories.transactions import read_transaction_range as _transaction_range
 
 __all__ = ["HistoryRepository", "SqliteSnapshotStore"]
+
+
+def _close_read_connection(connection: sqlite3.Connection) -> None:
+    try:
+        connection.close()
+    except sqlite3.Error as error:
+        raise StateDatabaseError(f"状态库读取连接关闭失败: {error}") from error
 
 
 @dataclass(frozen=True)
@@ -162,7 +170,10 @@ class HistoryRepository:
         return self._open_read_connection().connection
 
     def _open_read_connection(self) -> OwnedConnection:
-        owned = open_existing(self.path, DbOpenMode.EXISTING_RO, self._config)
+        try:
+            owned = open_existing(self.path, DbOpenMode.EXISTING_RO, self._config)
+        except OSError as error:
+            raise StateDatabaseError(f"状态库读取连接打开失败: {error}") from error
         try:
             if self._instance_id is not None and owned.metadata.instance_id != self._instance_id:
                 raise ConsistencyError("历史读取的数据库实例身份发生变化")
@@ -172,8 +183,11 @@ class HistoryRepository:
             owned.connection.execute("PRAGMA temp_store=FILE").close()
             owned.connection.execute("PRAGMA temp.cache_size=-2048").close()
             return owned
+        except sqlite3.Error as error:
+            _close_read_connection(owned.connection)
+            raise StateDatabaseError(f"状态库读取连接配置失败: {error}") from error
         except BaseException:
-            owned.connection.close()
+            _close_read_connection(owned.connection)
             raise
 
     @contextmanager
@@ -184,7 +198,7 @@ class HistoryRepository:
         try:
             with ExitStack() as resources:
                 owned = self._open_read_connection()
-                resources.callback(owned.connection.close)
+                resources.callback(_close_read_connection, owned.connection)
                 self._instance_id = owned.metadata.instance_id
                 self._report_connection = owned.connection
                 self._report_resources = resources
@@ -241,11 +255,17 @@ class HistoryRepository:
                         pass
                 except BaseException as rollback_error:
                     error.add_note(f"报告短读事务回滚失败: {rollback_error}")
+                    if isinstance(error, sqlite3.Error):
+                        failure = StateDatabaseError(f"状态库历史读取失败: {error}")
+                        attach_diagnostic_facts(failure, {"rollback_error": rollback_error})
+                        raise failure from error
                     raise error from rollback_error
+            if isinstance(error, sqlite3.Error):
+                raise StateDatabaseError(f"状态库历史读取失败: {error}") from error
             raise
         finally:
             if not shared:
-                connection.close()
+                _close_read_connection(connection)
 
     def _bind_instance(self, connection, *, from_repository=False):
         instance_id = _one(connection, "SELECT instance_id FROM database_metadata")[0]
@@ -375,8 +395,10 @@ class HistoryRepository:
                 (entity_type, after_id, from_wm, to_wm, limit),
             ).fetchall()
             return [int(row[0]) for row in rows]
+        except sqlite3.Error as error:
+            raise StateDatabaseError(f"状态库报告实体读取失败: {error}") from error
         finally:
-            connection.close()
+            _close_read_connection(connection)
 
     def frozen_registration(self, report_id: int) -> "_FrozenRegistration":
         """读取并核实冻结的完整事务边界。"""
@@ -440,8 +462,10 @@ class HistoryRepository:
                         tuple(missing))) as cursor:
                     for row in cursor.fetchall():
                         action_plan[int(row[0])] = int(row[1])
+        except sqlite3.Error as error:
+            raise StateDatabaseError(f"状态库报告范围读取失败: {error}") from error
         finally:
-            connection.close()
+            _close_read_connection(connection)
         return build_report_scope(
             plans=selected["plan"], actions=selected["action"],
             outputs=selected["output"], deliveries=selected["delivery"],
@@ -1093,8 +1117,10 @@ class HistoryRepository:
             with closing(connection.execute(
                     f"SELECT id FROM {table} WHERE {column} = ?", (value,))) as cursor:
                 return [int(row[0]) for row in cursor.fetchall()]
+        except sqlite3.Error as error:
+            raise StateDatabaseError(f"状态库关联实体读取失败: {error}") from error
         finally:
-            connection.close()
+            _close_read_connection(connection)
 
     def _owns_row_identity(self, entity, identity, table, row_id):
         """仅沿不可变归属关系定位身份，不以当前业务值重算历史状态。"""

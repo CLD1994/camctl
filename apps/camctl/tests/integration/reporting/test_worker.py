@@ -377,3 +377,130 @@ class TestRunJob:
         result = run_job(job)
         assert result.error_kind is ErrorKind.STATE
         assert result.error_code == "ConsistencyError"
+
+@pytest.mark.asyncio
+async def test_worker_distinguishes_state_read_failure_and_temporary_database_failure(
+        frozen_report, monkeypatch):
+    """实际冻结报告以同一身份重建；只在对应 SQLite 资源边界注入失败。"""
+    import asyncio
+    import builtins
+    import sqlite3
+    from urllib.parse import urlsplit, unquote
+
+    db_path, instance_id, report, home = frozen_report
+    job = _job(db_path, instance_id, report, home)
+    first = run_job(job)
+    baseline_path = Path(first.path)
+    baseline = baseline_path.read_bytes()
+    connect = sqlite3.connect
+    denied = []
+    deny_rollback = False
+
+    def connect_with_denied_read(database, *args, **kwargs):
+        connection = connect(database, *args, **kwargs)
+        parts = urlsplit(str(database))
+        if (kwargs.get('uri') and parts.scheme == 'file'
+                and Path(unquote(parts.path)) == db_path.resolve()
+                and 'mode=ro' in parts.query):
+            def authorize(action, table, column, database_name, trigger):
+                if action == sqlite3.SQLITE_READ and table == 'report_entity_changes':
+                    denied.append((table, column))
+                    return sqlite3.SQLITE_DENY
+                if deny_rollback and action == sqlite3.SQLITE_TRANSACTION and table == 'ROLLBACK':
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+            connection.set_authorizer(authorize)
+        return connection
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, 'connect', connect_with_denied_read)
+        failure = run_job(job)
+    assert denied
+    assert (failure.job_id, failure.instance_id, failure.error_kind) == (
+        job.job_id, job.instance_id, ErrorKind.STATE)
+    assert failure.diagnostic['cause']['type'] == 'sqlite3.DatabaseError'
+    assert not Path(job.staging_path).exists()
+    assert baseline_path.read_bytes() == baseline
+
+    deny_rollback = True
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, 'connect', connect_with_denied_read)
+        rollback_failure = run_job(job)
+    assert rollback_failure.error_kind is ErrorKind.STATE
+    assert rollback_failure.diagnostic['cause']['type'] == 'sqlite3.DatabaseError'
+    assert rollback_failure.diagnostic['diagnostic_facts']['rollback_error'] == {'$ref': '#/context'}
+    assert rollback_failure.diagnostic['context']['type'] == 'sqlite3.DatabaseError'
+    deny_rollback = False
+
+    temporary_failures = []
+    def fail_validation_database(database, *args, **kwargs):
+        if Path(str(database)).name == 'validation.db':
+            temporary_failures.append(str(database))
+            raise sqlite3.OperationalError('temporary validation database unavailable')
+        return connect(database, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, 'connect', fail_validation_database)
+        temporary = run_job(job)
+    assert temporary_failures
+    assert (temporary.job_id, temporary.instance_id, temporary.error_kind) == (
+        job.job_id, job.instance_id, ErrorKind.REPORT)
+    assert temporary.diagnostic['type'].endswith('.ProjectionStorageError')
+    assert temporary.diagnostic['cause']['type'] == 'sqlite3.OperationalError'
+    assert not Path(job.staging_path).exists()
+    assert baseline_path.read_bytes() == baseline
+
+    for operation in (sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_INSERT):
+        denied_temporary = []
+
+        def deny_temporary_access(database, *args, **kwargs):
+            connection = connect(database, *args, **kwargs)
+            if Path(str(database)).name == 'validation.db':
+                def authorize(action, name, column, database_name, trigger):
+                    if action == operation and (operation != sqlite3.SQLITE_INSERT
+                                                or not name.startswith('sqlite_')):
+                        denied_temporary.append((action, name))
+                        return sqlite3.SQLITE_DENY
+                    return sqlite3.SQLITE_OK
+                connection.set_authorizer(authorize)
+            return connection
+
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, 'connect', deny_temporary_access)
+            failure = run_job(job)
+        assert denied_temporary, (operation, failure)
+        assert failure.error_kind is ErrorKind.REPORT
+        assert failure.diagnostic['cause']['type'] == 'sqlite3.DatabaseError'
+        assert not Path(job.staging_path).exists()
+        assert baseline_path.read_bytes() == baseline
+
+    original_open = builtins.open
+    cancellation = asyncio.CancelledError('report file write cancelled')
+
+    class CancelledFile:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def write(self, data):
+            raise cancellation
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+    def cancel_staging_write(file, mode='r', *args, **kwargs):
+        handle = original_open(file, mode, *args, **kwargs)
+        if isinstance(file, (str, os.PathLike)) and Path(file) == Path(job.staging_path) and mode == 'wb':
+            return CancelledFile(handle)
+        return handle
+
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, 'open', cancel_staging_write)
+        with pytest.raises(asyncio.CancelledError) as caught:
+            run_job(job)
+    assert caught.value is cancellation
+    assert not Path(job.staging_path).exists()
+    assert baseline_path.read_bytes() == baseline
+
+    recovered = run_job(job)
+    assert (recovered.size_bytes, recovered.sha256) == (first.size_bytes, first.sha256)
+    assert Path(recovered.path).read_bytes() == baseline

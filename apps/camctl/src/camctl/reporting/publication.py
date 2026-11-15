@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import os
 import re
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -36,6 +37,7 @@ from camctl.host_files.io import DirectorySyncStage
 from camctl.logging_runtime.diagnostics import record_error
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure
 from camctl.persistence.business import BusinessDatabase
+from camctl.persistence.runtime import StateDatabaseError
 from camctl.reporting import policy
 from camctl.reporting.ack import AckReport
 from camctl.reporting.models import FrozenReport, ReportBytes
@@ -272,8 +274,11 @@ class DbPublicationSession:
     async def _write(self, method, *args, **kwargs):
         key = new_operation_key()
         occurred_at = self._occurred_at()
-        return await self._database.write(
-            lambda owned: method(key, owned, *args, occurred_at=occurred_at, **kwargs), key=key)
+        try:
+            return await self._database.write(
+                lambda owned: method(key, owned, *args, occurred_at=occurred_at, **kwargs), key=key)
+        except sqlite3.Error as error:
+            raise StateDatabaseError(f"报告状态库写入失败: {error}") from error
 
     async def prepare(self, report_id, contents):
         return await self._write(policy.record_report_bytes, report_id, contents)

@@ -1,5 +1,6 @@
 """任务执行将绑定参数交给实际生成仓储，并保留错误分类。"""
 
+import asyncio
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -122,4 +123,15 @@ def test_metadata_directory_mismatch_stops_generation_with_configuration_error(j
     collaborators.connection.close.assert_called_once()
     collaborators.repository_type.assert_not_called()
     collaborators.generate.assert_not_called()
+    collaborators.rename.assert_not_called()
+
+
+def test_generation_cancellation_keeps_control_exception(job, collaborators):
+    cancellation = asyncio.CancelledError("cancel generation")
+    collaborators.generate.side_effect = cancellation
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        worker.run_job(job)
+
+    assert caught.value is cancellation
     collaborators.rename.assert_not_called()
