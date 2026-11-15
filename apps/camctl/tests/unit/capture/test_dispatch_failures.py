@@ -1,8 +1,9 @@
 """拍摄分发在执行前提失效时停止同一批动作。"""
 
+import json
 import sqlite3
 import asyncio
-from unittest.mock import create_autospec
+from unittest.mock import AsyncMock, call, create_autospec
 
 import pytest
 
@@ -10,6 +11,7 @@ from camctl.capture import dispatch
 from camctl.capture.handlers import CaptureRuntime, HandlerOutcome
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.bindings import DeviceConfigurationError
+from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context
 from camctl.scheduling.service import ActionDescriptor
 
 
@@ -76,3 +78,23 @@ async def test_dispatch_preserves_the_handlers_explicit_waiting_fact(monkeypatch
     results = await dispatch.dispatch_ready(runtime, [ActionDescriptor(1, "camera_record", True)])
     assert results == [(1, outcome)]
     assert results[0][1] is outcome
+
+
+@pytest.mark.asyncio
+async def test_dispatch_keeps_all_handled_errors_and_continues_next_action(monkeypatch):
+    errors = [ValueError('first'), RuntimeError('second')]
+    handler = AsyncMock(side_effect=errors + [None])
+    monkeypatch.setattr(dispatch, 'capture_handler', lambda _: handler)
+    records = []
+    runtime = object()
+    with error_diagnostics_context(None, records.append):
+        async with diagnostic_scope():
+            outcomes = await dispatch.dispatch_ready(runtime, [ActionDescriptor(i, 'camera_record', True) for i in (1, 2, 3)])
+    assert handler.await_args_list == [call(i, runtime) for i in (1, 2, 3)]
+    assert len(outcomes) == 3
+    assert outcomes[0][0] == 1 and outcomes[0][1] is errors[0]
+    assert outcomes[1][0] == 2 and outcomes[1][1] is errors[1]
+    assert outcomes[2][0] == 3 and outcomes[2][1].phase == "dispatched"
+    documents = [json.loads(record) for record in records]
+    assert [document['error']['message'] for document in documents] == ['first', 'second']
+    assert [document['context']['action_id'] for document in documents] == [1, 2]

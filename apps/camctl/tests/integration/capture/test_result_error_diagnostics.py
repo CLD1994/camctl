@@ -270,22 +270,6 @@ async def test_normal_not_dispatched_control_does_not_log_error(tmp_path, diagno
     assert case.owned.connection.execute('SELECT status,result_event_id IS NOT NULL FROM operation_attempts').fetchone() == (3, 1)
 
 
-async def test_dispatch_keeps_all_handled_errors_and_continues_next_action(monkeypatch):
-    from camctl.capture import dispatch
-    from camctl.scheduling.service import ActionDescriptor
-    errors = [ValueError('first'), RuntimeError('second')]
-    handler = AsyncMock(side_effect=errors + [None])
-    monkeypatch.setattr(dispatch, 'capture_handler', lambda _: handler)
-    records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            outcomes = await dispatch.dispatch_ready(object(), [ActionDescriptor(i, 'camera_record', True) for i in (1, 2, 3)])
-    assert handler.await_count == 3 and len(outcomes) == 3
-    documents = _documents(records)
-    assert [document['error']['message'] for document in documents] == ['first', 'second']
-    assert [document['context']['action_id'] for document in documents] == [1, 2]
-
-
 async def test_baseline_freezes_full_actual_error_before_return_model_discards_tool_outcome(
         database, tmp_path, baseline_case):
     from camctl.devices.directory import DirectoryRead

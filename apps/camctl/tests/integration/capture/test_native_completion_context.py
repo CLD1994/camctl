@@ -1,4 +1,5 @@
 """原生延时的自然结束与提前停止使用各自原始完成依据。"""
+from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -160,14 +161,13 @@ async def test_optional_preview_of_original_outside_task_does_not_invalidate_new
         owned.connection.close()
 
 
-@pytest.mark.parametrize('change', [{}, {'wait_completed_event_id': 999}, {'start_result_event_id': None},
-    {'observation': {'identity': '/DCIM/wrong.OSV'}}, {'result_page_event_id': 999}])
-async def test_natural_file_event_guard_independently_checks_original_sources(tmp_path, change):
-    from camctl.contracts.history_values import TransactionRange
-    from camctl.history.validators import EventContext, EventValidationError
-    from camctl.persistence.repositories.validation import BusinessStorage
-    from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
-    owned, runtime, action_id, handler = await _native_world(tmp_path)
+async def _natural_guard_source(tmp_path, capture_resources, *, startup=False):
+    """真实拍摄产生完整守卫事实，资源结束后交给各个独立提案。"""
+    from camctl.persistence.repositories.transactions import row_facts
+    options = ({'catalog': StartupNativeCatalog(),
+        'wait_config': lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000)}
+        if startup else {})
+    owned, runtime, action_id, handler = await _native_world(tmp_path, **options)
     async def read(request, batch):
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
     result_driver(result_case_for(), side_effect=read)
@@ -190,23 +190,52 @@ async def test_natural_file_event_guard_independently_checks_original_sources(tm
             state['history_events'][identity] = dict(zip(columns, row))
         event_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()
         transaction_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_transactions').fetchone()
-        evidence = {**original, **change}
-        if evidence.get('start_result_event_id') is None:
-            del evidence['start_result_event_id']
-        event = event_envelope(event_id, transaction_id, 17, 3,
-            (update_change('device_files', file_id,
-                {'completion_state': 1, 'completion_evidence_json': None, 'size_bytes': None},
-                {'completion_state': 3, 'completion_evidence_json': evidence, 'size_bytes': 50}),),
-            runtime.wall_us(), evidence={'completion_request': dict.fromkeys(('locator', 'original_name', 'media_type'))})
-        context = EventContext(TransactionRange(transaction_id, event_id, event_id),
-            {('device_files', file_id): ('device_file', file_id)}, state)
-        if change:
-            with pytest.raises(EventValidationError):
-                BusinessStorage().validate_event(event, context)
-        else:
-            assert BusinessStorage().validate_event(event, context).envelope == event
+        occurred_at = runtime.wall_us()
+        owners = {('device_files', file_id): ('device_file', file_id)}
+        return action_id, file_id, original, state, owners, event_id, transaction_id, occurred_at
     finally:
-        owned.connection.close()
+        try:
+            await result_case_for().close()
+            await capture_resources.close()
+        finally:
+            owned.connection.close()
+
+
+def _natural_guard_proposal(source, evidence, state, owners):
+    from camctl.contracts.history_values import TransactionRange
+    from camctl.history.validators import EventContext
+    from camctl.persistence.repositories.transactions import event_envelope, update_change
+    _, file_id, _, _, _, event_id, transaction_id, occurred_at = source
+    event = event_envelope(event_id, transaction_id, 17, 3,
+        (update_change('device_files', file_id,
+            {'completion_state': 1, 'completion_evidence_json': None, 'size_bytes': None},
+            {'completion_state': 3, 'completion_evidence_json': evidence, 'size_bytes': 50}),),
+        occurred_at, evidence={'completion_request': dict.fromkeys(('locator', 'original_name', 'media_type'))})
+    context = EventContext(TransactionRange(transaction_id, event_id, event_id), owners, state)
+    return event, context
+
+
+async def test_natural_file_event_guard_independently_checks_original_sources(tmp_path, capture_resources):
+    from camctl.history.validators import EventValidationError
+    from camctl.persistence.repositories.validation import BusinessStorage
+    source = await _natural_guard_source(tmp_path, capture_resources)
+    changes = ({}, {'wait_completed_event_id': 999}, {'start_result_event_id': None},
+        {'observation': {'identity': '/DCIM/wrong.OSV'}}, {'result_page_event_id': 999})
+    for change in changes:
+        try:
+            original, state, owners = deepcopy((source[2], source[3], source[4]))
+            evidence = {**original, **deepcopy(change)}
+            if evidence.get('start_result_event_id') is None:
+                del evidence['start_result_event_id']
+            event, context = _natural_guard_proposal(source, evidence, state, owners)
+            if change:
+                with pytest.raises(EventValidationError):
+                    BusinessStorage().validate_event(event, context)
+            else:
+                assert BusinessStorage().validate_event(event, context).envelope == event
+        except BaseException as error:
+            error.add_note(f'change={change!r}')
+            raise
 
 
 class StartupNativeCatalog(NativeWaitCatalog):
@@ -247,69 +276,42 @@ async def test_new_native_context_and_history_preserve_original_startup_margin(t
         owned.connection.close()
 
 
-@pytest.mark.parametrize('change', ['none', 'startup', 'early_wait', 'future_page', 'future_time', 'missing_intent', 'early_intent'])
-async def test_new_natural_file_guard_uses_original_startup_and_actual_event_times(tmp_path, change):
-    from camctl.contracts.history_values import TransactionRange
-    from camctl.history.validators import EventContext, EventValidationError
+async def test_new_natural_file_guard_uses_original_startup_and_actual_event_times(tmp_path, capture_resources):
+    from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories.validation import BusinessStorage
-    from camctl.persistence.repositories.transactions import event_envelope, row_facts, update_change
-    owned, runtime, action_id, handler = await _native_world(tmp_path, catalog=StartupNativeCatalog(),
-        wait_config=lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000))
-    async def read(request, batch):
-        return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
-    result_driver(result_case_for(), side_effect=read)
-    try:
-        await capture_handler(handler)(action_id, runtime)
-        file_id, = owned.connection.execute('SELECT id FROM device_files').fetchone()
-        original = row_facts(owned.connection, 'device_files', file_id)['completion_evidence_json']
-        state = {'outputs': {}}
-        for table in ('actions', 'device_activities', 'operation_runs', 'operation_attempts', 'device_files'):
-            state[table] = {identity: row_facts(owned.connection, table, identity)
-                for identity, in owned.connection.execute(f'SELECT id FROM {table}')}
-        state['device_files'][file_id].update(completion_state=1, completion_evidence_json=None, size_bytes=None)
-        columns = ('id', 'transaction_id', 'event_type', 'event_version', 'occurred_at', 'clock_status', 'change_seq', 'body_json')
-        state['history_events'] = {}
-        identities = [original[key] for key in ('start_result_event_id', 'wait_completed_event_id', 'result_page_event_id')]
-        identities.extend(attempt['intent_event_id'] for attempt in state['operation_attempts'].values()
-            if state['operation_runs'][attempt['run_id']]['responsibility_key'].startswith('results/'))
-        for identity in identities:
-            row = owned.connection.execute('SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?', (identity,)).fetchone()
-            state['history_events'][identity] = dict(zip(columns, row))
-        if change in ('missing_intent', 'early_intent'):
-            attempt = next(value for value in state['operation_attempts'].values()
-                if state['operation_runs'][value['run_id']]['responsibility_key'].startswith('results/'))
-            intent = state['history_events'].pop(attempt['intent_event_id'])
-            if change == 'early_intent':
-                # 保持原意图行与事件一致，仅令I早于W；P仍晚于W，不能据P补造请求来源。
-                earlier = original['wait_completed_event_id'] - 1
-                attempt['intent_event_id'] = earlier
-                intent['id'] = earlier
-                body = json.loads(intent['body_json'])
-                row = next(value for value in body['rows'] if value['table'] == 'operation_attempts')
-                row['after']['values']['intent_event_id'] = earlier
-                intent['body_json'] = json.dumps(body)
-                state['history_events'][earlier] = intent
-        elif change == 'startup':
-            state['actions'][action_id]['execution_spec_json']['startup_margin_ms'] = 2000
-        elif change == 'early_wait':
-            state['history_events'][original['wait_completed_event_id']]['occurred_at'] = _NOW+330000000
-        elif change == 'future_page':
-            state['history_events'][original['result_page_event_id']]['occurred_at'] = _NOW+330000000
-        elif change == 'future_time':
-            state['history_events'][original['result_page_event_id']]['occurred_at'] = _NOW+800000000
-        event_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()
-        transaction_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_transactions').fetchone()
-        event = event_envelope(event_id, transaction_id, 17, 3,
-            (update_change('device_files', file_id,
-                {'completion_state': 1, 'completion_evidence_json': None, 'size_bytes': None},
-                {'completion_state': 3, 'completion_evidence_json': original, 'size_bytes': 50}),),
-            runtime.wall_us(), evidence={'completion_request': dict.fromkeys(('locator', 'original_name', 'media_type'))})
-        context = EventContext(TransactionRange(transaction_id, event_id, event_id),
-            {('device_files', file_id): ('device_file', file_id)}, state)
-        if change == 'none':
-            assert BusinessStorage().validate_event(event, context).envelope == event
-        else:
-            with pytest.raises(EventValidationError):
-                BusinessStorage().validate_event(event, context)
-    finally:
-        owned.connection.close()
+    source = await _natural_guard_source(tmp_path, capture_resources, startup=True)
+    action_id = source[0]
+    for change in ('none', 'startup', 'early_wait', 'future_page', 'future_time', 'missing_intent', 'early_intent'):
+        try:
+            original, state, owners = deepcopy((source[2], source[3], source[4]))
+            if change in ('missing_intent', 'early_intent'):
+                attempt = next(value for value in state['operation_attempts'].values()
+                    if state['operation_runs'][value['run_id']]['responsibility_key'].startswith('results/'))
+                intent = state['history_events'].pop(attempt['intent_event_id'])
+                if change == 'early_intent':
+                    # 保持原意图行与事件一致，仅令I早于W；P仍晚于W，不能据P补造请求来源。
+                    earlier = original['wait_completed_event_id'] - 1
+                    attempt['intent_event_id'] = earlier
+                    intent['id'] = earlier
+                    body = json.loads(intent['body_json'])
+                    row = next(value for value in body['rows'] if value['table'] == 'operation_attempts')
+                    row['after']['values']['intent_event_id'] = earlier
+                    intent['body_json'] = json.dumps(body)
+                    state['history_events'][earlier] = intent
+            elif change == 'startup':
+                state['actions'][action_id]['execution_spec_json']['startup_margin_ms'] = 2000
+            elif change == 'early_wait':
+                state['history_events'][original['wait_completed_event_id']]['occurred_at'] = _NOW+330000000
+            elif change == 'future_page':
+                state['history_events'][original['result_page_event_id']]['occurred_at'] = _NOW+330000000
+            elif change == 'future_time':
+                state['history_events'][original['result_page_event_id']]['occurred_at'] = _NOW+800000000
+            event, context = _natural_guard_proposal(source, original, state, owners)
+            if change == 'none':
+                assert BusinessStorage().validate_event(event, context).envelope == event
+            else:
+                with pytest.raises(EventValidationError):
+                    BusinessStorage().validate_event(event, context)
+        except BaseException as error:
+            error.add_note(f'change={change!r}')
+            raise

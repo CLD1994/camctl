@@ -1,6 +1,7 @@
 """已完成返回沿原 START 保存结束，文件与集合仍分别核实。"""
 
 import json
+import sqlite3
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -51,23 +52,16 @@ async def world(tmp_path, *, case="video", catalog=None):
     return owned, runtime, action_id, handler, driver
 
 
-async def test_full_call_timeout_is_shared_by_intent_and_actual_call(tmp_path):
-    owned, runtime, action_id, handler, driver = await world(tmp_path)
-    try:
-        await capture_handler(handler)(action_id, runtime)
-        assert runtime.driver.control.call_args.args[0].timeout_s == Decimal("610.0001")
-        assert owned.connection.execute("SELECT a.timeout_s_json FROM operation_attempts a"
-            " JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1").fetchone() == ("610.0001",)
-        assert (await runtime.action(action_id))["execution_spec_json"]["start_call_timeout_s"] == Decimal("610.0001")
-    finally:
-        owned.connection.close()
-
-
 @pytest.mark.parametrize("case", ["video", "empty", "wrong_kind"])
 async def test_completed_return_ends_activity_without_inventing_start_time(tmp_path, case):
     owned, runtime, action_id, handler, driver = await world(tmp_path, case=case)
     try:
         await capture_handler(handler)(action_id, runtime)
+        if case == "video":
+            assert runtime.driver.control.call_args.args[0].timeout_s == Decimal("610.0001")
+            assert owned.connection.execute("SELECT a.timeout_s_json FROM operation_attempts a"
+                " JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1").fetchone() == ("610.0001",)
+            assert (await runtime.action(action_id))["execution_spec_json"]["start_call_timeout_s"] == Decimal("610.0001")
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == ((3,) if case == "video" else (4,))
         assert owned.connection.execute("SELECT activity_state,sent_at,started_at,expected_check_at,wait_completed_event_id FROM device_activities").fetchone() == (3, None, None, None, None)
         start_event, start_time, start_txn = owned.connection.execute(
@@ -205,8 +199,37 @@ async def test_completed_return_history_restores_same_activity_in_three_paths(tm
         assert snapshot[key]["activity_state"] == 3 and snapshot[key]["completion_basis"] == 2
         assert snapshot[key]["completion_evidence_json"] == runtime.capture.read_result_completion(action_id, owned)
     finally:
-        await executor.close()
-        owned.connection.close()
+        try:
+            await executor.close()
+        finally:
+            owned.connection.close()
+
+
+async def test_history_closes_observation_connection_when_executor_close_fails(tmp_path, monkeypatch):
+    from camctl.persistence.executor import DbExecutor
+
+    original_world = world
+    original_close = DbExecutor.close
+    connections = []
+    failure = RuntimeError("执行器关闭失败")
+
+    async def tracked_world(*args, **kwargs):
+        result = await original_world(*args, **kwargs)
+        connections.append(result[0].connection)
+        return result
+
+    async def failing_close(executor):
+        await original_close(executor)
+        raise failure
+
+    monkeypatch.setattr(__import__(__name__, fromlist=['world']), 'world', tracked_world)
+    monkeypatch.setattr(DbExecutor, 'close', failing_close)
+    with pytest.raises(RuntimeError) as raised:
+        await test_completed_return_history_restores_same_activity_in_three_paths(tmp_path)
+    assert raised.value is failure
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        connections[0].execute('SELECT 1')
 
 
 async def test_completed_definition_does_not_turn_failed_return_into_ended(tmp_path):

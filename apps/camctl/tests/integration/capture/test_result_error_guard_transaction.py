@@ -178,36 +178,42 @@ async def _world(tmp_path, entry, *, error_kind="known"):
 
 
 @pytest.mark.parametrize("entry", _ENTRIES)
-@pytest.mark.parametrize("field", ["capture.error", "error"])
-@pytest.mark.parametrize("mutation", ["missing-stage", "wrong-registered-stage", "wrong-registered-details"])
-async def test_mutated_result_error_rolls_back_whole_public_transaction(tmp_path, entry, field, mutation):
+async def test_mutated_result_error_rolls_back_whole_public_transaction(tmp_path, entry):
     world = await _world(tmp_path, entry)
     try:
-        command = world.command
         before = _database_facts(world.owned)
         calls = world.calls()
-        original = deepcopy(command)
-        value = world.capture_error if field == "capture.error" else world.last_error
-        if mutation == "missing-stage":
-            del value["stage"]
-        elif mutation == "wrong-registered-stage":
-            value["stage"] = "read"
-            assert value["stage"] != registered_error(value["code"])["stage"]
-        else:
-            value["details"]["activity_id"] = "not-an-object-id"
-        if field == "capture.error":
-            assert command.error == original.error
-        else:
-            assert command.capture == original.capture
+        original_finish = deepcopy(world.finish)
+        for field in ("capture.error", "error"):
+            for mutation in ("missing-stage", "wrong-registered-stage", "wrong-registered-details"):
+                try:
+                    command = deepcopy(world.command)
+                    world.finish = deepcopy(original_finish)
+                    original = deepcopy(command)
+                    value = command.capture["error"] if field == "capture.error" else command.error
+                    if mutation == "missing-stage":
+                        del value["stage"]
+                    elif mutation == "wrong-registered-stage":
+                        value["stage"] = "read"
+                        assert value["stage"] != registered_error(value["code"])["stage"]
+                    else:
+                        value["details"]["activity_id"] = "not-an-object-id"
+                    if field == "capture.error":
+                        assert command.error == original.error
+                    else:
+                        assert command.capture == original.capture
 
-        receipt = world.save(command, new_operation_key())
+                    receipt = world.save(command, new_operation_key())
 
-        assert receipt.kind is DbOutcomeKind.ROLLED_BACK, receipt.error
-        assert isinstance(receipt.error, EventValidationError), receipt.error
-        assert receipt.error.__cause__ is not None
-        assert world.owned.connection.in_transaction is False
-        assert _database_facts(world.owned) == before
-        assert world.calls() == calls
+                    assert receipt.kind is DbOutcomeKind.ROLLED_BACK, receipt.error
+                    assert isinstance(receipt.error, EventValidationError), receipt.error
+                    assert receipt.error.__cause__ is not None
+                    assert world.owned.connection.in_transaction is False
+                    assert _database_facts(world.owned) == before
+                    assert world.calls() == calls
+                except BaseException as error:
+                    error.add_note(f"entry={entry}, field={field}, mutation={mutation}")
+                    raise
     finally:
         world.owned.connection.close()
 
