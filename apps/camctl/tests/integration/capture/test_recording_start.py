@@ -79,10 +79,10 @@ class DriverStub:
 
 class WallStub:
     def __init__(self, now_us: int) -> None:
-        self._now_us = now_us
+        self.current_us = now_us
 
     def now_us(self) -> int:
-        return self._now_us
+        return self.current_us
 
 
 class StoreAdapter:
@@ -291,11 +291,13 @@ async def test_late_confirmation_after_window_is_accepted(tmp_path: Path) -> Non
     """窗口内派发，窗口结束后取得确认：接受启动并沿原责任保存。"""
     owned = _environment(tmp_path)
     late_anchor = _ANCHOR_NS + 10_000_000_000
+    wall = WallStub(_NOW)
 
     class LateDriver:
         async def start(self, ticket) -> StartDispatch:
             # 派发时仍在窗口内；确认在窗口结束之后到达。
-            assert WallStub(_NOW).now_us() <= _WINDOW.window_end
+            assert wall.now_us() <= _WINDOW.window_end
+            wall.current_us = _WINDOW.window_end + 1
             return StartDispatch(
                 confirmed=True,
                 anchor_ns=late_anchor,
@@ -305,9 +307,15 @@ async def test_late_confirmation_after_window_is_accepted(tmp_path: Path) -> Non
     try:
         async with business_database(tmp_path / "state.db") as database:
             step = await start_recording(
-                _context(database, driver=LateDriver(), wall=WallStub(_NOW))
+                _context(database, driver=LateDriver(), wall=wall)
             )
+            assert wall.now_us() > _WINDOW.window_end
             assert step.phase is RecordingPhase.START_CONFIRMED
             assert step.stop_target_ns == late_anchor + 60_000 * 1_000_000
+            assert _value(owned,
+                "SELECT a.status, a.effect_state FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id=r.id"
+                " WHERE r.responsibility_key='start/1' AND a.attempt_no=1"
+            ) == (2, 3)
     finally:
         owned.connection.close()
