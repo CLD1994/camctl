@@ -71,11 +71,14 @@ async def _member_output(environment):
     return cfg, owned, context, output_id
 
 
-def _expect_rejected(owned, before, invoke):
+def _expect_rejected(owned, before, invoke, *, variant):
     """整组拒绝：事务拒绝回滚，历史与成员事实保持。"""
+    facts = tuple(owned.connection.iterdump())
     result = invoke()
-    assert result is None or result.kind is not DbOutcomeKind.COMPLETED, result
-    assert _history_count(owned) == before
+    assert result.kind is DbOutcomeKind.ROLLED_BACK, (variant, result)
+    assert not owned.connection.in_transaction, variant
+    assert tuple(owned.connection.iterdump()) == facts, variant
+    assert _history_count(owned) == before, variant
 
 
 async def test_member_success_reuse_rejects_changed_outcome_and_target(environment):
@@ -98,13 +101,13 @@ async def test_member_success_reuse_rejects_changed_outcome_and_target(environme
     _expect_rejected(owned, before, lambda: OutputsRepository().finish_cleanup_item(
         FinishCleanupItem(item_id, _other_outcome(request.outcome),
                           request.occurred_at),
-        key, owned))
+        key, owned), variant='success/outcome')
     _expect_rejected(owned, before, lambda: OutputsRepository().finish_cleanup_item(
         FinishCleanupItem(other_item, request.outcome, request.occurred_at),
-        key, owned))
+        key, owned), variant='success/target')
     _expect_rejected(owned, before, lambda: OutputsRepository().finish_cleanup_item(
         FinishCleanupItem(item_id, request.outcome, request.occurred_at + 1),
-        key, owned))
+        key, owned), variant='success/time')
     # 同键同输入在其他成员推进后仍只读复用，零新增历史。首个成
     # 员成功后产物已清理：另一成员复用完成事实直接成功。
     other_runtime = await _new_runtime(cfg, owned, driver)
@@ -154,10 +157,10 @@ async def test_member_failure_reuse_rejects_changed_details(environment):
         {**request.details, "attempts_used": request.details["attempts_used"] + 1},
         request.occurred_at)
     _expect_rejected(owned, before, lambda: OutputsRepository().fail_cleanup_item(
-        changed, key, owned))
+        changed, key, owned), variant='failure/details')
     _expect_rejected(owned, before, lambda: OutputsRepository().fail_cleanup_item(
         FailCleanupItem(request.item_id, "delete_attempts_exhausted",
-                        dict(request.details), request.occurred_at), key, owned))
+                        dict(request.details), request.occurred_at), key, owned), variant='failure/code')
     reused = OutputsRepository().fail_cleanup_item(request, key, owned)
     assert reused.kind is DbOutcomeKind.COMPLETED
     assert _history_count(owned) == before
@@ -203,9 +206,9 @@ async def test_progress_reuse_rejects_irreversible_on_entry_key(environment):
     before = _history_count(owned)
 
     _expect_rejected(owned, before, lambda: repository.progress_cleanup_item(
-        ProgressCleanupItem(item_id, _NOW, irreversible=True), key, owned))
+        ProgressCleanupItem(item_id, _NOW, irreversible=True), key, owned), variant='progress/irreversible')
     _expect_rejected(owned, before, lambda: repository.progress_cleanup_item(
-        ProgressCleanupItem(item_id, _NOW + 1), key, owned))
+        ProgressCleanupItem(item_id, _NOW + 1), key, owned), variant='progress/time')
 
 
 async def _dispatched_cancel_member(cfg, owned, output_id, driver):
@@ -259,10 +262,10 @@ async def test_member_cancel_reuse_keeps_original_when_facts_changed(environment
         CancelCleanupItem(item_id, request.occurred_at,
                           "delete_unconfirmed" if request.code == "file_delete_failed"
                           else "file_delete_failed",
-                          dict(request.details)), key, owned))
+                          dict(request.details)), key, owned), variant='cancel/code')
     _expect_rejected(owned, changed, lambda: OutputsRepository().cancel_cleanup_item(
         CancelCleanupItem(item_id, request.occurred_at + 1, request.code,
-                          dict(request.details)), key, owned))
+                          dict(request.details)), key, owned), variant='cancel/time')
 
 
 async def test_companion_reuse_rejects_changed_responsibility_keys(environment):
@@ -320,7 +323,7 @@ async def test_companion_reuse_rejects_changed_responsibility_keys(environment):
             occurred_at=_NOW + 10,
             error=ErrorValue("delete_attempts_exhausted", "delete"))
         _expect_rejected(owned, after, lambda mutated=mutated:
-                         operations.finish_stale_runs(mutated, open_key, owned))
+                         operations.finish_stale_runs(mutated, open_key, owned), variant=("companion/keys", keys))
     # 改变结果分类或错误也拒绝。
     for status, error in (
         (RunOutcome.CANCELED, None),
@@ -330,7 +333,7 @@ async def test_companion_reuse_rejects_changed_responsibility_keys(environment):
             responsibility_keys=open_request.responsibility_keys,
             status=status, occurred_at=_NOW + 10, error=error)
         _expect_rejected(owned, after, lambda mutated=mutated:
-                         operations.finish_stale_runs(mutated, open_key, owned))
+                         operations.finish_stale_runs(mutated, open_key, owned), variant=("companion/result", status, error))
     # 原输入重送仍只读复用。
     reused = operations.finish_stale_runs(open_request, open_key, owned)
     assert reused.kind is DbOutcomeKind.COMPLETED

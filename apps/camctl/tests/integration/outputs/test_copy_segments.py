@@ -117,7 +117,7 @@ def _target_path(roots: BoundDirectories, owned, file_id: int):
 
 async def _drive(
     owned, roots, copy_id: int, *, segment_size: int, max_segments: int | None = None,
-    occurred_at: int = _NOW + 1, offset: int = 0, prepare: bool = True,
+    occurred_at: int = _NOW + 1, offset: int = 0, prepare: bool = True, stream=None,
 ):
     """先按恢复规则准备目标，再用同一读取会话驱动分段。"""
     async with business_database(database_path(owned)) as database:
@@ -129,7 +129,8 @@ async def _drive(
                 occurred_at=occurred_at,
             )
         session = ReadSession(
-            SourceFile("501", {}, len(_CONTENT)), offset, _ByteStream(_CONTENT[offset:]),
+            SourceFile("501", {}, len(_CONTENT)), offset,
+            stream if stream is not None else _ByteStream(_CONTENT[offset:]),
             Decimal("10"),
         )
         steps = []
@@ -307,18 +308,35 @@ def test_stop_notice_halt_between_chunks(segment_env):
 def test_unknown_commit_does_not_advance(segment_env, monkeypatch):
     """段保存提交结果未知：编排停止推进，不安排下一段。"""
     owned, roots, first = segment_env
+    saves = []
+    reads = []
+    failure = RuntimeError("提交未知")
+
+    class ObservedStream(_ByteStream):
+        def read(self, limit):
+            data = super().read(limit)
+            reads.append(data)
+            return data
+
+    stream = ObservedStream(_CONTENT)
 
     def _unknown(self, command, key, owned_connection):
-        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=RuntimeError("提交未知"))
+        saves.append((command, key))
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=failure)
 
     monkeypatch.setattr(OutputsRepository, "save_segment", _unknown)
     with pytest.raises(CopySegmentError) as caught:
-        asyncio.run(_drive(owned, roots, first.copy_id, segment_size=4, max_segments=3))
+        asyncio.run(_drive(owned, roots, first.copy_id, segment_size=4,
+                           max_segments=3, stream=stream))
     assert caught.value.stage == "segment_save_unknown"
-    monkeypatch.undo()
-    # 未知不回滚已提交事实：可靠进度与事件由恢复按数据库实际提交确认。
-    committed = _committed(owned, first.copy_id)
-    assert committed in (0, 4)
+    assert caught.value.__cause__ is failure
+    assert len(saves) == 1
+    assert b"".join(reads) == _CONTENT[:4]
+    assert _target_path(roots, owned, first.target_file_id).read_bytes() == _CONTENT[:4]
+    assert stream.closed
+    # 本替身没有提交：首段字节已落盘，数据库进度仍为零。
+    assert _committed(owned, first.copy_id) == 0
+    assert _segment_events(owned) == 0
 
 
 def test_source_early_eof_reports_read_failure(segment_env):

@@ -14,6 +14,7 @@ from ..support.read_batch_cases import acquire_read_batch
 from ..host_files.file_boundary_helpers import fail_fd_operation
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.enums import enum_for
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.history.validators import EventValidationError
 from camctl.host_files.models import BoundDirectories, FilePurpose
@@ -51,11 +52,16 @@ def _qualified(owned, command):
 
 
 @pytest.fixture(params=["delivery", "internal"])
-def copy_env(request, read_targets, tmp_path):
+def copy_kind(request):
+    return request.param
+
+
+@pytest.fixture
+def copy_env(copy_kind, read_targets, tmp_path):
     """已建档拷贝与真实 staging 目录；交付与录像内部输入共用同一入口。"""
     owned = read_targets
-    command = _command(internal=request.param == "internal")
-    if request.param == "internal":
+    command = _command(internal=copy_kind == "internal")
+    if copy_kind == "internal":
         owned.connection.execute("DELETE FROM obtain_items")
         owned.connection.execute("DELETE FROM outputs")
     else:
@@ -289,16 +295,20 @@ def test_changed_host_source_identity_rejects_preparation(local_read, tmp_path):
         asyncio.run(_prepare(owned, qualification.copy_id, roots))
 
 
-def test_same_entry_prepares_internal_and_delivery_copies(copy_env):
+def test_same_entry_prepares_internal_and_delivery_copies(copy_env, copy_kind):
     """取回交付与录像内部输入通过同一准备入口，目标按各自用途定位。"""
     owned, roots, first = copy_env
     step = asyncio.run(_prepare(owned, first.copy_id, roots))
     purpose = owned.connection.execute(
         "SELECT purpose FROM intermediate_files WHERE id=?", (first.target_file_id,)).fetchone()[0]
-    expected = (FilePurpose.DELIVERY_COPY if purpose == 1 else FilePurpose.RECORDING_INPUT)
-    assert _relative(owned, first.target_file_id).split("/")[0] == (
-        "deliveries" if expected is FilePurpose.DELIVERY_COPY else "recording-inputs")
+    expected_purpose, directory = {
+        "delivery": (FilePurpose.DELIVERY_COPY, "deliveries"),
+        "internal": (FilePurpose.RECORDING_INPUT, "recording-inputs"),
+    }[copy_kind]
+    assert purpose == enum_for("intermediate_files.purpose")[expected_purpose.name]
+    assert _relative(owned, first.target_file_id).split("/")[0] == directory
     assert step.decision.outcome is ResumeOutcome.CREATE
+    assert _target_path(roots, owned, first.target_file_id).is_file()
 
 
 def test_host_source_copy_preparation_uses_local_facts(local_read, tmp_path):
