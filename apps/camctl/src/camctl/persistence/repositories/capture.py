@@ -2165,6 +2165,10 @@ class CaptureRepository:
         from .result_pages import read_file_input
         return read_file_input(ref, identity, owned, allow_missing=allow_missing)
 
+    def read_result_file_inputs(self, ref, identities, owned: OwnedConnection):
+        from .result_pages import read_file_inputs
+        return read_file_inputs(ref, identities, owned)
+
     def read_result_source(self, ticket, owned: OwnedConnection):
         """原意图前的可靠控制与等待决定原结果来源。"""
         from .result_sources import load_result_source

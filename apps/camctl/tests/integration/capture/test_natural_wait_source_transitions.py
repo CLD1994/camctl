@@ -735,6 +735,12 @@ async def test_old_v2_retained_metadata_comes_from_original_complete_source(tmp_
         saved = runtime.capture.read_result_sources(calls[0], None, 1, owned)
         assert saved.items[0][0].original_name is None
         assert _pages(owned) == raw and result.list_results.await_count == 2
+        original_page = owned.connection.execute(
+            "SELECT result_first_page_event_id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+            (calls[0].run_id, calls[0].attempt_id)).fetchone()[0]
+        owned.connection.execute("DELETE FROM result_page_files WHERE page_event_id=?", (original_page,))
+        with pytest.raises(ConsistencyError):
+            runtime.capture.read_result_sources(calls[0], None, 1, owned)
     finally:
         owned.connection.close()
 

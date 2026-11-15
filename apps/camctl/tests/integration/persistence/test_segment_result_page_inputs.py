@@ -1359,3 +1359,26 @@ async def test_fix1_i3_original_key_replay_uses_f_before_after_later_page(
         assert before == after
     finally:
         reopened.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_result_file_lookup_reads_cross_page_and_rejects_missing_relation(owned, tmp_path):
+    root = "/mnt/media_rw/emulated/DCIM/CAM"
+    outside_identity = f"{root}/outside-page.LRF"
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    refs, outside_file_id = await _save_three_pages(
+        ticket, owned, outside_identity=outside_identity)
+    repository = CaptureRepository()
+    identity = f"{root}/b.OSV"
+    found = repository.read_result_file_input(refs[-1], identity, owned)
+    assert found[0].identity == identity
+    assert found[1] == owned.connection.execute(
+        "SELECT file_id FROM result_page_files WHERE page_event_id=?", (refs[1].event_id,)
+    ).fetchone()[0]
+    assert repository.read_result_file_input(refs[-1], outside_identity, owned, allow_missing=True) is None
+
+    _damage_page_group(owned, refs[1].event_id, "missing_relation",
+        outside_file_id=outside_file_id, outside_identity=outside_identity,
+        other_page_event_id=refs[0].event_id)
+    with pytest.raises(ConsistencyError):
+        repository.read_result_file_input(refs[-1], identity, owned, allow_missing=True)

@@ -343,6 +343,11 @@ class SavedResultEntries:
         return await self.database.read(lambda owned: self.repository.read_result_file_input(
             self.last_ref, identity, owned, allow_missing=allow_missing))
 
+    async def find_many(self, identities):
+        values = await self.database.read(lambda owned: self.repository.read_result_file_inputs(
+            self.last_ref, identities, owned))
+        return {identity: value[:2] for identity, value in values.items()}
+
 
 class QualifiedResultEntries(SavedResultEntries):
     """逐页筛选原时刻；坏页仍由未筛选的原输入保存和核对。"""
@@ -356,15 +361,17 @@ class QualifiedResultEntries(SavedResultEntries):
             if self.source_qualified and saved.occurred_at >= self.lower_bound:
                 yield saved
 
+    async def find_many(self, identities):
+        values = await self.database.read(lambda owned: self.repository.read_result_file_inputs(
+            self.last_ref, identities, owned))
+        return {identity: value[:2] for identity, value in values.items()
+                if self.source_qualified and value[2] >= self.lower_bound}
+
     async def find(self, identity, *, allow_missing=False):
-        async for saved in (self.pages()):
-            identifiers = dict(saved.file_ids)
-            if identity in identifiers:
-                entry = next(entry for entry in saved.page.entries if entry.identity == identity)
-                return entry, identifiers[identity]
-        if allow_missing:
-            return None
-        raise ConsistencyError("配对原片缺少合格原结果页")
+        result = (await self.find_many((identity,))).get(identity)
+        if result is None and not allow_missing:
+            raise ConsistencyError("配对原片缺少合格原结果页")
+        return result
 
 
 class SourceResultEntries:
@@ -374,24 +381,49 @@ class SourceResultEntries:
         self.repository, self.database, self.ticket = repository, database, ticket
         self.current_entries = current_entries
 
-    async def records(self):
+    async def batches(self):
         cursor = None
         while True:
-            page = await self.database.read(lambda owned: self.repository.read_result_sources(
-                self.ticket, cursor, 32, owned), description="读取一批已保存文件来源")
-            for entry, file, file_id in page.items:
+            def read_batch(owned):
+                from camctl.persistence.repositories.result_pages import result_read_snapshot
+                with result_read_snapshot(owned.connection):
+                    page = self.repository.read_result_sources(self.ticket, cursor, 32, owned)
+                    current = {}
+                    if isinstance(self.current_entries, SavedResultEntries):
+                        identities = []
+                        for entry, _, _ in page.items:
+                            identities.append(entry.identity)
+                            if entry.paired_identity is not None:
+                                identities.append(entry.paired_identity)
+                        current = self.repository.read_result_file_inputs(
+                            self.current_entries.last_ref, identities, owned)
+                        if isinstance(self.current_entries, QualifiedResultEntries):
+                            current = {identity: value for identity, value in current.items()
+                                if self.current_entries.source_qualified
+                                and value[2] >= self.current_entries.lower_bound}
+                    return page, current
+
+            page, current = await self.database.read(read_batch,
+                description="读取一批已保存文件来源和当前观察")
+            yield page.items, current
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
+    async def records(self):
+        async for items, current_items in self.batches():
+            for entry, file, file_id in items:
                 if self.current_entries is not None:
-                    current = await self.current_entries.find(entry.identity, allow_missing=True)
+                    current = current_items.get(entry.identity)
                     if current is None:
                         continue
                     original_pair = entry.paired_identity
-                    entry, original_id = current
+                    entry, original_id, _ = current
                     if original_id != file_id:
                         raise ConsistencyError("当前原页改变已登记文件身份")
                     if entry.paired_identity != original_pair:
                         raise ConsistencyError("当前原页改变已登记文件配对")
-                    if (entry.paired_identity is not None and await self.current_entries.find(
-                            entry.paired_identity, allow_missing=True) is None):
+                    if entry.paired_identity is not None and entry.paired_identity not in current_items:
                         continue
                     complete = entry.complete and file.complete and entry.size_bytes == file.size_bytes
                     entry = replace(entry, complete=complete, size_bytes=entry.size_bytes if complete else None)
@@ -399,9 +431,6 @@ class SourceResultEntries:
                         pairing_confirmed=True if entry.paired_identity is not None else None,
                         complete=complete, size_bytes=entry.size_bytes)
                 yield entry, file, file_id
-            if page.next_cursor is None:
-                return
-            cursor = page.next_cursor
 
     async def __aiter__(self):
         async for entry, _, _ in self.records():
@@ -439,30 +468,30 @@ class TerminalResultEntries(SourceResultEntries):
     """终态逐文件合并原保留来源与合格当前观察，不改变原完成事实。"""
 
     async def records(self):
-        retained = SourceResultEntries(self.repository, self.database, self.ticket)
-        async for entry, file, file_id in (retained.records()):
-            if self.current_entries is not None:
-                current = (await self.current_entries.find(entry.identity, allow_missing=True)
-                    if isinstance(self.current_entries, SavedResultEntries) else
-                    next(((item, file_id) for item in self.current_entries if item.identity == entry.identity), None))
-                if current is not None:
-                    observed, original_id = current
-                    if original_id != file_id:
-                        raise ConsistencyError("终态当前观察改变原文件身份")
-                    if observed.paired_identity != entry.paired_identity:
-                        raise ConsistencyError("终态当前观察改变已登记文件配对")
-                    if observed.complete and file.complete and observed.size_bytes == file.size_bytes:
-                        # 当前未知的可选元信息不撤销原可靠值；仅用于终态保留，
-                        # 当前集合仍使用未补入这些原值的 current 视图。
-                        entry = replace(observed,
-                            kind=(observed.kind if observed.kind is not FileKind.OTHER
-                                or observed.evidence.get('kind') == FileKind.OTHER.value else entry.kind),
-                            format_id=observed.format_id if observed.format_id is not None else entry.format_id,
-                            original_name=observed.original_name if observed.original_name is not None else entry.original_name,
-                            media_type=observed.media_type if observed.media_type is not None else entry.media_type)
-                        file = replace(file, kind=entry.kind, format_id=entry.format_id,
-                            pairing_confirmed=True if entry.paired_identity is not None else None)
-            yield entry, file, file_id
+        async for items, current_items in self.batches():
+            for entry, file, file_id in items:
+                if self.current_entries is not None:
+                    current = (current_items.get(entry.identity)
+                        if isinstance(self.current_entries, SavedResultEntries) else
+                        next(((item, file_id, None) for item in self.current_entries
+                              if item.identity == entry.identity), None))
+                    if current is not None:
+                        observed, original_id, _ = current
+                        if original_id != file_id:
+                            raise ConsistencyError("终态当前观察改变原文件身份")
+                        if observed.paired_identity != entry.paired_identity:
+                            raise ConsistencyError("终态当前观察改变已登记文件配对")
+                        if observed.complete and file.complete and observed.size_bytes == file.size_bytes:
+                            # 未知的当前元信息不覆盖原完成观察；当前集合仍使用原始当前观察。
+                            entry = replace(observed,
+                                kind=(observed.kind if observed.kind is not FileKind.OTHER
+                                    or observed.evidence.get('kind') == FileKind.OTHER.value else entry.kind),
+                                format_id=observed.format_id if observed.format_id is not None else entry.format_id,
+                                original_name=observed.original_name if observed.original_name is not None else entry.original_name,
+                                media_type=observed.media_type if observed.media_type is not None else entry.media_type)
+                            file = replace(file, kind=entry.kind, format_id=entry.format_id,
+                                pairing_confirmed=True if entry.paired_identity is not None else None)
+                yield entry, file, file_id
 
 
 async def iter_result_entries(entries):

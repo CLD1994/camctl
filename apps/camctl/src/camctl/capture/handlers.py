@@ -5730,9 +5730,9 @@ async def _register_listing(runtime: CaptureRuntime, action_id: int, listing: Li
                     and (entry.paired_identity is not None) == previews)
                 if not batch:
                     continue
-                pairs = {entry.paired_identity: (await entries.find(entry.paired_identity,
-                         allow_missing=True))
-                         for entry in batch if entry.paired_identity is not None}
+                identities = {entry.paired_identity for entry in batch if entry.paired_identity is not None}
+                found_pairs = await entries.find_many(identities) if identities else {}
+                pairs = {identity: found_pairs.get(identity) for identity in identities}
                 rules = _product_requirements(action, FileKind.VIDEO).rules
                 if collection_valid and listing.scan_complete and any(entry.paired_identity is not None
                         and pairs[entry.paired_identity] is None and not is_optional_preview(

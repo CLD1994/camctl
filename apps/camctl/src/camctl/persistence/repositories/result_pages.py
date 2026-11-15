@@ -1,5 +1,5 @@
 """结果页保留原完整实际结果，页范围与首次文件发现共同提交。"""
-from contextlib import closing
+from contextlib import closing, contextmanager, nullcontext
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -25,7 +25,7 @@ from camctl.persistence.repositories.transactions import (CommandPlan, Transacti
     event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
     saved_transaction_events, update_change)
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.fact_reads import read_event, read_events, iter_transaction_events
+from camctl.persistence.fact_reads import read_event, read_events, iter_transaction_events, opened_operation_fact_scope
 from camctl.history.reads import ResultPageWriteScope
 from .baseline import read_reference, read_chunks, _chunk_at, _check_entries, _directories
 
@@ -447,6 +447,58 @@ def _at(connection, event_id):
     return saved, raw
 
 
+def _read_page_record(connection, event_id):
+    """读取完整页的直接关系，不重算产生该页的文件发现事务。"""
+    record = read_event(connection, event_id)
+    event, txn = record.event, record.transaction
+    saved, raw = _decode_saved_event(connection, event)
+    run, attempt, action, _ = _load(connection, saved.ref.ticket)
+    if event.evidence["attempt_id"] != attempt["id"]:
+        raise ConsistencyError("结果页与实际尝试身份不同")
+    with closing(connection.execute(
+            "SELECT id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity,"
+            "family_directory,family_stem,family_role FROM result_page_files"
+            " WHERE page_event_id=? ORDER BY id", (event_id,))) as cursor:
+        relations = cursor.fetchmany(129)
+    if len(relations) != len(saved.file_ids):
+        raise ConsistencyError("结果页与文件关系数量不一致")
+    if not relations:
+        if txn.last_event_id != event_id:
+            raise ConsistencyError("空结果页包含多余尾事件")
+        return saved, raw, event, txn
+    index_id = event_id + 1
+    if txn.last_event_id != index_id:
+        raise ConsistencyError("结果页缺少同事务末位文件关系事件")
+    index_record = read_event(connection, index_id)
+    index = index_record.event
+    try:
+        name, branch, _ = validate_event_structure(index)
+    except EventValidationError as error:
+        raise ConsistencyError("结果页关系事件不可解释") from error
+    if (name != "RESULT_PAGE" or branch != "INDEX_FILES"
+            or index_record.transaction != txn or index.occurred_at != event.occurred_at
+            or index.evidence != {"result_page_index": {"page_event_id": event_id}}
+            or len(index.rows) != len(relations)):
+        raise ConsistencyError("结果页关系事件与原页不同")
+    placeholders = ",".join("?" for _ in saved.file_ids)
+    with closing(connection.execute(
+            f"SELECT id,identity_key FROM device_files WHERE id IN ({placeholders})",
+            tuple(file_id for _, file_id in saved.file_ids))) as cursor:
+        file_keys = dict(cursor)
+    for (identity, file_id), relation, row in zip(saved.file_ids, relations, index.rows):
+        if file_keys.get(file_id) != file_identity_key(action["device_id"], action["driver_id"], identity):
+            raise ConsistencyError("结果页文件关系与固定身份或设备绑定不同")
+        expected = _relation_values(created_event_id=index_id, action_id=action["id"],
+            run_id=run["id"], attempt_id=attempt["id"], page_event_id=event_id,
+            file_id=file_id, identity=identity,
+            result_policy=action["execution_spec_json"].get("result_policy"))
+        values = dict(zip(expected, relation[1:]))
+        if (values != expected or row.table != "result_page_files" or row.before.exists
+                or row.row_id != relation[0] or dict(row.after.values) != expected):
+            raise ConsistencyError("结果页关系与原页身份或关系事件不符")
+    return saved, raw, event, txn
+
+
 def read_saved_page(connection, event_id):
     """普通消费原页事实；新页形成及原键重算使用独立完整核验口。"""
     record = read_event(connection, event_id)
@@ -546,7 +598,7 @@ def read_pages(ticket, cursor, batch, owned):
         return Page((), None)
     if first is None or last is None or first > last:
         raise ConsistencyError("结果页首末引用无效")
-    head, head_raw, head_event, head_txn = _at_record(owned.connection, first)
+    head, head_raw, head_event, head_txn = _read_page_record(owned.connection, first)
     if head.ref.ticket != ticket or head.ref.page_no != 1:
         raise ConsistencyError("结果页首引用不属于原尝试首批")
     previous = None
@@ -555,7 +607,7 @@ def read_pages(ticket, cursor, batch, owned):
         ObjectId(cursor)
         if not first <= cursor <= last:
             raise ConsistencyError("结果页游标不在原范围内")
-        previous, previous_raw, previous_event, previous_txn = _at_record(
+        previous, previous_raw, previous_event, previous_txn = _read_page_record(
             owned.connection, cursor)
         verified[cursor] = (previous, previous_raw, previous_event, previous_txn)
         if previous.ref.ticket != ticket:
@@ -571,12 +623,7 @@ def read_pages(ticket, cursor, batch, owned):
             event_id = record.event.event_id
             saved_record = verified.get(event_id)
             if saved_record is None:
-                event, txn = record.event, record.transaction
-                page, raw = _decode_saved_event(owned.connection, event)
-                try:
-                    _verify_page_relations(owned.connection, page, raw, event, txn)
-                except EventValidationError as error:
-                    raise ConsistencyError("结果页关系事件不可解释") from error
+                page, raw, event, txn = _read_page_record(owned.connection, event_id)
             else:
                 page, raw, event, txn = saved_record
             if page.ref.ticket != ticket or page.ref.page_no != (1 if previous is None else previous.ref.page_no + 1):
@@ -604,7 +651,7 @@ def read_page(ref, owned):
     first, last = attempt["result_first_page_event_id"], attempt["result_last_page_event_id"]
     if first is None or last is None or not first <= ref.event_id <= last:
         raise ConsistencyError("结果页引用不在原尝试可靠范围内")
-    saved, _ = _at(owned.connection, ref.event_id)
+    saved, _, _, _ = _read_page_record(owned.connection, ref.event_id)
     if saved.ref != ref:
         raise ConsistencyError("结果页引用改变原票据、批次或后续游标")
     return saved
@@ -613,7 +660,7 @@ def read_page(ref, owned):
 def read_page_at(event_id, owned):
     """原事件解码取得票据，再复用单页读取的可靠范围校验。"""
     ObjectId(event_id)
-    saved, _ = _at(owned.connection, event_id)
+    saved, _ = read_saved_page(owned.connection, event_id)
     return read_page(saved.ref, owned)
 
 
@@ -625,34 +672,93 @@ def read_last_page(ticket, owned):
         return None
     if first is None or last is None or first > last:
         raise ConsistencyError("结果页首末引用无效")
-    saved, _ = _at(owned.connection, last)
+    saved, _ = read_saved_page(owned.connection, last)
     if saved.ref.ticket != ticket:
         raise ConsistencyError("结果页末引用不属于原尝试")
     return read_page(saved.ref, owned)
 
 
-def read_file_input(last_ref, identity, owned, *, allow_missing=False):
-    """从原页范围查找一个差集成员，不装载全部文件元数据。"""
+@contextmanager
+def result_read_snapshot(connection):
+    """同一批事实共享完整只读事务，结束后释放事实缓存。"""
+    opened = not connection.in_transaction
+    if opened:
+        connection.execute("BEGIN")
+    try:
+        with opened_operation_fact_scope(connection, opened):
+            yield
+    finally:
+        if opened:
+            connection.execute("ROLLBACK")
+
+
+def read_file_inputs(last_ref, identities, owned):
+    with result_read_snapshot(owned.connection):
+        return _read_file_inputs(last_ref, identities, owned)
+
+
+def _read_file_inputs(last_ref, identities, owned):
+    """在同一事务中按关系定位一批当前页成员。"""
+    identities = tuple(dict.fromkeys(identities))
+    if len(identities) > 128 or any(not isinstance(value, str) for value in identities):
+        raise ValueError("结果文件身份批次必须不超过 128")
     last = read_page(last_ref, owned)
-    _, attempt, _, _ = _load(owned.connection, last_ref.ticket)
+    _, attempt, action, _ = _load(owned.connection, last_ref.ticket)
+    if not identities:
+        return {}
+    keys = tuple(file_identity_key(action["device_id"], action["driver_id"], identity)
+                 for identity in identities)
+    placeholders = ",".join("?" for _ in keys)
     with closing(owned.connection.execute(
-            "SELECT DISTINCT e.id FROM history_events e,"
-            " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
-            " WHERE e.id>=? AND e.id<=? AND e.event_type=?"
-            " AND json_extract(e.body_json,'$.reason')=?"
-            " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
-            " AND json_extract(f.value,'$[0]')=? ORDER BY e.id LIMIT 2",
-            (attempt["result_first_page_event_id"], last.ref.event_id, _TYPE, _APPEND,
-             attempt["id"], identity))) as reader:
-        found = reader.fetchmany(2)
-    if not found and allow_missing:
-        return None
-    if len(found) != 1:
+            f"SELECT id FROM device_files WHERE identity_key IN ({placeholders})", keys)) as reader:
+        file_ids = tuple(row[0] for row in reader)
+    rows = ()
+    if file_ids:
+        placeholders = ",".join("?" for _ in file_ids)
+        with closing(owned.connection.execute(
+                "SELECT identity,file_id,page_event_id FROM result_page_files"
+                " WHERE run_id=? AND attempt_id=? AND page_event_id>=? AND page_event_id<=?"
+                f" AND file_id IN ({placeholders}) ORDER BY page_event_id LIMIT ?",
+                (last_ref.ticket.run_id, attempt["id"], attempt["result_first_page_event_id"],
+                 last.ref.event_id, *file_ids, len(identities) + 1))) as reader:
+            rows = tuple(reader)
+    saved = None
+    result = {}
+    for identity, file_id, page_id in rows:
+        if identity not in identities or identity in result:
+            raise ConsistencyError("配对原片身份矛盾或不唯一")
+        if saved is None or saved.ref.event_id != page_id:
+            saved = (last if page_id == last.ref.event_id else
+                     _read_page_record(owned.connection, page_id)[0])
+        if saved.ref.ticket != last_ref.ticket or (identity, file_id) not in saved.file_ids:
+            raise ConsistencyError("结果文件关系与原页身份不符")
+        entry = next(item for item in saved.page.entries if item.identity == identity)
+        result[identity] = (entry, file_id, saved.occurred_at)
+    missing = set(identities) - result.keys()
+    if missing:
+        cursor = None
+        while True:
+            batch = read_pages(last_ref.ticket, cursor, 1, owned)
+            for saved in batch.items:
+                if saved.ref.event_id > last_ref.event_id:
+                    raise ConsistencyError("结果输入缺少原可靠末页")
+                if any(identity in missing for identity, _ in saved.file_ids):
+                    raise ConsistencyError("结果页文件引用缺少直接关系")
+                if saved.ref.event_id == last_ref.event_id:
+                    return result
+            if batch.next_cursor is None:
+                raise ConsistencyError("结果输入缺少原可靠末页")
+            cursor = batch.next_cursor
+    return result
+
+
+def read_file_input(last_ref, identity, owned, *, allow_missing=False):
+    found = read_file_inputs(last_ref, (identity,), owned).get(identity)
+    if found is None:
+        if allow_missing:
+            return None
         raise ConsistencyError("配对原片必须唯一属于原结果页范围")
-    saved, _ = _at(owned.connection, found[0][0])
-    file_id = dict(saved.file_ids)[identity]
-    entry = next(item for item in saved.page.entries if item.identity == identity)
-    return entry, file_id
+    return found[:2]
 
 
 def _first_complete_event(connection, facts):
@@ -743,27 +849,51 @@ def _legacy_source_entry(connection, ticket, identity, facts, activity, *, compl
 
 
 
-def _complete_source_entry(connection, ticket, identity, file_id, facts, activity):
-    """无页引用的旧 v2 完成观察按原完整条目匹配；旧 v1 继续原契约。"""
+def _complete_source_entry(connection, ticket, identity, file_id, facts, activity, page_cache, source_cache):
+    """无页引用的旧完成观察按原完整条目匹配；旧 v1 继续原契约。"""
     from .result_sources import ResultSourceKind, load_result_source
     completed = _first_complete_event(connection, facts)
     legacy = _legacy_source_entry(connection, ticket, identity, facts, activity, completion_event=completed)
     if legacy is not None:
         return legacy
     observation = facts["completion_evidence_json"].get("observation")
-    with closing(connection.execute(
+    photo_source = observation.get("photo_source") if isinstance(observation, dict) else None
+    if photo_source is not None:
+        if not isinstance(photo_source, dict) or "result_page_event_id" not in photo_source:
+            raise ConsistencyError("照片完成来源缺少原页引用")
+        candidates = ((ObjectId(photo_source["result_page_event_id"]),),)
+        reader_context = nullcontext(candidates)
+    else:
+        # 旧格式没有记录完成页，只能按原历史查找首个匹配且合格的观察。
+        reader_context = closing(connection.execute(
             "SELECT DISTINCT e.id FROM history_events e,"
             " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
             " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
             " AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
             " AND json_extract(e.body_json,'$.evidence.result_page.activity_id')=?"
             " AND json_extract(f.value,'$[0]')=? AND json_extract(f.value,'$[1]')=? ORDER BY e.id",
-            (_TYPE, _APPEND, ticket.run_id, int(ticket.target_id), identity, file_id))) as reader:
+            (_TYPE, _APPEND, ticket.run_id, int(ticket.target_id), identity, file_id)))
+    with reader_context as reader:
         for event_id, in reader:
-            saved, _ = _at(connection, event_id)
+            cached = page_cache[0]
+            if cached is None or cached[0].ref.event_id != event_id:
+                saved, _, _, transaction = _read_page_record(connection, event_id)
+                page_cache[0] = (saved, transaction)
+            else:
+                saved, transaction = cached
+            _, source_attempt, _, _ = _load(connection, saved.ref.ticket)
+            if (saved.ref.ticket.run_id != ticket.run_id
+                    or saved.ref.ticket.target_id != ticket.target_id
+                    or (identity, file_id) not in saved.file_ids
+                    or source_attempt["result_first_page_event_id"] is None
+                    or source_attempt["result_last_page_event_id"] is None
+                    or not source_attempt["result_first_page_event_id"] <= event_id
+                    <= source_attempt["result_last_page_event_id"]):
+                raise ConsistencyError("完整来源的原页身份或可靠边界不符")
             entry = next(item for item in saved.page.entries if item.identity == identity)
             actual_observation = observation
-            if isinstance(observation, dict) and "photo_source" in observation:
+            explicit_page = isinstance(observation, dict) and "photo_source" in observation
+            if explicit_page:
                 reference = observation["photo_source"]
                 photo_pages = [item for item in saved.page.outcome.observations
                                if item.type == RESULT_LISTED_TYPE and item.version == 3]
@@ -776,16 +906,29 @@ def _complete_source_entry(connection, ticket, identity, file_id, facts, activit
                 actual_observation = {key: value for key, value in observation.items() if key != "photo_source"}
             if not json_equal(entry.evidence, actual_observation):
                 continue
-            source = load_result_source(connection, saved.ref.ticket)
-            if (source.natural_lower_bound is not None and saved.occurred_at < source.natural_lower_bound
-                    or source.kind in (ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED) and source.requires_file_wait):
-                continue
+            if not explicit_page:
+                cached_source = source_cache[0]
+                if cached_source is None or cached_source[0] != saved.ref.ticket:
+                    source = load_result_source(connection, saved.ref.ticket)
+                    cached_source = (saved.ref.ticket, source.natural_lower_bound,
+                                     source.kind, source.requires_file_wait)
+                    source_cache[0] = cached_source
+                _, lower_bound, kind, requires_wait = cached_source
+                if (lower_bound is not None and saved.occurred_at < lower_bound
+                        or kind in (ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED)
+                        and requires_wait):
+                    continue
             return entry
     raise ConsistencyError("完整来源文件缺少与原完成观察一致的合格原条目")
 
 
 def read_source_inputs(ticket, cursor, batch, owned):
     """跨原核实轮次分页读取可靠文件；完整文件保持原完成页元数据。"""
+    with result_read_snapshot(owned.connection):
+        return _read_source_inputs(ticket, cursor, batch, owned)
+
+
+def _read_source_inputs(ticket, cursor, batch, owned):
     if type(batch) is not int or not 1 <= batch <= 128:
         raise ValueError("来源文件批次必须为 1—128")
     if cursor is not None:
@@ -796,6 +939,7 @@ def read_source_inputs(ticket, cursor, batch, owned):
             (action["id"], cursor or 0, batch + 1))) as reader:
         identifiers = [row[0] for row in reader]
     items = []
+    page_cache, source_cache = [None], [None]
     for file_id in identifiers[:batch]:
         facts = row_facts(owned.connection, "device_files", file_id)
         identity = parse_exact_json(facts["identity_key"])
@@ -803,26 +947,36 @@ def read_source_inputs(ticket, cursor, batch, owned):
                 or identity[:2] != [action["device_id"], action["driver_id"]]):
             raise ConsistencyError("原来源文件的身份与固定绑定不符")
         with closing(owned.connection.execute(
-                "SELECT DISTINCT e.id FROM history_events e,"
-                " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
-                " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
-                " AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
-                " AND json_extract(f.value,'$[1]')=? ORDER BY e.id DESC LIMIT 1",
-                (_TYPE, _APPEND, ticket.run_id, file_id))) as reader:
+                "SELECT page_event_id FROM result_page_files WHERE run_id=? AND file_id=?"
+                " ORDER BY page_event_id DESC LIMIT 1", (ticket.run_id, file_id))) as reader:
             row = reader.fetchone()
         completion = facts["completion_evidence_json"]
         if facts["completion_state"] == 3 and not isinstance(completion, dict):
             raise ConsistencyError("来源文件缺少可靠完成依据")
         source_id = (completion.get("result_page_event_id") if facts["completion_state"] == 3
             and isinstance(completion, dict) else None)
-        entry = (_complete_source_entry(owned.connection, ticket, identity[2], file_id, facts, activity)
+        entry = (_complete_source_entry(owned.connection, ticket, identity[2], file_id, facts, activity, page_cache, source_cache)
             if facts["completion_state"] == 3 and source_id is None else
             _legacy_source_entry(owned.connection, ticket, identity[2], facts, activity) if row is None else None)
         if entry is None:
             if row is None:
                 raise ConsistencyError("已确认来源文件缺少可靠原 RESULTS 元数据")
             # 后轮实际页可不合格；不能覆盖既有完整文件的原来源元数据。
-            saved, _ = _at(owned.connection, row[0] if source_id is None else source_id)
+            page_id = row[0] if source_id is None else source_id
+            cached = page_cache[0]
+            if cached is None or cached[0].ref.event_id != page_id:
+                saved, _, _, transaction = _read_page_record(owned.connection, page_id)
+                page_cache[0] = (saved, transaction)
+            else:
+                saved, transaction = cached
+            _, source_attempt, _, _ = _load(owned.connection, saved.ref.ticket)
+            if (source_attempt["result_first_page_event_id"] is None
+                    or source_attempt["result_last_page_event_id"] is None
+                    or not source_attempt["result_first_page_event_id"] <= page_id
+                    <= source_attempt["result_last_page_event_id"]):
+                raise ConsistencyError("来源页不在原尝试的可靠范围内")
+            if source_id is not None and transaction.last_event_id > facts["last_event_id"]:
+                raise ConsistencyError("文件完成来源页越过文件事实边界")
             if (saved.ref.ticket.run_id != ticket.run_id or saved.ref.ticket.target_id != ticket.target_id
                     or (identity[2], file_id) not in saved.file_ids):
                 raise ConsistencyError("来源文件的原页输入与物理身份不符")
