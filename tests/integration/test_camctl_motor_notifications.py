@@ -111,8 +111,15 @@ class MotorHost:
         environment = {**os.environ, "CAMCTL_TEST_TRACE_CALLS": "1"}
         self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, bufsize=0, env=environment)
-        self.wait(lambda: any(e["event"] == "initialized" for e in self.events),
-                  "C 主程序未初始化")
+        try:
+            self.wait(lambda: any(e["event"] == "initialized" for e in self.events),
+                      "C 主程序未初始化")
+        except BaseException as error:
+            try:
+                self.stop()
+            except BaseException as cleanup_error:
+                error.add_note(f"关闭尚未交还调用者的电机主程序时出错：{cleanup_error!r}")
+            raise
 
     def drain(self) -> None:
         while select.select([self.proc.stdout], [], [], 0)[0]:

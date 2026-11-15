@@ -150,7 +150,7 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 
 状态中的“待测量”表示有实际代码依据、但尚未测出各阶段占比及收益；“待方案核实”表示已定位具体内部依赖，但没有确认等价改法，不能直接删除或宣布需要新接口。数量仅描述当前明确的参数实例，不是全仓剩余用例数或完成率。旧静态候选、动态别名及未逐项核对的协作关系不作为已证实待改对象。
 
-后续按现有具体待办推进，不重新普查已经读完的文件。媒体、结果、来源及读取汇总的本批修正已经接入；C123—C126 的真实文件取消、存储拒绝及异常收场已完成核对和接入。根跨组件 C131—C145 按实际资源责任、错误观察和媒体判据实施，C140 已完成；C131、C132、C136、C143 正在隔离工作区处理，长验证先核必要范围与成本，不默认重跑完整参数矩阵。C68 的正式性能矩阵、B66 和 C145 继续待核，D8 的内部输入未来排期目标等待讨论。R1—R5 等生产事项在用户休息期间只记录，待其返回后统一解决。
+后续按现有具体待办推进，不重新普查已经读完的文件。媒体、结果、来源及读取汇总的本批修正已经接入；C123—C126 的真实文件取消、存储拒绝及异常收场已完成核对和接入。根跨组件 C131—C145 按实际资源责任、错误观察和媒体判据实施，C140 已完成；C131、C132、C137 已完成，C136、C143 正在隔离工作区处理，长验证先核必要范围与成本，不默认重跑完整参数矩阵。C68 的正式性能矩阵、B66 和 C145 继续待核，D8 的内部输入未来排期目标等待讨论。R1—R5 等生产事项在用户休息期间只记录，待其返回后统一解决。
 
 ### 已核实完成，应从旧待办关闭
 
@@ -375,13 +375,13 @@ B33—B36、C35、C37 已完成本批处置；C36 保留 R5 的生产契约失�
 | C128 | availability_errors 两个内存 SQLite 未显式关闭；motor 诊断夹具在受理和窗口断言之后才进入关闭作用域。 | 已完成，接入 `5c2d470a`；两个内存 SQL 及诊断夹具关闭责任明确，完整文件与准备中断实际关闭检查通过 | SQL 格式专项用 closing 保留原事务，诊断夹具从取得观察连接起保证收场；完整定义文件与两个诊断消费者及一次准备失败检查，不把静态缺口称实际耗尽。 |
 | C129 | notification_pipe 的填满管道及 EOF 读取、notification_error_facts 的 EOF 在回归时可阻塞 pytest 进程。 | 已完成，接入 `5c2d470a`；真实填满及 EOF 在独立进程中有外部十秒期限，未关写端反例按期失败并退出 | 保留真实管道、完整通知字节、三整数、满管道 would_block／零字节及短写后真 EOF，在有外部期限的独立进程验证并确认结束。不能将 EAGAIN 当 EOF；完整两个文件及未关写端的临时反例。 |
 | C130 | 电机管道文件在 supervisor.stop 抛错后跳过其余收场，普通文件和交接写端失败出口也缺明确拥有者。 | 已完成，接入 `5c2d470a`；本次进程及可确认身份的描述符逐层收场，停止抛错的实际出口检查通过 | 必要关闭逐层 finally，主错误和关闭错误保持；兜底只关本次仍拥有且身份已核的描述符，不能无条件重复关闭已交出的整数。与 C129 同负责人验证两个完整文件及停止抛错出口。 |
-| C131 | Action6 分段恢复两个函数在 host 已启动之后、进入 finally 之前准备两个等待取回。 | 静态核实，待扩大原收场作用域 | 从取得 demo 起进入原 try/finally，原双等待者和七个恢复实例不减；普通／原生各一准备失败出口核 host／CLI／Node 及读取线程结束，再按实际七实例验证。 |
-| C132 | Action6 原生延时的期限前文件操作断言只识别 OSMO 顶层 kind，漏掉 Action6 的 kind=file/file_kind 记录。 | 静态核实，待两格式见证 | 识别两种正式测试日志形状，保留原 PID／epoch、329／330 秒、300 秒目标与 30 秒余量。两格式负例及完整 Action6 原生延时节点；若改共用断言核 OSMO 实际消费者，不改生产。 |
+| C131 | Action6 分段恢复两个函数在 host 已启动之后、进入 finally 之前准备两个等待取回。 | 已完成，接入70282f25；两处准备失败及两个真实代表已验证 | 从取得demo后立即进入原try/finally，双等待者和七个恢复参数均保留。普通reached-copy-progress、原生必需照片失败代表通过；两处第二取回准备失败后host／CLI／Node／读取线程均结束。其余五参数未重跑，不宣称七项本次全部验证。 |
+| C132 | Action6 原生延时的期限前文件操作断言只识别 OSMO 顶层 kind，漏掉 Action6 的 kind=file/file_kind 记录。 | 已完成，接入70282f25 | Action6局部断言在原OSMO检查之上补查kind=file，两个实际日志格式均有拒绝见证，恢复前旧记录不误报。原329／330、300秒目标、30秒余量及同PID／epoch活跃时钟保持；完整自然期限节点通过，OSMO共用代码未变。 |
 | C133 | 根多条成功等待未接入现有按本次 host／run／request 观察的提前失败检查。 | 静态核实，待分组接入 | Action6 正常／恢复、C 模块／capture／部署／目录、报告、OSMO 普通／分段及双相机演示按各自本次操作建立观察起点和目标终态；重建 host 重新取检查器。保留全部成功预算及合法重试，不把正常退出或预定旧故障当新失败。先受控提前错误，再验证实际修改分区，不追加根全量。 |
 | C134 | camctl_media_roundtrip 三秒目标允许 2.5 秒下限。 | 静态核实，待按完整目标判定 | 下限从原独立目标三秒取得，保留短于源片上限、两条真实修复及交付摘要；短于目标反例与完整两场景验证。 |
 | C135 | 同一媒体联合链以编码仍为 h264 声称没有重编码。 | 静态核实，待真实修复命令见证 | 在外部 ffmpeg 调用边界记录并转发实际命令，核正式修复流复制，或核实际编码包；保留真实链，不以改文案代替原无重编码目标。与 C134 同组验证。 |
 | C136 | 根 process_recovery 先 select 十秒再阻塞 readline，半行和保持打开的 stderr 会使期限失效。 | 静态核实，待有界双流读取 | 此辅助按现有 C12 方法覆盖整行及错误双流，保留原回复期限、原进程组收场和具体 PID；半行、stderr 保持打开、退出原错窄反例后完整文件，既有共享辅助不重开。 |
-| C137 | MotorHost 在启动 C 主程序后等待初始化失败，没有将实例转交给调用者收场。 | 静态核实，待构造失败收场 | Popen 成功即承担异常结束，原错误保持；初始化失败核具体 C PID／CLI 组／管道，再完整通知文件。 |
+| C137 | MotorHost 在启动 C 主程序后等待初始化失败，没有将实例转交给调用者收场。 | 已完成，构造失败后由MotorHost自己关闭尚未转交的主程序 | Popen成功后立即承担初始化失败出口，原异常保持、关闭错误附注。真实通知边界链与两个窄构造失败检查通过；只新增构造失败收场，已有其他通知业务未改，故没有为此重跑整通知矩阵。 |
 | C138 | 根 session_recovery 多处旧 CLI、三并发 submit 和未来等待会话只在准备成功后终止。 | 静态核实，待显式进程拥有者 | 从每次创建成功起登记，有界结束全部本次已创建进程及管道，保留原中断、五秒自然等待、三提交／同请求／真冷恢复；不能把全局预算兜底当调用方收场证明。完整文件及窄准备失败出口。 |
 | C139 | 根未来等待只查 submit 已写的 PENDING，未证明本次 CLI 在排期前已承担驻留等待。 | 静态核实，待当前进程公开事实 | 排期前取得同一真实 CLI 发布并包含目标的初始报告等事实，核 UTC 尚未到排期，再由该进程自然等原排期。五秒、120秒保护和过期分区不变，不改为受控时间跳跃。与 C138 同组核。 |
 | C140 | 安装版能力来源切换的两处 SQLite with 没有显式关闭观察连接。 | 已改为 closing 并验证 | 原首次冻结、配置切换、原键与新请求、零设备调用保持；真实安装版单项及观察异常出口通过，不扩大浏览器矩阵。 |
@@ -1030,6 +1030,11 @@ Python 的收集与执行均为 **10,791 个唯一主节点：10,786 项通过�
 来源四函数为 `test_bound_port_from_another_connection_is_rejected`、`test_original_source_key_rechecks_original_h_after_later_work_and_new_ids`、`test_point_iteration_cannot_relabel_its_numeric_ids_as_actions`、`test_source_resolution_streams_bounded_events_and_returns_finite_result`。最后五函数为原键核实、`test_unknown_commit_recovers_same_source_request_and_ids_after_reopen`、`test_source_write_and_original_key_keep_bounded_pages`、`test_aggregate_role_is_revoked_when_page_assembly_fails`、`test_source_aggregate_pages_have_exact_current_ids_and_keep_point_roles`；其中20／200／600成员、每批四项的功能分页保持。
 
 读取流实际选择 `outputs/test_read_diagnostics.py` 的 `test_checksum_exhaustion_records_verification_error`、`test_normal_cancellation_before_dispatch_has_no_error_record`、`test_local_read_normal_stopped_result_is_not_error`，`test_digest_diagnostics.py::test_verification_failure_logs_original_digest_facts_once_before_save`，以及 `test_default_exclusions.py::test_obtain_runtime_consumes_saved_default_exclusions`。
+
+| 2026-11-15 根恢复与进程责任 | 实际正向节点 | 结果与边界 |
+| --- | --- | --- |
+| C131、C132，`20facddc` | test_action6_segmented_recovery_roundtrip 的 `test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]`、`test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters`；test_action6_builtin_timelapse_roundtrip 的 `test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs` | 首次三节点命令为2通过、1准备错误，pytest95.25秒、墙钟95.977秒、退出一；错误是默认解释器路径不存在，期限目标尚未执行。显式UV_PYTHON后只补期限节点，一项通过、105.05／105.764秒、退出零；两次分别记录，不拼成一次三项全绿。准备失败两临时探针按预期在原异常结束，2失败、退出一、52.07／52.762秒，关闭事实均核实。两格式断言窄反例通过。各预算委派无回收错误，不扩大七恢复矩阵或OSMO范围。 |
+| C137，基于 `9fb12d82` 的构造失败收场差异 | test_camctl_motor_notifications.py::test_client_export_host_callback_report_import_boundaries | 一项通过，pytest34.47秒、启动器墙钟35.040秒、退出零；2GiB合计预算委派无错误且已回收。首次同节点在客户端导出时因缺tsx准备失败，构造器尚未执行，pytest19.96秒、退出一；随后复用锁文件一致的已有客户端依赖，只补原节点，没有安装或修改共用依赖。临时两分区使用真实子进程，初始化观察失败后进程和三管道均结束，原异常保持；关闭后另抛错时仍保留原异常并附注，检查墙钟0.007秒、退出零。该窄检查不冒充完整C初始化故障链。 |
 
 | 2026-11-15 根能力来源，基于 `f0d58feb` 的测试侧差异 | 实际范围 | 结果与边界 |
 | --- | --- | --- |
