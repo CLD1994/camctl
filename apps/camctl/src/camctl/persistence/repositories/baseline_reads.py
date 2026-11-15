@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from camctl.capture.baseline_models import (
     BaselineCallsCursor, BaselineChunkSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
-    BaselineReadUnconfirmedSave, BaselineRef, BaselineState)
+    BaselineReadUnconfirmedSave, BaselineReadNotCalledSave, BaselineRef, BaselineState)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.contracts.json_values import json_equal
@@ -160,10 +160,11 @@ def _read_call(connection, call_id, boundary):
             raise ConsistencyError('基准意图包含尚未返回的结果')
         return BaselineReadCallView(call_id, event.event_id, state, request,
             None, None, None, None, None, HistoryBoundary(transaction.txn_id, transaction.last_event_id))
-    if state is _STATE.UNCONFIRMED:
+    if state in (_STATE.UNCONFIRMED, _STATE.NOT_CALLED):
         result=_event_at(connection,values['result_event_id'])
         result_tx=read_transaction_range(connection,result.transaction_id)
-        expected=_unconfirmed_event(call_id,result.occurred_at,result.event_id,result.transaction_id)
+        expected=(_unconfirmed_event if state is _STATE.UNCONFIRMED else _not_called_event)(
+            call_id,result.occurred_at,result.event_id,result.transaction_id)
         if (replace(result,change_seq=None) != expected or result_tx.first_event_id != result.event_id
                 or result_tx.last_event_id != result.event_id
                 or any(values[name] is not None for name in
@@ -271,6 +272,7 @@ def verify_write(request,key,owned,*,execution_finished=True):
         scope=TransactionScope(connection,boundary.txn_id,boundary.last_event_id)
         command=(SaveBaselineReadIntent(request,key) if isinstance(request,BaselineReadIntent)
                  else SaveBaselineReadUnconfirmed(request,key) if isinstance(request,BaselineReadUnconfirmedSave)
+                 else SaveBaselineReadNotCalled(request,key) if isinstance(request,BaselineReadNotCalledSave)
                  else SaveBaselineReadReturn(request,key))
         plan=command.plan(scope)
         if not plan.read_only or scope.allocation is not None:
@@ -362,8 +364,8 @@ def baseline_read_guard(event, context):
             reads.validate(event, context)
         elif event.reason == 2 and type(reads) is BaselineReturnGroup:
             reads.validate_return(event)
-        elif event.reason == 3 and type(reads) is BaselineReturnGroup:
-            reads.validate_unconfirmed(event)
+        elif event.reason in (3, 4) and type(reads) is BaselineReturnGroup:
+            reads.validate_settlement(event)
         else:
             raise ConsistencyError('基准调用事实缺少同连接独立读取')
     except (KeyError, TypeError, ValueError) as error:
@@ -495,7 +497,7 @@ class BaselineReturnGroup:
                     or event.event_id+1 != self.transaction.last_event_id):
                 raise ConsistencyError('基准返回只接受一个前序实际批次')
             self.pending=event
-        elif event.event_type != _EVENT['id'] or event.reason not in (2,3):
+        elif event.event_type != _EVENT['id'] or event.reason not in (2,3,4):
             raise ConsistencyError('基准返回组包含其他业务事件')
         return replace(context,baseline_read_reads=self,
             baseline_reads={self.scope.activity_id:self.stats})
@@ -532,13 +534,17 @@ class BaselineReturnGroup:
                 raise ConsistencyError('基准返回与同连接已写前序批次不一致')
         self.pending=event
 
-    def validate_unconfirmed(self,event):
+    def validate_settlement(self,event):
+        if event.reason == 4:
+            from camctl.persistence.runtime import require_baseline_not_called_format
+            row = _one(self.connection, "SELECT format_version FROM database_metadata WHERE id=1")
+            require_baseline_not_called_format(None if row is None else row[0])
         _unconfirmed_qualification(self.connection,self.view)
         if (self.chunk is not None or self.transaction.first_event_id != event.event_id
                 or self.transaction.last_event_id != event.event_id
-                or replace(event,change_seq=None) != _unconfirmed_event(
+                or replace(event,change_seq=None) != (_unconfirmed_event if event.reason == 3 else _not_called_event)(
                     self.scope.call_id,event.occurred_at,event.event_id,event.transaction_id)):
-            raise ConsistencyError('基准返回未知必须独立保存原调用的未知事实')
+            raise ConsistencyError('基准收场必须独立保存原调用的对应事实')
         self.pending=event
 
     def seal(self,validated):
@@ -604,6 +610,46 @@ class SaveBaselineReadUnconfirmed:
         event=_unconfirmed_event(view.call_id,self.request.occurred_at,
             allocation.first_event_id,allocation.txn_id)
         result=replace(view,state=_STATE.UNCONFIRMED,result_event_id=event.event_id,
+            boundary=HistoryBoundary(event.transaction_id,event.event_id))
+        state={'actions':{action['id']:action},'device_activities':{activity['id']:activity},
+            'baseline_read_calls':{view.call_id:row_facts(scope.connection,'baseline_read_calls',view.call_id)}}
+        return CommandPlan((event,),{('baseline_read_calls',view.call_id):('action',action['id'])},
+            state,result=result,baseline_read_write_scope=BaselineReadWriteScope(
+                action['id'],activity['id'],view.call_id))
+
+
+def _not_called_event(call_id,occurred_at,event_id,transaction_id):
+    return event_envelope(event_id,transaction_id,_EVENT['id'],4,
+        (update_change('baseline_read_calls',call_id,{'state':int(_STATE.INTENDED),'result_event_id':None},
+            {'state':int(_STATE.NOT_CALLED),'result_event_id':event_id}),),occurred_at,
+        {'baseline_read_request':{'call_id':call_id,'occurred_at':occurred_at}})
+
+
+class SaveBaselineReadNotCalled:
+    def __init__(self,request,key):
+        if not isinstance(request,BaselineReadNotCalledSave):
+            raise TypeError('基准确认未调用需要原调用及本次收场时刻')
+        self.request,self.key=request,OperationKey(key)
+
+    def plan(self,scope):
+        view=_read_call(scope.connection,self.request.call_id,_current_boundary(scope.connection))
+        if view is None or self.key != view.request.result_save_key:
+            raise ConsistencyError('基准确认未调用必须使用原结果保存键')
+        saved=saved_transaction_events(scope.connection,self.key)
+        if saved is not None:
+            event=_event_at(scope.connection,saved[-1]['event_id'])
+            if (view.state is not _STATE.NOT_CALLED or len(saved) != 1
+                    or replace(event,change_seq=None) != _not_called_event(
+                        view.call_id,self.request.occurred_at,event.event_id,event.transaction_id)):
+                raise ConsistencyError('基准确认未调用原键与原完整申请不同')
+            return CommandPlan((),{},{},result=view,read_only=True)
+        if view.state is not _STATE.INTENDED:
+            raise ConsistencyError('已有基准结果不能替换为确认未调用')
+        activity,action,_=_unconfirmed_qualification(scope.connection,view)
+        allocation=scope.allocate(1)
+        event=_not_called_event(view.call_id,self.request.occurred_at,
+            allocation.first_event_id,allocation.txn_id)
+        result=replace(view,state=_STATE.NOT_CALLED,result_event_id=event.event_id,
             boundary=HistoryBoundary(event.transaction_id,event.event_id))
         state={'actions':{action['id']:action},'device_activities':{activity['id']:activity},
             'baseline_read_calls':{view.call_id:row_facts(scope.connection,'baseline_read_calls',view.call_id)}}

@@ -728,6 +728,7 @@
 | 1 | `INTENDED` |
 | 2 | `RETURNED` |
 | 3 | `UNCONFIRMED` |
+| 4 | `NOT_CALLED` |
 
 ### `segment_sets.source_kind`
 

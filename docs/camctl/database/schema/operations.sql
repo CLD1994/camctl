@@ -231,7 +231,7 @@ CREATE TABLE baseline_read_calls (
     chunk_count INTEGER NOT NULL CHECK (chunk_count >= 0),
     entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
     read_no INTEGER NOT NULL CHECK (read_no > 0),
-    state INTEGER NOT NULL CHECK (state IN (1,2,3)),
+    state INTEGER NOT NULL CHECK (state IN (1,2,3,4)),
     returned_at INTEGER,
     result_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     error_json TEXT CHECK (error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')),
@@ -246,7 +246,7 @@ CREATE TABLE baseline_read_calls (
     CHECK ((state = 1 AND result_event_id IS NULL AND returned_at IS NULL AND error_json IS NULL
             AND next_cursor_json IS NULL AND chunk_event_id IS NULL)
         OR (state = 2 AND result_event_id IS NOT NULL AND returned_at IS NOT NULL)
-        OR (state = 3 AND result_event_id IS NOT NULL AND returned_at IS NULL AND error_json IS NULL
+        OR (state IN (3,4) AND result_event_id IS NOT NULL AND returned_at IS NULL AND error_json IS NULL
             AND next_cursor_json IS NULL AND chunk_event_id IS NULL)),
     CHECK (error_json IS NULL OR (next_cursor_json IS NULL AND chunk_event_id IS NULL))
 ) STRICT;

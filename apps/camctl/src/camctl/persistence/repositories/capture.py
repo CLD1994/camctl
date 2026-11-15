@@ -2338,6 +2338,17 @@ class CaptureRepository:
             return DbOutcome(DbOutcomeKind.ROLLED_BACK,error=receipt.error)
         return DbOutcome(DbOutcomeKind.UNKNOWN,error=receipt.error)
 
+    def save_baseline_read_not_called(self,request,key,owned):
+        from camctl.persistence.runtime import require_baseline_not_called_format
+        from .baseline_reads import SaveBaselineReadNotCalled
+        require_baseline_not_called_format(owned.metadata.format_version if owned.metadata is not None else None)
+        receipt=commit_operation(SaveBaselineReadNotCalled(request,key),key,owned)
+        if receipt.kind=='completed':
+            return DbOutcome(DbOutcomeKind.COMPLETED,value=receipt.result)
+        if receipt.kind=='rolled_back':
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK,error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN,error=receipt.error)
+
     def finish_capture_stop(self, finish, key, owned):
         """停止确认保存实际结束；文件范围和采集目标分别核实。"""
         receipt = commit_operation(_CaptureStopCommand(finish, None, key), key, owned)

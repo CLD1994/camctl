@@ -3825,6 +3825,14 @@
             "BASELINE_READ.UNCONFIRMED"
           ],
           "id": "transition_2"
+        },
+        {
+          "from": 1,
+          "to": 4,
+          "by": [
+            "BASELINE_READ.NOT_CALLED"
+          ],
+          "id": "transition_3"
         }
       ]
     },
@@ -10733,6 +10741,49 @@
               "transitions": {
                 "state": [
                   "transition_2"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "baseline_read"
+          ],
+          "evidence": [
+            "baseline_read_request"
+          ]
+        },
+        "NOT_CALLED": {
+          "reason": 4,
+          "title": "保存基准目录确认未调用",
+          "rows": [
+            {
+              "table": "baseline_read_calls",
+              "op": "update",
+              "columns": [
+                "state",
+                "result_event_id"
+              ],
+              "before": {
+                "state": [
+                  1
+                ]
+              },
+              "after": {
+                "state": [
+                  4
+                ]
+              },
+              "required": [
+                "state",
+                "result_event_id"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_3"
                 ]
               }
             }

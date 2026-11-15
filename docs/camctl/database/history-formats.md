@@ -178,7 +178,7 @@ Action6 分段普通录像的可靠正常到时 STOP，在原 `ATTEMPT_RESULT` �
 | 34 `MOTOR_CHANGED` | 1 保存电机发送意图与动作开始；2 保存完整通知写入；3 保存明确通知写入失败；4 保存通道不可用与可靠未发送；5 保存可靠未发送与过期；7 保存恢复时发送结果不确定 |
 | 35 `RESULT_PAGE` | 1 保存本轮实际页返回、文件观察及页范围；2 索引本页实际差集文件身份 |
 | 36 `SEGMENT_FACTS` | 1 建立原扫描的分段集合；2 保存有限原扫描成员；3 固定完整分段成员；4 保存第二遍缺口事实；5 固定两遍完整判断；6 保存有序默认原片成员；7 发布默认成员的实际产物关联；8 共同发布唯一正式分段集合；9 建立固定来源的结果集合；10 固定原H0的完整结果成员；11 保存结果核实的有限决定；12 固定已结束核实的结果处置 |
-| 37 `BASELINE_READ` | 1 保存基准目录调用原始输入；2 保存基准目录实际返回；3 保存基准目录返回未知 |
+| 37 `BASELINE_READ` | 1 保存基准目录调用原始输入；2 保存基准目录实际返回；3 保存基准目录返回未知；4 保存基准目录确认未调用 |
 | 38 `SEGMENT_INSPECTION` | 1 建立分段检查责任；2 保存分段媒体检查结果 |
 | 39 `AVAILABILITY_CHECK` | 1 固定设备检查责任与目标；2 按可用性检查解除旧活动限制 |
 | 40 `FILE_BATCH_CHANGED` | 1 取得同机文件批次；2 释放同机文件批次 |
@@ -222,8 +222,8 @@ Action6 分段普通录像的可靠正常到时 STOP，在原 `ATTEMPT_RESULT` �
 | `device_activities.baseline_last_event_id` | 本次基准收集的最后一条 `BASELINE_CHUNK.APPEND` 事件 | 每次追加设为 E；首批与首条引用相等，固定非空基准时保持；固定空基准时共同置空 |
 | `baseline_read_calls.created_event_id` | 创建本次调用的INTEND事件E | 创建时保存，之后固定；调用行归属原动作历史 |
 | `baseline_read_calls.baseline_first_event_id`、`baseline_last_event_id` | 调用前可靠基准前缀的首末APPEND | 创建时共同为空或共同引用已有事件，之后固定，不随后续页或FIX替换 |
-| `baseline_read_calls.result_event_id` | 保存本调用RETURN或UNCONFIRMED的事件E | INTENDED时为空，结果首次保存后固定 |
-| `baseline_read_calls.chunk_event_id` | 成功非空RETURN同组前序APPEND | 意图、空页、错误及未知时为空；成功非空页首次固定实际批次，不保存第二份目录数组 |
+| `baseline_read_calls.result_event_id` | 保存本调用 RETURN、UNCONFIRMED 或 NOT_CALLED 的事件 E | INTENDED时为空，结果首次保存后固定 |
+| `baseline_read_calls.chunk_event_id` | 成功非空RETURN同组前序APPEND | 意图、空页、错误、未知及确认未调用时为空；成功非空页首次固定实际批次，不保存第二份目录数组 |
 
 基准首尾必须属于同一活动和同一次收集，首条的 `chunk_no` 为 1，后续批号连续。事件范围内可以夹有其他活动或其他类型事件，读取时仍须按活动及分支筛选。中断后重收非空基准时，新首批同时替换两个引用；重收为空时按空基准分支清空。前后值保留被替换的旧范围，以便恢复重收前的状态。
 
@@ -281,6 +281,8 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 `BASELINE_READ.INTEND` 的 `evidence.baseline_read_request` 保存原动作、活动、设备及驱动、完整规范目录、输入游标、精确正超时、基准前缀首末及计数、调用序号、调用和结果保存双键，以及原意图时刻。数据库行与这份原始输入一致；意图单独提交，不能解释为目录调用已经派发。
 
 `BASELINE_READ.RETURN` 的同名证据保存 `call_id`、`returned_at`、`error`、`next_cursor` 和 `chunk_event_id`。真实错误采用原ErrorValue；无错误表示成功页，空页与末页由下一游标分别解释。成功非空页只在同组前序APPEND保存实际目录数组，RETURN引用该批次，二者使用同一实际返回时刻；成功空页或实际错误只保存RETURN。原始工具诊断不复制为基准资格输入。
+
+`BASELINE_READ.UNCONFIRMED` 和 `BASELINE_READ.NOT_CALLED` 各自独立提交一个结果事件，证据保存原 `call_id` 和 `occurred_at`。前者记录原结果无法确认时的收场时刻；后者只由原拥有者可靠确认外部目录调用未发生后保存，时刻为该确认时刻。两者使用原结果保存键，均不填写实际返回时刻、设备错误或目录内容，也不能支持启动。旧意图或返回未知的记录不能仅凭当前没有本地任务改判为未调用。
 
 基准返回范围由原内核定位到同一动作、活动及调用，分别核实际输入前缀、已通过守卫的前序批次、精确引用和完整组末事件。有限和有界事务都在形成可靠结果及COMMIT前确认整组已经结束；缺批次、缺RETURN、错误引用或不同返回时刻均整组回滚。已经保存的实际返回按原结果键和原完整边界读取，后来FIX或新调用不替换原输入、时刻或目录内容。字段及状态组合见[基准目录调用](operation-fields.md#基准目录调用)。
 

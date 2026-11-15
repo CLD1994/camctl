@@ -197,3 +197,14 @@ class BaselineReadUnconfirmedSave:
     def __post_init__(self):
         ObjectId(self.call_id)
         UtcMicros(self.occurred_at)
+
+
+@dataclass(frozen=True)
+class BaselineReadNotCalledSave:
+    """原拥有者确认目录端口未调用的时刻。"""
+    call_id: int
+    occurred_at: int
+
+    def __post_init__(self):
+        ObjectId(self.call_id)
+        UtcMicros(self.occurred_at)

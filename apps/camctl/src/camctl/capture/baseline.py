@@ -121,9 +121,10 @@ async def recover_terminal_baselines(*, runtime, limit=None):
             "SELECT MAX(last.id) FROM baseline_read_calls last"
             " WHERE last.action_id=a.id AND last.activity_id=d.id)"
             " WHERE d.occupancy_state=1 AND d.baseline_state=2 AND d.dispatch_state=1"
-            " AND a.status IN (3,4,5,6) AND b.state IN (?,?)"
+            " AND a.status IN (3,4,5,6) AND b.state IN (?,?,?)"
             " AND (d.action_id,d.id)>(?,?) ORDER BY d.action_id,d.id LIMIT ?",
-            (int(BaselineReadState.RETURNED), int(BaselineReadState.UNCONFIRMED), *after, limit),
+            (int(BaselineReadState.RETURNED), int(BaselineReadState.UNCONFIRMED),
+             int(BaselineReadState.NOT_CALLED), *after, limit),
         )) as cursor:
                 return cursor.fetchall()
         candidates = await runtime.database.read(read)

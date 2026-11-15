@@ -17,15 +17,15 @@
 | `directories_json`、`cursor_json`、`timeout_s_json` | 规范完整目录数组、可空原输入游标和精确正超时数字。游标为空表示首次读取，其余游标必须绑定相同设备及完整目录；输入均固定。 |
 | `baseline_first_event_id`、`baseline_last_event_id` | 可空原基准前缀首末事件外键；空前缀共同为空，非空前缀共同有值且首不晚于末。 |
 | `chunk_count`、`entry_count`、`read_no` | 必填非负前缀批数和条数、正整数调用序号。前缀为空时两计数为零，否则条数不小于批数；同一活动的read_no唯一连续，空页也消耗调用序号。 |
-| `state` | 必填INTENDED、RETURNED或UNCONFIRMED；只从INTENDED进入一种结果，不重开。 |
-| `returned_at`、`result_event_id` | 可空UTC整数微秒实际返回时刻和结果事件外键。INTENDED时共同为空；RETURNED时共同有值；UNCONFIRMED只保存结果事件，不补造返回时刻。 |
-| `error_json`、`next_cursor_json`、`chunk_event_id` | 可空实际错误、成功页下一游标和原基准批次事件外键。INTENDED及UNCONFIRMED时均为空；错误返回不带下一游标或批次。成功非空页引用同组前序APPEND，成功空页不建批次，是否结束由下一游标判断。 |
+| `state` | 必填 INTENDED、RETURNED、UNCONFIRMED 或 NOT_CALLED；只从INTENDED进入一种结果，不重开。 |
+| `returned_at`、`result_event_id` | 可空UTC整数微秒实际返回时刻和结果事件外键。INTENDED时共同为空；RETURNED时共同有值；UNCONFIRMED 和 NOT_CALLED 只保存结果事件，不补造返回时刻。 |
+| `error_json`、`next_cursor_json`、`chunk_event_id` | 可空实际错误、成功页下一游标和原基准批次事件外键。INTENDED、UNCONFIRMED 及 NOT_CALLED 时均为空；错误返回不带下一游标或批次。成功非空页引用同组前序APPEND，成功空页不建批次，是否结束由下一游标判断。 |
 
-意图创建必须核对原动作的准备资格：沿原执行路径时要求 `RUNNING + execution_started=1`；首次独立提前准备时要求 `PENDING + execution_started=0`；原动作已开始、但原 `START` 均有可靠无效果依据且仍可重试时，保留 `RUNNING + execution_started=1`。独立准备路径均须持有当前会话已经可靠保存的设置准备结果。两者均要求活动为 `COLLECTING/NOT_DISPATCHED/HELD`，绑定、目录、实际前缀及连续调用关系完整。首调用从空前缀和空游标开始；后续调用只沿前一成功RETURNED的非空下一游标继续，前一调用未结束、出错、返回未知或已到末页时不创建下一调用。
+意图创建必须核对原动作的准备资格：沿原执行路径时要求 `RUNNING + execution_started=1`；首次独立提前准备时要求 `PENDING + execution_started=0`；原动作已开始、但原 `START` 均有可靠无效果依据且仍可重试时，保留 `RUNNING + execution_started=1`。独立准备路径均须持有当前会话已经可靠保存的设置准备结果。两者均要求活动为 `COLLECTING/NOT_DISPATCHED/HELD`，绑定、目录、实际前缀及连续调用关系完整。首调用从空前缀和空游标开始；后续调用只沿前一成功RETURNED的非空下一游标继续，前一调用未结束、出错、返回未知、确认未调用或已到末页时不创建下一调用。
 
-INTEND独立提交。非空成功页的APPEND与RETURN按此顺序在同一事务保存；空页、实际错误或返回未知各只保存一个结果事件。结果列首次赋值后固定。意图不表示已经派发，调用结果不自行结束动作、固定基准或释放活动。实际返回未知的拥有者及后续收场规则见[核实结束与终态提交](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#核实结束与终态提交)；接入进度由[分段实施计划](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p4把分段规则接入正常录像异常恢复和空尾分类)跟踪。
+INTEND独立提交。非空成功页的APPEND与RETURN按此顺序在同一事务保存；空页、实际错误、返回未知或确认未调用各只保存一个结果事件。结果列首次赋值后固定。意图不表示已经派发，调用结果不自行结束动作、固定基准或释放活动。实际返回未知的拥有者及后续收场规则见[核实结束与终态提交](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#核实结束与终态提交)；接入进度由[分段实施计划](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p4把分段规则接入正常录像异常恢复和空尾分类)跟踪。
 
-本会话新建意图的拥有者可靠确认实际读取尚未开始时，原意图保存恢复成功后继续使用同一拥有者、序号及双键，不创建替代调用。取消或启动窗口结束后不再发起读取，先按原结果键保存 UNCONFIRMED，再提交动作终态及解除占用；没有实际返回时不填写 `returned_at` 或 `error_json`。冷恢复读取到 INTENDED 不能单凭没有本地 Task 推断原调用未派发，仍须按既定恢复边界收场。实际读取仍在执行时，其他流程保留等待；只有已有保存申请未可靠完成才按状态保存错误处理。
+本会话新建意图的拥有者可靠确认实际读取尚未开始时，原意图保存恢复成功后继续使用同一拥有者、序号及双键，不创建替代调用。取消或启动窗口结束后不再发起读取，先按原结果键保存 NOT_CALLED 和确认时刻，再提交动作终态及解除占用；没有实际返回时不填写 `returned_at` 或 `error_json`，不得将其作为空目录或允许 START 的成功基准。冷恢复读取到 INTENDED 或 UNCONFIRMED 不能单凭没有本地任务推断原调用未派发，也不能改判为 NOT_CALLED；仍须按既定恢复边界收场。实际读取仍在执行时，其他流程保留等待；只有已有保存申请未可靠完成才按状态保存错误处理。
 
 SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空值组合。业务守卫独立核对原设备/目录/前缀、跨列键唯一性、连续调用和实际批次来源。动作恢复及快照包含调用行；按 `(action_id,id)` 分页发现原调用，历史读取使用固定完整边界，不从当前状态改写原始输入。
 

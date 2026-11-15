@@ -3,7 +3,7 @@ import asyncio
 from dataclasses import dataclass,field
 
 from camctl.capture.baseline_models import (
-    BaselineReadCallView,BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave)
+    BaselineReadCallView,BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave,BaselineReadNotCalledSave)
 from camctl.capture.baseline_saves import BaselineSaveOwner
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryRead
@@ -32,6 +32,7 @@ class PendingBaselineRead:
     result: BaselineReadCallView|None=None
     diagnostic: BaseException|None=None
     unconfirmed_request: BaselineReadUnconfirmedSave|None=None
+    not_called_request: BaselineReadNotCalledSave|None=None
     settlement_at: int|None=None
     settlement_clock_attempted: bool=False
     #: 只授予本会话新建的原意图；冷恢复意图不能据此重做目录调用。
@@ -103,13 +104,13 @@ async def abort_unstarted_baseline_read(owner, *, capture, database, wall_us):
     owner.aborted_before_call = True
     if owner.intent_view is None or owner.result is not None:
         return
-    if owner.unconfirmed_request is None:
+    if owner.not_called_request is None:
         owner.settlement_clock_attempted = True
         owner.settlement_at = wall_us()
-        owner.unconfirmed_request = BaselineReadUnconfirmedSave(
+        owner.not_called_request = BaselineReadNotCalledSave(
             owner.intent_view.call_id, owner.settlement_at
         )
-        owner.saves.begin(owner.unconfirmed_request, key=owner.intent.result_save_key)
+        owner.saves.begin(owner.not_called_request, key=owner.intent.result_save_key)
     (await resume_baseline_read_save(owner, capture=capture, database=database))
 
 
@@ -217,6 +218,10 @@ async def resume_baseline_read_call(owner,context,*,capture,database,wall_us):
         return (await resume_baseline_read_save(owner,capture=capture,database=database))
     if owner.actual_return is not None:
         return None
+    if owner.not_called_request is not None:
+        if owner.saves.pending is None and owner.result is None:
+            owner.saves.begin(owner.not_called_request,key=owner.intent.result_save_key)
+        return (await resume_baseline_read_save(owner,capture=capture,database=database))
     if owner.unconfirmed_request is not None:
         if owner.saves.pending is None and owner.result is None:
             owner.saves.begin(owner.unconfirmed_request,key=owner.intent.result_save_key)

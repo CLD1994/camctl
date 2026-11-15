@@ -255,6 +255,7 @@ class BootstrapCaptureCase:
             for name in ("finish_start_result", "finish_capture_stop", "conclude_activity", "append_baseline",
                          "fix_baseline",
                          "save_baseline_read_intent", "save_baseline_read_return", "save_baseline_read_unconfirmed",
+                         "save_baseline_read_not_called",
                          "save_result_page")})
         operations = type("ObservedOperations", (OperationRepository,), {
             "finish_attempt": observed("finish_attempt", OperationRepository.finish_attempt)})

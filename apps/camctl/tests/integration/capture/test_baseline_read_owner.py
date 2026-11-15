@@ -163,7 +163,7 @@ async def test_intent_saved_but_cancelled_before_call_has_no_fabricated_return(d
         finally:
             assert directory.calls == []
             state, event, returned_at, error = await _stored(owned)
-            assert state == 3 and event is not None and returned_at is None and error is None
+            assert state == 4 and event is not None and returned_at is None and error is None
     finally:
         gate.set()
         try:

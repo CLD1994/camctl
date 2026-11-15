@@ -3,7 +3,7 @@ from dataclasses import dataclass, field, replace
 
 from camctl.capture.baseline_models import (BaselineChunkResult, BaselineChunkSave,
     BaselineFixSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
-    BaselineReadState, BaselineReadUnconfirmedSave, BaselineRef, BaselineState)
+    BaselineReadState, BaselineReadUnconfirmedSave, BaselineReadNotCalledSave, BaselineRef, BaselineState)
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import db_outcome_for, DbOutcome, DbOutcomeKind
@@ -11,7 +11,7 @@ from camctl.persistence.models import db_outcome_for, DbOutcome, DbOutcomeKind
 
 @dataclass(frozen=True)
 class PendingBaselineSave:
-    request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn | BaselineReadUnconfirmedSave
+    request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn | BaselineReadUnconfirmedSave | BaselineReadNotCalledSave
     key: OperationKey
     response: BaselineChunkResult | BaselineRef | BaselineReadCallView | None = None
     save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
@@ -29,16 +29,16 @@ class BaselineSaveOwner:
     def __init__(self):
         self.pending: PendingBaselineSave | None = None
 
-    def begin(self, request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn | BaselineReadUnconfirmedSave,
+    def begin(self, request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn | BaselineReadUnconfirmedSave | BaselineReadNotCalledSave,
               *, key: OperationKey | None = None) -> PendingBaselineSave:
         if not isinstance(request, (BaselineChunkSave, BaselineFixSave, BaselineReadIntent,
-                                    BaselineReadReturn,BaselineReadUnconfirmedSave)):
+                                    BaselineReadReturn,BaselineReadUnconfirmedSave,BaselineReadNotCalledSave)):
             raise TypeError("基准拥有者需要完整的原始保存申请")
         if isinstance(request,BaselineReadIntent):
             if key is not None and key != request.call_key:
                 raise ConsistencyError('基准意图必须保留原调用键')
             key=request.call_key
-        elif isinstance(request,(BaselineReadReturn,BaselineReadUnconfirmedSave)) and key is None:
+        elif isinstance(request,(BaselineReadReturn,BaselineReadUnconfirmedSave,BaselineReadNotCalledSave)) and key is None:
             raise ConsistencyError('基准返回必须显式使用原结果保存键')
         if self.pending is not None:
             if self.pending.request != request or (key is not None and self.pending.key != key):
@@ -64,6 +64,8 @@ class BaselineSaveOwner:
                 method=repository.save_baseline_read_return
             elif isinstance(pending.request,BaselineReadUnconfirmedSave):
                 method=repository.save_baseline_read_unconfirmed
+            elif isinstance(pending.request,BaselineReadNotCalledSave):
+                method=repository.save_baseline_read_not_called
             else:
                 method = (repository.append_baseline if isinstance(pending.request, BaselineChunkSave)
                           else repository.fix_baseline)
@@ -78,7 +80,7 @@ class BaselineSaveOwner:
                 _delivery_error = failure
             if receipt.kind is DbOutcomeKind.COMPLETED:
                 response = receipt.value
-                if isinstance(pending.request,(BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave)):
+                if isinstance(pending.request,(BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave,BaselineReadNotCalledSave)):
                     self._check_call_response(pending.request,response)
                     self._remember_response(pending,response)
                     if _delivery_error is not None:
@@ -129,6 +131,9 @@ class BaselineSaveOwner:
         elif isinstance(request,BaselineReadUnconfirmedSave):
             if response.call_id != request.call_id or response.state is not BaselineReadState.UNCONFIRMED:
                 raise ConsistencyError('基准返回未知回执不属于原调用')
+        elif isinstance(request,BaselineReadNotCalledSave):
+            if response.call_id != request.call_id or response.state is not BaselineReadState.NOT_CALLED:
+                raise ConsistencyError('基准确认未调用回执不属于原调用')
         elif (response.call_id != request.call_id or response.state is not BaselineReadState.RETURNED
                 or response.returned_at != request.returned_at or response.error != request.error
                 or response.next_cursor != (None if request.returned.page is None else request.returned.page.next_cursor)):

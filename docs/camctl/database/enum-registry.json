@@ -592,7 +592,8 @@
       "members": {
         "INTENDED": 1,
         "RETURNED": 2,
-        "UNCONFIRMED": 3
+        "UNCONFIRMED": 3,
+        "NOT_CALLED": 4
       }
     },
     "segment_sets.source_kind": {

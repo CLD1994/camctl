@@ -43,7 +43,7 @@ async def consume_read(pending, runtime):
             pending.read_owner = None
             return True
         return False
-    pending.aborted = owner.aborted_before_call
+    pending.aborted = owner.aborted_before_call or result.state is BaselineReadState.NOT_CALLED
     pending.read_no = result.request.read_no
     pending.cursor = result.next_cursor
     pending.exhausted = (

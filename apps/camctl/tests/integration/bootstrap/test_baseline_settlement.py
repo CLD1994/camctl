@@ -253,7 +253,7 @@ async def test_segment_window_ending_during_intent_save_closes_without_read(tmp_
         return receipt
     case.after_save = slow
     await _prepare(case, runtime)
-    assert _call(case)[2:] == (3, None, None)
+    assert _call(case)[2:] == (4, None, None)
     assert case.owned.connection.execute("SELECT status FROM actions").fetchone() == (5,)
     await case.common_round()
     assert case.owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
@@ -279,9 +279,53 @@ async def test_cancel_closes_unstarted_segment_intent_before_terminal(tmp_path, 
     await case.common_round()
     assert case.owned.connection.execute("SELECT status FROM actions WHERE id=?", (case.action_id,)).fetchone() == (6,)
     assert case.owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
-    assert _call(case) == (str(original.call_key), str(original.result_save_key), 3, None, None)
+    assert _call(case) == (str(original.call_key), str(original.result_save_key), 4, None, None)
     assert case.directory.calls == []
     assert case.owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
+
+
+async def test_not_called_unknown_receipt_keeps_original_request_until_cancel_and_release(tmp_path, bootstrap_case):
+    case = bootstrap_case
+    original, _ = await _unstarted(case, tmp_path)
+    await case.cancel()
+    first_time = case.clock.wall
+    def lose_receipt(name, request, key, receipt):
+        if name == "save_baseline_read_not_called":
+            return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("原结果回执未知"))
+        return receipt
+    case.after_save = lose_receipt
+    with pytest.raises(ConsistencyError):
+        await capture_handler(case.handler)(case.action_id, await case.view())
+    assert _call(case)[2:] == (4, None, None)
+    assert case.owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (1,)
+    first, key = _saved(case, "save_baseline_read_not_called")[0]
+    assert first.occurred_at == first_time and str(key) == str(original.result_save_key)
+    case.after_save = None
+    case.clock.wall += 100
+    await capture_handler(case.handler)(case.action_id, await case.view())
+    await case.common_round()
+    assert all(item == (first, key) for item in _saved(case, "save_baseline_read_not_called"))
+    assert CaptureRepository().verify_baseline_read_write(first, key, case.owned).state.name == "NOT_CALLED"
+    assert case.owned.connection.execute("SELECT status FROM actions").fetchone() == (6,)
+    assert case.owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
+    assert case.directory.calls == []
+
+
+async def test_cold_resume_releases_terminal_not_called_scope(tmp_path, bootstrap_case):
+    case = bootstrap_case
+    runtime = await _world(case, tmp_path, segmented=True)
+    def slow(name, request, key, receipt):
+        if name == "save_baseline_read_intent" and receipt.kind is DbOutcomeKind.COMPLETED:
+            case.clock.wall += 6_000_000
+        return receipt
+    case.after_save = slow
+    await _prepare(case, runtime)
+    assert _call(case)[2:] == (4, None, None)
+    assert case.owned.connection.execute("SELECT status FROM actions").fetchone() == (5,)
+    await case.reconnect(cold=True)
+    await case.common_round()
+    assert case.owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
+    assert case.directory.calls == []
 
 
 async def test_start_entry_rejects_not_executed_baseline_save_without_error(tmp_path, bootstrap_case):

@@ -484,6 +484,90 @@ async def test_unknown_result_preserves_original_inputs_and_has_no_return_time(o
     assert owned.connection.execute('SELECT status FROM actions WHERE id=?',(intent.action_id,)).fetchone()==(2,)
 
 
+async def test_not_called_result_replays_original_key_and_history(owned, tmp_path):
+    from camctl.capture.baseline_models import BaselineReadNotCalledSave
+    from camctl.contracts.values import ConsistencyError, new_operation_key
+    from camctl.history.snapshots import SnapshotRef, prepare_snapshot
+    from camctl.persistence.executor import DbExecutor
+    from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    intent = await _intent(owned, tmp_path)
+    capture = CaptureRepository()
+    first = capture.save_baseline_read_intent(intent, intent.call_key, owned).value
+    history = HistoryRepository(tmp_path / 'state.db')
+    identity = ('baseline_read_calls', first.call_id)
+    before = history.restore_entity('action', intent.action_id, first.boundary)[identity]
+    executor = DbExecutor(lambda: open_existing(tmp_path / 'state.db', DbOpenMode.EXISTING_RW, DbConfig()),
+                          capacity=4, enqueue_timeout_seconds=9)
+    try:
+        store = SqliteSnapshotStore(tmp_path / 'state.db', executor)
+        image = (await store.load_entity_images((SnapshotRef(1, intent.action_id),)))[0]
+        await store.save_snapshots((prepare_snapshot(image),))
+    finally:
+        await executor.close()
+    request = BaselineReadNotCalledSave(first.call_id, _SCHEDULED + 5)
+    result = capture.save_baseline_read_not_called(request, intent.result_save_key, owned)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    view = result.value
+    assert view.state.name == 'NOT_CALLED' and view.request == intent
+    assert (view.returned_at, view.error, view.next_cursor, view.chunk_event_id) == (None, None, None, None)
+    assert capture.read_baseline_call_result(first.call_id, owned) == view
+    assert capture.verify_baseline_read_write(request, intent.result_save_key, owned) == view
+    assert capture.save_baseline_read_not_called(request, intent.result_save_key, owned).value == view
+    assert capture.save_baseline_read_not_called(replace(request, occurred_at=_SCHEDULED + 6),
+        intent.result_save_key, owned).kind is DbOutcomeKind.ROLLED_BACK
+    assert capture.save_baseline_read_not_called(request, new_operation_key(), owned).kind is DbOutcomeKind.ROLLED_BACK
+    assert history.restore_entity('action', intent.action_id, first.boundary)[identity] == before
+    restored = history.restore_entity('action', intent.action_id, view.boundary)[identity]
+    assert restored['state'] == 4 and restored['returned_at'] is None
+    fresh = open_existing(tmp_path / 'state.db', DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        assert capture.verify_baseline_read_write(request, intent.result_save_key, fresh) == view
+        assert capture.read_baseline_call_result(first.call_id, fresh) == view
+        with pytest.raises(ConsistencyError):
+            capture.verify_baseline_read_write(replace(request, occurred_at=_SCHEDULED + 6),
+                                               intent.result_save_key, fresh)
+    finally:
+        fresh.connection.close()
+
+
+async def test_not_called_requires_format_v10_without_changing_v9(owned, tmp_path):
+    from camctl.capture.baseline_models import BaselineReadNotCalledSave
+    from camctl.persistence.runtime import DatabaseUnsupportedFormatError
+    intent = await _intent(owned, tmp_path)
+    capture = CaptureRepository()
+    first = capture.save_baseline_read_intent(intent, intent.call_key, owned).value
+    # 存储格式专项：把已建立意图的库标记为旧格式，核对入口拒绝及库中事实不变。
+    owned.connection.execute('UPDATE database_metadata SET format_version=9 WHERE id=1')
+    old = replace(owned, metadata=replace(owned.metadata, format_version=9))
+    request = BaselineReadNotCalledSave(first.call_id, _SCHEDULED + 5)
+    with pytest.raises(DatabaseUnsupportedFormatError):
+        capture.save_baseline_read_not_called(request, intent.result_save_key, old)
+    assert capture.read_baseline_call_result(first.call_id, old) is None
+    assert capture.read_baseline_call(first.call_id, first.boundary, old) == first
+    assert owned.connection.execute('SELECT format_version FROM database_metadata').fetchone() == (9,)
+
+
+@pytest.mark.parametrize('previous', ['returned', 'unconfirmed'])
+async def test_not_called_cannot_replace_existing_result(owned, tmp_path, previous):
+    from camctl.capture.baseline_models import BaselineReadNotCalledSave, BaselineReadReturn, BaselineReadUnconfirmedSave
+    from camctl.contracts.pages import Page
+    from camctl.devices.directory import DirectoryRead
+    intent = await _intent(owned, tmp_path)
+    capture = CaptureRepository()
+    first = capture.save_baseline_read_intent(intent, intent.call_key, owned).value
+    if previous == 'returned':
+        request = BaselineReadReturn(first.call_id, _SCHEDULED + 1, None, DirectoryRead(None, None, Page((), None)))
+        saved = capture.save_baseline_read_return(request, intent.result_save_key, owned)
+    else:
+        request = BaselineReadUnconfirmedSave(first.call_id, _SCHEDULED + 1)
+        saved = capture.save_baseline_read_unconfirmed(request, intent.result_save_key, owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    replacement = BaselineReadNotCalledSave(first.call_id, _SCHEDULED + 2)
+    assert capture.save_baseline_read_not_called(replacement, intent.result_save_key, owned).kind is DbOutcomeKind.ROLLED_BACK
+    assert capture.read_baseline_call_result(first.call_id, owned) == saved.value
+
+
 async def test_unknown_cannot_replace_an_actual_return(owned,tmp_path):
     from camctl.capture import baseline_models as models
     from camctl.contracts.pages import Page
