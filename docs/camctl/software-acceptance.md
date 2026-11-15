@@ -1504,21 +1504,21 @@
 
 #### 验收 P-03
 - 原文：[验收 P-03](database/consistency-verification.md#报告对象分页的具体查询验证)（真实首批与后续游标查询的覆盖索引）。
-- 结论：已覆盖
+- 结论：部分覆盖
 - 归属：P6 索引成本与 H7 规模测量（persistence 计划、history 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
 - 测试：apps/camctl/tests/integration/persistence/test_cache_queries.py、apps/camctl/tests/integration/history/test_complete_history.py
 - 证据：persistence 计划 P6 收口验证记录（EXPLAIN QUERY PLAN 断言五张体量表无 SCAN）；ANALYZE 后的代表性样本上首批与续读经 `report_changes_by_entity` 覆盖索引检索、无临时排序（history 计划 H7 验证记录，Windows 开发机）。
-- 未核验前提：无
+- 未核验前提：实际公开报告选择已有首批／续页SQL与部分执行工作量见证；三种统计准备状态下的真实预查询和续页矩阵尚未齐全，手写SQL计划不能替代。当前范围见[重构工作记录C68](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
 
 #### 验收 P-04
 - 原文：[验收 P-04](database/consistency-verification.md#报告对象分页的具体查询验证)（数据形态组合下的扫描增长）。
-- 结论：已覆盖
+- 结论：部分覆盖
 - 归属：H7 规模测量（history 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
 - 测试：apps/camctl/tests/integration/history/test_complete_history.py
 - 证据：均匀（对象与目录行等量）、高重复（少数对象大量行）与稀疏（窗口外）三种形态混合样本上分页读完整、升序无重复，页大小 100 与 7 取得相同集合，高重复对象只贡献一次身份，计划不退化为全表扫描（history 计划 H7 验证记录，Windows 开发机）。
-- 未核验前提：无
+- 未核验前提：已有混合分布分页及固定4200动作样本的稀疏窗口检查；固定入选关联而扩大目录、固定大范围而缩小页面的实际工作量对照仍不完整。
 
 #### 验收 P-05
 - 原文：[验收 P-05](database/consistency-verification.md#报告对象分页的具体查询验证)（分页期间提交新事件的冻结范围不变）。
@@ -1531,12 +1531,12 @@
 
 #### 验收 P-06
 - 原文：[验收 P-06](database/consistency-verification.md#报告对象分页的具体查询验证)（候选峰值与完整选择工作量）。
-- 结论：已覆盖
+- 结论：部分覆盖
 - 归属：P5 批分离与 H7 规模测量（persistence 计划、history 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
 - 测试：apps/camctl/tests/integration/persistence/test_repositories.py、apps/camctl/tests/integration/history/test_complete_history.py
 - 证据：批分离与不可变批次已覆盖（persistence 计划 P5 收口验证记录）；代表性样本上候选扫描每批不超过固定批量、分页取得的候选集合与独立全量选择一致、半数晚于边界的候选被窗口过滤（history 计划 H7 验证记录，Windows 开发机）。
-- 未核验前提：无
+- 未核验前提：已有批次上界、分页完整性和部分公开入口观察；候选峰值、完整选择工作量及不同游标／生产筛选入口的矩阵仍不完整，不能据基础查询或局部批分离通过认定全部覆盖。
 
 ## 九、跨模块契约场景
 

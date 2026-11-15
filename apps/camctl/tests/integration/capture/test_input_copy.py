@@ -270,12 +270,13 @@ async def test_undecided_check_waits(pipeline) -> None:
 
 
 @pytest.mark.asyncio
-async def test_future_schedule_waits(pipeline) -> None:
-    """输入时刻早于计划时刻时，资格入口仍须等待。"""
+async def test_wall_clock_before_recording_schedule_defers_input_copy(pipeline) -> None:
+    """原片已写完后墙钟回拨到原录像排期之前，内部复制仍须等待。"""
     owned, roots, sessions, copies, context = pipeline
     step = await obtain_recording_input(context(occurred_at=_NOW - 999_990))
     assert step.phase is InputPhase.WAITING
     assert step.reason == "not_due"
+    assert sessions.opens == []
     assert _input_row(owned) is None
 
 
