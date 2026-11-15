@@ -35,16 +35,16 @@ from test_osmo_builtin_timelapse_roundtrip import (
 osmo_package = osmo_roundtrip.osmo_package
 
 
-def _report_or_error(deployment, statuses):
-    report = _report_with_statuses(deployment.ready, statuses)
-    if report is None:
-        log = (deployment.root / "module.log").read_text(encoding="utf-8")
-        assert "result=error" not in log, log[-6000:]
-    return report
+def _watch_request(demo, request, statuses):
+    request_id = int(json.loads(request.read_text(encoding="utf-8"))["request_id"])
+    return demo.watch_failures(request_id=request_id, expected_statuses=statuses)
 
 
-def _resume_marker(demo, deployment, host_demo, camctl, environment, marker, request):
-    wait_for(marker.is_file, 150, "安装版提交同步点尚未到达")
+def _resume_marker(
+    demo, deployment, host_demo, camctl, environment, marker, request,
+    failure, expected_statuses,
+):
+    wait_for(marker.is_file, 150, "安装版提交同步点尚未到达", failure=failure)
     observed = json.loads(marker.read_text(encoding="utf-8"))
     assert observed["key"] and observed["pid"] > 0
     demo.stop()
@@ -61,6 +61,7 @@ def _resume_marker(demo, deployment, host_demo, camctl, environment, marker, req
         ] == observed[key]
     demo = HostDemo(deployment, host_demo, launcher=str(camctl))
     try:
+        failure = _watch_request(demo, request, expected_statuses)
         demo.start(env=environment)
         demo.submit(request)
     except BaseException as error:
@@ -69,7 +70,7 @@ def _resume_marker(demo, deployment, host_demo, camctl, environment, marker, req
         except BaseException as cleanup_error:
             error.add_note(f"关闭尚未交还调用者的分段恢复主程序时出错：{cleanup_error!r}")
         raise
-    return demo, observed
+    return demo, observed, failure
 
 
 @pytest.mark.skipif(os.name != "posix", reason="安装版 C host 链在 Linux 验证")
@@ -199,8 +200,9 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             _capture_body(action_type, params, scheduled_at=format_utc(initial["utc_us"]))
         )
         demo = HostDemo(deployment, host_demo, launcher=str(camctl))
-        failure = demo.watch_failures()
         monkeypatch.chdir(package.root)
+        capture_status = {"capture": status.upper()}
+        failure = _watch_request(demo, plan, capture_status)
         demo.start(env=environment)
         demo.submit(plan)
         wait_for(
@@ -216,6 +218,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
         if scenario == "overrun":
             demo.stop()
             demo = HostDemo(deployment, host_demo, launcher=str(camctl))
+            failure = _watch_request(demo, plan, capture_status)
             demo.start(env=environment)
             demo.submit(plan)
         release = 330 if native else 24 if scenario == "short-set" else 22 if scenario == "overrun" else 12
@@ -226,13 +229,15 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
         )
         captured = None
         if stage in ("scan", "finish", "report"):
-            demo, captured = _resume_marker(
-                demo, deployment, host_demo, camctl, environment, marker, plan
+            demo, captured, failure = _resume_marker(
+                demo, deployment, host_demo, camctl, environment, marker, plan,
+                failure, capture_status,
             )
         report = wait_for(
-            lambda: _report_or_error(deployment, {"capture": status}),
+            lambda: _report_with_statuses(deployment.ready, {"capture": status}),
             150,
             "分段拍摄未产生预期报告",
+            failure=failure,
         )
         source = _action(report, "capture")
         aid = int(source["action_instance_id"])
@@ -310,14 +315,18 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     ],
                 }
             )
+            expected_status = "succeeded" if expected else "failed"
+            expected_statuses = {name: expected_status.upper()}
+            failure = _watch_request(demo, request, expected_statuses)
             copy_gate = Path(environment["CAMCTL_OSMO_TEST_READ_GATE"])
             if scenario == "native-tail" and name == "original":
                 copy_gate.unlink()
                 read_log_start = len(_records(adb_log))
             demo.submit(request)
             if stage == "selection" and name == "original":
-                demo, observed = _resume_marker(
-                    demo, deployment, host_demo, camctl, environment, marker, request
+                demo, observed, failure = _resume_marker(
+                    demo, deployment, host_demo, camctl, environment, marker, request,
+                    failure, expected_statuses,
                 )
                 assert observed["items"]
             if scenario == "native-tail" and name == "original":
@@ -329,6 +338,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     ), None),
                     90,
                     "取回尚未到达实际数据块同步点",
+                    failure=failure,
                 )
                 saved_copy = wait_for(
                     lambda: query_state(
@@ -337,6 +347,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     ),
                     90,
                     "读取尚未提交第一块进度",
+                    failure=failure,
                 )
                 assert len(saved_copy) == 1
                 request_id = int(json.loads(request.read_text(encoding="utf-8"))["request_id"])
@@ -365,10 +376,8 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                 # 恢复的真实读取先暂停，再核对原身份和可靠偏移。
                 environment["CAMCTL_OSMO_TEST_READ_GATE_AFTER_BYTES"] = "0"
                 demo = HostDemo(deployment, host_demo, launcher=str(camctl))
+                failure = _watch_request(demo, request, expected_statuses)
                 demo.start(env=environment)
-                resumed_failure = demo.watch_failures(
-                    request_id=request_id, expected_statuses={name: "SUCCEEDED"}
-                )
                 demo.submit(request)
                 resumed_read = wait_for(
                     lambda: next((
@@ -378,7 +387,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     ), None),
                     120,
                     "原请求恢复尚未开始读取原片",
-                    failure=resumed_failure,
+                    failure=failure,
                 )
                 resumed_gate = wait_for(
                     lambda: next((
@@ -388,7 +397,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     ), None),
                     30,
                     "恢复读取尚未在转发新字节前暂停",
-                    failure=resumed_failure,
+                    failure=failure,
                 )
                 assert_copy_resumed_before_data(
                     interrupted_read=interrupted_read,
@@ -406,11 +415,11 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     ),
                 )
                 copy_gate.touch()
-            expected_status = "succeeded" if expected else "failed"
             latest = wait_for(
-                lambda: _report_or_error(deployment, {name: expected_status}),
+                lambda: _report_with_statuses(deployment.ready, {name: expected_status}),
                 120,
                 "分段取回尚未完成",
+                failure=failure,
             )
             obtained = _action(latest, name)
             deliveries = obtained.get("deliveries", [])
@@ -426,8 +435,8 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     (saved_copy[0][1],),
                 ) == [saved_copy[0][:2]]
             if not expected:
-                failure = obtained["result"]["failures"][0]["error"]
-                assert failure["code"] == (
+                action_error = obtained["result"]["failures"][0]["error"]
+                assert action_error["code"] == (
                     "default_segment_scope_empty"
                     if scenario == "empty"
                     else "default_segment_scope_unconfirmed"
@@ -449,6 +458,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                 }
             )
             assert receipt["last_report_id"] == latest["report_id"]
+            failure = _watch_request(demo, ack, {"ack": "SUCCEEDED"})
             demo.submit(ack)
             wait_for(
                 lambda: (
@@ -460,6 +470,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                 ),
                 90,
                 "报告覆盖尚未吸收 ACK",
+                failure=failure,
             )
             for delivery in reversed(deliveries):
                 row = query_state(
@@ -508,6 +519,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             deployment.state_db, "SELECT id,output_id FROM deliveries ORDER BY id"
         )
         log_start = len(demo.module_log())
+        failure = _watch_request(demo, request, expected_statuses)
         demo.submit(request)
         submitted = wait_for(
             lambda: re.search(
@@ -516,6 +528,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             ),
             30,
             "原请求重送尚未由 host 接收",
+            failure=failure,
         )
         wait_for(
             lambda: re.search(
@@ -524,6 +537,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             ),
             90,
             "原请求重送尚未成功完成",
+            failure=failure,
         )
         assert (
             query_state(
