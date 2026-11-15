@@ -461,7 +461,7 @@ class TestGenerateReportFile:
             assert not consumer.done()
             assert consumer.cancel()
             with pytest.raises(asyncio.CancelledError):
-                await consumer
+                await asyncio.wait_for(consumer, timeout=10)
             assert consumer.cancelled()
             with pytest.raises(ConsistencyError):
                 selection.read_page('plan', cursor=page.next_cursor)
@@ -469,7 +469,7 @@ class TestGenerateReportFile:
             if not consumer.done():
                 consumer.cancel()
                 try:
-                    await consumer
+                    await asyncio.wait_for(consumer, timeout=10)
                 except asyncio.CancelledError:
                     pass
             elif not consumer.cancelled():
