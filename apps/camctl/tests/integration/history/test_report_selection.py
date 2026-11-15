@@ -330,6 +330,78 @@ async def test_late_corruption_is_visible_before_first_page(finished_photo, tabl
 
 
 @pytest.mark.asyncio
+async def test_repeated_report_associations_cross_capacity(finished_photo, monkeypatch):
+    """正式受理的对象上准备目录边界样本；这里只验证选择，不回放合成历史。"""
+    import uuid
+
+    owned, path = finished_photo
+    _submit_many(owned, 2, 1)
+    connection = owned.connection
+    from camctl.history.queries import report_target_types
+    action_type = report_target_types()['action']
+    exemplar = connection.execute(
+        'SELECT e.event_type,e.event_version,e.occurred_at,e.clock_status,e.body_json '
+        'FROM history_events e JOIN report_entity_changes c ON c.event_id=e.id '
+        'WHERE c.entity_type=? AND c.entity_id=1 LIMIT 1', (action_type,)).fetchone()
+    assert exemplar is not None
+    start_event = connection.execute('SELECT MAX(id) FROM history_events').fetchone()[0]
+    start_tx = connection.execute('SELECT MAX(id) FROM history_transactions').fetchone()[0]
+    start_wm = _to_wm(connection)
+    count = 4098
+    connection.execute('BEGIN')
+    try:
+        connection.execute('INSERT INTO history_transactions VALUES(?,?,?,?)',
+            (start_tx + 1, uuid.uuid4().hex, start_event + 1, start_event + count))
+        connection.executemany(
+            'INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) '
+            'VALUES(?,?,?,?,?,?,?,?)',
+            ((start_event + i, start_tx + 1, *exemplar[:4], start_wm + i, exemplar[4])
+             for i in range(1, count + 1)))
+        connection.executemany(
+            'INSERT INTO report_entity_changes(entity_type,entity_id,event_id,change_seq) VALUES(?,?,?,?)',
+            ((action_type, 1 if i < count else 2, start_event + i, start_wm + i)
+             for i in range(1, count + 1)))
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
+    boundary = _boundary(connection)
+    repository = HistoryRepository(path / 'state.db')
+    for associations in (4095, 4096, 4097, 4098):
+        request = ReportScopeRequest(boundary, start_wm, start_wm + associations, 1)
+        with monkeypatch.context() as patch:
+            probe = _StatementProbe(repository, patch)
+            with repository.open_report_selection(request) as selection:
+                assert _read(selection, 'action', 1) == ([1, 2] if associations == count else [1])
+                if associations == 4096:
+                    # 已缓存一个动作后，计划与动作共享剩余候选容量。
+                    assert _read(selection, 'plan') == [1]
+            action_records = [r for r in probe.statements if r['kind'] in ('candidate', 'page')]
+            assert len(action_records[0]['rows']) == min(associations, 4097)
+            assert action_records[0]['kind'] == 'candidate'
+            assert 'DISTINCT' not in action_records[0]['sql']
+            assert action_records[0]['parameters'][-1] == 4097
+            if associations <= 4096:
+                assert [r['kind'] for r in action_records[:1]] == ['candidate']
+                if associations == 4095:
+                    assert len(action_records) == 1
+                else:
+                    assert [r['kind'] for r in action_records] == ['candidate', 'candidate', 'page']
+                    assert len(action_records[1]['rows']) == 4096
+            else:
+                assert action_records[1]['kind'] == 'page'
+
+    # 第一批 4097 条均指向动作 1；末条损坏不能被分页路径吞掉。
+    connection.execute('PRAGMA foreign_keys=OFF')
+    connection.execute('DELETE FROM actions WHERE id=2')
+    request = ReportScopeRequest(boundary, start_wm, start_wm + count, 1)
+    with repository.open_report_selection(request) as selection:
+        with pytest.raises(ConsistencyError):
+            selection.read_page('action', parent_id=1)
+
+
+@pytest.mark.asyncio
 async def test_delivery_window_does_not_validate_unselected_source_reference_chain(two_item_world):
     world = two_item_world
     _grant_item(world, world.item_ids[0])
@@ -444,7 +516,7 @@ class _QueryProbe:
 class _StatementProbe:
     """记录真实语句和取行；VM 指令估计为进度回调次数乘以粒度。"""
 
-    def __init__(self, repository, monkeypatch):
+    def __init__(self, repository, monkeypatch, *, capture_integrity=False):
         import sqlite3
 
         original_connect = sqlite3.connect
@@ -470,6 +542,17 @@ class _StatementProbe:
         maintenance_pragmas = {'incremental_vacuum', 'wal_checkpoint'}
 
         class ObservedCursor(sqlite3.Cursor):
+            def fetchone(self):
+                record = getattr(self, 'record', None)
+                try:
+                    row = super().fetchone()
+                    if record is not None:
+                        record['rows'] = [] if row is None else [tuple(row)]
+                    return row
+                finally:
+                    if record is not None:
+                        self.connection.set_progress_handler(None, 0)
+
             def fetchall(self):
                 record = getattr(self, 'record', None)
                 try:
@@ -536,8 +619,10 @@ class _StatementProbe:
                     # SQLite 可复用本连接已准备的语句而不再调用 authorizer。
                     reads = set(self._reads_by_sql.get(sql, ()))
                 columns = cursor.description or ()
-                if any(table == 'report_entity_changes' for table, _ in reads) and len(columns) in (1, 2):
-                    record = {'kind': 'candidate' if len(columns) == 2 else 'page',
+                if (any(table == 'report_entity_changes' for table, _ in reads)
+                        and (len(columns) in (1, 2) or capture_integrity and len(columns) == 3)):
+                    kind = {1: 'page', 2: 'candidate', 3: 'integrity'}[len(columns)]
+                    record = {'kind': kind,
                               'sql': sql, 'parameters': tuple(parameters),
                               'vm_steps_estimate': steps[0], 'reads': reads}
                     cursor.record = record
@@ -770,6 +855,10 @@ async def test_small_window_uses_index_after_physical_report_directory_growth(fi
         assert large_facts[1] - small_facts[1] > 4200
         assert small_facts[2] == large_facts[2]
         assert small_facts[2]
+        sources = report_target_types()
+        action_associations = sum(row[0] in {sources['action'], sources['output'], sources['delivery']}
+                                  for row in small_facts[2])
+        assert action_associations > 1
         large_boundary = _boundary(large_connection)
         assert max(row[2] for row in small_facts[2]) <= small_boundary.last_event_id
         assert max(row[2] for row in large_facts[2]) <= large_boundary.last_event_id
@@ -805,7 +894,7 @@ async def test_small_window_uses_index_after_physical_report_directory_growth(fi
             assert action_queries == after_repeat == 1, name
             action = records[0]
             assert action['kind'] == 'candidate', name
-            assert action['rows'] == [(1, 1)], name
+            assert action['rows'] == [(1, 1)] * action_associations, name
             plan = _actual_plans(state, [action])[0]
             print('REPORT_DIRECTORY_GROWTH', {
                 'database': name, 'window': (from_wm, to_wm),
@@ -835,14 +924,15 @@ def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_
     request = ReportScopeRequest(_boundary(source_connection), 0, _to_wm(source_connection), 100)
     repository = HistoryRepository(state)
     with monkeypatch.context() as patch:
-        probe = _StatementProbe(repository, patch)
+        probe = _StatementProbe(repository, patch, capture_integrity=True)
         started = time.perf_counter()
         with repository.open_report_selection(request) as selection:
             first = selection.read_page('action', parent_id=2)
             second = selection.read_page('action', parent_id=2, cursor=first.next_cursor)
         reading = time.perf_counter() - started
     started = time.perf_counter()
-    records = probe.statements
+    records = [record for record in probe.statements if record['kind'] != 'integrity']
+    integrity = [record for record in probe.statements if record['kind'] == 'integrity']
     assert first.items == tuple(range(4, 104))
     assert first.next_cursor is not None
     assert second.items == tuple(range(104, 204))
@@ -853,18 +943,29 @@ def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_
     assert first.next_cursor.after_id == 103
     assert second.next_cursor.after_id == 203
     plans = _actual_plans(state, records)
+    integrity_plans = _actual_plans(state, integrity)
     print('REPORT_STATISTICS', {'statistics': statistics, 'preparation_s': preparation,
           'reading_s': reading, 'verification_s': time.perf_counter() - started,
           'sqlite': __import__('sqlite3').sqlite_version,
           'statements': [(record['kind'], record['sql'], record['parameters'], len(record['rows']),
                           record['vm_steps_estimate'], plan) for record, plan in zip(records, plans)],
+          'integrity': [(record['sql'], record['parameters'], record['rows'],
+                         record['vm_steps_estimate'], plan)
+                        for record, plan in zip(integrity, integrity_plans)],
           'vm_granularity': 100}, flush=True)
     problems = []
+    assert len(integrity) == 3
+    assert all(record['rows'] == [] for record in integrity)
+    assert all(_report_directory_uses_range_index(record['sql'], plan)
+               and all('COVERING INDEX' in row for row in plan if 'report_changes_by_sequence' in row)
+               for record, plan in zip(integrity, integrity_plans))
     candidate_access = [row for row in plans[0] if 'report_changes_by_sequence' in row]
     if not candidate_access or not all('SEARCH' in row and 'COVERING INDEX' in row for row in candidate_access):
         problems.append(('candidate_not_covering', plans[0]))
     if not _report_directory_uses_range_index(records[0]['sql'], plans[0]):
         problems.append(('candidate_not_range_search', plans[0]))
+    if any('TEMP B-TREE' in row for row in plans[0]):
+        problems.append(('candidate_temporary_sort', plans[0]))
     for page, plan in enumerate(plans[1:], 1):
         access = [row for row in plan if 'report_changes_by_entity' in row]
         if not access or not all('SEARCH' in row and 'COVERING INDEX' in row for row in access):

@@ -111,8 +111,7 @@ class ReportEntitySelection:
     def _window_sql():
         return 'c.entity_type=? AND c.change_seq>? AND c.change_seq<=? AND c.event_id<=?'
 
-    def _candidates_sql(self, target):
-        branches, parameters = [], []
+    def _source_joins(self, target):
         for path in self._paths(target):
             source = path[0]
             target_alias = f'e{len(path)-1}'
@@ -124,17 +123,30 @@ class ReportEntitySelection:
                 child = path[index - 1]
                 joins.append(f'LEFT JOIN {parent.table} e{index} ON e{index}.{parent.identity}=e{index-1}.{child.foreign_key}')
             missing = ' OR '.join(f'e{index}.{spec.identity} IS NULL' for index, spec in enumerate(path))
-            # NULL 排在合法整数 ID 前；任意晚 ID 损坏也不能被 LIMIT 隐藏。
+            yield source, target_alias, ' '.join(joins), missing
+
+    def _candidates_sql(self, target):
+        branches, parameters = [], []
+        for source, target_alias, joins, missing in self._source_joins(target):
             identity = f'CASE WHEN {missing} THEN NULL ELSE {target_alias}.{target.identity} END'
             parent_id = f'{target_alias}.{target.foreign_key}' if target.parent else 'NULL'
             branches.append(f'SELECT {identity}, {parent_id}'
                             ' FROM report_entity_changes c INDEXED BY report_changes_by_sequence '
-                            + ' '.join(joins) + ' WHERE ' + self._window_sql())
+                            + joins + ' WHERE ' + self._window_sql())
             parameters.extend(self._window(source))
-        # SQL 去重后只移交有限小记录；归属列在对象创建后不变。
-        if len(branches) == 1:
-            branches[0] = branches[0].replace('SELECT ', 'SELECT DISTINCT ', 1)
-        return ' UNION '.join(branches) + ' ORDER BY 1 LIMIT ?', (*parameters, self._remaining + 1)
+        # 先限制原始关联，不能为去重而扫描完整窗口。
+        return ' UNION ALL '.join(branches) + ' LIMIT ?', (*parameters, self._remaining + 1)
+
+    def _validate_large_window(self, connection, target):
+        # 从目录检查缺失关系；只返回首条损坏证据，不将合法关联载入内存。
+        # 每种目标只在切换到分页时检查一次，不随父对象或页数重扫。
+        for source, _, joins, missing in self._source_joins(target):
+            sql = ('SELECT c.entity_id, c.event_id, c.change_seq '
+                   'FROM report_entity_changes c INDEXED BY report_changes_by_sequence '
+                   + joins + ' WHERE ' + self._window_sql() + ' AND (' + missing + ') LIMIT 1')
+            with closing(connection.execute(sql, self._window(source))) as reader:
+                if reader.fetchone() is not None:
+                    raise ConsistencyError('报告目录缺少必要主对象或祖先')
 
     def _page_sql(self, target, parent_id, after):
         branches, parameters = [], []
@@ -189,12 +201,15 @@ class ReportEntitySelection:
                     if any(row[0] is None for row in candidates):
                         raise ConsistencyError('报告目录缺少必要主对象或祖先')
                     if len(candidates) <= self._remaining:
-                        self._cache[entity] = tuple(candidates)
-                        self._remaining -= len(candidates)
+                        unique = tuple(sorted({(row[0], row[1]) for row in candidates}))
+                        self._cache[entity] = unique
+                        self._remaining -= len(unique)
+                        del candidates
                     else:
+                        # 先释放探测记录，再检查目录并交付第一页。
+                        del candidates
+                        self._validate_large_window(connection, target)
                         self._cache[entity] = None
-                    # 超预算分支在读页/交付第一项前释放整批探测记录。
-                    del candidates
                 cached = self._cache[entity]
                 if cached is None:
                     sql, parameters = self._page_sql(target, parent_id, after)
