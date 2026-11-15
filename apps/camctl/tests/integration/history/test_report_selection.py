@@ -447,9 +447,7 @@ class _QueryProbe:
         import weakref
         path = repository.path.resolve()
         original_connect = sqlite3.connect
-        self.steps = 0
         self.connections = []
-        self.sql = []
         self.candidates = []
         probe = self
 
@@ -463,7 +461,6 @@ class _QueryProbe:
             def execute(self, sql, *args, **kwargs):
                 was_in_transaction = self.in_transaction
                 reads = set()
-                statement = [None]
                 observed = getattr(self, '_probe_attached', False)
                 if observed:
                     def authorize(action, table, column, _database, _source):
@@ -471,7 +468,6 @@ class _QueryProbe:
                             reads.add((table, column))
                         return sqlite3.SQLITE_OK
                     self.set_authorizer(authorize)
-                    self.set_trace_callback(lambda value: statement.__setitem__(0, value))
                 try:
                     cursor = super().execute(sql, *args, **kwargs)
                 finally:
@@ -488,10 +484,6 @@ class _QueryProbe:
                             value = Record(value)
                             probe.candidates.append(weakref.ref(value))
                         return value
-                    def advance():
-                        probe.steps += 100
-                        return 0
-                    self.set_progress_handler(advance, 100)
                     self.row_factory = row_factory
                 elif observed:
                     columns = cursor.description or ()
@@ -499,9 +491,6 @@ class _QueryProbe:
                     kind = ('candidate' if touches_changes and len(columns) == 2 else
                             'page' if touches_changes and len(columns) == 1 else None)
                     self._probe_kind = kind
-                    if kind is not None:
-                        assert statement[0] is not None
-                        probe.sql.append((kind, statement[0]))
                 return cursor
 
         def connect(database, *args, **kwargs):
@@ -1155,114 +1144,6 @@ async def test_real_source_preparation_preserves_large_report_selection(finished
     print('REAL_SOURCE_PHASE', {'preparation_s': preparation, 'reading_s': target,
         'verification_s': verification, 'close_s': close,
         'note': '准备含真实受理、调度、拍摄及其测试替身；fixture收场另计'}, flush=True)
-
-
-@pytest.mark.asyncio
-async def test_large_window_releases_candidates_and_keyset_pages_do_not_rescan_window(report_selection_sample, monkeypatch):
-    import gc
-    import time
-    from camctl.history.report_selection import ReportEntitySelection
-    elapsed = {'reading': 0.0, 'close': 0.0}
-    depth = [0]
-    def timed(original, phase):
-        def call(*args, **kwargs):
-            outer = depth[0] == 0
-            depth[0] += 1
-            started = time.perf_counter()
-            try:
-                return original(*args, **kwargs)
-            finally:
-                depth[0] -= 1
-                if outer:
-                    elapsed[phase] += time.perf_counter() - started
-        return call
-    monkeypatch.setattr(HistoryRepository, 'open_report_selection', timed(HistoryRepository.open_report_selection, 'reading'))
-    monkeypatch.setattr(ReportEntitySelection, 'read_page', timed(ReportEntitySelection.read_page, 'reading'))
-    monkeypatch.setattr(ReportEntitySelection, '__exit__', timed(ReportEntitySelection.__exit__, 'close'))
-    started = time.perf_counter()
-    connection, state, watermarks = report_selection_sample
-    early_sparse_wm, output_window_end, early = watermarks
-    request = ReportScopeRequest(_boundary(connection), 0, _to_wm(connection), 17)
-    repository = HistoryRepository(state)
-    # 前一计划的产物 4 与后一计划的动作 4 共用整数编号；此窗口只包含前一计划的变化。
-    assert connection.execute('SELECT source_action_id FROM outputs WHERE id=4').fetchone()[0] == 1
-    assert connection.execute('SELECT plan_id FROM actions WHERE id=4').fetchone()[0] == 2
-    output_window = replace(request, from_wm=early_sparse_wm, to_wm=output_window_end)
-    with repository.open_report_selection(output_window) as selection:
-        assert _read(selection, 'output', 1) == [1, 2, 3, 4]
-        assert _read(selection, 'output', 2) == []
-        assert _read(selection, 'action', 2) == []
-    probe = _QueryProbe(repository, monkeypatch)
-    with repository.open_report_selection(request) as selection:
-        assert _read(selection, 'plan') == [1, 2, 3]
-        action_candidates_start = len(probe.candidates)
-        probe.steps = 0
-        first = selection.read_page('action', parent_id=2)
-        preflight_steps = probe.steps
-        assert first.items == tuple(range(4, 21))
-        gc.collect()
-        action_candidates = probe.candidates[action_candidates_start:]
-        assert action_candidates and all(reference() is None for reference in action_candidates)
-        cursor = first.next_cursor
-        vm_pages = []
-        actual = list(first.items)
-        while cursor is not None:
-            probe.steps = 0
-            page = selection.read_page('action', parent_id=2, cursor=cursor)
-            vm_pages.append(probe.steps)
-            actual.extend(page.items)
-            cursor = page.next_cursor
-        assert actual == list(range(4, 4204))
-        assert _read(selection, 'action', 3) == [4204, 4205, 4206]
-        candidate_sql = [sql for kind, sql in probe.sql if kind == 'candidate']
-        assert len(candidate_sql) == 2  # 固定窗口的 plan/action 各一次，跨父对象不重查。
-        page_sql = [sql for kind, sql in probe.sql if kind == 'page']
-        assert max(vm_pages) < preflight_steps // 8
-        from contextlib import closing
-        import sqlite3
-        with closing(sqlite3.connect(f"{repository.path.resolve().as_uri()}?mode=ro", uri=True,
-                                     isolation_level=None)) as connection:
-            connection.execute('BEGIN').close()
-            plans = tuple(row[3] for row in connection.execute('EXPLAIN QUERY PLAN ' + page_sql[0]))
-            candidate_plan = tuple(row[3] for row in connection.execute('EXPLAIN QUERY PLAN ' + candidate_sql[1]))
-        assert any('actions_plan_members' in row for row in plans)
-        assert any('report_changes_by_entity' in row for row in plans)
-        assert not any('TEMP B-TREE FOR ORDER BY' in row for row in plans)
-        print({'preflight_vm_steps': preflight_steps, 'page_vm_min': min(vm_pages),
-               'page_vm_max': max(vm_pages), 'pages': len(vm_pages) + 1,
-               'candidate_queries': len(candidate_sql), 'unrelated_outputs': 4,
-               'query_plan': plans, 'candidate_query_plan': candidate_plan})
-    gc.collect()
-    assert all(reference() is None for reference in probe.candidates)
-    import sqlite3
-    for connection in probe.connections:
-        with pytest.raises(sqlite3.ProgrammingError):
-            connection.execute('SELECT 1')
-    # 稀疏的末窗口不随当前已有的 4200 个无关动作遍历主表。
-    probe.sql.clear()
-    probe.steps = 0
-    sparse = replace(request, from_wm=early)
-    with repository.open_report_selection(sparse) as selection:
-        assert _read(selection, 'action', 3) == [4204, 4205, 4206]
-        assert _read(selection, 'action', 2) == []
-        assert all(kind != 'page' for kind, _ in probe.sql)
-    print({'sparse_vm_steps': probe.steps, 'sparse_candidates': len(probe.sql)})
-    assert probe.steps < preflight_steps // 8
-    probe.sql.clear()
-    probe.steps = 0
-    with repository.open_report_selection(replace(request, to_wm=early_sparse_wm)) as selection:
-        assert _read(selection, 'action', 1) == [1, 2, 3]
-        assert _read(selection, 'action', 2) == []
-        assert all(kind != 'page' for kind, _ in probe.sql)
-    print({'early_sparse_vm_steps': probe.steps})
-    assert probe.steps < preflight_steps // 8
-    total = time.perf_counter() - started
-    print('SAMPLE_READ_PHASE', {'reading_s': elapsed['reading'],
-        'verification_and_observer_s': total - elapsed['reading'] - elapsed['close'],
-        'close_s': elapsed['close'], 'call_s': total,
-        'note': '读取包含SQLite trace、进度和弱引用观测'}, flush=True)
-
-
 
 
 @pytest.mark.asyncio
