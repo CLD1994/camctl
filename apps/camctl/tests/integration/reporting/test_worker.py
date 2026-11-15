@@ -217,6 +217,7 @@ class TestRealWorkerProcess:
                     assert failure.kind is GenerationOutcomeKind.STATE_FAILURE
                     assert failure.failure is not None
                     assert failure.failure.error_kind is ErrorKind.STATE
+                    assert failure.failure.error_code == "ConsistencyError", (failure.detail, failure.failure)
                     assert failure.success is None
                     assert not supervisor.reusable
                     assert not processes[0].is_alive()
