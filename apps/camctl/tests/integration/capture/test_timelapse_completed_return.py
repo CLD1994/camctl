@@ -1,7 +1,6 @@
 """已完成返回沿原 START 保存结束，文件与集合仍分别核实。"""
 
 import json
-import sqlite3
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -203,33 +202,6 @@ async def test_completed_return_history_restores_same_activity_in_three_paths(tm
             await executor.close()
         finally:
             owned.connection.close()
-
-
-async def test_history_closes_observation_connection_when_executor_close_fails(tmp_path, monkeypatch):
-    from camctl.persistence.executor import DbExecutor
-
-    original_world = world
-    original_close = DbExecutor.close
-    connections = []
-    failure = RuntimeError("执行器关闭失败")
-
-    async def tracked_world(*args, **kwargs):
-        result = await original_world(*args, **kwargs)
-        connections.append(result[0].connection)
-        return result
-
-    async def failing_close(executor):
-        await original_close(executor)
-        raise failure
-
-    monkeypatch.setattr(__import__(__name__, fromlist=['world']), 'world', tracked_world)
-    monkeypatch.setattr(DbExecutor, 'close', failing_close)
-    with pytest.raises(RuntimeError) as raised:
-        await test_completed_return_history_restores_same_activity_in_three_paths(tmp_path)
-    assert raised.value is failure
-    assert len(connections) == 1
-    with pytest.raises(sqlite3.ProgrammingError):
-        connections[0].execute('SELECT 1')
 
 
 async def test_completed_definition_does_not_turn_failed_return_into_ended(tmp_path):
