@@ -11,9 +11,10 @@ from pathlib import Path
 def _migrate_v9_to_v10(state_db: Path, identity: dict) -> None:
     """在维护事务的独立副本上保留全部 V9 行并发布新结构。"""
     from camctl.persistence.capture_preparation_upgrade import _upgrade_full_copy
+    from camctl.update_engine.update_transaction import file_metadata
     from camctl.persistence.runtime import DbConfig, DbOpenMode, _FORMAT_VERSIONS, open_existing
 
-    info = state_db.stat()
+    original_file_metadata = file_metadata(state_db)
     owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         if asdict(owned.metadata) != identity:
@@ -22,8 +23,15 @@ def _migrate_v9_to_v10(state_db: Path, identity: dict) -> None:
                            upgrade_name='format', description='数据库格式', minimum='V9')
     finally:
         owned.connection.close()
-    os.chown(state_db, info.st_uid, info.st_gid)
-    os.chmod(state_db, info.st_mode & 0o7777)
+    os.chown(state_db, original_file_metadata['uid'], original_file_metadata['gid'])
+    os.chmod(state_db, original_file_metadata['mode'])
+    xattrs = original_file_metadata['xattrs']
+    for name in set(os.listxattr(state_db)) - xattrs.keys():
+        os.removexattr(state_db, name)
+    for name, value in xattrs.items():
+        os.setxattr(state_db, name, bytes.fromhex(value))
+    if file_metadata(state_db) != original_file_metadata:
+        raise ValueError('迁移副本的文件元信息发生变化')
     descriptor = os.open(state_db, os.O_RDWR | os.O_CLOEXEC)
     try:
         os.fsync(descriptor)

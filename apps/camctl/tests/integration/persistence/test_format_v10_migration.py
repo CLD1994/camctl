@@ -11,7 +11,7 @@ from camctl.deployment import migrate_copy
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.runtime import DatabaseInvalidError, DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import DatabaseInvalidError, DbConfig, DbOpenMode, StateDatabaseError, open_existing
 
 from .test_baseline_read_facts import _intent
 from ..scheduling.test_start_action import _SCHEDULED, owned
@@ -84,6 +84,7 @@ async def test_deployment_migrates_old_facts_and_keeps_source(owned, tmp_path, o
         with sqlite3.connect(destination) as target:
             connection.backup(target)
     os.chmod(destination, 0o640)
+    os.setxattr(destination, 'user.camctl-migration-test', b'preserve')
     before = _rows(source)
     config = tmp_path / 'config.toml'
     config.write_text(f'''[paths]
@@ -96,6 +97,7 @@ processing = "/srv/camctl/processing"
     result = migrate_copy(config, destination)
     assert result['format_version'] == 10
     assert destination.stat().st_mode & 0o777 == 0o640
+    assert os.getxattr(destination, 'user.camctl-migration-test') == b'preserve'
     assert _rows(source) == before
     after = _rows(destination)
     assert after.pop('acceptance_receipts') == []
@@ -157,3 +159,42 @@ def test_deployment_rejects_source_as_copy_without_changing_it(tmp_path):
     with pytest.raises(ValueError, match='独立数据库副本'):
         migrate_copy(config, source)
     assert source.read_bytes() == before
+
+
+def test_copy_publication_failure_keeps_original_and_verified_backup(tmp_path, monkeypatch):
+    from ..support.database import create_test_database
+    source, destination = tmp_path / 'state.db', tmp_path / 'copy.db'
+    create_test_database(source)
+    _legacy_v9(source)
+    with sqlite3.connect(source) as original, sqlite3.connect(destination) as copy:
+        original.backup(copy)
+    before = _rows(source)
+    config = tmp_path / 'config.toml'
+    config.write_text(f'''[paths]
+state_db = "{source}"
+log_file = "{tmp_path / 'camctl.log'}"
+staging = "/srv/camctl/staging"
+ready = "/srv/camctl/ready"
+processing = "/srv/camctl/processing"
+''')
+    actual_replace = os.replace
+
+    def fail_publication(src, dst):
+        if Path(dst) == destination:
+            raise PermissionError('controlled copy publication failure')
+        return actual_replace(src, dst)
+
+    monkeypatch.setattr(os, 'replace', fail_publication)
+    with pytest.raises(StateDatabaseError, match='升级未完成核验'):
+        migrate_copy(config, destination)
+    assert _rows(source) == before
+    assert _rows(destination) == before
+    backups = list(tmp_path.glob('copy.db.before-format-v10-*.sqlite'))
+    assert len(backups) == 1
+    assert _rows(backups[0]) == before
+    for path in (source, destination, backups[0]):
+        checked = open_existing(path, DbOpenMode.EXISTING_RO, DbConfig())
+        try:
+            assert checked.metadata.format_version == 9
+        finally:
+            checked.connection.close()
