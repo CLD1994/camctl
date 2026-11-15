@@ -82,17 +82,51 @@ class GroupSession:
              str(self.deployment.config_path), "-", str(retries)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, start_new_session=True, env=environment)
+        os.set_blocking(self.proc.stdout.fileno(), False)
+        os.set_blocking(self.proc.stderr.fileno(), False)
+        self._stdout = bytearray()
+        self._stderr = bytearray()
+        self._pipes = [self.proc.stdout, self.proc.stderr]
         assert self.reply() == "initialized"
         self.until(lambda: (root / "exit-ready").exists(), "首个 CLI 和受管工具准备退出")
         self.old = self.calls("run")[0]
         self.tool = self.roles("tool")[0]
 
+    def _read_output(self, timeout: float) -> bool:
+        stdout_closed = False
+        for pipe in select.select(self._pipes, [], [], timeout)[0]:
+            data = os.read(pipe.fileno(), 4096)
+            if not data:
+                self._pipes.remove(pipe)
+                stdout_closed |= pipe is self.proc.stdout
+            elif pipe is self.proc.stdout:
+                self._stdout.extend(data)
+            else:
+                self._stderr.extend(data)
+        return stdout_closed
+
+    def _drain_available_output(self, deadline: float) -> None:
+        while (self._pipes and time.monotonic() < deadline
+               and select.select(self._pipes, [], [], 0)[0]):
+            self._read_output(0)
+
     def reply(self) -> str:
-        assert select.select([self.proc.stdout], [], [], 10)[0], "C 驱动没有及时返回"
-        text = self.proc.stdout.readline().strip()
-        if not text and self.proc.poll() is not None:
-            raise AssertionError(self.proc.stderr.read())
-        return text
+        deadline = time.monotonic() + 10
+        while True:
+            if b"\n" in self._stdout:
+                line, _, remainder = self._stdout.partition(b"\n")
+                self._stdout = bytearray(remainder)
+                return line.decode().strip()
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, "C 驱动没有及时返回"
+            closed = self._read_output(min(remaining, .05))
+            if self.proc.poll() is not None:
+                # 只读取当前可用的诊断，不等待仍由后代持有的管道关闭。
+                self._drain_available_output(deadline)
+                if b"\n" not in self._stdout:
+                    raise AssertionError(self._stderr.decode(errors="replace"))
+            elif closed:
+                raise AssertionError("C 驱动输出结束，未返回完整的一行")
 
     def command(self, line: str) -> str:
         self.proc.stdin.write(line + "\n")
@@ -139,7 +173,9 @@ class GroupSession:
             result = predicate()
             if result:
                 return result
-            assert self.proc.poll() is None, self.proc.stderr.read()
+            if self.proc.poll() is not None:
+                self._drain_available_output(deadline)
+                raise AssertionError(self._stderr.decode(errors="replace"))
             time.sleep(.005)
         raise AssertionError(f"{message} 超时\n{self.records()}\n{self.logs()}")
 
@@ -179,29 +215,41 @@ class GroupSession:
     def close(self):
         if not hasattr(self, "proc"):
             return
-        if self.proc.poll() is not None:
-            self.proc.communicate(timeout=5)
-            return
-        # 冻结已知测试主程序后取得其具体子进程，避免清理时产生新调用。
-        os.kill(self.proc.pid, signal.SIGSTOP)
-        os.waitpid(self.proc.pid, os.WUNTRACED)
-        groups = {record["pgid"] for record in self.records()}
-        for task in Path(f"/proc/{self.proc.pid}/task").iterdir():
-            try:
-                children = (task / "children").read_text().split()
-            except (FileNotFoundError, ProcessLookupError):
-                continue  # 已停止主程序的其他线程仍可恰在观察时退出。
-            for child in children:
-                state = snapshot(int(child))
-                if state:
-                    groups.add(state["pgid"])
+        if self.proc.poll() is None:
+            # 冻结已知测试主程序后取得其具体子进程，避免清理时产生新调用。
+            os.kill(self.proc.pid, signal.SIGSTOP)
+            os.waitpid(self.proc.pid, os.WUNTRACED)
+            groups = {record["pgid"] for record in self.records()}
+            for task in Path(f"/proc/{self.proc.pid}/task").iterdir():
+                try:
+                    children = (task / "children").read_text().split()
+                except (FileNotFoundError, ProcessLookupError):
+                    continue  # 已停止主程序的其他线程仍可恰在观察时退出。
+                for child in children:
+                    state = snapshot(int(child))
+                    if state:
+                        groups.add(state["pgid"])
+        else:
+            # 主程序提前退出时，只收场测试接管的具体后代所属的已知组。
+            candidates = {record["pgid"] for record in self.records()} | {self.proc.pid}
+            groups = set()
+            for task in Path("/proc/self/task").iterdir():
+                try:
+                    children = (task / "children").read_text().split()
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                for child in children:
+                    state = snapshot(int(child))
+                    if state and state["pgid"] in candidates:
+                        groups.add(state["pgid"])
         for group in groups:
             assert group > 1 and group != os.getpgrp()
             try:
                 os.killpg(group, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        self.proc.kill()
+        if self.proc.poll() is None:
+            self.proc.kill()
         self.proc.communicate(timeout=5)
         # 测试父进程接管本测试的孤儿后代；只回收这些组里的具体 PID。
         deadline = time.monotonic() + 5

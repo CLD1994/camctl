@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import select
+import signal
 import shlex
 import sqlite3
 import sys
 import time
+from contextlib import closing
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -68,11 +72,18 @@ def test_host_reply_requires_a_complete_line_within_deadline(tmp_path, operation
 def test_host_exit_does_not_wait_for_descendant_to_close_output(tmp_path, hold_stdout):
     deployment = _deployment(tmp_path)
     host = tmp_path / "host"
+    child_script = ("import time; from pathlib import Path; time.sleep(2); "
+                    f"Path({str(tmp_path / 'child-finished')!r}).touch()")
     host.write_text(
         f"#!{sys.executable}\n"
         "import subprocess, sys\n"
-        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2)'], "
+        "from pathlib import Path\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {child_script!r}], "
         f"stdin=subprocess.DEVNULL, stdout={'None' if hold_stdout else 'subprocess.DEVNULL'})\n"
+        "identity = str(child.pid)\n"
+        "if sys.platform == 'linux':\n"
+        "    identity += ' ' + Path(f'/proc/{child.pid}/stat').read_text().rsplit(')', 1)[1].split()[19]\n"
+        f"open({str(tmp_path / 'child-pid')!r}, 'w').write(identity)\n"
         "sys.stderr.write('original error'); sys.stderr.flush()\n"
         "sys.exit(7)\n", encoding="utf-8")
     host.chmod(0o700)
@@ -85,7 +96,50 @@ def test_host_exit_does_not_wait_for_descendant_to_close_output(tmp_path, hold_s
         assert "original error" in str(failure.value)
         assert time.monotonic() - started < 1.5
     finally:
-        demo.stop()
+        try:
+            demo.stop()
+        finally:
+            pid_file = tmp_path / "child-pid"
+            if pid_file.exists():
+                identity = pid_file.read_text().split()
+                pid = int(identity[0])
+                finished = tmp_path / "child-finished"
+                if hasattr(os, "pidfd_open"):
+                    try:
+                        pidfd = os.pidfd_open(pid)
+                    except ProcessLookupError:
+                        assert finished.exists(), f"子进程 {pid} 未留下完成记录"
+                    else:
+                        try:
+                            try:
+                                stat = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+                            except FileNotFoundError:
+                                stat = None
+                            if stat is None or stat[19] != identity[1]:
+                                assert finished.exists(), f"子进程 {pid} 未留下完成记录"
+                            elif not select.select([pidfd], [], [], 3)[0]:
+                                try:
+                                    signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass
+                                assert select.select([pidfd], [], [], 1)[0], (
+                                    f"测试创建的子进程 {pid} 未能结束")
+                                raise AssertionError(f"测试创建的子进程 {pid} 未按时结束")
+                            else:
+                                assert finished.exists(), f"子进程 {pid} 未留下完成记录"
+                        finally:
+                            os.close(pidfd)
+                else:
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        if finished.exists():
+                            try:
+                                os.kill(pid, 0)
+                            except ProcessLookupError:
+                                break
+                        time.sleep(.01)
+                    else:
+                        raise AssertionError(f"测试创建的子进程 {pid} 未在期限内结束")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="测试进程使用 POSIX 可执行脚本")
@@ -227,7 +281,7 @@ def test_wait_observes_current_run_result_while_host_stays_alive(tmp_path, host_
 def test_wait_limits_incompatible_terminal_to_requested_actions(tmp_path, name):
     deployment = _deployment(tmp_path)
     statuses = enum_for("actions.status")
-    with sqlite3.connect(deployment.state_db) as connection:
+    with closing(sqlite3.connect(deployment.state_db)) as connection, connection:
         connection.executescript(
             "CREATE TABLE plans(id INTEGER,request_id TEXT);"
             "CREATE TABLE actions(id INTEGER,plan_id INTEGER,name TEXT,status INTEGER,"
