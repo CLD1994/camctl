@@ -43,21 +43,28 @@ def _seed_environment(tmp_path: Path):
     target = tmp_path / "state.db"
     _create_valid_database(target)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)",
-        ("f" * 32,),
-    )
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
-    )
-    connection.commit()
-    return target, owned
+    try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
+            " VALUES (1, ?, 1, 1)",
+            ("f" * 32,),
+        )
+        connection.execute(
+            "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
+            " occurred_at, clock_status, change_seq, body_json)"
+            " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
+            (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
+        )
+        connection.commit()
+        return target, owned
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as cleanup_error:
+            error.add_note(f"关闭观察连接失败: {cleanup_error!r}")
+        raise
 
 
 def _seed_plan(connection: sqlite3.Connection, plan_id: int) -> None:
@@ -238,21 +245,28 @@ def _six_form_environment(tmp_path: Path):
     取回动作 30 属于计划 1，处于执行中且来源待解析。
     """
     target, owned = _seed_environment(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_plan(connection, 1)
-    _seed_plan(connection, 2)
-    _seed_action(connection, 11, 1, action_type=2, group_name="上午", name="录像A")
-    _seed_action(connection, 12, 1, action_type=7, group_name="上午")
-    _seed_action(connection, 13, 1, action_type=2, group_name="下午")
-    _seed_action(connection, 14, 1, action_type=2)
-    _seed_action(connection, 21, 2, action_type=2, group_name="晨拍")
-    _seed_action(connection, 22, 2, action_type=7)
-    _seed_action(connection, 30, 1, action_type=4, source_resolution_state=1)
-    connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
-        (json.dumps({"params":{"source":{"plan_instance_id":"2"}}}),))
-    connection.commit()
-    return target, owned
+    try:
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_plan(connection, 1)
+        _seed_plan(connection, 2)
+        _seed_action(connection, 11, 1, action_type=2, group_name="上午", name="录像A")
+        _seed_action(connection, 12, 1, action_type=7, group_name="上午")
+        _seed_action(connection, 13, 1, action_type=2, group_name="下午")
+        _seed_action(connection, 14, 1, action_type=2)
+        _seed_action(connection, 21, 2, action_type=2, group_name="晨拍")
+        _seed_action(connection, 22, 2, action_type=7)
+        _seed_action(connection, 30, 1, action_type=4, source_resolution_state=1)
+        connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+            (json.dumps({"params":{"source":{"plan_instance_id":"2"}}}),))
+        connection.commit()
+        return target, owned
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as cleanup_error:
+            error.add_note(f"关闭观察连接失败: {cleanup_error!r}")
+        raise
 
 
 def _fixed_resolution(members: tuple[int, ...]) -> SourceResolution:
@@ -461,26 +475,33 @@ def test_legal_empty_source_set_fixes_without_selections(tmp_path: Path) -> None
 def _prepared_selection(tmp_path: Path):
     """固定单一来源（计划 2 的动作 21）并把来源置为成功终态。"""
     target, owned = _six_form_environment(tmp_path)
-    repository = OutputsRepository()
-    owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
-        (json.dumps({"params":{"source":{"action_instance_id":"21"}}}),))
-    owned.connection.commit()
-    outcome = repository.resolve_sources(
-        ResolveSources(
-            action_id=30,
-            spec=SourceSpec(action_instance_id=21),
-            occurred_at=_NOW,
-        ),
-        new_operation_key(),
-        owned,
-    )
-    assert outcome.kind is DbOutcomeKind.COMPLETED
-    selection_id = _value(owned, "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=30")[0]
-    owned.connection.execute("BEGIN IMMEDIATE")
-    owned.connection.execute("UPDATE actions SET status = 3 WHERE id = 21")
-    owned.connection.commit()
-    _set_selection_request(owned.connection, SelectionMode.DEFAULT)
-    return target, owned, repository, selection_id
+    try:
+        repository = OutputsRepository()
+        owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+            (json.dumps({"params":{"source":{"action_instance_id":"21"}}}),))
+        owned.connection.commit()
+        outcome = repository.resolve_sources(
+            ResolveSources(
+                action_id=30,
+                spec=SourceSpec(action_instance_id=21),
+                occurred_at=_NOW,
+            ),
+            new_operation_key(),
+            owned,
+        )
+        assert outcome.kind is DbOutcomeKind.COMPLETED
+        selection_id = _value(owned, "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=30")[0]
+        owned.connection.execute("BEGIN IMMEDIATE")
+        owned.connection.execute("UPDATE actions SET status = 3 WHERE id = 21")
+        owned.connection.commit()
+        _set_selection_request(owned.connection, SelectionMode.DEFAULT)
+        return target, owned, repository, selection_id
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as cleanup_error:
+            error.add_note(f"关闭观察连接失败: {cleanup_error!r}")
+        raise
 
 
 def _set_selection_request(connection, mode, requested=()):

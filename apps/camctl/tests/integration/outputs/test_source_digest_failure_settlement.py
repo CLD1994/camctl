@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import asynccontextmanager
 from dataclasses import replace
 
 import pytest
@@ -31,24 +32,39 @@ pytestmark = pytest.mark.asyncio
 _CONTENT = b"0123456789"
 
 
+@asynccontextmanager
+async def _file_task_supervisor():
+    from camctl.session.supervision import Supervisor
+
+    supervisor = Supervisor()
+    try:
+        yield supervisor
+    except BaseException as error:
+        try:
+            result = await supervisor.drain_required()
+            if result.failed:
+                error.add_note(f"文件任务收场失败: {result!r}")
+        except BaseException as cleanup_error:
+            error.add_note(f"文件任务收场异常: {cleanup_error!r}")
+        raise
+    else:
+        assert not (await supervisor.drain_required()).failed
+
+
 @pytest_asyncio.fixture
 async def public_read_case(tmp_path):
     from camctl.host_files.tasks import FileTaskExecutor
-    from camctl.session.supervision import Supervisor
 
     owned, action, output = await prepare_request(tmp_path, now=_NOW)
-    driver = Driver(digest_error="source SHA query failed")
-    supervisor = Supervisor()
-    runtime = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
-                      horizon=None, executor=FileTaskExecutor(supervisor))(
-                          await capture_database(owned))
     try:
-        yield owned, action, output, driver, runtime
+        async with _file_task_supervisor() as supervisor:
+            driver = Driver(digest_error="source SHA query failed")
+            runtime = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
+                              horizon=None, executor=FileTaskExecutor(supervisor))(
+                                  await capture_database(owned))
+            yield owned, action, output, driver, runtime
     finally:
-        try:
-            assert not (await supervisor.drain_required()).failed
-        finally:
-            owned.connection.close()
+        owned.connection.close()
 
 
 def _delivery_read_state(owned, output):
@@ -70,7 +86,7 @@ class _ReadStream:
         self.position += len(data)
         return data
 
-    def stop(self) -> None:
+    def cancel(self) -> None:
         return None
 
     def close(self) -> None:
@@ -111,82 +127,78 @@ class _ReadDriver:
 async def test_source_digest_failure_finishes_original_read_and_preserves_sibling_success(
         tmp_path, capture_resources):
     from camctl.host_files.tasks import FileTaskExecutor
-    from camctl.session.supervision import Supervisor
 
     owned, action, outputs = await prepare_request(tmp_path, now=_NOW, sibling=True)
-    supervisor = Supervisor()
     try:
-        sources = owned.connection.execute(
-            "SELECT o.id,o.device_file_id,a.device_id FROM outputs o"
-            " JOIN actions a ON a.id=o.source_action_id WHERE o.id IN (?,?) ORDER BY o.id",
-            outputs,
-        ).fetchall()
-        assert len(sources) == 2 and all(row[2] == "cam-1" for row in sources)
-        assert sources[0][1] != sources[1][1]
-        failed_output, failed_file, _ = sources[0]
-        good_output, good_file, _ = sources[1]
-        driver = Driver(digest_errors={str(failed_file): "source SHA query failed"})
-        runtime = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
-                          horizon=None, executor=FileTaskExecutor(supervisor))(
-                              await capture_database(owned))
-        await advance_obtain(runtime)
+        async with _file_task_supervisor() as supervisor:
+            sources = owned.connection.execute(
+                "SELECT o.id,o.device_file_id,a.device_id FROM outputs o"
+                " JOIN actions a ON a.id=o.source_action_id WHERE o.id IN (?,?) ORDER BY o.id",
+                outputs,
+            ).fetchall()
+            assert len(sources) == 2 and all(row[2] == "cam-1" for row in sources)
+            assert sources[0][1] != sources[1][1]
+            failed_output, failed_file, _ = sources[0]
+            good_output, good_file, _ = sources[1]
+            driver = Driver(digest_errors={str(failed_file): "source SHA query failed"})
+            runtime = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
+                              horizon=None, executor=FileTaskExecutor(supervisor))(
+                                  await capture_database(owned))
+            await advance_obtain(runtime)
 
-        states = owned.connection.execute(
-            "SELECT c.source_device_file_id,c.committed_bytes,c.verification_state,"
-            " c.source_sha256,c.target_sha256,c.verification_error_json,"
-            " c.recopies_used,d.status,d.error_json,i.source_dependency,c.slot_device_id,"
-            " r.status,r.error_json,r.attempts_used,r.retry_wait_required,t.status,t.result_json"
-            " FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id"
-            " JOIN obtain_items i ON i.delivery_id=d.id"
-            " JOIN operation_runs r ON r.copy_id=c.id"
-            " JOIN operation_attempts t ON t.run_id=r.id"
-            " WHERE d.action_id=? ORDER BY c.source_device_file_id", (action,),
-        ).fetchall()
-        assert len(states) == 2
-        failed, good = states
-        verification = enum_for("file_copies.verification_state")
-        delivery = enum_for("deliveries.status")
-        run = enum_for("operation_runs.status")
-        attempt = enum_for("operation_attempts.status")
-        digest = hashlib.sha256(_CONTENT).hexdigest()
+            states = owned.connection.execute(
+                "SELECT c.source_device_file_id,c.committed_bytes,c.verification_state,"
+                " c.source_sha256,c.target_sha256,c.verification_error_json,"
+                " c.recopies_used,d.status,d.error_json,i.source_dependency,c.slot_device_id,"
+                " r.status,r.error_json,r.attempts_used,r.retry_wait_required,t.status,t.result_json"
+                " FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id"
+                " JOIN obtain_items i ON i.delivery_id=d.id"
+                " JOIN operation_runs r ON r.copy_id=c.id"
+                " JOIN operation_attempts t ON t.run_id=r.id"
+                " WHERE d.action_id=? ORDER BY c.source_device_file_id", (action,),
+            ).fetchall()
+            assert len(states) == 2
+            failed, good = states
+            verification = enum_for("file_copies.verification_state")
+            delivery = enum_for("deliveries.status")
+            run = enum_for("operation_runs.status")
+            attempt = enum_for("operation_attempts.status")
+            digest = hashlib.sha256(_CONTENT).hexdigest()
 
-        assert failed[:5] == (failed_file, 10, int(verification.FAILED), None, digest)
-        assert parse_exact_json(failed[5]) == {"reason": str({"reason": "source SHA query failed"})}
-        assert failed[6] == 0
-        assert failed[7] == int(delivery.FAILED)
-        expected_error = {
-            "code": "source_file_unconfirmed", "stage": "source_read",
-            "details": {"output_id": str(failed_output)},
-        }
-        assert parse_exact_json(failed[8]) == expected_error
-        assert failed[9:11] == (0, None)
-        assert failed[11] == int(run.FAILED)
-        assert parse_exact_json(failed[12]) == expected_error
-        assert failed[13:15] == (1, 0)
-        assert failed[15] == int(attempt.SUCCEEDED)
-        assert failed[16] is not None
-        assert good[0:3] == (good_file, 10, int(verification.MATCHED))
-        assert good[3:5] == (digest, digest)
-        assert good[7] in (int(delivery.PREPARING), int(delivery.PREPARED))
-        assert good[11] == int(run.SUCCEEDED)
-        assert good[15] == int(attempt.SUCCEEDED)
-        assert sorted(driver.digest_targets) == sorted((str(failed_file), str(good_file)))
-        assert len(driver.calls) == 2 and all(offset == 0 for offset, _ in driver.calls)
-        assert all(end.stopped and end.error is None for end in driver.ends)
+            assert failed[:5] == (failed_file, 10, int(verification.FAILED), None, digest)
+            assert parse_exact_json(failed[5]) == {"reason": str({"reason": "source SHA query failed"})}
+            assert failed[6] == 0
+            assert failed[7] == int(delivery.FAILED)
+            expected_error = {
+                "code": "source_file_unconfirmed", "stage": "source_read",
+                "details": {"output_id": str(failed_output)},
+            }
+            assert parse_exact_json(failed[8]) == expected_error
+            assert failed[9:11] == (0, None)
+            assert failed[11] == int(run.FAILED)
+            assert parse_exact_json(failed[12]) == expected_error
+            assert failed[13:15] == (1, 0)
+            assert failed[15] == int(attempt.SUCCEEDED)
+            assert failed[16] is not None
+            assert good[0:3] == (good_file, 10, int(verification.MATCHED))
+            assert good[3:5] == (digest, digest)
+            assert good[7] in (int(delivery.PREPARING), int(delivery.PREPARED))
+            assert good[11] == int(run.SUCCEEDED)
+            assert good[15] == int(attempt.SUCCEEDED)
+            assert sorted(driver.digest_targets) == sorted((str(failed_file), str(good_file)))
+            assert len(driver.calls) == 2 and all(offset == 0 for offset, _ in driver.calls)
+            assert all(end.stopped and end.error is None for end in driver.ends)
 
-        await advance_obtain(runtime)
-        published, filename = owned.connection.execute(
-            "SELECT status,file_name FROM deliveries WHERE action_id=? AND output_id=?",
-            (action, good_output),
-        ).fetchone()
-        assert published == int(delivery.PUBLISHED)
-        assert (tmp_path / "ready" / filename).read_bytes() == _CONTENT
-        assert driver.digest_calls == 2
+            await advance_obtain(runtime)
+            published, filename = owned.connection.execute(
+                "SELECT status,file_name FROM deliveries WHERE action_id=? AND output_id=?",
+                (action, good_output),
+            ).fetchone()
+            assert published == int(delivery.PUBLISHED)
+            assert (tmp_path / "ready" / filename).read_bytes() == _CONTENT
+            assert driver.digest_calls == 2
     finally:
-        try:
-            assert not (await supervisor.drain_required()).failed
-        finally:
-            owned.connection.close()
+        owned.connection.close()
 
 
 async def test_unknown_attempt_finish_reuses_original_key_without_requery(
@@ -264,7 +276,6 @@ async def test_unknown_delivery_failure_reuses_original_key_without_duplicate_ev
 async def test_saved_read_end_and_digest_failure_resume_without_device_calls(tmp_path, capture_resources):
     import sqlite3
     from camctl.host_files.tasks import FileTaskExecutor
-    from camctl.session.supervision import Supervisor
     from ..support.digest_read_recovery_cases import Driver, factory, prepare_request
 
     owned, action, output = await prepare_request(tmp_path, now=_NOW)
@@ -282,50 +293,48 @@ async def test_saved_read_end_and_digest_failure_resume_without_device_calls(tmp
                                 description='注入读取结果保存故障')
 
         driver = Driver(digest_error='source SHA query failed', on_digest=deny_attempt_save)
-        supervisor = Supervisor()
-        first = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
-                        horizon=None, executor=FileTaskExecutor(supervisor))(database)
-        try:
-            with pytest.raises(ConsistencyError):
-                await advance_obtain(first)
-        finally:
-            await database.read(lambda current: current.connection.set_authorizer(None),
-                                description='恢复数据库授权器')
-        assert denied and len(driver.calls) == 1 and driver.digest_calls == 1
-        row = owned.connection.execute(
-            'SELECT c.id,c.committed_bytes,c.read_end_event_id,c.verification_state,'
-            'c.verification_error_json,r.id,r.attempts_used,a.status FROM file_copies c '
-            'JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts a ON a.run_id=r.id').fetchone()
-        copy_id, committed, end_event, verification, error, run_id, attempts, status = row
-        assert committed == 10 and end_event is not None
-        assert verification == int(enum_for('file_copies.verification_state').FAILED)
-        assert 'source SHA query failed' in error
-        assert attempts == 1 and status == int(enum_for('operation_attempts.status').RUNNING)
-        assert not (await supervisor.drain_required()).failed
+        async with _file_task_supervisor() as supervisor:
+            first = factory(tmp_path, driver, now=_NOW, boundary=RecoveryBoundary.UNCONFIRMED,
+                            horizon=None, executor=FileTaskExecutor(supervisor))(database)
+            try:
+                with pytest.raises(ConsistencyError):
+                    await advance_obtain(first)
+            finally:
+                await database.read(lambda current: current.connection.set_authorizer(None),
+                                    description='恢复数据库授权器')
+            assert denied and len(driver.calls) == 1 and driver.digest_calls == 1
+            row = owned.connection.execute(
+                'SELECT c.id,c.committed_bytes,c.read_end_event_id,c.verification_state,'
+                'c.verification_error_json,r.id,r.attempts_used,a.status FROM file_copies c '
+                'JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts a ON a.run_id=r.id').fetchone()
+            copy_id, committed, end_event, verification, error, run_id, attempts, status = row
+            assert committed == 10 and end_event is not None
+            assert verification == int(enum_for('file_copies.verification_state').FAILED)
+            assert 'source SHA query failed' in error
+            assert attempts == 1 and status == int(enum_for('operation_attempts.status').RUNNING)
         database = await capture_resources.restart_database(owned)
         recovered_driver = Driver()
-        recovered_supervisor = Supervisor()
-        recovered = factory(tmp_path, recovered_driver, now=_NOW,
-            boundary=RecoveryBoundary.UNCONFIRMED, horizon=None,
-            executor=FileTaskExecutor(recovered_supervisor))(database)
-        await advance_obtain(recovered)
-        assert recovered_driver.calls == [] and recovered_driver.digest_calls == 0
-        row = owned.connection.execute(
-            'SELECT r.id,r.attempts_used,r.status,a.status,d.status,c.read_end_event_id '
-            'FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id '
-            'JOIN operation_attempts a ON a.run_id=r.id JOIN deliveries d ON d.id=c.delivery_id '
-            'WHERE c.id=?', (copy_id,)).fetchone()
-        assert row == (run_id, 1, int(enum_for('operation_runs.status').FAILED),
-            int(enum_for('operation_attempts.status').SUCCEEDED),
-            int(enum_for('deliveries.status').FAILED), end_event)
-        delivery = owned.connection.execute(
-            'SELECT d.action_id,d.output_id,d.error_json,c.verification_error_json '
-            'FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id WHERE c.id=?',
-            (copy_id,)).fetchone()
-        assert delivery[:2] == (action, output)
-        assert parse_exact_json(delivery[2])['code'] == 'source_file_unconfirmed'
-        assert 'source SHA query failed' in delivery[3]
-        assert not (await recovered_supervisor.drain_required()).failed
+        async with _file_task_supervisor() as recovered_supervisor:
+            recovered = factory(tmp_path, recovered_driver, now=_NOW,
+                boundary=RecoveryBoundary.UNCONFIRMED, horizon=None,
+                executor=FileTaskExecutor(recovered_supervisor))(database)
+            await advance_obtain(recovered)
+            assert recovered_driver.calls == [] and recovered_driver.digest_calls == 0
+            row = owned.connection.execute(
+                'SELECT r.id,r.attempts_used,r.status,a.status,d.status,c.read_end_event_id '
+                'FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id '
+                'JOIN operation_attempts a ON a.run_id=r.id JOIN deliveries d ON d.id=c.delivery_id '
+                'WHERE c.id=?', (copy_id,)).fetchone()
+            assert row == (run_id, 1, int(enum_for('operation_runs.status').FAILED),
+                int(enum_for('operation_attempts.status').SUCCEEDED),
+                int(enum_for('deliveries.status').FAILED), end_event)
+            delivery = owned.connection.execute(
+                'SELECT d.action_id,d.output_id,d.error_json,c.verification_error_json '
+                'FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id WHERE c.id=?',
+                (copy_id,)).fetchone()
+            assert delivery[:2] == (action, output)
+            assert parse_exact_json(delivery[2])['code'] == 'source_file_unconfirmed'
+            assert 'source SHA query failed' in delivery[3]
     finally:
         owned.connection.close()
 
@@ -338,7 +347,6 @@ async def test_process_exit_before_read_end_requires_boundary_and_confirms_eof(t
     from camctl.host_files.tasks import FileTaskExecutor
     from camctl.outputs.read_attempts import running_read_ticket
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-    from camctl.session.supervision import Supervisor
     from ..support.digest_read_recovery_cases import CONTENT, Driver, factory, prepare_request
 
     owned, action, output = await prepare_request(tmp_path, now=_NOW)
@@ -386,48 +394,46 @@ async def test_process_exit_before_read_end_requires_boundary_and_confirms_eof(t
         assert running_read_ticket(owned, copy_id)[0] == original
         horizon, = owned.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
         blocked_driver = Driver()
-        supervisor = Supervisor()
-        blocked = factory(tmp_path, blocked_driver, now=_NOW,
-            boundary=RecoveryBoundary.UNCONFIRMED, horizon=None,
-            executor=FileTaskExecutor(supervisor))(database)
-        await advance_obtain(blocked)
-        assert blocked_driver.calls == [] and blocked_driver.digest_calls == 0
-        assert blocked_driver.diagnostics and blocked_driver.diagnostics[-1].reason.value == 'unconfirmed_boundary'
-        assert running_read_ticket(owned, copy_id)[0] == original
-        assert not (await supervisor.drain_required()).failed
+        async with _file_task_supervisor() as supervisor:
+            blocked = factory(tmp_path, blocked_driver, now=_NOW,
+                boundary=RecoveryBoundary.UNCONFIRMED, horizon=None,
+                executor=FileTaskExecutor(supervisor))(database)
+            await advance_obtain(blocked)
+            assert blocked_driver.calls == [] and blocked_driver.digest_calls == 0
+            assert blocked_driver.diagnostics and blocked_driver.diagnostics[-1].reason.value == 'unconfirmed_boundary'
+            assert running_read_ticket(owned, copy_id)[0] == original
         await capture_resources.restart_database(owned)
         database = await capture_database(owned)
         driver = Driver()
-        supervisor = Supervisor()
-        recovered = factory(tmp_path, driver, now=_NOW,
-            boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, horizon=horizon,
-            executor=FileTaskExecutor(supervisor))(database)
-        await advance_obtain(recovered)
-        assert driver.calls == [(len(CONTENT), original)]
-        assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].bytes_read == 0
-        assert driver.ends[-1].error is None and driver.digest_calls == 1
-        row = owned.connection.execute(
-            'SELECT r.attempts_used,a.status,c.read_end_event_id,c.committed_bytes '
-            'FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id '
-            'JOIN operation_attempts a ON a.run_id=r.id WHERE c.id=?', (copy_id,)).fetchone()
-        assert row[0] == 1 and row[1] == int(enum_for('operation_attempts.status').SUCCEEDED)
-        assert row[2] is not None and row[3] == len(CONTENT)
-        body, = owned.connection.execute('SELECT body_json FROM history_events WHERE id=?', (row[2],)).fetchone()
-        saved = parse_exact_json(body)['evidence']['read_end']
-        assert saved['ticket']['run_id'] == original.run_id
-        assert saved['ticket']['attempt_no'] == original.attempt_id
-        assert saved['end'] == {'stopped': True, 'bytes_read': 0, 'error': None}
-        delivery = owned.connection.execute(
-            'SELECT d.action_id,d.output_id,d.status,c.source_sha256,c.target_sha256,i.source_dependency '
-            'FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id '
-            'JOIN obtain_items i ON i.delivery_id=d.id WHERE c.id=?', (copy_id,)).fetchone()
-        assert delivery[:2] == (action, output)
-        assert delivery[2] in (int(enum_for('deliveries.status').PREPARED),
-                               int(enum_for('deliveries.status').PUBLISHED))
-        assert delivery[3:5] == (hashlib.sha256(CONTENT).hexdigest(),) * 2
-        assert delivery[5] == 0
-        assert (tmp_path / 'staging' / relative).read_bytes() == CONTENT
-        assert not (await supervisor.drain_required()).failed
+        async with _file_task_supervisor() as supervisor:
+            recovered = factory(tmp_path, driver, now=_NOW,
+                boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, horizon=horizon,
+                executor=FileTaskExecutor(supervisor))(database)
+            await advance_obtain(recovered)
+            assert driver.calls == [(len(CONTENT), original)]
+            assert driver.ends and driver.ends[-1].stopped and driver.ends[-1].bytes_read == 0
+            assert driver.ends[-1].error is None and driver.digest_calls == 1
+            row = owned.connection.execute(
+                'SELECT r.attempts_used,a.status,c.read_end_event_id,c.committed_bytes '
+                'FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id '
+                'JOIN operation_attempts a ON a.run_id=r.id WHERE c.id=?', (copy_id,)).fetchone()
+            assert row[0] == 1 and row[1] == int(enum_for('operation_attempts.status').SUCCEEDED)
+            assert row[2] is not None and row[3] == len(CONTENT)
+            body, = owned.connection.execute('SELECT body_json FROM history_events WHERE id=?', (row[2],)).fetchone()
+            saved = parse_exact_json(body)['evidence']['read_end']
+            assert saved['ticket']['run_id'] == original.run_id
+            assert saved['ticket']['attempt_no'] == original.attempt_id
+            assert saved['end'] == {'stopped': True, 'bytes_read': 0, 'error': None}
+            delivery = owned.connection.execute(
+                'SELECT d.action_id,d.output_id,d.status,c.source_sha256,c.target_sha256,i.source_dependency '
+                'FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id '
+                'JOIN obtain_items i ON i.delivery_id=d.id WHERE c.id=?', (copy_id,)).fetchone()
+            assert delivery[:2] == (action, output)
+            assert delivery[2] in (int(enum_for('deliveries.status').PREPARED),
+                                   int(enum_for('deliveries.status').PUBLISHED))
+            assert delivery[3:5] == (hashlib.sha256(CONTENT).hexdigest(),) * 2
+            assert delivery[5] == 0
+            assert (tmp_path / 'staging' / relative).read_bytes() == CONTENT
     finally:
         owned.connection.close()
 

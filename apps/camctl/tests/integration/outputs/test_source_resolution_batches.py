@@ -216,29 +216,36 @@ async def _real_environment(tmp_path, *, storage=None, cleanup=False, source=Non
     target = tmp_path / "real.db"
     _create_valid_database(target)
     owned = open_existing(target,DbOpenMode.EXISTING_RW,DbConfig())
-    shots = [{"name":f"shot-{i}","type":"camera_take_photo","device_id":"cam-1",
-              "scheduled_at":"2026-01-15 09:00:00","params":{"type":"single_shot"},"policy":{"max_delay_ms":1000}}
-             for i in range(captures)]
-    async def accept(body):
-        return (await accept_body(owned,body,occurred_at=_NOW)).plan_id
-    source_plan = await accept(_plan_body(request_id="501",actions=shots))
-    source = source or {"plan_instance_id":str(source_plan)}
-    owner = {"name":"fetch","type":"delete_action_outputs" if cleanup else "obtain_action_outputs",
-             "scheduled_at":"2026-01-15 09:00:00","params":{"source":source}}
-    if not cleanup:
-        owner["params"]["purpose"]="manual"
-    owner_plan = await accept(_plan_body(request_id="502",actions=[owner]))
-    owner_id = owned.connection.execute("SELECT id FROM actions WHERE plan_id=?",(owner_plan,)).fetchone()[0]
-    repository = outputs.OutputsRepository(1, storage=storage)
-    if cleanup:
-        from camctl.outputs.cleanup_flow import StartCleanupAction
-        result = repository.start_cleanup_action(StartCleanupAction(owner_id,_NOW),new_operation_key(),owned)
-    else:
-        result = repository.start_obtain_action(outputs.StartObtainAction(owner_id,_NOW),new_operation_key(),owned)
-    assert result.kind is DbOutcomeKind.COMPLETED, result.error
-    from camctl.outputs.sources import read_source_spec
-    request = outputs.ResolveSources(owner_id,read_source_spec(json.dumps({"params":{"source":source}})),_NOW)
-    return target,owned,request
+    try:
+        shots = [{"name":f"shot-{i}","type":"camera_take_photo","device_id":"cam-1",
+                  "scheduled_at":"2026-01-15 09:00:00","params":{"type":"single_shot"},"policy":{"max_delay_ms":1000}}
+                 for i in range(captures)]
+        async def accept(body):
+            return (await accept_body(owned,body,occurred_at=_NOW)).plan_id
+        source_plan = await accept(_plan_body(request_id="501",actions=shots))
+        source = source or {"plan_instance_id":str(source_plan)}
+        owner = {"name":"fetch","type":"delete_action_outputs" if cleanup else "obtain_action_outputs",
+                 "scheduled_at":"2026-01-15 09:00:00","params":{"source":source}}
+        if not cleanup:
+            owner["params"]["purpose"]="manual"
+        owner_plan = await accept(_plan_body(request_id="502",actions=[owner]))
+        owner_id = owned.connection.execute("SELECT id FROM actions WHERE plan_id=?",(owner_plan,)).fetchone()[0]
+        repository = outputs.OutputsRepository(1, storage=storage)
+        if cleanup:
+            from camctl.outputs.cleanup_flow import StartCleanupAction
+            result = repository.start_cleanup_action(StartCleanupAction(owner_id,_NOW),new_operation_key(),owned)
+        else:
+            result = repository.start_obtain_action(outputs.StartObtainAction(owner_id,_NOW),new_operation_key(),owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        from camctl.outputs.sources import read_source_spec
+        request = outputs.ResolveSources(owner_id,read_source_spec(json.dumps({"params":{"source":source}})),_NOW)
+        return target,owned,request
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as cleanup_error:
+            error.add_note(f"关闭观察连接失败: {cleanup_error!r}")
+        raise
 
 
 async def test_original_source_key_rechecks_original_h_after_later_work_and_new_ids(source_observation, tmp_path):
@@ -345,21 +352,47 @@ async def test_bound_port_from_another_connection_is_rejected(source_observation
     storage = observation.storage
     from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
     from camctl.persistence.event_reads import SqlEventReads
-    path,owned=_six_form_environment(tmp_path)
-    other=open_existing(path,DbOpenMode.EXISTING_RW,DbConfig())
+    path, owned = _six_form_environment(tmp_path)
+    other = None
     try:
-        request=_request(owned,SourceSpec(plan_instance_id=2))
-        before=tuple(owned.connection.iterdump())
-        from camctl.persistence.repositories.transactions import commit_operation
-        proposal,key,result=captured_source(owned,request, storage=storage)
-        def foreign(context,*_):
-            return replace(context,current_reads=SqlEventReads(other.connection,context.current_reads.scope))
-        result=storage.commit_operation(SourceSequence(proposal,request,result,change_context=foreign),key,owned)
-        assert result.kind=="rolled_back"
-        assert tuple(owned.connection.iterdump())==before
+        other = open_existing(path, DbOpenMode.EXISTING_RO, DbConfig())
+        other.connection.execute("BEGIN")
+        other.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
+        request = _request(owned, SourceSpec(plan_instance_id=2))
+        before = tuple(owned.connection.iterdump())
+        delivered = []
+        commit = storage.commit_operation
+
+        def decorate(command, key, current):
+            class ForeignConnectionCommand:
+                def plan(self, scope):
+                    plan = command.plan(scope)
+
+                    def context(event, transaction):
+                        actual = plan.context(event, transaction)
+                        reads = actual.current_reads
+                        assert isinstance(reads, SqlEventReads)
+                        delivered.append(event.event_id)
+                        return replace(actual, current_reads=SqlEventReads(other.connection, reads.scope))
+
+                    return replace(plan, context=context)
+
+            return commit(ForeignConnectionCommand(), key, current)
+
+        monkeypatch.setattr(storage, "commit_operation", decorate)
+        result = outputs.OutputsRepository(1, storage=storage).resolve_sources(
+            request, new_operation_key(), owned)
+        assert delivered
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert '事件读取端口必须由原事务同一连接' in str(result.error)
+        assert not owned.connection.in_transaction
+        assert tuple(owned.connection.iterdump()) == before
     finally:
-        other.connection.close()
-        owned.connection.close()
+        try:
+            if other is not None:
+                other.connection.close()
+        finally:
+            owned.connection.close()
 
 
 @pytest.mark.parametrize("cleanup",[False,True])
@@ -776,21 +809,28 @@ async def _aggregate_role_world(tmp_path, start, *, storage):
     """真实三计划：目标 owner=8/main plan=3，源页与数值碰撞 action 分开。"""
     from ..acceptance.test_source_member_proof import _body
     _, owned, _ = await _real_environment(tmp_path, storage=storage)
-    body = _body()
-    if not start:
-        body["actions"][-1]["params"]["source"] = {"plan_instance_id":"1"}
-        local = _body()["actions"][-1]
-        local["name"] = "local-fetch"
-        body["actions"].append(local)
-    accepted = await accept_body(owned,body,occurred_at=_NOW)
-    assert accepted.plan_id == 3
-    request = outputs.StartObtainAction(8,_NOW) if start else outputs.ResolveSources(8,SourceSpec(plan_instance_id=1),_NOW)
-    if not start:
-        local_started = outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(9,_NOW),new_operation_key(),owned)
-        assert local_started.kind is DbOutcomeKind.COMPLETED, local_started.error
-        started = outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(8,_NOW),new_operation_key(),owned)
-        assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    return owned, request
+    try:
+        body = _body()
+        if not start:
+            body["actions"][-1]["params"]["source"] = {"plan_instance_id":"1"}
+            local = _body()["actions"][-1]
+            local["name"] = "local-fetch"
+            body["actions"].append(local)
+        accepted = await accept_body(owned,body,occurred_at=_NOW)
+        assert accepted.plan_id == 3
+        request = outputs.StartObtainAction(8,_NOW) if start else outputs.ResolveSources(8,SourceSpec(plan_instance_id=1),_NOW)
+        if not start:
+            local_started = outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(9,_NOW),new_operation_key(),owned)
+            assert local_started.kind is DbOutcomeKind.COMPLETED, local_started.error
+            started = outputs.OutputsRepository(1, storage=storage).start_obtain_action(outputs.StartObtainAction(8,_NOW),new_operation_key(),owned)
+            assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        return owned, request
+    except BaseException as error:
+        try:
+            owned.connection.close()
+        except BaseException as cleanup_error:
+            error.add_note(f"关闭观察连接失败: {cleanup_error!r}")
+        raise
 
 
 def _run_aggregate_role_command(owned, request, monkeypatch, *, storage, observation, start, finite, batch_size=1):
