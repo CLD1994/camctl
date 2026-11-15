@@ -981,12 +981,15 @@ async def test_large_selection_keeps_old_boundary_across_page_commits(report_sel
                 assert _read(selection, 'plan') == [1, 2, 3]
                 assert repository.restore_primary_at_h('action', 4, before)['status'] == int(status_enum.PENDING)
 
-        with HistoryRepository(state).open_report_selection(request) as selection:
-            assert read_actions(selection, 1) == [1, 2, 3]
-            assert read_actions(selection, 2) == list(range(4, 4204))
-            assert read_actions(selection, 3) == [4204, 4205, 4206]
-            assert read_actions(selection, 4) == []
-            assert _read(selection, 'plan') == [1, 2, 3]
+        cold_repository = HistoryRepository(state)
+        with cold_repository.report_read_scope():
+            with cold_repository.open_report_selection(request) as selection:
+                assert read_actions(selection, 1) == [1, 2, 3]
+                assert read_actions(selection, 2) == list(range(4, 4204))
+                assert read_actions(selection, 3) == [4204, 4205, 4206]
+                assert read_actions(selection, 4) == []
+                assert _read(selection, 'plan') == [1, 2, 3]
+                assert cold_repository.restore_primary_at_h('action', 4, before)['status'] == int(status_enum.PENDING)
     finally:
         owned.connection.close()
 
