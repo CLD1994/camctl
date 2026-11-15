@@ -127,18 +127,19 @@ async def test_save_keeps_real_target_and_exact_actual_reason(
     (EmergencyOutcome.NOT_ATTEMPTED, ()),
     (EmergencyOutcome.UNCONFIRMED, (_attempt(status=4, error=_ATTEMPT_ERROR),)),
 ])
-@pytest.mark.parametrize("reason", [None, "", 7, False, []], ids=[
-    "missing", "empty", "integer", "boolean", "list",
-])
-async def test_invalid_failure_reason_rolls_back_all_facts(tmp_path, outcome, attempts, reason):
+async def test_invalid_failure_reason_rolls_back_all_facts(tmp_path, outcome, attempts):
     owned = await _world(tmp_path)
     try:
         before = _facts(owned)
-        saved = _save(owned, EmergencyRecord(outcome, len(attempts), 3, reason=reason), attempts)
-        assert saved.kind is DbOutcomeKind.ROLLED_BACK
-        assert saved.error is not None
-        assert owned.connection.in_transaction is False
-        assert _facts(owned) == before
+        for reason in (None, "", 7, False, []):
+            label = f"outcome={outcome!r}, reason={reason!r}"
+            key = new_operation_key()
+            saved = _save(owned, EmergencyRecord(outcome, len(attempts), 3, reason=reason),
+                          attempts, key=key)
+            assert saved.kind is DbOutcomeKind.ROLLED_BACK, label
+            assert saved.error is not None, label
+            assert owned.connection.in_transaction is False, label
+            assert _facts(owned) == before, label
     finally:
         owned.connection.close()
 
@@ -284,31 +285,31 @@ async def test_attempted_partial_config_rolls_back_all_facts(
     (EmergencyOutcome.NOT_ATTEMPTED, ()),
     (EmergencyOutcome.UNCONFIRMED, (_attempt(status=4, error=_ATTEMPT_ERROR),)),
 ])
-@pytest.mark.parametrize("timeout_s, retry_interval_s", [
-    (Decimal("0"), Decimal("1")),
-    (Decimal("-1"), Decimal("1")),
-    (Decimal("10"), Decimal("-1")),
-    (Decimal("NaN"), Decimal("1")),
-    (Decimal("Infinity"), Decimal("1")),
-    (Decimal("-Infinity"), Decimal("1")),
-    (Decimal("10"), Decimal("NaN")),
-    (Decimal("10"), Decimal("Infinity")),
-    (Decimal("10"), Decimal("-Infinity")),
-], ids=["zero-timeout", "negative-timeout", "negative-interval",
-        "nan-timeout", "infinite-timeout", "negative-infinite-timeout",
-        "nan-interval", "infinite-interval", "negative-infinite-interval"])
-async def test_invalid_known_config_rolls_back_all_facts(
-        tmp_path, outcome, attempts, timeout_s, retry_interval_s):
+async def test_invalid_known_config_rolls_back_all_facts(tmp_path, outcome, attempts):
     owned = await _world(tmp_path)
     try:
         before = _facts(owned)
-        saved = _save(owned, EmergencyRecord(
-            outcome, len(attempts), 3, reason=_REASON), attempts,
-            timeout_s=timeout_s, retry_interval_s=retry_interval_s)
-        assert saved.kind is DbOutcomeKind.ROLLED_BACK
-        assert saved.error is not None
-        assert owned.connection.in_transaction is False
-        assert _facts(owned) == before
+        configurations = (
+            (Decimal("0"), Decimal("1")),
+            (Decimal("-1"), Decimal("1")),
+            (Decimal("10"), Decimal("-1")),
+            (Decimal("NaN"), Decimal("1")),
+            (Decimal("Infinity"), Decimal("1")),
+            (Decimal("-Infinity"), Decimal("1")),
+            (Decimal("10"), Decimal("NaN")),
+            (Decimal("10"), Decimal("Infinity")),
+            (Decimal("10"), Decimal("-Infinity")),
+        )
+        for timeout_s, retry_interval_s in configurations:
+            label = f"outcome={outcome!r}, timeout_s={timeout_s!r}, retry_interval_s={retry_interval_s!r}"
+            key = new_operation_key()
+            saved = _save(owned, EmergencyRecord(
+                outcome, len(attempts), 3, reason=_REASON), attempts, key=key,
+                timeout_s=timeout_s, retry_interval_s=retry_interval_s)
+            assert saved.kind is DbOutcomeKind.ROLLED_BACK, label
+            assert saved.error is not None, label
+            assert owned.connection.in_transaction is False, label
+            assert _facts(owned) == before, label
     finally:
         owned.connection.close()
 

@@ -287,7 +287,7 @@ def _assert_local_finish(owned, world, methods):
 @pytest.mark.parametrize("consumer", _CONSUMERS)
 @pytest.mark.parametrize("binding", _BINDINGS)
 @pytest.mark.parametrize("history", _HISTORIES)
-async def test_closed_unconfirmed_keeps_files_without_device_access(
+async def test_closed_terminal_reentry_does_not_append_outputs(
         tmp_path, monkeypatch, consumer, binding, history):
     world = await closed_consumer_world(tmp_path, monkeypatch, consumer=consumer, history=history)
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -295,21 +295,6 @@ async def test_closed_unconfirmed_keeps_files_without_device_access(
         assert owned.metadata == world.metadata
         runtime, methods = await fresh_closed_runtime(owned, world, binding)
         _assert_preserved(owned, world, methods)
-        await capture_handler(world.handler)(world.action_id, runtime)
-        _assert_local_finish(owned, world, methods)
-    finally:
-        owned.connection.close()
-
-
-@pytest.mark.parametrize("consumer", _CONSUMERS)
-@pytest.mark.parametrize("binding", _BINDINGS)
-@pytest.mark.parametrize("history", _HISTORIES)
-async def test_closed_terminal_reentry_does_not_append_outputs(
-        tmp_path, monkeypatch, consumer, binding, history):
-    world = await closed_consumer_world(tmp_path, monkeypatch, consumer=consumer, history=history)
-    owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
-    try:
-        runtime, methods = await fresh_closed_runtime(owned, world, binding)
         advance = capture_handler(world.handler)
         await advance(world.action_id, runtime)
         _assert_local_finish(owned, world, methods)

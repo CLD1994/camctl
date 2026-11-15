@@ -23,7 +23,7 @@ def _result_run(owned, activity_id):
 
 def _attempts(owned, run_id):
     return owned.connection.execute(
-        "SELECT attempt_no,status,result_json,error_json FROM operation_attempts"
+        "SELECT * FROM operation_attempts"
         " WHERE run_id=? ORDER BY attempt_no", (run_id,)).fetchall()
 
 
@@ -51,7 +51,7 @@ async def test_check_budget_change_adds_only_remaining_attempts(tmp_path, result
         assert first.calls == [activity_id, activity_id]
         original_attempts = _attempts(owned, run_id)
         original_history = owned.connection.execute(
-            "SELECT id FROM history_events ORDER BY id").fetchall()
+            "SELECT * FROM history_events ORDER BY id").fetchall()
         db_path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         owned.connection.close()
 
@@ -69,7 +69,7 @@ async def test_check_budget_change_adds_only_remaining_attempts(tmp_path, result
             assert second.calls == [activity_id] * additional
             assert _attempts(reopened, run_id)[:2] == original_attempts
             assert reopened.connection.execute(
-                "SELECT id FROM history_events ORDER BY id"
+                "SELECT * FROM history_events ORDER BY id"
             ).fetchall()[:len(original_history)] == original_history
 
             # 已收场的核实流程不因再次运行或更高上限重开。
@@ -80,6 +80,10 @@ async def test_check_budget_change_adds_only_remaining_attempts(tmp_path, result
             await advance(action_id, again)
             assert third.calls == []
             assert _result_run(reopened, activity_id)[1:] == (6, 2 + additional, 0)
+            assert _attempts(reopened, run_id)[:len(original_attempts)] == original_attempts
+            assert reopened.connection.execute(
+                "SELECT * FROM history_events ORDER BY id"
+            ).fetchall()[:len(original_history)] == original_history
         finally:
             reopened.connection.close()
     finally:

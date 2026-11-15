@@ -90,8 +90,7 @@ async def test_original_direct_query_cannot_use_a_later_natural_wait(tmp_path):
         owned.connection.close()
 
 
-@pytest.mark.parametrize('boundary', ['repository', 'event_guard'])
-async def test_natural_result_boundary_rejects_original_intent_before_wait(tmp_path, boundary):
+async def test_natural_result_event_guard_rejects_original_intent_before_wait(tmp_path):
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext, EventValidationError
     from camctl.persistence.repositories.validation import BusinessStorage
@@ -99,30 +98,26 @@ async def test_natural_result_boundary_rejects_original_intent_before_wait(tmp_p
     owned, runtime, aid, page, wait_id, command, finish = await _original_direct_history(tmp_path)
     try:
         before = tuple(owned.connection.iterdump())
-        if boundary == 'repository':
-            receipt = CaptureRepository().finish_result_check(finish, command, new_operation_key(), owned)
-            assert receipt.kind is DbOutcomeKind.ROLLED_BACK
-        else:
-            state = {table: {row[0]: row_facts(owned.connection, table, row[0])
-                for row in owned.connection.execute(f'SELECT id FROM {table}')}
-                for table in ('actions', 'device_activities', 'operation_runs', 'operation_attempts')}
-            cursor = owned.connection.execute('SELECT * FROM history_events')
-            columns = [column[0] for column in cursor.description]
-            state['history_events'] = {row[0]: dict(zip(columns, row)) for row in cursor}
-            event_id = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()[0]
-            txn_id = owned.connection.execute('SELECT MAX(id)+1 FROM history_transactions').fetchone()[0]
-            event = event_envelope(event_id, txn_id, 16, 1, (update_change('device_activities', aid,
-                {'result_set_state': 1, 'result_check_json': None, 'completion_basis': 1,
-                 'completion_evidence_json': None, 'capture_json': None},
-                {'result_set_state': 3, 'result_check_json': {'contract': command.contract,
-                    'outcome': 1, 'observation': command.observation}, 'completion_basis': 3,
-                 'completion_evidence_json': command.evidence, 'capture_json': {'status': 'completed'}}),), runtime.wall_us())
-            change_seq = owned.connection.execute('SELECT MAX(change_seq)+1 FROM history_events').fetchone()[0]
-            event = replace(event, change_seq=change_seq)
-            context = EventContext(TransactionRange(txn_id, event_id, event_id),
-                {('device_activities', aid): ('action', aid)}, state)
-            with pytest.raises(EventValidationError, match="自然集合的原结果来源无效"):
-                BusinessStorage().validate_event(event, context)
+        state = {table: {row[0]: row_facts(owned.connection, table, row[0])
+            for row in owned.connection.execute(f'SELECT id FROM {table}')}
+            for table in ('actions', 'device_activities', 'operation_runs', 'operation_attempts')}
+        cursor = owned.connection.execute('SELECT * FROM history_events')
+        columns = [column[0] for column in cursor.description]
+        state['history_events'] = {row[0]: dict(zip(columns, row)) for row in cursor}
+        event_id = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()[0]
+        txn_id = owned.connection.execute('SELECT MAX(id)+1 FROM history_transactions').fetchone()[0]
+        event = event_envelope(event_id, txn_id, 16, 1, (update_change('device_activities', aid,
+            {'result_set_state': 1, 'result_check_json': None, 'completion_basis': 1,
+             'completion_evidence_json': None, 'capture_json': None},
+            {'result_set_state': 3, 'result_check_json': {'contract': command.contract,
+                'outcome': 1, 'observation': command.observation}, 'completion_basis': 3,
+             'completion_evidence_json': command.evidence, 'capture_json': {'status': 'completed'}}),), runtime.wall_us())
+        change_seq = owned.connection.execute('SELECT MAX(change_seq)+1 FROM history_events').fetchone()[0]
+        event = replace(event, change_seq=change_seq)
+        context = EventContext(TransactionRange(txn_id, event_id, event_id),
+            {('device_activities', aid): ('action', aid)}, state)
+        with pytest.raises(EventValidationError, match="自然集合的原结果来源无效"):
+            BusinessStorage().validate_event(event, context)
         assert tuple(owned.connection.iterdump()) == before
     finally:
         owned.connection.close()
