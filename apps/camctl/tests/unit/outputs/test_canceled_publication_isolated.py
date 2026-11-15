@@ -90,6 +90,12 @@ def load_handoff():
     modules['camctl.contracts.values'].MAX_OBJECT_ID = 2**63 - 1
     modules['camctl.contracts.workflow_errors'].registered_error = lambda code: {'stage': 'publication'}
     modules['camctl.contracts.workflow_errors'].validate_error_details = lambda code, details: None
+    rejection_name = 'camctl.outputs.rejections'
+    rejection_spec = importlib.util.spec_from_file_location(
+        rejection_name, Path(__file__).parents[3] / 'src/camctl/outputs/rejections.py')
+    rejections = importlib.util.module_from_spec(rejection_spec)
+    rejection_spec.loader.exec_module(rejections)
+    modules[rejection_name] = rejections
     name = 'camctl.outputs._isolated_cancel_handoff'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/handoff.py')
     module = importlib.util.module_from_spec(spec)
@@ -961,6 +967,8 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 return SimpleNamespace(kind='completed', value=SimpleNamespace(complete=True, file_ids=(23,)))
         class WorkFiles:
             executor = SimpleNamespace(unfinished_files=lambda: ())
+            def files_in_use(self, file_ids):
+                return False
             async def first_cleanup(self, files, **kwargs):
                 calls.append(('cleanup', files))
                 return module.SettlementOutcome(True)
