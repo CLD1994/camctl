@@ -374,8 +374,10 @@ async def test_actual_sqlite_commit_unknown_never_reissues_reboot(owned, tmp_pat
             await pass_residual_gate(actual, (await actual.action(2)))
         assert len(faults) == 1 and faults[0].injected
     finally:
-        await baseline_case_for().drain()
-        await database.close()
+        try:
+            await baseline_case_for().drain()
+        finally:
+            await database.close()
     assert transport.reboots == (0 if unknown_phase == "intent" else 1)
     for _ in range(8):
         await advance_existing_recovery()
@@ -406,10 +408,12 @@ async def test_recovery_history_restores_responsibility_and_legacy_v2_without_ta
     from ..persistence.test_runtime import _create_valid_database
     from pathlib import Path
     import sqlite3
+    from contextlib import closing
     old_path = tmp_path / "legacy.db"
     _create_valid_database(old_path, format_version=2)
-    with sqlite3.connect(old_path) as connection:
-        connection.execute("DROP TABLE software_recoveries")
+    with closing(sqlite3.connect(old_path)) as connection:
+        with connection:
+            connection.execute("DROP TABLE software_recoveries")
     from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
     legacy = open_existing(old_path, DbOpenMode.EXISTING_RW, DbConfig())
     try:

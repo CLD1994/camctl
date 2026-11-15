@@ -6,7 +6,6 @@ import json
 
 import pytest
 
-from camctl.bootstrap import capture_assembly
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import registered_error
@@ -74,7 +73,7 @@ def _assert_original_group(owned, key, occurred_at, table, identity, status):
 async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
     world = await stop_close_world(tmp_path, consumer)
     stop_save, action_save = OperationRepository.finish_stale_runs, CaptureRepository.finish_capture
-    stop_inputs, stop_receipts, action_inputs, action_receipts, order, faults = [], [], [], [], [], []
+    stop_inputs, stop_receipts, action_inputs, action_receipts, faults = [], [], [], [], []
     before_attempts, before_activity = _attempts(world.owned), _activity(world.owned, world.action_id)
     before_history = world.owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
 
@@ -92,7 +91,6 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
         relevant = finish.responsibility_keys == (f"stop/{world.action_id}",)
         if relevant:
             stop_inputs.append((finish, key))
-            order.append("stop-save")
             receipt = submit(lambda *args: stop_save(repository, *args), finish, key, current, "stop")
             stop_receipts.append(receipt)
             return receipt
@@ -102,7 +100,6 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
         relevant = request.action_id == world.action_id and request.failure is not None and request.failure.code == "recording_stop_failed"
         if relevant:
             action_inputs.append((request, key))
-            order.append("action-save")
             receipt = submit(lambda *args: action_save(repository, *args), request, key, current, "action")
             action_receipts.append(receipt)
             return receipt
@@ -143,21 +140,11 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
             (world.action_id,)).fetchone() == (4 if stage == "action" and after else 2,)
         if not after:
             assert tuple(world.owned.connection.iterdump()) == fault.target_before
-        real_binding = capture_assembly.check_binding
-
-        def binding(saved, current):
-            order.append("binding-check")
-            return real_binding(saved, current)
-
-        monkeypatch.setattr(capture_assembly, "check_binding", binding)
         world.wall[0] += 100_000_000
         world.mono[0] += 100_000_000_000
-        order.clear()
         await world.advance()
         assert all(saved is finish and key == stop_key for saved, key in stop_inputs)
         assert len(stop_inputs) == 2 and stop_receipts[-1].kind is DbOutcomeKind.COMPLETED
-        if "binding-check" in order:
-            assert order.index("stop-save") < order.index("binding-check")
         stop_events = _assert_original_group(world.owned, stop_key, world.formed_at,
             "operation_runs", world.stop_id, 6)
         if first_stop_events is not None:

@@ -237,9 +237,13 @@ async def test_held_stop_is_saved_before_new_binding_failure(tmp_path, binding, 
         assert len(world.stopper.calls) == 1
         world.result_driver.list_results.assert_not_awaited()
     finally:
-        await capture_resources.close()
-        await world.database.close()
-        owned.connection.close()
+        try:
+            await capture_resources.close()
+        finally:
+            try:
+                await world.database.close()
+            finally:
+                owned.connection.close()
 
 
 async def test_typed_stop_confirmation_does_not_require_a_generic_observation_name(tmp_path):
@@ -339,9 +343,13 @@ async def test_unknown_stop_save_preserves_original_result_time_and_duration(tmp
         assert len(world.stopper.calls) == 1
         world.driver.control.assert_awaited_once()
     finally:
-        await capture_resources.close()
-        await world.database.close()
-        owned.connection.close()
+        try:
+            await capture_resources.close()
+        finally:
+            try:
+                await world.database.close()
+            finally:
+                owned.connection.close()
 
 
 @pytest.mark.parametrize("duration_known", [False, True])
@@ -495,9 +503,13 @@ async def test_unknown_output_finalization_keeps_original_page_and_failed_goal(t
         assert world.result_driver.list_results.await_count == 2
         assert len(world.stopper.calls) == 1
     finally:
-        await capture_resources.close()
-        await world.database.close()
-        owned.connection.close()
+        try:
+            await capture_resources.close()
+        finally:
+            try:
+                await world.database.close()
+            finally:
+                owned.connection.close()
 
 
 async def test_output_finalization_refuses_unowned_original_page_members(tmp_path, native_result_case):
@@ -609,9 +621,13 @@ async def test_finalization_repository_reuses_original_closed_page(tmp_path, com
         assert world.result_driver.list_results.await_count == 2
         assert len(world.stopper.calls) == 1
     finally:
-        await capture_resources.close()
-        await world.database.close()
-        owned.connection.close()
+        try:
+            await capture_resources.close()
+        finally:
+            try:
+                await world.database.close()
+            finally:
+                owned.connection.close()
 
 
 async def test_baseline_recording_stops_then_finalizes_scope_and_succeeds(tmp_path, native_result_case):
@@ -680,7 +696,9 @@ async def test_stopped_finalized_scope_has_identical_forward_reverse_and_snapsho
     from camctl.history.snapshots import SnapshotRef, decode_snapshot, prepare_snapshot
     from camctl.history.validators import ValidatedEvent
     from camctl.persistence.executor import DbExecutor
+    from camctl.persistence.business import BusinessDatabase
     from camctl.persistence.repositories.history import SqliteSnapshotStore
+    from camctl.contracts.json_values import parse_exact_json
 
     case_support = native_result_case
     owned, runtime, action_id, handler = await case_support.world(tmp_path, consumer,
@@ -700,7 +718,63 @@ async def test_stopped_finalized_scope_has_identical_forward_reverse_and_snapsho
             case_support.clock.monotonic = 65_000_000_000
         else:
             runtime = await case_support.reopen(owned, cold=True)
-        await capture_handler(handler)(action_id, runtime)
+        # 在真实 SQLite 提交边界读取动作自身成员，保留目标事务的独立预期。
+        await case_support.close()
+        await case_support.session.close()
+        captured = {}
+
+        def read_members(connection):
+            members = {}
+            queries = {
+                "actions": ("id=?", (action_id,)),
+                "device_activities": ("action_id=?", (action_id,)),
+                "operation_runs": ("action_id=?", (action_id,)),
+                "operation_attempts": ("run_id IN (SELECT id FROM operation_runs WHERE action_id=?)", (action_id,)),
+                "recording_processing": ("action_id=?", (action_id,)),
+                "result_page_files": ("action_id=?", (action_id,)),
+            }
+            for table, (condition, parameters) in queries.items():
+                cursor = connection.execute(f"SELECT * FROM {table} WHERE {condition}", parameters)
+                names = [column[0] for column in cursor.description]
+                for row in cursor:
+                    full = dict(zip(names, row))
+                    members[(table, full["id"])] = {
+                        name: parse_exact_json(value) if name.endswith("_json") and value is not None else value
+                        for name, value in full.items() if name in business_columns(table)}
+            return members
+
+        class ObserveCommits:
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, parameters=()):
+                cursor = self.connection.execute(sql, parameters)
+                if sql == "COMMIT":
+                    last = self.connection.execute(
+                        "SELECT id,last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1").fetchone()
+                    count = self.connection.execute(
+                        "SELECT change_count FROM entity_event_links WHERE entity_type=1 AND entity_id=?"
+                        " ORDER BY event_id DESC LIMIT 1", (action_id,)).fetchone()
+                    if last and count:
+                        captured[HistoryBoundary(*last)] = (read_members(self.connection), count[0])
+                return cursor
+
+        def open_observed():
+            actual = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+            return replace(actual, connection=ObserveCommits(actual.connection))
+
+        database = await BusinessDatabase.open(open_observed)
+        try:
+            runtime = await case_support.factory(database, "cam-1")
+            await capture_handler(handler)(action_id, runtime)
+        finally:
+            try:
+                await case_support.close()
+            finally:
+                await database.close()
         end_image, = await store.load_entity_images((ref,))
         finalized, = owned.connection.execute("SELECT output_set_finalized_event_id FROM device_activities"
             " WHERE action_id=?", (action_id,)).fetchone()
@@ -719,7 +793,8 @@ async def test_stopped_finalized_scope_has_identical_forward_reverse_and_snapsho
             return EntityImage(1, action_id, True, business,
                 full[("actions", action_id)]["last_event_id"], count)
 
-        members = {(row.table, row.row_id) for row in end_image.rows}
+        expected, expected_count = captured[boundary]
+        members = set().union(*(rows for rows, _ in captured.values()))
         events = []
         for raw in owned.connection.execute(
             "SELECT h.id,h.transaction_id,h.event_type,h.event_version,h.occurred_at,h.clock_status,h.change_seq,h.body_json"
@@ -736,7 +811,9 @@ async def test_stopped_finalized_scope_has_identical_forward_reverse_and_snapsho
             events, boundary)
         reverse = restore(RestoreSeed(seed_image(end_image.rows, end_image.change_count), end_image.boundary),
             events, boundary)
-        assert forward.rows == snapshot.rows == reverse.rows
+        for image in (forward, snapshot, reverse):
+            assert image.rows == expected
+            assert image.change_count == expected_count
         activity = forward.rows[("device_activities", 1)]
         assert activity["activity_state"] == 3 and activity["output_set_finalized_event_id"] == finalized
         assert activity["completion_evidence_json"] is None
@@ -748,8 +825,10 @@ async def test_stopped_finalized_scope_has_identical_forward_reverse_and_snapsho
         assert any(values["result_event_id"] == original_stop for (table, _), values in forward.rows.items()
             if table == "operation_attempts")
     finally:
-        await executor.close()
-        owned.connection.close()
+        try:
+            await executor.close()
+        finally:
+            owned.connection.close()
 
 
 async def test_host_timer_sent_margin_preserves_raw_control_elapsed(tmp_path, native_result_case):

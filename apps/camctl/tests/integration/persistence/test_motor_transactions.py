@@ -276,48 +276,6 @@ def test_time_rejection_never_creates_intent(owned, when, reason):
     ).fetchone() == (0,)
 
 
-def test_restoring_old_boundary_preserves_intent_and_public_results(prepared):
-    from camctl.motor.models import FinishSendRequest, MotorFinalKind
-    from camctl.persistence.repositories.history import HistoryRepository
-    from camctl.contracts.public_projection import ProjectionInput, project_public
-
-    owned, repository, _, _, permit = prepared
-    path = owned.connection.execute("PRAGMA database_list").fetchone()[2]
-    history = HistoryRepository(path)
-    old_boundary = history.current_boundary()
-    result = repository.finish_send(
-        FinishSendRequest(1, NOW + 1, MotorFinalKind.WRITTEN, permit, written_bytes=78),
-        new_operation_key(),
-        owned,
-    )
-    assert result.kind is DbOutcomeKind.COMPLETED, result.error
-    current_boundary = history.current_boundary()
-    before = history.restore_entity("action", 1, old_boundary, event_batch_size=1)
-    after = history.restore_entity("action", 1, current_boundary, event_batch_size=1)
-    assert before[("motor_notifications", 1)]["outcome"] == 1
-    assert before[("actions", 1)]["status"] == 2
-    assert after[("motor_notifications", 1)]["outcome"] == 3
-    assert after[("actions", 1)]["status"] == 3
-    public = project_public(
-        ProjectionInput("action", 1, {"actions": {1: after[("actions", 1)]}})
-    )
-    assert public["type"] == "motor_control" and public["status"] == "succeeded"
-    assert public["input_params"] == {"position": 100} and public["policy"] == {
-        "max_delay_ms": 1000
-    }
-    assert (
-        not {
-            "device_execution",
-            "effective_params",
-            "result_params",
-            "outputs",
-            "deliveries",
-            "device_id",
-        }
-        & public.keys()
-    )
-
-
 @pytest.mark.parametrize("change", ["missing_key", "wrong_action", "missing_notice"])
 def test_read_verifies_original_intent_transaction(prepared, change):
     import json

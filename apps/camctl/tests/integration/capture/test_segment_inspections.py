@@ -61,9 +61,11 @@ async def inspection_world(tmp_path, request):
             return flow, request, driver, digest, tools
         yield owned, roots, members, build, supervisor, runtime
     finally:
-        result = await supervisor.drain_required()
-        assert not result.failed
-        owned.connection.close()
+        try:
+            result = await supervisor.drain_required()
+            assert not result.failed
+        finally:
+            owned.connection.close()
 
 
 @pytest.mark.parametrize(('metric', 'expected', 'frames'), [

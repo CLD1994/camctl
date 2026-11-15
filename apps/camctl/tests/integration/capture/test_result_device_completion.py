@@ -20,10 +20,11 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from pathlib import Path
 from camctl.history.decoding import decode_event_row
-from camctl.history.events import event_type_name, branch_of
+from camctl.history.events import event_type_name, branch_of, business_columns
 from camctl.history.validators import ValidatedEvent
 from camctl.history.replay import EntityImage, RestoreSeed, restore
 from camctl.contracts.history_values import INITIAL_BOUNDARY
+from camctl.contracts.json_values import parse_exact_json
 from camctl.history.snapshots import SnapshotRef, prepare_snapshot
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
@@ -230,12 +231,27 @@ async def test_device_completion_history_restores_same_activity_in_three_paths(t
         capacity=4, enqueue_timeout_seconds=9)
     try:
         middle = history.current_boundary()
+        def activity_rows():
+            cursor = owned.connection.execute(
+                "SELECT * FROM device_activities WHERE action_id=?", (action_id,))
+            names = [column[0] for column in cursor.description]
+            rows = {}
+            for raw in cursor:
+                values = dict(zip(names, raw))
+                rows[("device_activities", values["id"])] = {
+                    name: parse_exact_json(value) if name.endswith("_json") and value is not None else value
+                    for name, value in values.items() if name in business_columns("device_activities")}
+            return rows
+        middle_activity = activity_rows()
+        assert len(middle_activity) == 1
         store = SqliteSnapshotStore(path, executor)
         image, = await store.load_entity_images((SnapshotRef(1, action_id),))
         await store.save_snapshots((prepare_snapshot(image),))
         device_pages(runtime)
         await capture_handler(handler)(action_id, runtime)
         end = history.current_boundary()
+        end_activity = activity_rows()
+        assert end_activity.keys() == middle_activity.keys()
         reverse = history.restore_entity("action", action_id, middle)
         snapshot = history.restore_entity("action", action_id, end)
         events = []
@@ -249,12 +265,19 @@ async def test_device_completion_history_restores_same_activity_in_three_paths(t
                 {(row.table, row.row_id): (1, action_id) for row in event.rows}))
         forward = restore(RestoreSeed(EntityImage(1, action_id, False, {}, 0, 0), INITIAL_BOUNDARY), events, end)
         current = runtime.capture.read_result_completion(action_id, owned)
-        key = ("device_activities", 1)
+        key, = middle_activity
+        for expected, actual in ((middle_activity, reverse), (end_activity, snapshot),
+                                 (end_activity, forward.rows)):
+            actual_activity = {row_key: {name: values[name] for name in business_columns("device_activities")}
+                for row_key, values in actual.items() if row_key[0] == "device_activities"}
+            assert actual_activity == expected
         assert reverse[key]["activity_state"] == 1
         for column in ("activity_state", "completion_basis", "completion_evidence_json", "result_set_state", "occupancy_state"):
             assert snapshot[key][column] == forward.rows[key][column]
         assert snapshot[key]["activity_state"] == 3 and snapshot[key]["completion_basis"] == 2
         assert snapshot[key]["completion_evidence_json"] == current
     finally:
-        await executor.close()
-        owned.connection.close()
+        try:
+            await executor.close()
+        finally:
+            owned.connection.close()
