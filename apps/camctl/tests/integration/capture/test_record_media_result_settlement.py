@@ -460,58 +460,6 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
             recovered.connection.close()
 
 
-async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
-        media_pipeline, monkeypatch):
-    """完整 VIDEO 加未完成 OTHER 的控制分区：媒体链照常，收场等集合。
-
-    未完成 OTHER 被如实观察为完成未知，不进入读取或产物；完整
-    VIDEO 的读取与检查不受影响。集合因未完成文件暂不齐备时保持
-    重试等待，不把未完成解释为完成；OTHER 写完后集合齐备，收场
-    只登记完整源文件为产物。
-    """
-    owned, roots, source_id = media_pipeline
-    entry = replace(_entry("original-recording", size=len(_CONTENT)),
-                    locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
-    incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
-    results = ResultsDouble({1: (entry, incomplete)})
-    clock = _TestClock()
-    runtime, results, reader, tools = await _runtime_with_media(
-        media_pipeline, Decimal("61"), clock, monkeypatch, results)
-
-    await capture_handler("camera_record")(1, runtime)
-    assert _result_run(owned)[1:4] == (2, 1, 1)
-
-    clock.wall = _NOW + 200_000_000
-    await capture_handler("camera_record")(1, runtime)
-
-    # 未完成 OTHER 被如实观察为完成未知，不进入读取或产物。
-    other_id, = owned.connection.execute(
-        "SELECT id FROM device_files WHERE observer_action_id=1 AND id<>?",
-        (source_id,)).fetchone()
-    assert owned.connection.execute(
-        "SELECT completion_state FROM device_files WHERE id=?",
-        (other_id,)).fetchone() == (1,)
-    assert owned.connection.execute(
-        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
-        (other_id,)).fetchone() == (0,)
-    # 媒体链不受未完成 OTHER 影响：只读源文件，检查完成且无需修复。
-    assert len(reader.opens) == 1
-    assert tools.calls == ["probe", "probe"]
-    assert owned.connection.execute(
-        "SELECT check_state, repair_state FROM recording_processing"
-        " WHERE id=1").fetchone() == (3, 2)
-    # 集合因未完成 OTHER 暂不齐备：不收场、不登记产物、保持重试等待。
-    assert _result_run(owned)[1:4] == (2, 1, 1)
-    assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
-    assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
-
-    # 集合中未完成文件不参与收场判定：保持等待、不解释为完成，
-    # 也不因未完成文件丢弃已观察的完整源文件事实。
-    assert owned.connection.execute(
-        "SELECT presence_state, completion_state FROM device_files WHERE id=?",
-        (source_id,)).fetchone() == (2, 3)
-
-
 async def test_incomplete_other_turning_complete_settles_from_saved_facts(
         media_pipeline, monkeypatch):
     """未完成 OTHER 转完整后的本地装载次序：新轮次只补观察，收场沿已保存事实。
@@ -531,6 +479,7 @@ async def test_incomplete_other_turning_complete_settles_from_saved_facts(
         media_pipeline, Decimal("61"), clock, monkeypatch, results)
 
     await capture_handler("camera_record")(1, runtime)
+    assert _result_run(owned)[1:4] == (2, 1, 1)
     clock.wall = _NOW + 200_000_000
     await capture_handler("camera_record")(1, runtime)
     assert _result_run(owned)[1:4] == (2, 1, 1)
@@ -539,6 +488,22 @@ async def test_incomplete_other_turning_complete_settles_from_saved_facts(
     other_id, = owned.connection.execute(
         "SELECT id FROM device_files WHERE observer_action_id=1 AND id<>?",
         (source_id,)).fetchone()
+
+    # 集合暂未齐备时，源视频检查已经完成，OTHER 保持未知且没有产物。
+    assert owned.connection.execute(
+        "SELECT completion_state FROM device_files WHERE id=?",
+        (other_id,)).fetchone() == (1,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
+        (other_id,)).fetchone() == (0,)
+    assert owned.connection.execute(
+        "SELECT check_state, repair_state FROM recording_processing WHERE id=1"
+    ).fetchone() == (3, 2)
+    assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
+    assert owned.connection.execute(
+        "SELECT presence_state, completion_state FROM device_files WHERE id=?",
+        (source_id,)).fetchone() == (2, 3)
 
     # 后续轮次：同一集合中的 OTHER 转完整且集合确定。重试间隔按会
     # 话单调钟计时，墙钟与单调钟一起越过间隔。
