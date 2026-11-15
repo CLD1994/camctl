@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Sequence
 
@@ -242,7 +243,9 @@ def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int
         failure_code="action_validation_failed" if issues else None,
         failure_details={"issues": issues} if issues else None,
         driver_id=driver_id,
-        parameter_type=parameter_type, parameter_definition=definition,
+        parameter_type=parameter_type, parameter_definition=(
+            replace(definition, schema=deepcopy(definition.schema), defaults=deepcopy(definition.defaults))
+            if definition is not None else None),
     )
 
 
@@ -261,7 +264,7 @@ def _validate_capture_params(raw, definition, validator):
         raise RuleError("拍摄参数 Schema 必须约束完整对象")
     from camctl.devices.catalog import apply_defaults
 
-    effective = apply_defaults(raw, definition.defaults)
+    effective = apply_defaults(raw, deepcopy(definition.defaults))
     if schema_issues(definition.schema, effective, "params", validator=validator):
         raise RuleError("驱动默认值使合法原参数不再符合参数规则")
     return ActionValidation(name="", raw=raw, ok=True, effective_params=effective)

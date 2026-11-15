@@ -286,3 +286,22 @@ def test_each_action_uses_its_device_definition_and_validates_its_own_parameters
     assert result.actions[3].effective_params["shots"] == 5
     assert result.actions[1].failure_details["issues"][0]["field"] == "actions[1].params.shots"
     assert result.actions[4].failure_details["issues"][0]["field"] == "actions[4].params.shots"
+
+
+def test_reused_definition_keeps_nested_defaults_independent_between_actions():
+    from copy import deepcopy
+    from camctl.acceptance.ports import ParameterDefinition
+
+    class NestedDefaults(StubCatalog):
+        def parameter_definition(self, device_id, action_type, parameter_type):
+            schema = deepcopy(CAMERA_DEFINITION)
+            schema["properties"]["options"] = {"type": "array", "items": {"type": "integer"}}
+            return ParameterDefinition(schema, {"shots": 1, "options": [1, 2]})
+
+    decision = validate_new_body(_body([_camera_action("a"), _camera_action("b")]), NestedDefaults())
+    first, second = decision.actions
+    assert first.ok and second.ok
+    first.effective_params["options"].append(3)
+    first.parameter_definition.defaults["options"].append(4)
+    assert second.effective_params["options"] == [1, 2]
+    assert second.parameter_definition.defaults["options"] == [1, 2]
