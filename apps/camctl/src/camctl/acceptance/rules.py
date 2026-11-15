@@ -16,7 +16,7 @@ from camctl.acceptance.schema import (
     RuleError,
     validate_plan_structure,
     validate_precise,
-    plan_fragment, schema_issues,
+    plan_fragment, schema_issues, precise_validator_for,
 )
 from camctl.acceptance.ports import ParameterDefinition, StaticActionCatalog
 from camctl.contracts.json_values import JsonValue
@@ -114,9 +114,10 @@ def validate_new_body(raw: JsonValue, catalog: StaticActionCatalog) -> BodyDecis
             raw=raw,
         )
 
+    validators = _AcceptanceValidators()
     validated: list[ActionValidation] = []
     for index, action in enumerate(actions):
-        validated.append(_validate_action(action, catalog, index))
+        validated.append(_validate_action(action, catalog, index, validators))
     return BodyDecision(
         is_whole_rejection=False,
         actions=tuple(validated),
@@ -124,10 +125,43 @@ def validate_new_body(raw: JsonValue, catalog: StaticActionCatalog) -> BodyDecis
     )
 
 
-def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int) -> ActionValidation:
+class _AcceptanceValidators:
+    """校验器和静态能力仅在本次受理内复用。"""
+
+    def __init__(self):
+        self.public = {}
+        self.definitions = {}
+        self.parameters = {}
+
+    def issues(self, name, document, prefix):
+        schema = plan_fragment(name)
+        if name not in self.public:
+            self.public[name] = precise_validator_for(schema)
+        return schema_issues(schema, document, prefix, validator=self.public[name])
+
+    def definition(self, catalog, device, action_type, parameter_type):
+        key = (device, action_type, parameter_type)
+        if key not in self.definitions:
+            definition = catalog.parameter_definition(*key)
+            if definition is not None:
+                validate_parameter_schema(parameter_type, definition.schema)
+            self.definitions[key] = definition
+        return self.definitions[key]
+
+    def parameter_validator(self, definition):
+        # 规则内容作为键，避免不同设备能力错误共用校验器。
+        from camctl.contracts.json_encoding import encode_exact_json
+        key = encode_exact_json(definition.schema)
+        if key not in self.parameters:
+            self.parameters[key] = precise_validator_for(definition.schema)
+        return self.parameters[key]
+
+
+def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int,
+                     validators: _AcceptanceValidators) -> ActionValidation:
     prefix = f"actions[{index}]"
     name, action_type = action["name"], action["type"]
-    issues = list(schema_issues(plan_fragment("action"), action, prefix))
+    issues = list(validators.issues("action", action, prefix))
     input_fields = {key: value for key, value in action.items() if key not in {"name", "type"}}
     device_id = scheduled = group = max_delay = None
     effective = None
@@ -147,7 +181,7 @@ def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int
 
     if "device_id" in action and action_type in _CAMERA_TYPES:
         raw_device = action["device_id"]
-        if not schema_issues(plan_fragment("action/properties/device_id"), raw_device, prefix + ".device_id"):
+        if not validators.issues("action/properties/device_id", raw_device, prefix + ".device_id"):
             if catalog.device_exists(raw_device):
                 device_id = raw_device
                 del input_fields["device_id"]
@@ -164,30 +198,29 @@ def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int
             del input_fields["scheduled_at"]
     if "group" in action and action_type != "obtain_action_outputs":
         candidate = action["group"]
-        if not schema_issues(plan_fragment("action/properties/group"), candidate, prefix + ".group"):
+        if not validators.issues("action/properties/group", candidate, prefix + ".group"):
             if candidate == candidate.strip():
                 group = candidate
                 del input_fields["group"]
             else:
                 issues.append({"field": prefix + ".group", "reason": "range", "value": candidate})
     if action_type == "motor_control" and "policy" in action:
-        if not schema_issues(plan_fragment("time_window_policy"), action["policy"], prefix + ".policy"):
+        if not validators.issues("time_window_policy", action["policy"], prefix + ".policy"):
             max_delay = int(action["policy"]["max_delay_ms"])
     if action_type in _CAMERA_TYPES:
-        if "policy" in action and not schema_issues(plan_fragment("camera_policy"), action["policy"], prefix + ".policy"):
+        if "policy" in action and not validators.issues("camera_policy", action["policy"], prefix + ".policy"):
             max_delay = int(action["policy"]["max_delay_ms"])
         if device_id is not None:
             params = action.get("params")
             if not catalog.device_supports(device_id, action_type):
                 issues.append({"field": prefix + ".type", "reason": "unsupported", "value": action_type})
             elif isinstance(params, dict) and isinstance(params.get("type"), str) and params["type"]:
-                definition = catalog.parameter_definition(device_id, action_type, params["type"])
+                definition = validators.definition(catalog, device_id, action_type, params["type"])
                 if definition is None:
                     issues.append({"field": prefix + ".params.type", "reason": "unsupported", "value": params["type"]})
                 else:
-                    validate_parameter_schema(params["type"], definition.schema)
                     parameter_type = params["type"]
-                    parameter_result = validate_capture_params(params, definition)
+                    parameter_result = _validate_capture_params(params, definition, validators.parameter_validator(definition))
                     if parameter_result.ok:
                         effective = parameter_result.effective_params
                     else:
@@ -213,11 +246,13 @@ def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int
     )
 
 
-def validate_capture_params(
-    raw: JsonValue, definition: ParameterDefinition
-) -> ActionValidation:
+def validate_capture_params(raw: JsonValue, definition: ParameterDefinition) -> ActionValidation:
     """按驱动参数定义校验并补齐默认值；原输入保持不变。"""
-    issues = schema_issues(definition.schema, raw, "params")
+    return _validate_capture_params(raw, definition, precise_validator_for(definition.schema))
+
+
+def _validate_capture_params(raw, definition, validator):
+    issues = schema_issues(definition.schema, raw, "params", validator=validator)
     if issues:
         return ActionValidation(name="", raw=raw, ok=False,
                                 failure="; ".join(i["field"] + ": " + i["reason"] for i in issues),
@@ -227,7 +262,7 @@ def validate_capture_params(
     from camctl.devices.catalog import apply_defaults
 
     effective = apply_defaults(raw, definition.defaults)
-    if schema_issues(definition.schema, effective, "params"):
+    if schema_issues(definition.schema, effective, "params", validator=validator):
         raise RuleError("驱动默认值使合法原参数不再符合参数规则")
     return ActionValidation(name="", raw=raw, ok=True, effective_params=effective)
 

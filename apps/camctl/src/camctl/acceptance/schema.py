@@ -75,12 +75,12 @@ def plan_fragment(name: str) -> dict:
             "$ref": f"plan.schema.json#/$defs/{name}"}
 
 
-def schema_issues(schema: Any, document: Any, prefix: str) -> tuple[dict, ...]:
+def schema_issues(schema: Any, document: Any, prefix: str, *, validator=None) -> tuple[dict, ...]:
     """把 Schema 的已确定错误转换为公共机器字段，不解析错误文案。"""
     import re
 
     try:
-        errors = validation_errors(precise_validator_for(schema), document)
+        errors = validation_errors(validator if validator is not None else precise_validator_for(schema), document)
     except SchemaRuleError as error:
         raise RuleError(str(error)) from error
     issues: list[dict] = []

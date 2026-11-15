@@ -7,6 +7,14 @@ CREATE TABLE history_transactions (
     CHECK (first_event_id > 0 AND last_event_id >= first_event_id)
 ) STRICT;
 
+-- 受理写事务的原申请身份和首次完整答复，与历史事务共同提交。
+CREATE TABLE acceptance_receipts (
+    transaction_id INTEGER PRIMARY KEY REFERENCES history_transactions(id),
+    version INTEGER NOT NULL CHECK (version > 0),
+    request_identity TEXT NOT NULL,
+    result_json TEXT NOT NULL CHECK (json_valid(result_json) AND json_type(result_json) = 'object')
+) STRICT;
+
 CREATE TABLE history_events (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     transaction_id INTEGER NOT NULL REFERENCES history_transactions(id) DEFERRABLE INITIALLY DEFERRED,

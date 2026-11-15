@@ -261,3 +261,28 @@ class TestBodyDecisions:
         body["extra_field"] = 1
         decision = validate_new_body(body, StubCatalog())
         assert decision.is_whole_rejection
+
+
+def test_each_action_uses_its_device_definition_and_validates_its_own_parameters():
+    from copy import deepcopy
+    from camctl.acceptance.ports import ParameterDefinition
+
+    class DifferentDevices(StubCatalog):
+        def parameter_definition(self, device_id, action_type, parameter_type):
+            schema = deepcopy(CAMERA_DEFINITION)
+            schema["properties"]["shots"]["maximum"] = 2 if device_id == "cam-1" else 5
+            return ParameterDefinition(schema, {"shots": 2 if device_id == "cam-1" else 5})
+
+    actions = [
+        _camera_action("a", params={"type": "single_shot"}),
+        _camera_action("b", params={"type": "single_shot", "shots": 3}),
+        _camera_action("c", device="cam-2", params={"type": "single_shot", "shots": 3}),
+        _camera_action("d", device="cam-2", params={"type": "single_shot"}),
+        _camera_action("e", device="cam-2", params={"type": "single_shot", "shots": True}),
+    ]
+    result = validate_new_body(_body(actions), DifferentDevices())
+    assert [action.ok for action in result.actions] == [True, False, True, True, False]
+    assert result.actions[0].effective_params["shots"] == 2
+    assert result.actions[3].effective_params["shots"] == 5
+    assert result.actions[1].failure_details["issues"][0]["field"] == "actions[1].params.shots"
+    assert result.actions[4].failure_details["issues"][0]["field"] == "actions[4].params.shots"

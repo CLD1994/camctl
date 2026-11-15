@@ -102,6 +102,8 @@ class CommandPlan:
     #: 投影写完后、事务结束前完成依赖新状态的响应判断。
     #: 只允许可靠状态查询和非阻塞资格操作，不执行长任务或新写入。
     complete_result: Callable[[sqlite3.Connection, Any], Any] | None = None
+    #: 在首次结果完整形成后、提交之前保存命令自己的完成依据。
+    save_result: Callable[[sqlite3.Connection, int, Any], None] | None = None
     #: 本写事务已完整读取的身份等值范围；匹配行由 state_rows 提供。
     read_coverage: ReadCoverage = field(default_factory=ReadCoverage)
     baseline_reads: Mapping[int, BaselineRangeRead] = field(default_factory=dict)
@@ -971,6 +973,8 @@ def _execute_business_work(command, operation_key, connection, atomic_transactio
                     plan.complete_result(connection, plan.result)
                     if plan.complete_result else plan.result
                 )
+                if plan.save_result is not None:
+                    plan.save_result(connection, allocation.txn_id, result)
         except SchemaRuleError:
             raise
         except Exception as error:

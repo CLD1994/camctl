@@ -177,8 +177,9 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
 class ProcessInputCommand:
     """一次输入处理的完整事务命令。"""
 
-    def __init__(self, command: ProcessInput, format_version: int | None) -> None:
+    def __init__(self, command: ProcessInput, format_version: int | None, key: OperationKey) -> None:
         self._command = command
+        self._key = key
         self._format_version = format_version
         self._catalog = command.catalog
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
@@ -195,11 +196,19 @@ class ProcessInputCommand:
         if self._command.mode is CommandMode.SUBMIT:
             if self._command.submit_handoff is None:
                 raise TransactionError("submit 必须在输入事务内提供接管判断")
-            return replace(self._plan_input(scope), complete_result=self._complete_handoff)
-        if (self._command.mode is not CommandMode.RUN
-                or self._command.submit_handoff is not None):
+            complete = self._complete_handoff
+        elif self._command.mode is CommandMode.RUN and self._command.submit_handoff is None:
+            complete = None
+        else:
             raise TransactionError("输入命令模式与接管端口不符")
-        return self._plan_input(scope)
+        from camctl.acceptance.receipts import recover_result, save_result
+        recovered = recover_result(scope.connection, self._key, self._command)
+        if recovered is not None:
+            return CommandPlan(events=(), owners={}, state_rows={}, result=recovered, read_only=True)
+        plan = self._plan_input(scope)
+        return replace(plan, complete_result=complete,
+                       save_result=lambda connection, txn_id, result:
+                           save_result(connection, txn_id, self._command, result))
 
     def _complete_handoff(self, connection, result: AcceptanceResult) -> AcceptanceResult:
         needs_run = self._command.submit_handoff.needs_run(connection)
@@ -617,6 +626,7 @@ class AcceptanceRepository:
             ProcessInputCommand(
                 command,
                 owned.metadata.format_version if owned.metadata is not None else None,
+                key,
             ),
             key,
             owned,

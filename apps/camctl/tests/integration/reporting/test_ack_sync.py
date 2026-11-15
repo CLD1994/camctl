@@ -348,10 +348,11 @@ def test_formal_guard_rejects_unqualified_confirmation(sync_environment, bad_fac
     previous = _existing_ack(owned, "equal")
     before = _counts(connection)
     command = ProcessInput(ParsedInput("plan.json", _body("reused", report)), Catalog(), CommandMode.RUN, _NOW)
+    key = new_operation_key()
 
     class IncorrectConfirmation:
         def plan(self, scope):
-            plan = ProcessInputCommand(command, owned.metadata.format_version).plan(scope)
+            plan = ProcessInputCommand(command, owned.metadata.format_version, key).plan(scope)
             states = deepcopy(plan.state_rows)
             events = list(plan.events)
             event = next(event for event in events if event.event_type == 29)
@@ -369,7 +370,7 @@ def test_formal_guard_rejects_unqualified_confirmation(sync_environment, bad_fac
                 events[events.index(event)] = replace(event, rows=(replace(row, after=after),))
             return replace(plan, state_rows=states, events=tuple(events))
 
-    receipt = commit_operation(IncorrectConfirmation(), new_operation_key(), owned)
+    receipt = commit_operation(IncorrectConfirmation(), key, owned)
     assert receipt.kind == "rolled_back"
     assert isinstance(receipt.error, EventValidationError)
     assert _counts(connection) == before
