@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 import sqlite3
+import sys
 
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
 from camctl.bootstrap.obtain_assembly import session_obtain_assembly
@@ -390,7 +391,13 @@ async def read_test_runtime(owned, driver, evidence, *, staging, internal=False,
     try:
         yield runtime
     finally:
-        results = await supervisor.drain_required()
-        failures = tuple(result.exception or RuntimeError(result.error) for result in results.failed)
+        original = sys.exception()
+        try:
+            results = await executor.drain_required()
+            failures = tuple(result.exception or RuntimeError(result.error) for result in results.failed)
+        except BaseException as error:
+            failures = (error,)
         if failures:
+            if original is not None:
+                failures = (original, *failures)
             raise BaseExceptionGroup("取回专项文件责任收场失败", failures)

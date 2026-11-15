@@ -3,6 +3,8 @@
 import asyncio
 import json
 import os
+import sys
+from contextlib import asynccontextmanager
 import threading
 import time
 from pathlib import Path
@@ -13,12 +15,13 @@ import pytest
 from camctl.devices.drivers.hasselblad.driver import EVIDENCE, HasselbladDriver
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 from camctl.host_files.models import BoundDirectories
+from camctl.host_files.tasks import FileTaskExecutor
+from camctl.session.supervision import Supervisor
 from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
-from camctl.host_files.downloads import DownloadWorkspace, download_path, recover_download
+from camctl.host_files.downloads import download_path, recover_download
 from camctl.operations.process import RawToolOutcome, ToolStartError
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.obtain_flow import advance_obtain
-from camctl.outputs.read_attempts import running_read_ticket
 
 from ..support.outputs import output_drivers, read_test_runtime
 from ..bootstrap.test_download_cleanup import photo_read_request
@@ -58,12 +61,64 @@ async def _wait_read_ready(task, ready):
             await task
             raise AssertionError("业务提前结束，尚未提交读取请求")
         if waiter not in done:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
             raise TimeoutError("读取请求未在原准备窗口内建立")
     finally:
         waiter.cancel()
         await asyncio.gather(waiter, return_exceptions=True)
+
+
+@asynccontextmanager
+async def _advancing_read(runtime, ready, start, executor, release=None):
+    task = asyncio.create_task(_advance_until_read(runtime, ready))
+    try:
+        yield task
+    finally:
+        original = sys.exception()
+        start.set()
+        if release is not None:
+            release.set()
+        errors = []
+        if not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=3)
+            except BaseException as error:
+                errors.append(error)
+                if isinstance(error, TimeoutError):
+                    task.cancel()
+                    try:
+                        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=3)
+                    except BaseException as cancellation_error:
+                        errors.append(cancellation_error)
+        elif not task.cancelled():
+            error = task.exception()
+            if original is not None and error is not None:
+                errors.append(error)
+        try:
+            settled = await asyncio.wait_for(executor.drain_required(), timeout=3)
+            errors.extend(result.exception or RuntimeError(result.error) for result in settled.failed)
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            if original is not None:
+                for error in errors:
+                    original.add_note(f"读取责任收场: {type(error).__name__}: {error}")
+            else:
+                raise BaseExceptionGroup("读取责任收场失败", errors)
+
+
+def _assert_original_ticket(owned, ticket):
+    rows = owned.connection.execute(
+        "SELECT r.id,r.copy_id,r.responsibility_key,r.attempts_used,"
+        "a.attempt_no,a.status,a.result_json,a.intent_event_id "
+        "FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id "
+        "WHERE r.copy_id=? AND (a.status=1 OR a.result_json IS NULL)",
+        (int(ticket.target_id),)).fetchall()
+    assert len(rows) == 1
+    run_id, copy_id, key, used, attempt, status, result, intent = rows[0]
+    assert (run_id, str(copy_id), key, used, attempt, status, result) == (
+        ticket.run_id, ticket.target_id, ticket.responsibility_key,
+        ticket.attempt_id, ticket.attempt_id, 1, None)
+    assert ticket.operation == "read" and intent is not None
 
 
 def _error_text(error):
@@ -86,6 +141,24 @@ def _error_text(error):
 @pytest.mark.parametrize("failure", ["not_started", "exited", "exited_cleanup", "no_exit", "transport_error", "bare_cancel", "verify_close", "dispose_close"])
 async def test_preparation_settlement_survives_real_consumer_and_result_save(photo_read_request, tmp_path, source_kind, failure, monkeypatch):
     assert source_kind == "device"
+    if failure in ("verify_close", "dispose_close"):
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "integration.outputs.test_read_preparation_settlement",
+            str(tmp_path / "isolated"), failure,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.communicate()
+        assert process.returncode == 0, (process.returncode, stdout.decode(errors="replace"),
+                                         stderr.decode(errors="replace"))
+        return
+    await _run_preparation_case(photo_read_request, tmp_path, failure, monkeypatch)
+
+
+async def _run_preparation_case(photo_read_request, tmp_path, failure, monkeypatch):
     owned, command = photo_read_request
     config, driver, transport, staging = _real_download_driver(tmp_path, monkeypatch)
     original_run = transport.run
@@ -105,14 +178,6 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(pho
             raise asyncio.CancelledError("transport cancelled without exit")
         raise OSError("transport lost exit")
     transport.run = original_run if failure in ("verify_close", "dispose_close") else run
-    # 在公开工作区构造边界记录本测试拥有的真实资源，关闭故障由 os.close 注入。
-    workspaces = []
-    class Workspace(DownloadWorkspace):
-        def __init__(self, *args):
-            super().__init__(*args)
-            workspaces.append(self)
-    from camctl.devices.drivers.hasselblad import driver as driver_module
-    monkeypatch.setattr(driver_module, "DownloadWorkspace", Workspace)
     ready, start = asyncio.Event(), asyncio.Event()
     tickets = []
     original_open = driver.open_read
@@ -123,16 +188,21 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(pho
         return await original_open(source, offset, ticket, idle_timeout_s=idle_timeout_s)
     driver.open_read = open_read
     entered, release = threading.Event(), threading.Event()
-    real_close, real_stat = os.close, os.fstat
-    close_calls = []
+    real_open, real_close, real_stat = os.open, os.close, os.fstat
+    close_calls, opened = [], []
     work = None
+    def track_open(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        if work is not None and Path(path) == work / "tool-selected-name.bin":
+            opened.append(fd)
+        return fd
     def fail_close(fd):
-        if workspaces and workspaces[-1].fd == fd:
+        if fd in opened:
             close_calls.append(fd)
             raise OSError("file close not confirmed")
         return real_close(fd)
     def fault_stat(fd):
-        if workspaces and workspaces[-1].fd == fd and not entered.is_set():
+        if fd in opened and not entered.is_set():
             entered.set()
             if failure == "verify_close":
                 raise ValueError("source file verification rejected")
@@ -147,76 +217,73 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(pho
             return real_remove(path)
         monkeypatch.setattr(downloads.shutil, "rmtree", fail_remove)
     if failure in ("verify_close", "dispose_close"):
+        monkeypatch.setattr(os, "open", track_open)
         monkeypatch.setattr(os, "close", fail_close)
     if failure in ("verify_close", "dispose_close"):
         monkeypatch.setattr(os, "fstat", fault_stat)
+    executor = FileTaskExecutor(Supervisor())
     unsettled = failure in ("no_exit", "transport_error", "bare_cancel", "verify_close", "dispose_close")
     try:
         async with read_test_runtime(owned, driver, EVIDENCE, staging=staging,
-                max_read_attempts=5,
+                max_read_attempts=5, file_executor=executor,
                 occurred_at=lambda: command.occurred_at + 20, driver_id=DRIVER_ID,
                 availability=_availability(config, driver, lambda: command.occurred_at + 20)) as runtime:
-            task = asyncio.create_task(_advance_until_read(runtime, ready))
-            await _wait_read_ready(task, ready)
-            ticket = tickets[0]
-            work = download_path(staging, ticket)
-            start.set()
-            if failure == "dispose_close":
-                async with asyncio.timeout(2):
-                    while not entered.is_set():
-                        await asyncio.sleep(0.001)
-                task.cancel("cancel_verify")
-                release.set()
-            if unsettled:
-                with pytest.raises(BaseException) as observed:
-                    await task
-                if failure in ("verify_close", "dispose_close"):
-                    assert "file close not confirmed" in _error_text(observed.value)
-                    assert ("source file verification rejected" if failure == "verify_close" else "cancel_verify") in _error_text(observed.value)
-                status, result = owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-                    (ticket.run_id, ticket.attempt_id)).fetchone()
-                if failure in ("verify_close", "dispose_close"):
-                    assert len(close_calls) == 1
-                    assert os.fstat(close_calls[0]).st_size == len(RAW)
-                assert status == 1 and result is None
-                assert running_read_ticket(owned, int(ticket.target_id))[0] == ticket
-                assert work.exists() and not await recover_download(staging, ticket)
-                assert len(transport.calls) == 3
-                # 正式入口再进入仍保留原运行尝试，不增加设备调用或读取预算。
-                try:
-                    await advance_obtain(runtime)
-                except (ReadPreparationError, ConsistencyError, asyncio.CancelledError) as retained:
-                    assert any(value in _error_text(retained) for value in
-                        ("preparation_unconfirmed", "恢复", "原", "cancel_verify"))
-                assert tickets == [ticket]
-                assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (1,)
-                assert owned.connection.execute("SELECT slot_device_id FROM file_copies WHERE id=?", (int(ticket.target_id),)).fetchone()[0] is not None
-            else:
-                await task
-                status, result = owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-                    (ticket.run_id, ticket.attempt_id)).fetchone()
-                assert status == 3
-                assert json.loads(result)["settlement"]["evidence"]["type"] == "read_returned"
-                stored = json.loads(owned.connection.execute("SELECT error_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-                    (ticket.run_id, ticket.attempt_id)).fetchone()[0])
-                assert stored["code"] == "device_error"
-                assert ("exec not found" if failure == "not_started" else "17") in stored["details"]["reason"]
-                if failure == "exited_cleanup":
-                    assert "download cleanup denied" in stored["details"]["reason"] and work.exists()
+            async with _advancing_read(runtime, ready, start, executor, release) as task:
+                await _wait_read_ready(task, ready)
+                ticket = tickets[0]
+                work = download_path(staging, ticket)
+                start.set()
+                if failure == "dispose_close":
+                    async with asyncio.timeout(2):
+                        while not entered.is_set():
+                            await asyncio.sleep(0.001)
+                    task.cancel("cancel_verify")
+                    release.set()
+                if unsettled:
+                    with pytest.raises(BaseException) as observed:
+                        await task
+                    if failure in ("verify_close", "dispose_close"):
+                        assert "file close not confirmed" in _error_text(observed.value)
+                        assert ("source file verification rejected" if failure == "verify_close" else "cancel_verify") in _error_text(observed.value)
+                    status, result = owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                        (ticket.run_id, ticket.attempt_id)).fetchone()
+                    if failure in ("verify_close", "dispose_close"):
+                        assert len(close_calls) == 1
+                        assert os.fstat(close_calls[0]).st_size == len(RAW)
+                    assert status == 1 and result is None
+                    _assert_original_ticket(owned, ticket)
+                    assert work.exists() and not await recover_download(staging, ticket)
+                    assert (work / "tool-selected-name.bin").read_bytes() == RAW
+                    assert len(transport.calls) == 3
+                    # 正式入口再进入仍保留原运行尝试，不增加设备调用或读取预算。
+                    try:
+                        await advance_obtain(runtime)
+                    except (ReadPreparationError, ConsistencyError, asyncio.CancelledError) as retained:
+                        assert any(value in _error_text(retained) for value in
+                            ("preparation_unconfirmed", "恢复", "原", "cancel_verify"))
+                    assert tickets == [ticket]
+                    assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (1,)
+                    assert owned.connection.execute("SELECT slot_device_id FROM file_copies WHERE id=?", (int(ticket.target_id),)).fetchone()[0] is not None
                 else:
-                    assert not work.exists()
-                assert RAW.decode("latin1") not in stored["details"]["reason"]
-                await advance_obtain(runtime)
-                assert tickets[-1].attempt_id == ticket.attempt_id + 1
-                assert len(transport.calls) == 6
+                    await task
+                    status, result = owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                        (ticket.run_id, ticket.attempt_id)).fetchone()
+                    assert status == 3
+                    assert json.loads(result)["settlement"]["evidence"]["type"] == "read_returned"
+                    stored = json.loads(owned.connection.execute("SELECT error_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                        (ticket.run_id, ticket.attempt_id)).fetchone()[0])
+                    assert stored["code"] == "device_error"
+                    assert ("exec not found" if failure == "not_started" else "17") in stored["details"]["reason"]
+                    if failure == "exited_cleanup":
+                        assert "download cleanup denied" in stored["details"]["reason"] and work.exists()
+                    else:
+                        assert not work.exists()
+                    assert RAW.decode("latin1") not in stored["details"]["reason"]
+                    await advance_obtain(runtime)
+                    assert tickets[-1].attempt_id == ticket.attempt_id + 1
+                    assert len(transport.calls) == 6
     finally:
         release.set()
-        # 注入的 close 明确未执行真实关闭，测试在原描述符上完成实际收场。
-        for workspace in workspaces:
-            if workspace.fd is not None:
-                real_close(workspace.fd)
-                workspace.fd = None
-            workspace.release()
 
 
 @pytest.mark.asyncio
@@ -261,31 +328,52 @@ async def test_maintenance_waiting_keeps_original_read_even_when_user_cancelled(
                                                 (command.action_id,)).fetchone() == (1,)
             raise
     driver.open_read = open_read
+    executor = FileTaskExecutor(Supervisor())
     async with read_test_runtime(owned, driver, EVIDENCE, staging=staging,
-            max_read_attempts=1,
+            max_read_attempts=1, file_executor=executor,
             occurred_at=lambda: command.occurred_at + 20, driver_id=DRIVER_ID,
             availability=_availability(config, driver, lambda: command.occurred_at + 20)) as runtime:
-        task = asyncio.create_task(_advance_until_read(runtime, ready))
-        await _wait_read_ready(task, ready)
-        ticket = tickets[0]
-        work = download_path(staging, ticket)
-        work.mkdir(parents=True)
-        (work / "old").write_bytes(b"old responsibility")
-        if waiting_for == "prepare_denied":
-            real_mkdir = os.mkdir
-            def denied(path, *args, **kwargs):
-                if Path(path) == work:
-                    raise PermissionError("download workspace preparation denied")
-                return real_mkdir(path, *args, **kwargs)
-            monkeypatch.setattr(os, "mkdir", denied)
-        start.set()
-        with pytest.raises(ReadPreparationError) as delivered:
-            await task
-        assert delivered.value is failures[0]
-        assert delivered.value.settlement is ReadPreparationSettlement.WAITING
-        assert ("preparation denied" if waiting_for == "prepare_denied" else str(work)) in str(delivered.value)
-        assert running_read_ticket(owned, int(ticket.target_id))[0] == ticket
-        assert not transport.calls
-        assert (work / "old").read_bytes() == b"old responsibility"
-        assert owned.connection.execute("SELECT result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-            (ticket.run_id, ticket.attempt_id)).fetchone() == (None,)
+        async with _advancing_read(runtime, ready, start, executor) as task:
+            await _wait_read_ready(task, ready)
+            ticket = tickets[0]
+            work = download_path(staging, ticket)
+            work.mkdir(parents=True)
+            (work / "old").write_bytes(b"old responsibility")
+            if waiting_for == "prepare_denied":
+                real_mkdir = os.mkdir
+                def denied(path, *args, **kwargs):
+                    if Path(path) == work:
+                        raise PermissionError("download workspace preparation denied")
+                    return real_mkdir(path, *args, **kwargs)
+                monkeypatch.setattr(os, "mkdir", denied)
+            start.set()
+            with pytest.raises(ReadPreparationError) as delivered:
+                await task
+            assert delivered.value is failures[0]
+            assert delivered.value.settlement is ReadPreparationSettlement.WAITING
+            assert ("preparation denied" if waiting_for == "prepare_denied" else str(work)) in str(delivered.value)
+            _assert_original_ticket(owned, ticket)
+            assert not transport.calls
+            assert (work / "old").read_bytes() == b"old responsibility"
+            assert owned.connection.execute("SELECT result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                (ticket.run_id, ticket.attempt_id)).fetchone() == (None,)
+
+
+async def _isolated_preparation_case(path, failure):
+    from ..bootstrap.test_download_cleanup import photo_read_request as fixture
+    from ..support.capture import capture_test_session
+    from ..support.outputs import output_test_session
+
+    path.mkdir(parents=True)
+    with pytest.MonkeyPatch.context() as patch, output_test_session():
+        async with capture_test_session() as resources:
+            prepared = fixture.__wrapped__(path, resources)
+            request = await anext(prepared)
+            try:
+                await _run_preparation_case(request, path, failure, patch)
+            finally:
+                await prepared.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(_isolated_preparation_case(Path(sys.argv[1]), sys.argv[2]))
