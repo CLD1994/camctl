@@ -419,9 +419,10 @@ class _StatementProbe:
                     raise
                 finally:
                     self._statement_reads = None
-                if reads:
-                    self._reads_by_sql[sql] = frozenset(reads)
-                else:
+                    # 绑定失败时 SQLite 也可能已缓存准备好的语句。
+                    if reads:
+                        self._reads_by_sql[sql] = frozenset(reads)
+                if not reads:
                     # SQLite 可复用本连接已准备的语句而不再调用 authorizer。
                     reads = set(self._reads_by_sql.get(sql, ()))
                 columns = cursor.description or ()
@@ -468,6 +469,13 @@ def test_statement_probe_observes_cached_sql_on_each_connection(tmp_path, monkey
         assert connection.execute(other, (0,)).fetchall() == [(1, 7)]
         assert connection.execute(other, (7,)).fetchall() == []
         assert connection.execute('SELECT entity_id FROM report_entity_changes WHERE entity_id=?', (7,)).fetchall() == [(7,)]
+        fresh_sql = 'SELECT entity_type,entity_id FROM report_entity_changes WHERE entity_id>=?'
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute(fresh_sql, ())
+        with pytest.raises(sqlite3.OperationalError):
+            connection.execute('SELECT FROM report_entity_changes')
+        assert len(probe.statements) == 4
+        assert connection.execute(fresh_sql, (7,)).fetchall() == [(1, 7)]
         with pytest.raises(sqlite3.ProgrammingError):
             connection.execute(sql, ())
         assert connection.execute(sql, (0,)).fetchall() == [(1, 7)]
@@ -477,7 +485,7 @@ def test_statement_probe_observes_cached_sql_on_each_connection(tmp_path, monkey
 
     assert [(record['kind'], record['parameters'], record['rows']) for record in probe.statements] == [
         ('candidate', (0,), [(1, 7)]), ('candidate', (7,), []), ('candidate', (6,), [(1, 7)]),
-        ('page', (7,), [(7,)]), ('candidate', (0,), [(1, 7)]),
+        ('page', (7,), [(7,)]), ('candidate', (7,), [(1, 7)]), ('candidate', (0,), [(1, 7)]),
         ('candidate', (7,), []), ('candidate', (0,), [(1, 7)]),
     ]
     assert ('main', 'unrelated', 'a') in probe.reads
