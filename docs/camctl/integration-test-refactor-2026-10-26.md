@@ -1062,7 +1062,7 @@ B66在`5783d833`仅执行一次定向测量：camera_demo_transport 的 `test_ru
 
 process_recovery 正向选择 `test_next_run_waits_for_old_group_settlement`、`test_abnormal_restart_keeps_shared_budget`、`test_unknown_scan_keeps_call_and_pending_request`、`test_early_reap_never_signals_stale_group_or_starts_run`、`test_original_group_does_not_kill_parallel_submit_or_other_groups`。host_wait_failures 选择 `test_host_exit_does_not_wait_for_descendant_to_close_output`、`test_wait_limits_incompatible_terminal_to_requested_actions`。原文件的其他未修改节点没有重复运行。
 
-本批完成后按实际补丁核对接入，释放媒体、照片准备、读取汇总、结果准备、来源保存、文件责任和根Action6／进程观察的八个工作区及已解决临时材料，保留分支和提交；新的三个实施工作区仅承载各自当前任务。生产源码保持不变，未决原始现场仍在原处。
+本批十四个自建实施工作区均已核对实际补丁进入协调分支，并通过Git释放，分支和提交保留；已解决临时材料及单独npm ci依赖也已删除。共享解释器的源码绑定已恢复到稳定协调工作区，不再指向已释放目录。相对本批起点f0d58feb，camctl、客户端、host生产源码及protocol均无改动；未决原始现场保持原位。
 
 | 2026-11-15 历史消费者，`50b5ff38` | 实际完整范围 | 结果与边界 |
 | --- | --- | --- |
