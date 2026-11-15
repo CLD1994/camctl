@@ -718,17 +718,17 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
     )
     deployment = scenario["deployment"]
     demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
-    waiter_names = ("pre-default-a", "pre-default-b")
-    waiter_ids = [
-        _submit_obtain(
-            demo, deployment, action_name=name, source_id=source_id,
-            selection={"filter": "default"},
-        )
-        for name in waiter_names
-    ]
-    _wait_for_waiting_obtains(deployment, source_id, waiter_names)
-    failure = demo.watch_failures()
     try:
+        waiter_names = ("pre-default-a", "pre-default-b")
+        waiter_ids = [
+            _submit_obtain(
+                demo, deployment, action_name=name, source_id=source_id,
+                selection={"filter": "default"},
+            )
+            for name in waiter_names
+        ]
+        _wait_for_waiting_obtains(deployment, source_id, waiter_names)
+        failure = demo.watch_failures()
         if case != "unknown":
             runs = [record for record in _records(deployment.root / "cli-processes.jsonl")
                     if record["stage"] == "started" and record["command"][:1] == ["run"]]
@@ -1228,17 +1228,17 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
     )
     deployment = scenario["deployment"]
     demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
-    waiter_names = ("native-prefix-a", "native-prefix-b")
-    waiter_ids = [
-        _submit_obtain(
-            demo, deployment, action_name=name, source_id=source_id,
-            selection={"filter": "default"},
-        )
-        for name in waiter_names
-    ]
-    _wait_for_waiting_obtains(deployment, source_id, waiter_names)
-    failure = demo.watch_failures()
     try:
+        waiter_names = ("native-prefix-a", "native-prefix-b")
+        waiter_ids = [
+            _submit_obtain(
+                demo, deployment, action_name=name, source_id=source_id,
+                selection={"filter": "default"},
+            )
+            for name in waiter_names
+        ]
+        _wait_for_waiting_obtains(deployment, source_id, waiter_names)
+        failure = demo.watch_failures()
         _release_clock(scenario, 330)
         report = wait_for(
             lambda: _report_with_statuses(

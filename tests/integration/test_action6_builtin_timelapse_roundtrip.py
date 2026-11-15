@@ -54,6 +54,17 @@ def _tools(package, deployment, params):
     return environment, tools / "camctl", clock, remote, content
 
 
+def _assert_action6_recovery_boundary_empty(
+        deployment, adb_log, *, action_id, activity_id, recovery_started_ns):
+    _assert_recovery_boundary_empty(
+        deployment, adb_log, action_id=action_id, activity_id=activity_id,
+        recovery_started_ns=recovery_started_ns,
+    )
+    assert not [call for call in _records(adb_log)
+                if call.get("kind") == "file"
+                and call.get("started_ns", 0) >= recovery_started_ns]
+
+
 @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 联合链")
 def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs(
         tmp_path, host_demo, osmo_package, monkeypatch):
@@ -128,7 +139,7 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
         _wait_for_boundary_reads(clock_log, pid=resumed["pid"], epoch=negative["epoch"],
             module="camctl.capture.handlers", function="_advance_timelapse_natural_wait", kind="monotonic_ns",
             utc_us=initial["utc_us"] + 329_000_000, monotonic_ns=initial["monotonic_ns"] + 329_000_000_000)
-        _assert_recovery_boundary_empty(deployment, adb_log, action_id=action_id, activity_id=activity_id,
+        _assert_action6_recovery_boundary_empty(deployment, adb_log, action_id=action_id, activity_id=activity_id,
             recovery_started_ns=resumed["started_ns"])
         release = set_running(clock, utc_us=initial["utc_us"] + 330_000_000,
             monotonic_ns=initial["monotonic_ns"] + 330_000_000_000)
