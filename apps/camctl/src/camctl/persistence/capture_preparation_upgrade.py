@@ -86,6 +86,9 @@ def _upgrade_tables(source, target, target_format):
     original = _one(source, "SELECT format_version FROM database_metadata WHERE id=1")[0]
     tables = _tables(source)
     added = set(business_tables_for_format(target_format)) - set(business_tables_for_format(original))
+    from camctl.persistence.runtime import NON_BUSINESS_TABLE_MINIMUM_FORMAT
+    added.update(name for name, minimum in NON_BUSINESS_TABLE_MINIMUM_FORMAT.items()
+                 if original < minimum <= target_format)
     target_tables = _tables(target)
     nonempty = {table for table in added & set(target_tables)
         if _one(target, f"SELECT COUNT(*) FROM {_quote(table)}") != (0,)}

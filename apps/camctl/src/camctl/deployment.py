@@ -8,8 +8,26 @@ import os
 from pathlib import Path
 
 
+def _migrate_v9_to_v10(state_db: Path, identity: dict) -> None:
+    """在维护事务的独立副本上保留全部 V9 行并发布新结构。"""
+    from camctl.persistence.capture_preparation_upgrade import _upgrade_full_copy
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, _FORMAT_VERSIONS, open_existing
+
+    owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        if asdict(owned.metadata) != identity:
+            raise ValueError('迁移前数据库身份发生变化')
+        _upgrade_full_copy(owned, state_db, source_versions=(int(_FORMAT_VERSIONS.V9),),
+                           upgrade_name='format', description='数据库格式', minimum='V9')
+    finally:
+        owned.connection.close()
+
+
 # 起点到下一格式的登记。每个迁移负责校验其历史和进度语义。
-MIGRATIONS = {}
+from camctl.contracts.enums import enum_for
+
+_FORMAT_VERSIONS = enum_for("database_metadata.format_version")
+MIGRATIONS = {int(_FORMAT_VERSIONS.V9): (int(_FORMAT_VERSIONS.V10), _migrate_v9_to_v10)}
 
 
 def inspect_configuration(config_path: Path | None) -> dict:

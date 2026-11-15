@@ -40,6 +40,10 @@ PHOTO_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V5)
 OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V6)
 DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V7)
 PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V8)
+BASELINE_NOT_CALLED_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V10)
+
+# 非事件投影表的首次格式；事件投影表由事件登记维护。
+NON_BUSINESS_TABLE_MINIMUM_FORMAT = {"acceptance_receipts": int(_FORMAT_VERSIONS.V10)}
 _ACTION_TYPES = enum_for("actions.type")
 
 _PRAGMA_LIMIT = 2_147_483_647
@@ -310,6 +314,16 @@ def require_preview_selection_format(format_version: int | None) -> None:
         )
 
 
+def require_baseline_not_called_format(format_version: int | None) -> None:
+    """未调用事实需要 V10 的状态组合。"""
+    if (isinstance(format_version, bool) or not isinstance(format_version, int)
+            or format_version not in SUPPORTED_FORMAT_VERSIONS
+            or format_version < BASELINE_NOT_CALLED_MINIMUM_FORMAT_VERSION):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持基准读取未调用事实；请先执行部署更新"
+        )
+
+
 def _known_integer_check_values(sql: str | None, column: str) -> frozenset[int] | None:
     """读取指定已知列声明中的简单整数等值或 IN 检查，不解析通用 SQL。"""
     if not isinstance(sql, str):
@@ -423,12 +437,20 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
         expected = expected_table_names()
         from camctl.history.events import business_tables_for_format, load_event_registry
         unavailable = set(load_event_registry()["tables"]) - set(business_tables_for_format(format_version))
+        unavailable.update(name for name, minimum in NON_BUSINESS_TABLE_MINIMUM_FORMAT.items()
+                           if format_version < minimum)
         expected = expected - unavailable
         missing = expected - present
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
         _verify_read_end_structure(connection)
+        if format_version >= int(_FORMAT_VERSIONS.V10):
+            from camctl.persistence.format_v10_structure import verify_format_v10_structure
+            try:
+                verify_format_v10_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"格式 V10 结构无效: {error}") from error
         if format_version >= int(_FORMAT_VERSIONS.V9):
             from camctl.persistence.file_batch_structure import verify_file_batch_structure
             try:
