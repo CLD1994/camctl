@@ -22,6 +22,22 @@ from .test_work_files import (
 )
 
 
+async def _wait_started(started, running):
+    deadline = asyncio.get_running_loop().time() + 5
+    while not started.is_set():
+        remaining = deadline - asyncio.get_running_loop().time()
+        assert remaining > 0, "实际文件操作没有进入目标阶段"
+        done, _ = await asyncio.wait({running}, timeout=min(remaining, 0.05))
+        if done:
+            await running
+            raise AssertionError("实际文件任务在进入目标阶段前结束")
+
+
+async def _wait_finished(running):
+    done, _ = await asyncio.wait({running}, timeout=5)
+    assert done, "放行后实际责任未在期限内结束"
+
+
 class FileOwner:
     async def take_over(self, task):
         await task.pending.wait()
@@ -78,7 +94,7 @@ async def test_live_media_file_task_keeps_terminal_owner_file_until_actual_end(p
             task_id=FileTaskId("media/terminal-owner"), file_id=file_id,
             stage="media", business="original file", body=media), FileOwner()))
         try:
-            await asyncio.to_thread(started.wait)
+            await _wait_started(started, running)
             context = replace(_context(database, roots), executor=executor)
 
             result = await clean_one_work_file(file_id, context)
@@ -89,8 +105,11 @@ async def test_live_media_file_task_keeps_terminal_owner_file_until_actual_end(p
             assert executor.unfinished_files() == (file_id,)
         finally:
             release.set()
+            await _wait_finished(running)
             await running
-            await supervisor.drain_required()
+            drain = asyncio.create_task(supervisor.drain_required())
+            await _wait_finished(drain)
+            await drain
 
 
 @pytest.mark.asyncio
@@ -119,7 +138,7 @@ async def test_cancel_cleanup_waits_actual_unlink_and_saves_result_once(public_f
         context = _context(database, roots)
         task = asyncio.create_task(clean_one_work_file(file_id, context))
         try:
-            assert await asyncio.to_thread(started.wait, 0.5)
+            await _wait_started(started, task)
             task.cancel()
             await asyncio.sleep(0)
             task.cancel()
@@ -128,6 +147,7 @@ async def test_cancel_cleanup_waits_actual_unlink_and_saves_result_once(public_f
             assert _work_path(roots, owned, file_id).read_bytes() == _CONTENT
             assert _file_state(owned, file_id)[:2] == (2, 3)
             release.set()
+            await _wait_finished(task)
             with pytest.raises(asyncio.CancelledError):
                 await task
             assert _file_state(owned, file_id)[:2] == (2, 4)
@@ -136,4 +156,5 @@ async def test_cancel_cleanup_waits_actual_unlink_and_saves_result_once(public_f
             assert calls == [target]
         finally:
             release.set()
+            await _wait_finished(task)
             await asyncio.gather(task, return_exceptions=True)

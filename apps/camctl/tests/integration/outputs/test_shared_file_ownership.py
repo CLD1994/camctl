@@ -14,7 +14,6 @@ import pytest
 
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.host_files.tasks import FileTaskExecutor
-from camctl.outputs import copy
 from camctl.outputs.copy import (
     CompletionContext, CopyContext, SegmentContext, complete_copy,
     copy_next_segment, prepare_copy,
@@ -34,6 +33,7 @@ from ..support.outputs import submit_output_document
 from ..capture.result_consumer_fixtures import ResultCatalog
 from .test_qualification import _NOW
 from .test_work_files import _cancel_delivery, _context, _file_state
+from .test_work_file_execution import _wait_finished, _wait_started
 
 
 @pytest.mark.asyncio
@@ -52,37 +52,54 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
         loop_thread = threading.get_ident()
         session = None
 
-        def hold(actual):
-            def run(*args, **kwargs):
-                actual_threads.append(threading.get_ident())
-                if threading.get_ident() == loop_thread:
-                    raise OSError("实际文件操作不能在事件循环中等待")
-                started.set()
-                release.wait()
-                return actual(*args, **kwargs)
-            return run
+        def hold():
+            actual_threads.append(threading.get_ident())
+            if threading.get_ident() == loop_thread:
+                raise OSError("实际文件操作不能在事件循环中等待")
+            started.set()
+            assert release.wait(10), "测试未放行实际文件调用"
+
+        class HeldSource:
+            def __getattr__(self, name):
+                return getattr(session, name)
+
+            def read_chunk(self, limit):
+                hold()
+                return session.read_chunk(limit)
 
         if stage == "prepare":
-            monkeypatch.setattr(copy, "prepare_target", hold(copy.prepare_target))
             operation = prepare_copy(copy_id, CopyContext(
                 repository, database, roots, _NOW + 20, executor=executor))
         elif stage == "segment":
             await prepare_copy(copy_id, CopyContext(repository, database, roots, _NOW + 1))
             session = ReadSession(SourceFile("501", {}, len(_CONTENT)), 0,
                                   _ByteStream(_CONTENT), Decimal("10"))
-            monkeypatch.setattr(copy, "transfer_segment", hold(copy.transfer_segment))
             operation = copy_next_segment(copy_id, SegmentContext(
-                repository, database, roots, _NOW + 20, len(_CONTENT), session,
+                repository, database, roots, _NOW + 20, len(_CONTENT), HeldSource(),
                 executor=executor))
-        elif stage == "hash":
+        else:
             await _drive(owned, roots, copy_id, segment_size=len(_CONTENT))
-            monkeypatch.setattr(copy, "hash_target", hold(copy.hash_target))
             operation = complete_copy(copy_id, CompletionContext(
                 repository, database, roots, _NOW + 20, executor=executor))
 
+        relative, = owned.connection.execute(
+            "SELECT relative_path FROM intermediate_files WHERE id=?", (file_id,)).fetchone()
+        target = roots.staging / relative
+        actual_open = os.open
+
+        def hold_target(path, flags, *args, **kwargs):
+            selected = (isinstance(path, (str, Path)) and Path(path) == target
+                        and ((stage == "prepare" and flags & os.O_CREAT)
+                             or (stage == "hash" and flags & os.O_ACCMODE == os.O_RDONLY)))
+            if selected:
+                hold()
+            return actual_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", hold_target)
+
         running = asyncio.create_task(operation)
         try:
-            assert await asyncio.to_thread(started.wait, 0.5), "实际调用必须已开始"
+            await _wait_started(started, running)
             assert executor.unfinished_files() == (file_id,)
             if qualification.delivery_id is not None:
                 _cancel_delivery(owned, qualification.delivery_id)
@@ -100,16 +117,20 @@ async def test_shared_file_operation_keeps_qualification_until_actual_end(
             assert owned.connection.execute("SELECT 1").fetchone() == (1,)
             assert executor.unfinished_files() == (file_id,)
             release.set()
+            await _wait_finished(running)
             with pytest.raises(asyncio.CancelledError):
                 await running
             assert executor.unfinished_files() == ()
             assert actual_threads and all(value != loop_thread for value in actual_threads)
         finally:
             release.set()
+            await _wait_finished(running)
             await asyncio.gather(running, return_exceptions=True)
             if session is not None:
                 session.request_stop()
-                await session.wait_stopped()
+                read_end = asyncio.create_task(session.wait_stopped())
+                await _wait_finished(read_end)
+                await read_end
 
 
 @pytest.mark.asyncio

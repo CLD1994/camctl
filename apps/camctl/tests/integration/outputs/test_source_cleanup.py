@@ -9,35 +9,22 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
-from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
 
 import pytest
 import pytest_asyncio
 
-from camctl.capture.files import file_identity_key
-from camctl.contracts.values import new_operation_key
-from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.attempts import AttemptConfig
 from camctl.outputs.cleanup_flow import (
-    CleanupOutcomeChoice,
-    CleanupRuntime,
     delete_source_file,
 )
-from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from ..support.database import business_database, create_test_database
-from ..support.outputs import cleanup_runtime
+from ..bootstrap.test_output_binding_changes import (
+    Catalog, _NOW, _save_photos, environment,  # noqa: F401
+)
+from ..support.outputs import cleanup_runtime, prepare_cleanup_member
 
-
-_NOW = 1_750_000_000_000_000
-_BINDING = DeviceBinding(device_id="cam-1", driver_id="camctl-adb")
 
 _EVIDENCE = EvidenceRegistry(
     (
@@ -72,7 +59,7 @@ class DriverDouble:
             observations = (
                 DeviceObservation(
                     type="file_absent", version=1,
-                    data={"cleanup_item_id": "91"}),
+                    data={"cleanup_item_id": request.params["cleanup_item_id"]}),
             )
         return DeviceCallResult(
             observations=observations, error=self.delete_error)
@@ -84,85 +71,27 @@ class DriverDouble:
             observations = (
                 DeviceObservation(
                     type="file_presence", version=1,
-                    data={"cleanup_item_id": "91", "present": self.present}),
+                    data={"cleanup_item_id": request.params["cleanup_item_id"], "present": self.present}),
             )
         return DeviceCallResult(
             observations=observations, error=self.query_error)
 
 
 @pytest_asyncio.fixture
-async def pipeline(tmp_path: Path):
-    target = tmp_path / "state.db"
-    create_test_database(target)
-    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)", ("f" * 32,))
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})))
-    connection.execute(
-        "INSERT INTO plans (id, request_id, name, created_at, status,"
-        " created_event_id, last_event_id, change_count)"
-        " VALUES (1, 4242, 'seed', ?, 1, 1, 1, 1)", (_NOW,))
-    connection.execute(
-        "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
-        " scheduled_at, group_name, input_fields_json, effective_params_json,"
-        " driver_id, max_delay_ms, execution_spec_json, status, execution_started,"
-        " cancel_requested, error_code, error_details_json, first_window_observed_at,"
-        " expiration_reason, source_resolution_state, resolved_source_plan_id,"
-        " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (11, 1, 0, 'rec', 2, 'cam-1', ?, NULL, '{}', '{}', 'camctl-adb',"
-        " 1000, '{}', 3, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
-        (_NOW,))
-    connection.execute(
-        "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
-        " scheduled_at, group_name, input_fields_json, effective_params_json,"
-        " driver_id, max_delay_ms, execution_spec_json, status, execution_started,"
-        " cancel_requested, error_code, error_details_json, first_window_observed_at,"
-        " expiration_reason, source_resolution_state, resolved_source_plan_id,"
-        " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (30, 1, 1, 'clean', 5, NULL, ?, NULL, ?, NULL, NULL, NULL, '{}',"
-        " 2, 1, 0, NULL, NULL, NULL, NULL, 2, 1, 2, 1, 1, 1)",
-        (_NOW, json.dumps({"params": {"output_ids": ["701"]}})))
-    connection.execute(
-        "INSERT INTO action_dependencies (id, action_id, depends_on_action_id)"
-        " VALUES (41, 30, 11)")
-    connection.execute(
-        "INSERT INTO device_files (id, observer_action_id, source_action_id,"
-        " identity_key, locator_json, ownership_evidence_json, role,"
-        " presence_state, completion_state, completion_evidence_json,"
-        " checksum_support, size_bytes, created_event_id, last_event_id,"
-        " change_count) VALUES (501, 11, 11, ?, '{}', '{}', 2, 2, 3,"
-        " '{}', 2, 10, 1, 1, 1)",
-        (file_identity_key(*connection.execute(
-            "SELECT device_id, driver_id FROM actions WHERE id = 11").fetchone(),
-            "file-0501"),))
-    connection.execute(
-        "INSERT INTO outputs (id, source_action_id, kind, device_file_id,"
-        " availability, cleanup_status, media_json, created_event_id,"
-        " last_event_id, change_count) VALUES (701, 11, 1, 501, 1, 1, '{}',"
-        " 1, 1, 1)")
-    # 目标已固定：成员 91 处于未解析。
-    connection.execute(
-        "INSERT INTO cleanup_items (id, action_id, requested_output_id, output_id,"
-        " status, restriction_state) VALUES (91, 30, 701, 701, 1, 1)")
-    connection.commit()
-    try:
-        async with business_database(target) as database:
-            yield owned, database
-    finally:
-        owned.connection.close()
+async def pipeline(environment):
+    cfg, owned, context, capture_driver = environment
+    await _save_photos(cfg, owned, context, capture_driver)
+    output_id, file_id = owned.connection.execute(
+        "SELECT id,device_file_id FROM outputs ORDER BY id LIMIT 1").fetchone()
+    _action_id, item_id = prepare_cleanup_member(
+        owned, catalog=Catalog(), now=_NOW, output_id=output_id, request_id="2")
+    yield owned, context.database, output_id, file_id, item_id
 
 
-async def _runtime(database, driver, *, delete_attempts=1, query_attempts=1,
+async def _runtime(database, driver, item_id, *, delete_attempts=1, query_attempts=1,
                    monotonic_ns=_default_monotonic_ns):
     return await cleanup_runtime(
-        database, driver, _EVIDENCE, item_id=91,
+        database, driver, _EVIDENCE, item_id=item_id, device_id="cam-a",
         delete_attempts=delete_attempts, query_attempts=query_attempts,
         occurred_at=lambda: _NOW + 10, monotonic_ns=monotonic_ns,
     )
@@ -179,83 +108,99 @@ pytestmark = pytest.mark.asyncio
 
 class TestDeletionChain:
     async def test_confirmed_delete_succeeds_with_cleaned_projection(self, pipeline):
-        owned, database = pipeline
+        owned, database, output_id, file_id, item_id = pipeline
         driver = DriverDouble(absent=True)
-        step = await delete_source_file(await _runtime(database, driver), 91)
+        step = await delete_source_file(await _runtime(database, driver, item_id), item_id)
         assert step.phase == "succeeded" and step.detail == "DELETED", step
         assert _value(
             owned, "SELECT status, restriction_state, outcome, error_code"
-            " FROM cleanup_items WHERE id = 91") == (4, 4, 1, None)
+            " FROM cleanup_items WHERE id = ?", item_id) == (4, 4, 1, None)
         assert _value(
             owned, "SELECT availability, cleanup_status FROM outputs"
-            " WHERE id = 701") == (3, 4)
+            " WHERE id = ?", output_id) == (3, 4)
         assert _value(
-            owned, "SELECT presence_state FROM device_files WHERE id = 501") == (3,)
+            owned, "SELECT presence_state FROM device_files WHERE id = ?", file_id) == (3,)
         # 删除流程一次尝试；查询流程未动。
         assert driver.delete_calls == 1 and driver.query_calls == 0
         assert _value(
             owned, "SELECT COUNT(*) FROM operation_runs"
-            " WHERE responsibility_key = 'delete/91'") == (1,)
+            " WHERE responsibility_key = ?", f"delete/{item_id}") == (1,)
 
     async def test_unknown_delete_confirmed_absent_by_query(self, pipeline):
-        owned, database = pipeline
+        owned, database, output_id, file_id, item_id = pipeline
         driver = DriverDouble(absent=False, present=False)
-        step = await delete_source_file(await _runtime(database, driver), 91)
+        step = await delete_source_file(await _runtime(database, driver, item_id), item_id)
         assert step.phase == "succeeded" and step.detail == "ABSENCE_CONFIRMED", step
         assert _value(
-            owned, "SELECT status, outcome FROM cleanup_items WHERE id = 91"
+            owned, "SELECT status, outcome FROM cleanup_items WHERE id = ?", item_id
         ) == (4, 3)
         assert driver.delete_calls == 1 and driver.query_calls == 1
         # 两个流程各自一次尝试：预算独立。
         assert _value(
             owned, "SELECT COUNT(*) FROM operation_runs"
-            " WHERE responsibility_key IN ('delete/91', 'exists/91')") == (2,)
+            " WHERE responsibility_key IN (?, ?)", f"delete/{item_id}", f"exists/{item_id}") == (2,)
 
     async def test_unknown_delete_with_file_still_present_waits(self, pipeline):
-        owned, database = pipeline
+        owned, database, output_id, file_id, item_id = pipeline
         driver = DriverDouble(absent=False, present=True)
         clock = {"ns": _default_monotonic_ns()}
         runtime = await _runtime(
-            database, driver, delete_attempts=2,
+            database, driver, item_id, delete_attempts=2,
             monotonic_ns=lambda: clock["ns"])
-        step = await delete_source_file(runtime, 91)
+        step = await delete_source_file(runtime, item_id)
         assert step.phase == "still_present", step
         # 成员保持删除中，不因文件仍在判定失败。
         assert _value(
-            owned, "SELECT status FROM cleanup_items WHERE id = 91") == (3,)
+            owned, "SELECT status FROM cleanup_items WHERE id = ?", item_id) == (3,)
+        # 未到原间隔不得消费第二次删除预算。
+        waiting = await delete_source_file(runtime, item_id)
+        assert waiting.phase == "delete_retry_wait", waiting
+        assert driver.delete_calls == 1
         # 预算内重试：删除间隔到时后再次推进发起第二次删除并成功。
         driver.absent = True
         clock["ns"] += 1_000_000_000
-        retry = await delete_source_file(runtime, 91)
+        retry = await delete_source_file(runtime, item_id)
         assert retry.phase == "succeeded", retry
         assert driver.delete_calls == 2
 
     async def test_delete_budget_exhaustion_fails_with_registered_error(
             self, pipeline):
-        owned, database = pipeline
+        owned, database, output_id, file_id, item_id = pipeline
         driver = DriverDouble(absent=False, present=True)
         # 第一次：删除效果未知，查询确认仍在——等待预算内重试。
         first = await delete_source_file(
-            await _runtime(database, driver, delete_attempts=1, query_attempts=1), 91)
+            await _runtime(database, driver, item_id, delete_attempts=1, query_attempts=1), item_id)
         assert first.phase == "still_present", first
         # 重试进入删除：删除预算耗尽按公共错误终态失败；查询预算独立
         # 不受影响（未确认缺席不以删除代替核实）。
         second = await delete_source_file(
-            await _runtime(database, driver, delete_attempts=1, query_attempts=1), 91)
+            await _runtime(database, driver, item_id, delete_attempts=1, query_attempts=1), item_id)
         assert second.phase == "failed", second
         assert second.detail == "delete_attempts_exhausted", second
         row = _value(
             owned, "SELECT status, error_code, error_details_json"
-            " FROM cleanup_items WHERE id = 91")
+            " FROM cleanup_items WHERE id = ?", item_id)
         assert row[0] == 5
         assert row[1] == 2
-        assert json.loads(row[2])["output_id"] == "701"
+        assert json.loads(row[2])["output_id"] == str(output_id)
+
+    async def test_query_budget_exhaustion_fails_without_another_delete(self, pipeline):
+        owned, database, output_id, _file_id, item_id = pipeline
+        driver = DriverDouble(absent=False, query_error={"code": "source_query_failed"})
+        runtime = await _runtime(database, driver, item_id, delete_attempts=1, query_attempts=1)
+        first = await delete_source_file(runtime, item_id)
+        assert first.phase == "query_unknown", first
+        second = await delete_source_file(runtime, item_id)
+        assert (second.phase, second.detail) == ("failed", "file_query_attempts_exhausted")
+        assert (driver.delete_calls, driver.query_calls) == (1, 1)
+        row = _value(owned, "SELECT status,error_details_json FROM cleanup_items WHERE id=?", item_id)
+        assert row[0] == 5 and json.loads(row[1])["output_id"] == str(output_id)
 
     async def test_terminal_member_is_idempotent(self, pipeline):
-        owned, database = pipeline
+        owned, database, output_id, file_id, item_id = pipeline
         driver = DriverDouble(absent=True)
-        await delete_source_file(await _runtime(database, driver), 91)
-        again = await delete_source_file(await _runtime(database, driver), 91)
+        await delete_source_file(await _runtime(database, driver, item_id), item_id)
+        again = await delete_source_file(await _runtime(database, driver, item_id), item_id)
         assert again.phase == "already_terminal", again
         assert driver.delete_calls == 1
-        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (2,)
