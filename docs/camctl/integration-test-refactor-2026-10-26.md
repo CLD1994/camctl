@@ -146,7 +146,7 @@ N1、A1—A5、B1—B21、C1—C15 已按各自状态完成修复、验证或有
 
 随后对 `c016a618` 的 bootstrap 全部 125 文件完成六组只读详审，A6、B22—B32、C16—C34 的三十一项具体处置已完成修改、评审和实际范围验证。部分精确组合按用户取舍减少，页面留存及未来停止能力的边界分别保留，不把它们写成等价覆盖。
 
-B33—B55、C35—C89 及后续具体事项已按表中结果完成修改、验证、有依据保留或覆盖取舍；C36 的 R5 原答复恢复问题也已修复。十六组件目录及根 Python／Node 保留文件的正文详审范围已补齐，不再重新普查。三档内存测量及检出校准已完成，自动增长判据明确暂缓，增长要求不认定已验收。当前仍需完成统一源码的最终全量、超过九秒的耗时登记和文档收尾；未运行的设备、无交换及已暂缓场景不混入本阶段剩余数。
+B33—B55、C35—C89 及后续具体事项已按表中结果完成修改、验证、有依据保留或覆盖取舍；C36 的 R5 原答复恢复问题也已修复。十六组件目录及根 Python／Node 保留文件的正文详审范围已补齐，不再重新普查。三档内存测量及检出校准已完成，自动增长判据明确暂缓，增长要求不认定已验收。最终全量、超过九秒的耗时登记和测试侧补修已完成；新发现的 R8／R9 生产职责调整等待讨论，整体目标尚未完成。未运行的设备、无交换及已暂缓场景不混入本阶段剩余数。
 
 状态中的“待测量”表示有实际代码依据、但尚未测出各阶段占比及收益；“待方案核实”表示已定位具体内部依赖，但没有确认等价改法，不能直接删除或宣布需要新接口。数量仅描述当前明确的参数实例，不是全仓剩余用例数或完成率。旧静态候选、动态别名及未逐项核对的协作关系不作为已证实待改对象。
 
@@ -156,15 +156,17 @@ B33—B55、C35—C89 及后续具体事项已按表中结果完成修改、验�
 
 - [x] 核实此前扩大单元运行的失败与本次覆盖承接的关系。已知直接相关的替身缺口已修，未找到其余失败承接本轮迁移行为的依据；未归因项单独保留，不据此宣称单元全量通过，也不扩为本轮全部修复任务。
 - [x] 核实 C68 的实际报告查询证据，同步查询验收要求；保留未测的候选驻留峰值及其他筛选组合边界，不恢复比较专项或扩展内存矩阵。
-- [ ] 在最终统一源码执行一次完整集成回归，覆盖实际发现的 camctl 全部组件目录、根 Python 和 Node 文件；记录源码、命令、环境、结果、退出码及墙钟。
-- [ ] 按主节点 setup、call、teardown 合计严格大于九秒登记慢用例；数量较多时按 Python 文件汇总，分开记录并行整轮墙钟、任务墙钟及用例阶段时间。
+- [x] 在统一冻结源码完成一次全量集成回归，覆盖实际发现的 camctl 全部组件目录、根 Python 和 Node 文件；原始失败、后续补验及未决生产事项分别记录。
+- [x] 按主节点 setup、call、teardown 合计严格大于九秒登记 160 项，按 39 个 Python 文件汇总；并行整轮、任务及用例阶段时间分别记录。
 - [ ] 汇总有效覆盖、取舍和后续写法，提交本阶段变更，释放本次工作区及已解决临时材料。
+- [ ] R8：讨论并确定受理答复的数据库访问分工，再实施获准的生产调整与相关验证。
+- [ ] R9：讨论并确定报告状态库异常转换的责任边界，再实施获准的生产调整与相关验证。
 
 ### 最终全量与补验（2026-11-16）
 
 最终运行冻结干净源码 `4eeb5dfe`，使用 Python 3.11.17、SQLite 3.53.1、Node 24.22.1、四个隔离任务槽及 2GiB 内存与交换空间合计预算。范围为全部十六个组件目录、三十二个根 Python 文件及四个 Node 文件。没有本地历史计时输入，显式使用 `--force-root-shards --root-shards 4`，由真实收集清单分配为 126 个任务；分片仅调整执行安排，不减少参数实例。
 
-第一次启动在收集阶段丢失运行会话，原进程和专属资源组均已不存在，没有执行用例，不计为完整回归或业务失败。重新启动后的运行由协调者持有实际会话，保持冻结输入，当前仍在执行。
+第一次启动在收集阶段丢失运行会话，原进程和专属资源组均已不存在，没有执行用例，不计为完整回归或业务失败。重新启动后的运行由协调者持有实际会话，保持冻结输入，已经自然结束；原外层会话实际返回退出码 1。
 
 已完成的 acceptance 任务有一项旧断言失败：`test_clock_status.py::test_reused_request_preserves_old_clock_status` 要求原凭据重送返回 REUSED。R5 已确定原凭据恢复第一次完整答复，新凭据重复请求才返回 REUSED。只将同原键的两处断言改为完整结果与第一次相等，保留历史不变及新键复用检查；完整文件补验 **10 项通过，pytest 3.17 秒、墙钟 3.93 秒、退出零**。生产源码没有改变，原全量失败与补验分别保留。
 
@@ -180,6 +182,101 @@ contracts 的导入图检查另有一项失败，报告六条禁止边。其中�
 | --- | --- |
 | R8：受理答复的数据库访问归属 | `AcceptanceRepository` 调用 `acceptance.receipts` 保存和恢复第一次完整答复；后者既比较申请、解释答复，又直接查写数据库及核实原历史事务。建议把数据库读写放回受理业务存储，业务模块保留申请身份及答复规则的纯计算，通用数据库不引用业务规则。必须保持同一事务保存、原键完整答复、原申请核对和错误语义。当前证明的是分层混合，没有证实重复保存、答复丢失或其他用户功能故障。 |
 | R9：报告发布的数据库异常转换归属 | `DbPublicationSession` 在报告流程模块里直接捕获 `sqlite3.Error`，转成 `StateDatabaseError`，供报告工作进程区分状态库故障与报告临时资源故障。建议先核对业务数据库入口的结果与直接异常契约，再把底层异常转换放到存储责任边界；保留 STATE 分类、原异常链、提交未知和取消行为。不能简单删除捕获或只修改依赖检查。当前未证实新的用户可观察故障，调整方案待讨论。 |
+
+### 最终回归结果与慢文件清单
+
+实际运行时间为 **2026-11-15 21:13:29—22:07:08 UTC**。干净冻结源码为 `4eeb5dfe`；组件、根 Python、Node 全部实际发现目标均纳入，28 个根模块按真实收集清单分片。逐任务的收集与执行身份相同，各分片的并集完整且互不重复，没有遗漏或额外节点。
+
+| 范围 | 通过 | 失败 | 跳过 |
+| --- | ---: | ---: | ---: |
+| Python 唯一主节点 | 10,318 | 15 | 4 |
+| Python 嵌套子检查，另计 | 342 | 0 | 0 |
+| 根 Node，四个文件 | 118 | 0 | 0 |
+
+126 个任务中 120 个通过、六个失败，入口、预算启动器及外层命令均退出 **1**。四项跳过为三个 Windows 文件系统／句柄场景和主机源不适用的读取配置参数。Python 主节点总数为 **10,337**，不把嵌套检查加入该数量。
+
+| 计时口径 | 秒 |
+| --- | ---: | ---: |
+| 隔离运行器整轮墙钟，含准备与调度 | 3219.279 |
+| 预算启动器从开始到收场 | 3219.867 |
+| shell 记录的完整外层墙钟 | 3220.180 |
+| 全部任务墙钟之和，任务并行 | 12013.130 |
+| Python 主节点准备阶段合计 | 1944.584 |
+| Python 主节点测试体阶段合计 | 9258.480 |
+| Python 主节点收场阶段合计 | 87.278 |
+
+整轮约 **53 分 40 秒**。任务时间不能相加当整轮墙钟；测试体还包含建库、业务准备和等待，不能解释为纯 SQL 或业务执行。较长的组件任务为 bootstrap **1445.800 秒**、capture **1034.027 秒**、outputs **904.873 秒**、persistence **588.620 秒**，这些任务各含大量短节点；只看单项九秒阈值会漏掉重复准备的累计成本。本次没有量化不同源码之间的稳定提速比例。
+
+预算由 v1 资源组执行，配置为内存与交换空间合计 **2,147,483,648 字节**。容量节点通过了实际叶组限额、峰值、内存不足及完整业务结果检查；成功任务临时目录已自动释放，具体业务峰值没有留存，不用外层委派组峰值替代。启动器没有环境或收场错误、没有剩余进程，专属资源组已移除；严格无交换与自动增长判据保持各自边界。
+
+冻结回归的十五项失败没有从原统计中抹去。时钟历史一项、日志四项、历史读取六项、读取子进程两项及仓储约束一项，共十四项已有上述测试侧修复和实际影响范围补验；各次相关范围合计 150 个不同主节点，另一次日志单项为重复身份，不再次累计。仓储约束精确补入已批准的结果批次只读事务，完整文件三项通过、墙钟 6.22 秒；共享审计的既有反例单元另有 68 项通过、pytest 0.18 秒／墙钟 0.56 秒。其余连接创建、直接提交及 `BEGIN IMMEDIATE` 限制保持。
+
+剩余的一项导入图失败对应 **R8、R9 两处生产职责问题**，已登记并等待讨论，不能将当前状态称为全量全绿。补修相对冻结版本只改测试、固定样本与文档，生产代码相同；各次补验不拼成一次新的完整回归，也不重复运行未受影响的全量。
+
+正式命令从仓库根执行。`PYTHON` 为 `/home/cld/.local/share/camctl-test-runtime311/bin/python`，`NODE_MODULES` 为 `/workspaces/camctl/apps/client/node_modules`。`BUDGET_OUTPUT`、`RUN_OUTPUT` 表示实际使用的两个独立输出目录，启动前均不存在；这里保留实际参数，不登记临时材料的具体路径。
+
+```bash
+time -p "$PYTHON" scripts/run-memory-budget.py --camctl-memory-limit 2GiB \
+  --evidence-dir "$BUDGET_OUTPUT" -- \
+  "$PYTHON" scripts/run-integration.py --scope all --jobs 4 \
+  --root-shards 4 --force-root-shards --python "$PYTHON" \
+  --node-modules "$NODE_MODULES" --output "$RUN_OUTPUT"
+```
+
+以下按 Python 文件登记 **严格超过九秒**的主节点：组件内部 **30 项**、根跨组件 **130 项**，合计 **160 项、39 个文件**。每行三个阶段只累计该文件中的慢节点，分母包含该文件全部主节点；模块／会话准备归实际首位消费者。全部计时来自冻结全量，不用补验耗时替换失败路径，不重复累计嵌套检查。
+
+**组件内部**，文件相对 `apps/camctl/tests/integration/`：
+
+| 文件 | 超过九秒／全部 | 准备／测试体／收场（秒） | 最慢节点（秒） |
+| --- | ---: | ---: | ---: |
+| [history/test_record_segment_history.py](../../apps/camctl/tests/integration/history/test_record_segment_history.py) | 3／34 | 0.007／124.943／0.005 | 84.535 |
+| [persistence/test_segment_scan_pairing.py](../../apps/camctl/tests/integration/persistence/test_segment_scan_pairing.py) | 3／55 | 0.009／120.753／0.073 | 41.776 |
+| [bootstrap/test_distribution.py](../../apps/camctl/tests/integration/bootstrap/test_distribution.py) | 5／43 | 0.013／75.572／0.007 | 21.040 |
+| [persistence/test_segment_transaction_batches.py](../../apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py) | 2／109 | 0.006／71.567／0.013 | 60.820 |
+| [acceptance/test_entrypoints.py](../../apps/camctl/tests/integration/acceptance/test_entrypoints.py) | 7／16 | 0.012／68.213／0.011 | 10.121 |
+| [bootstrap/test_hasselblad_device_distribution.py](../../apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py) | 2／2 | 1.265／63.936／0.007 | 33.827 |
+| [history/test_report_selection.py](../../apps/camctl/tests/integration/history/test_report_selection.py) | 1／39 | 0.054／63.650／0.014 | 63.718 |
+| [outputs/test_source_capacity.py](../../apps/camctl/tests/integration/outputs/test_source_capacity.py) | 1／1 | 0.008／34.319／0.001 | 34.328 |
+| [persistence/test_segment_result_batches.py](../../apps/camctl/tests/integration/persistence/test_segment_result_batches.py) | 2／2 | 0.006／25.552／0.019 | 13.645 |
+| [contracts/test_dependencies.py](../../apps/camctl/tests/integration/contracts/test_dependencies.py) | 1／3 | 14.746／0.000／0.000 | 14.747 |
+| [persistence/test_segment_storage.py](../../apps/camctl/tests/integration/persistence/test_segment_storage.py) | 1／89 | 0.003／13.712／0.010 | 13.725 |
+| [outputs/test_read_discovery.py](../../apps/camctl/tests/integration/outputs/test_read_discovery.py) | 1／29 | 0.121／12.849／0.011 | 12.982 |
+| [history/test_complete_history.py](../../apps/camctl/tests/integration/history/test_complete_history.py) | 1／19 | 0.254／11.254／0.011 | 11.519 |
+
+**根跨组件**，文件相对 `tests/integration/`：
+
+| 文件 | 超过九秒／全部 | 准备／测试体／收场（秒） | 最慢节点（秒） |
+| --- | ---: | ---: | ---: |
+| [test_hasselblad_photo_roundtrip.py](../../tests/integration/test_hasselblad_photo_roundtrip.py) | 23／29 | 99.871／1591.678／1.759 | 123.803 |
+| [test_device_file_cleanup_roundtrip.py](../../tests/integration/test_device_file_cleanup_roundtrip.py) | 9／10 | 185.488／414.220／0.163 | 152.130 |
+| [test_osmo_builtin_record_segmentation_roundtrip.py](../../tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py) | 8／8 | 92.740／501.434／0.083 | 94.417 |
+| [test_action6_segmented_recovery_roundtrip.py](../../tests/integration/test_action6_segmented_recovery_roundtrip.py) | 8／8 | 91.748／405.146／1.178 | 89.374 |
+| [test_osmo_builtin_timelapse_roundtrip.py](../../tests/integration/test_osmo_builtin_timelapse_roundtrip.py) | 3／4 | 68.450／238.002／0.047 | 111.744 |
+| [test_real_camera_demo_roundtrip.py](../../tests/integration/test_real_camera_demo_roundtrip.py) | 4／4 | 82.616／177.470／0.225 | 66.813 |
+| [test_camctl_motor_recovery.py](../../tests/integration/test_camctl_motor_recovery.py) | 15／21 | 8.109／224.845／0.198 | 19.360 |
+| [test_action6_builtin_segmented_roundtrip.py](../../tests/integration/test_action6_builtin_segmented_roundtrip.py) | 2／2 | 49.612／167.111／0.146 | 110.127 |
+| [test_camctl_motor_notifications.py](../../tests/integration/test_camctl_motor_notifications.py) | 5／5 | 83.339／117.120／0.155 | 46.520 |
+| [test_camctl_report_roundtrip.py](../../tests/integration/test_camctl_report_roundtrip.py) | 6／6 | 62.112／118.397／0.185 | 45.472 |
+| [test_camctl_output_roundtrip.py](../../tests/integration/test_camctl_output_roundtrip.py) | 7／7 | 0.013／177.567／0.118 | 46.019 |
+| [test_camctl_c_module_roundtrip.py](../../tests/integration/test_camctl_c_module_roundtrip.py) | 3／3 | 63.575／91.848／0.237 | 57.807 |
+| [test_camctl_session_recovery.py](../../tests/integration/test_camctl_session_recovery.py) | 6／6 | 0.015／149.594／0.129 | 30.752 |
+| [test_camctl_process_recovery.py](../../tests/integration/test_camctl_process_recovery.py) | 4／8 | 85.176／34.887／0.156 | 34.531 |
+| [test_action6_builtin_timelapse_roundtrip.py](../../tests/integration/test_action6_builtin_timelapse_roundtrip.py) | 1／1 | 21.530／95.565／0.124 | 117.219 |
+| [test_device_capability_declarations.py](../../tests/integration/test_device_capability_declarations.py) | 4／6 | 13.716／98.443／0.035 | 54.246 |
+| [test_camctl_host_deployment.py](../../tests/integration/test_camctl_host_deployment.py) | 3／5 | 66.154／28.845／0.097 | 33.696 |
+| [test_host_wait_failures.py](../../tests/integration/test_host_wait_failures.py) | 4／20 | 77.375／1.270／0.003 | 19.954 |
+| [test_video_size_estimate.py](../../tests/integration/test_video_size_estimate.py) | 5／12 | 0.010／77.176／0.047 | 24.668 |
+| [test_action6_builtin_demo_roundtrip.py](../../tests/integration/test_action6_builtin_demo_roundtrip.py) | 1／1 | 21.911／49.395／0.073 | 71.379 |
+| [test_timelapse_time_parameters.py](../../tests/integration/test_timelapse_time_parameters.py) | 2／3 | 0.004／68.361／0.029 | 35.107 |
+| [test_camctl_media_roundtrip.py](../../tests/integration/test_camctl_media_roundtrip.py) | 2／3 | 0.005／43.389／0.039 | 22.426 |
+| [test_camctl_cancellation_roundtrip.py](../../tests/integration/test_camctl_cancellation_roundtrip.py) | 1／1 | 0.002／38.776／0.020 | 38.798 |
+| [test_camctl_directory_switch.py](../../tests/integration/test_camctl_directory_switch.py) | 1／1 | 20.955／16.302／0.033 | 37.289 |
+| [test_camctl_capture_roundtrip.py](../../tests/integration/test_camctl_capture_roundtrip.py) | 2／2 | 0.004／32.468／0.033 | 18.176 |
+| [test_hasselblad_photo_parameters.py](../../tests/integration/test_hasselblad_photo_parameters.py) | 1／9 | 2.186／13.543／0.009 | 15.737 |
+
+最慢单项为精确文件清理 **152.130 秒**，其次为 Hasselblad 正常链 `raw-host-1-4000` **123.803 秒**、Action6 原生延时完整链 **117.219 秒**。这些节点包含独立安装、真实业务准备或设备合同等待；本次登记不把超过九秒自动判为冗余或生产瓶颈。
+
+四个 Node 文件任务墙钟分别为：事件转换 **2.845 秒／58 项**、报告依赖 **8.167 秒／32 项**、报告依赖条件 **0.595 秒／25 项**、视频覆盖协议 **1.155 秒／3 项**，均不足九秒。
 
 ### 已核实完成，应从旧待办关闭
 
@@ -200,8 +297,8 @@ contracts 的导入图检查另有一项失败，报告六条禁止边。其中�
 
 | 编号 | 具体问题与计划动作 | 当前状态 | 完成标准与验证范围 |
 | --- | --- | --- | --- |
-| Q1 | 原授权包含 camctl 各组件及根跨组件保留测试的公开边界、有效覆盖、重复与维护成本。 | 正文详审及已决处置完成；C68 已按实际证据收尾，R3 精确场景与暂缓项保持边界，最终统一回归待执行 | 按最终收尾清单核对，不重开已删除或暂缓的内容；最终结果保持与各次局部结果的区别。 |
-| Q2 | 历史完整回归有 164 个超过九秒的节点，不能代表当前源码。 | 已确认的准备复用、等待、判据和资源收场问题已处置；必要慢链有依据保留，本次最终回归重新计时 | 记录严格超过九秒的当前节点；数量较多时按文件汇总，不把并行阶段耗时之和当墙钟，也不据不同源码计算稳定收益。 |
+| Q1 | 原授权包含 camctl 各组件及根跨组件保留测试的公开边界、有效覆盖、重复与维护成本。 | 正文详审及已决处置完成；C68 已按实际证据收尾，R3 精确场景与暂缓项保持边界；最终统一回归已结束，测试侧失败已补修，R8／R9 等待讨论 | 按最终收尾清单核对，不重开已删除或暂缓的内容；最终结果保持与各次局部结果的区别。 |
+| Q2 | 历史完整回归有 164 个超过九秒的节点，不能代表当前源码。 | 已确认的准备复用、等待、判据和资源收场问题已处置；最终全量已完成计时，160 个慢节点按 39 个文件登记 | 记录严格超过九秒的当前节点；数量较多时按文件汇总，不把并行阶段耗时之和当墙钟，也不据不同源码计算稳定收益。 |
 | N1 | 根 `test_camctl_report_roundtrip.py::test_report_import_ack_roundtrip` 在等待同步动作成功时超时，报告已生成，但动作始终待执行，未进入领取、导入及 ACK。 | 已修复并集成，独立评审通过；80 项相关单元、12 项组件集成及完整根报告六项均通过，详见下文 | 受控回归证实并修复扫描后受理新任务的遗漏，保留真实跨组件链和原 120 秒预算。原全量失败仍缺精确交错见证，不将本次复现当作历史失败的确定归因，也不改写原全量结果。 |
 | N2 | 根报告联合链辅助函数先保存早期 ready 文件名，稍后却取最新发布编号，可能混用两份报告；冻结全量在此检查之前已因 N1 超时。 | 已修正并集成；独立评审及完整六项验证通过 | 从同一份实际可领取报告取得身份、字节及数据库长度／摘要，覆盖目标请求的同步完成后再领取；保留客户端导入和 ACK 全链。N2 的测试修正与 N1 的生产修复分别验证。 |
 | A1 | `bootstrap/test_session_lock_errors.py::test_lock_control_and_parent_cancel_keep_first_source` 的两个参数仍钩住私有报告装配和收场阶段。按已批准取舍删除这两个精确交叉，并清理仅供它们使用的辅助代码。 | 已完成，已独立评审并集成；结果见本阶段新增验证 | 保留公开解锁异常、原错误、日志副本、重复取消、文件结果及锁保护的分层测试；明确不再直接覆盖四条件交叉。验证完整锁文件及相关日志收场文件。 |
@@ -420,7 +517,7 @@ contracts 的导入图检查另有一项失败，报告六条禁止边。其中�
 | C144 | 根照片 _rows／内存反例、照片参数观察、host_wait 合成数据库没有确定关闭连接。 | 已完成，接入2c497fda、c58bb09b | host_wait、照片_rows、内存反例及参数观察均显式关闭；需要事务的两处保留原事务上下文。普通／恢复／参数／内存实际消费者及SQL异常出口通过，范围分别记录。 |
 | C145 | OSMO 时间消费见证要求调用栈含生产私有名并固定源码行。 | 已完成，接入445207c3 | 通过公开session_capture_assembly的UTC／单调钟回调标记真实拍摄消费，安装版来源、同PID／epoch、冻结双读数及跨真实0.5秒均保留；报告的general时钟不能代替。三个时间目标及正反例通过，移除私有函数／栈／源码行绑定；原目标和等待不变。 |
 | C146 | P-05把冻结答复、旧H读取、报告重建和错误收场的分层证据标成整项已覆盖，缺少读取中提交等具体见证。 | 本批公开见证与 R7 分类修复已接入；保留原 4200 动作、ACK、页间取消和进程重建各自的分层证据 | 状态库实际查询失败现为 STATE，报告临时资源失败为 REPORT。页间取消不等于 SQLite 执行中取消，本次故障注入没有经过真实报告子进程和完整设备停止；不将分层证据扩为全部同时组合，也不恢复已退休的历史 S 私有交叉。 |
-| V1 | 按具体风险复核本清单涉及的公开接口、覆盖承接和测试维护成本；核对旧记录的未关闭事项。 | 正文详审、已决处置与当前边界核实完成；C68、C146 及已决生产事项均已处理，D5／D6／D9 已删除，最终回归与耗时登记由 Q1、Q2 跟踪 | 不以阅读数代替质量完成率，最终验证与局部证据分别记录；已暂缓或移出的精确交叉不扩为本轮新增测试。 |
+| V1 | 按具体风险复核本清单涉及的公开接口、覆盖承接和测试维护成本；核对旧记录的未关闭事项。 | 正文详审、已决处置与当前边界核实完成；C68、C146 及已决生产事项均已处理，D5／D6／D9 已删除，最终回归、耗时登记及新发现的生产事项由 Q1、Q2 跟踪 | 不以阅读数代替质量完成率，最终验证与局部证据分别记录；已暂缓或移出的精确交叉不扩为本轮新增测试。 |
 | V2 | 各批完成实际影响范围验证，最后运行约定完整 camctl、根 Python／Node 及容量范围，记录准确源码、耗时和收场。 | 已完成；`1aa6ae18` 的统一回归全部通过，85 任务自然退出零，唯一节点及预算已核对，本轮构建与成功材料已释放。B5、B6 后续完整文件补验单列 | 区分整轮、完整文件补验、未运行和环境失败，不重复累计同一节点，不改写旧冻结全量退出码；同工作量报告收益，及时提交、集成及释放工作区和已解决临时材料。 |
 
 A1 的两个参数和 A2 的一个实例已按批准取舍移除，这不是全仓剩余用例数。B1、B2、B4 已完成测量、实施及完整影响范围验证，B3 已测量并说明保留理由。C1—C3 是三组具体边界问题，合计参数数不代表缺陷数，也不预设最终删减数量。进度只在上表更新，不另建平行完成清单。
