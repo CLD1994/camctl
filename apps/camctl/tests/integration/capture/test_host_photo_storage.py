@@ -137,21 +137,6 @@ def _drafts(files):
     )
 
 
-def test_prepare_reuses_action_files_across_operation_keys_without_physical_files(tmp_path):
-    owned = _photo_environment(tmp_path)
-    try:
-        key = new_operation_key()
-        first = _prepare(owned, key)
-        assert _prepare(owned, key) == first
-        assert _prepare(owned) == first
-        assert first.original.relative_path == f"capture-originals/{first.original.file_id}.3fr"
-        assert first.preview.relative_path == f"capture-previews/{first.preview.file_id}.jpg"
-        assert not (tmp_path / first.original.relative_path).exists()
-        assert owned.connection.execute("SELECT COUNT(*) FROM intermediate_files").fetchone() == (2,)
-    finally:
-        owned.connection.close()
-
-
 def test_legacy_v1_rejects_host_photo_writes_without_history_or_files(tmp_path):
     from camctl.persistence.repositories.host_capture import (
         HostCaptureRepository,
@@ -385,6 +370,7 @@ def test_photo_file_responsibilities_follow_saved_capture_format(tmp_path, captu
         assert first.preview.relative_path == f"capture-previews/{first.preview.file_id}.jpg"
         assert _prepare(owned, key) == first
         assert _prepare(owned) == first
+        assert not (tmp_path / first.original.relative_path).exists()
         assert owned.connection.execute("SELECT COUNT(*) FROM intermediate_files").fetchone() == (2,)
     finally:
         owned.connection.close()

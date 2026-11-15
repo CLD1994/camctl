@@ -1,8 +1,4 @@
-"""C4 单张拍摄流程的组件集成测试。
-
-真实授予与结果事务、驱动替身组合：照片共用拍摄设备竞争但按自
-身完成声明收场；未派发取消不创建调用；调用结果按声明保存。
-"""
+"""单张拍摄仓储与公共操作事务：响应事实保存及取消后的授予拒绝。"""
 
 from __future__ import annotations
 
@@ -12,15 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from camctl.capture.photo import (
-    CaptureAssessment,
-    PhotoCompletion,
-    PhotoDecision,
-    PhotoDispatch,
-    PhotoState,
-    decide_photo,
-    run_photo,
-)
 from camctl.contracts.values import new_operation_key
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.operations.attempts import AttemptConfig, AttemptFinish
@@ -112,8 +99,8 @@ def _value(owned, sql: str, *params):
 pytestmark = pytest.mark.asyncio
 
 
-async def test_photo_return_waits_for_file_verification(tmp_path: Path) -> None:
-    """拍照调用成功后，尚未确认的文件继续核实。"""
+async def test_photo_start_response_saves_attempt_facts(tmp_path: Path) -> None:
+    """可靠拍照响应经公共操作事务保存状态及效果。"""
     owned = _environment(tmp_path)
     scheduling = SchedulingRepository()
     operations = OperationRepository()
@@ -167,30 +154,14 @@ async def test_photo_return_waits_for_file_verification(tmp_path: Path) -> None:
             " WHERE r.responsibility_key = 'start/1'",
         )
         assert saved[0] == 2 and saved[1] == 3
-
-        decision = decide_photo(
-            PhotoState(
-                action_terminal=False,
-                canceled=False,
-                dispatched=True,
-                response_completed=True,
-                response_failed=False,
-                effect_unknown=False,
-                stop_supported=False,
-            ),
-            CaptureAssessment(complete=False),
-            PhotoCompletion.COMPLETED_ON_RETURN,
-        )
-        assert decision is PhotoDecision.VERIFY_RESULTS
     finally:
         owned.connection.close()
 
 
-async def test_photo_cancel_before_dispatch_keeps_zero_calls(tmp_path: Path) -> None:
-    """取消在派发前生效：不调用驱动，次数保留为一次未派发。"""
+async def test_canceled_photo_rejects_start_grant(tmp_path: Path) -> None:
+    """取消标记使仓储拒绝授予 START，尝试数保持为零。"""
     owned = _environment(tmp_path)
     scheduling = SchedulingRepository()
-    operations = OperationRepository()
     try:
         owned.connection.execute("BEGIN IMMEDIATE")
         owned.connection.execute("UPDATE actions SET cancel_requested = 1 WHERE id = 1")
@@ -211,20 +182,5 @@ async def test_photo_cancel_before_dispatch_keeps_zero_calls(tmp_path: Path) -> 
         assert rejected.value.reason == "canceled"
         calls = _value(owned, "SELECT COUNT(*) FROM operation_attempts")
         assert calls[0] == 0
-
-        decision = decide_photo(
-            PhotoState(
-                action_terminal=False,
-                canceled=True,
-                dispatched=False,
-                response_completed=False,
-                response_failed=False,
-                effect_unknown=False,
-                stop_supported=False,
-            ),
-            CaptureAssessment(complete=False),
-            PhotoCompletion.SENT_ONLY,
-        )
-        assert decision is PhotoDecision.NOT_DISPATCHED_CANCELED
     finally:
         owned.connection.close()

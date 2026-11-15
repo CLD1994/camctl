@@ -44,6 +44,9 @@ async def test_legacy_start_is_blocked_before_device_call_without_results(
             "SELECT status FROM operation_runs WHERE responsibility_key=?",
             (f"start/{action_id}",),
         ).fetchone() is None
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM operation_runs WHERE action_id=?", (action_id,)
+        ).fetchone() == (0,)
     finally:
         owned.connection.close()
 
@@ -67,18 +70,6 @@ async def test_legacy_photo_saves_binding_failure_before_missing_result_capabili
             "SELECT COUNT(*) FROM operation_runs WHERE action_id=1").fetchone() == (0,)
     finally:
         await runtime.database.close()
-        owned.connection.close()
-
-
-async def test_result_page_evidence_without_result_port_fails_as_capability_error(tmp_path):
-    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record",
-        start=False, assembly_options={"results": None})
-    try:
-        with pytest.raises(CapabilityNotDeclaredError, match="result"):
-            await capture_handler(handler)(action_id, runtime)
-        assert owned.connection.execute(
-            "SELECT COUNT(*) FROM operation_runs WHERE action_id=?", (action_id,)).fetchone() == (0,)
-    finally:
         owned.connection.close()
 
 

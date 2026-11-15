@@ -62,16 +62,17 @@ class TestDeclaredCompletion:
             _assessment(explicitly_unmet=explicitly_unmet, read_error=read_error),
             PhotoCompletion.COMPLETED_ON_RETURN) is expected
 
-    @pytest.mark.parametrize("response_completed,complete,completion,expected", [
-        (True, False, PhotoCompletion.COMPLETED_ON_RETURN, PhotoDecision.VERIFY_RESULTS),
-        (False, True, PhotoCompletion.SENT_ONLY, PhotoDecision.REGISTER_SUCCESS),
-        (False, False, PhotoCompletion.SENT_ONLY, PhotoDecision.VERIFY_RESULTS),
+    @pytest.mark.parametrize("response_completed,complete,completion,stop_supported,expected", [
+        (True, False, PhotoCompletion.COMPLETED_ON_RETURN, True, PhotoDecision.VERIFY_RESULTS),
+        (True, False, PhotoCompletion.COMPLETED_ON_RETURN, False, PhotoDecision.VERIFY_RESULTS),
+        (False, True, PhotoCompletion.SENT_ONLY, True, PhotoDecision.REGISTER_SUCCESS),
+        (False, False, PhotoCompletion.SENT_ONLY, True, PhotoDecision.VERIFY_RESULTS),
     ])
     async def test_photo_uses_declared_completion(
-            self, response_completed, complete, completion, expected) -> None:
+            self, response_completed, complete, completion, stop_supported, expected) -> None:
         """完成响应与文件依据分别满足所属契约。"""
         decision = decide_photo(
-            _state(response_completed=response_completed),
+            _state(response_completed=response_completed, stop_supported=stop_supported),
             _assessment(complete=complete),
             completion,
         )
@@ -96,9 +97,10 @@ class TestDeclaredCompletion:
 
 
 class TestCancelAndFailure:
-    async def test_canceled_before_dispatch_creates_no_attempt(self) -> None:
+    @pytest.mark.parametrize("stop_supported", [True, False])
+    async def test_canceled_before_dispatch_creates_no_attempt(self, stop_supported) -> None:
         decision = decide_photo(
-            _state(canceled=True, dispatched=False),
+            _state(canceled=True, dispatched=False, stop_supported=stop_supported),
             _assessment(),
             PhotoCompletion.SENT_ONLY,
         )
