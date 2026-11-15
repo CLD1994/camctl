@@ -711,12 +711,14 @@ async def test_segmented_prestart_failure_keeps_original_finite_contract(tmp_pat
     from camctl.devices.ports import DeviceCallResult
     from camctl.capture.handlers import capture_handler
     from decimal import Decimal
-    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),start=False)
+    config=AttemptConfig(1,Decimal('10'),Decimal('3'))
+    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),start=False,
+        runtime_options={'start_config':config})
     try:
         actual=runtime.driver.control.return_value.outcome
         runtime.driver.control.return_value=DeviceCallResult.from_outcome(replace(actual,status=AttemptStatus.FAILED,
             error=ErrorValue('device_error','device'),effect=EffectState.NO_EFFECT,observations=()))
-        runtime.start_config=AttemptConfig(1,Decimal('10'))
+        assert runtime.start_config==config
         await capture_handler('camera_record')(action_id,runtime)
         assert owned.connection.execute('SELECT status FROM actions WHERE id=?',(action_id,)).fetchone()==(4,)
         assert owned.connection.execute(
@@ -1286,25 +1288,26 @@ async def test_both_entries_use_one_canonical_order_and_original_batch(tmp_path,
 async def test_bounded_context_cannot_replace_original_transaction_connection(tmp_path,monkeypatch):
     from camctl.persistence.event_reads import SqlEventReads
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.UNKNOWN)
-    _finish_attempt(owned,ref,runtime)
-    row=repo.read_set(ref,owned)
-    request=_request_for(ref,row,runtime.wall_us(),repo.read_assessment(ref,owned),2)
-    path=owned.connection.execute('PRAGMA database_list').fetchone()[2]
-    observer=open_existing(Path(path),DbOpenMode.EXISTING_RO,DbConfig())
-    observer.connection.execute('BEGIN')
-    observer.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
-    delivered=[]
-    def transform(command,scope):
-        plan=command.plan(scope)
-        def context(event,transaction):
-            original=plan.context(event,transaction)
-            reads=original.current_reads
-            assert isinstance(reads,SqlEventReads)
-            delivered.append(event.event_id)
-            return replace(original,current_reads=SqlEventReads(observer.connection,reads.scope))
-        return replace(plan,context=context)
-    decorate_transaction_command(monkeypatch,transactions,transform)
+    observer=None
     try:
+        _finish_attempt(owned,ref,runtime)
+        row=repo.read_set(ref,owned)
+        request=_request_for(ref,row,runtime.wall_us(),repo.read_assessment(ref,owned),2)
+        path=owned.connection.execute('PRAGMA database_list').fetchone()[2]
+        observer=open_existing(Path(path),DbOpenMode.EXISTING_RO,DbConfig())
+        observer.connection.execute('BEGIN')
+        observer.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
+        delivered=[]
+        def transform(command,scope):
+            plan=command.plan(scope)
+            def context(event,transaction):
+                original=plan.context(event,transaction)
+                reads=original.current_reads
+                assert isinstance(reads,SqlEventReads)
+                delivered.append(event.event_id)
+                return replace(original,current_reads=SqlEventReads(observer.connection,reads.scope))
+            return replace(plan,context=context)
+        decorate_transaction_command(monkeypatch,transactions,transform)
         before=_complete_persisted_state(owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
         assert delivered
@@ -1312,7 +1315,10 @@ async def test_bounded_context_cannot_replace_original_transaction_connection(tm
         assert '事件读取端口必须由原事务同一连接' in str(saved.error)
         assert not owned.connection.in_transaction
         assert _complete_persisted_state(owned)==before
-    finally:observer.connection.close();owned.connection.close()
+    finally:
+        try:
+            if observer is not None:observer.connection.close()
+        finally:owned.connection.close()
 
 
 @pytest.mark.asyncio

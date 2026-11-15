@@ -183,7 +183,6 @@ def _boundary_at(connection) -> HistoryBoundary:
 
 
 class _Rows(dict):
-    sql_rows: dict
     last_event_id: int
     change_count: int
 
@@ -198,7 +197,6 @@ def _current_rows(connection, entity_id: int) -> _Rows:
         "operation_attempts": ("SELECT t.* FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id LEFT JOIN device_activities a ON a.id = r.activity_id WHERE CASE WHEN r.kind IN (8, 9) THEN a.action_id ELSE r.action_id END = ?", (entity_id,)),
     }
     result = _Rows()
-    result.sql_rows = {}
     for table, (sql, params) in queries.items():
         cursor = connection.execute(sql, params)
         names = [column[0] for column in cursor.description]
@@ -207,7 +205,6 @@ def _current_rows(connection, entity_id: int) -> _Rows:
             for name in json_columns().get(table, ()):
                 if full.get(name) is not None:
                     full[name] = parse_exact_json(full[name])
-            result.sql_rows[(table, full["id"])] = dict(full)
             result[(table, full["id"])] = {
                 name: full[name] for name in business_columns(table)}
     position = connection.execute(
