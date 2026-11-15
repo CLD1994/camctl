@@ -60,8 +60,15 @@ def _resume_marker(demo, deployment, host_demo, camctl, environment, marker, req
             )
         ] == observed[key]
     demo = HostDemo(deployment, host_demo, launcher=str(camctl))
-    demo.start(env=environment)
-    demo.submit(request)
+    try:
+        demo.start(env=environment)
+        demo.submit(request)
+    except BaseException as error:
+        try:
+            demo.stop()
+        except BaseException as cleanup_error:
+            error.add_note(f"关闭尚未交还调用者的分段恢复主程序时出错：{cleanup_error!r}")
+        raise
     return demo, observed
 
 
