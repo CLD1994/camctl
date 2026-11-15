@@ -24,6 +24,8 @@ from .test_capture_contract import _NOW
 from .test_result_page_history import _actual, _entry, _BINDING, _CURSOR
 from ..support.result_cases import ResultCase, saved_result_pages
 from .result_consumer_fixtures import result_driver
+from ..support.task_wait import wait_for_signal
+from .task_cleanup import close_observer, settle_capture_task
 
 pytestmark = pytest.mark.asyncio
 
@@ -121,7 +123,7 @@ async def _stop_before_result_page(tmp_path, capture_resources, catalog, *, wait
         case.clock.wall = _NOW + 60_000_000
         case.clock.monotonic = 65_000_000_000
         task = asyncio.create_task(capture_handler(handler)(action_id, runtime))
-        await asyncio.wait_for(entered.wait(), 2)
+        await wait_for_signal(entered, task, timeout=2)
         case.stopper.stop.assert_awaited_once()
         assert owned.connection.execute(
             "SELECT activity_state,occupancy_state,output_set_finalized_event_id"
@@ -134,16 +136,19 @@ async def _stop_before_result_page(tmp_path, capture_resources, catalog, *, wait
             spec, = owned.connection.execute("SELECT execution_spec_json FROM actions WHERE id=?", (action_id,)).fetchone()
             assert "file_completion_wait_ms" not in json.loads(spec)
         release.set()
-        await task
+        await asyncio.wait_for(asyncio.shield(task), 30)
         if not wait_required:
             assert (await runtime.action(action_id))["status"] == 3
             assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (1,)
     finally:
         release.set()
-        if task is not None and not task.done():
-            await task
-        await case.close()
-        owned.connection.close()
+        try:
+            await settle_capture_task(task)
+        finally:
+            try:
+                await case.close()
+            finally:
+                close_observer(owned)
 
 
 async def test_confirmed_stop_keeps_files_unconfirmed_until_reliable_wait_page(tmp_path, capture_resources):

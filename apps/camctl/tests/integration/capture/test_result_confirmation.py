@@ -87,10 +87,15 @@ async def _environment(
     owned, runtime, aid, handler = await case.world(tmp_path,
         'record' if action_type == 2 else 'timelapse', catalog=Catalog(),
         start=prepare_only, prepare_start_only=prepare_only)
-    if not prepare_only:
-        await capture_handler(handler)(aid, runtime)
-    case.clock.wall = _NOW
-    return owned
+    try:
+        if not prepare_only:
+            await capture_handler(handler)(aid, runtime)
+        case.clock.wall = _NOW
+        return owned
+    except BaseException:
+        from .task_cleanup import close_observer
+        close_observer(owned)
+        raise
 
 
 def _value(owned, sql: str, *params):
@@ -641,50 +646,55 @@ class TestConclusionRecovery:
         owned, runtime, action_id, handler = await case.world(tmp_path, 'timelapse',
             start=False, independent_activity=independent_activity,
             assembly_options={'check_config': AttemptConfig(1, Decimal('1.25'), Decimal(0))})
-        await capture_handler(handler)(action_id, runtime)
-        activity_id, = owned.connection.execute(
-            'SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()
-        case.results.delegate = ResultsDouble({activity_id: (_entry('clip-1'),)}, set_finalized=satisfied)
-        case.clock.wall = _NOW
-        case.clock.monotonic += 600_000_000_000
-        class ConclusionSaved(Exception):
-            pass
-        saved_inputs = []
-        original_finish = CaptureRepository.finish_result_check
-        original_close = CaptureRepository.close_result_check_unconfirmed
-        def finish(repository, request, confirm, key, current, **options):
-            receipt = original_finish(repository, request, confirm, key, current, **options)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-            if satisfied:
-                saved_inputs.append((request, confirm, key))
+        try:
+            await capture_handler(handler)(action_id, runtime)
+            activity_id, = owned.connection.execute(
+                'SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()
+            case.results.delegate = ResultsDouble({activity_id: (_entry('clip-1'),)}, set_finalized=satisfied)
+            case.clock.wall = _NOW
+            case.clock.monotonic += 600_000_000_000
+            class ConclusionSaved(Exception):
+                pass
+            saved_inputs = []
+            original_finish = CaptureRepository.finish_result_check
+            original_close = CaptureRepository.close_result_check_unconfirmed
+            def finish(repository, request, confirm, key, current, **options):
+                receipt = original_finish(repository, request, confirm, key, current, **options)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+                if satisfied:
+                    saved_inputs.append((request, confirm, key))
+                    return replace(receipt, handoff_error=ConclusionSaved())
+                return receipt
+            def close(repository, request, key, current):
+                receipt = original_close(repository, request, key, current)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+                saved_inputs.append((request, key))
                 return replace(receipt, handoff_error=ConclusionSaved())
-            return receipt
-        def close(repository, request, key, current):
-            receipt = original_close(repository, request, key, current)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-            saved_inputs.append((request, key))
-            return replace(receipt, handoff_error=ConclusionSaved())
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(CaptureRepository, 'finish_result_check', finish)
-            patch.setattr(CaptureRepository, 'close_result_check_unconfirmed', close)
-            with pytest.raises(ConclusionSaved):
-                await capture_handler(handler)(action_id, runtime)
-                if not satisfied:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(CaptureRepository, 'finish_result_check', finish)
+                patch.setattr(CaptureRepository, 'close_result_check_unconfirmed', close)
+                with pytest.raises(ConclusionSaved):
                     await capture_handler(handler)(action_id, runtime)
-        if satisfied:
-            finish, confirm, key = saved_inputs[0]
-            fact = owned.connection.execute(
-                'SELECT occurred_at,body_json FROM history_events ORDER BY id DESC LIMIT 1').fetchone()
-            assert fact[0] == finish.occurred_at
-            activity_row, = json.loads(fact[1])['rows']
-            assert activity_row['table'] == 'device_activities'
-            saved_evidence = activity_row['after']['values']['completion_evidence_json']
-            assert saved_evidence['wait_completed_event_id'] == confirm.evidence['wait_completed_event_id']
-        assert (await runtime.action(action_id))['status'] == 2
-        original = owned.connection.execute(
-            'SELECT id,run_id,attempt_no,status,result_event_id,result_json,error_json'
-            ' FROM operation_attempts ORDER BY id').fetchall()
-        return owned, original, action_id, activity_id
+                    if not satisfied:
+                        await capture_handler(handler)(action_id, runtime)
+            if satisfied:
+                finish, confirm, key = saved_inputs[0]
+                fact = owned.connection.execute(
+                    'SELECT occurred_at,body_json FROM history_events ORDER BY id DESC LIMIT 1').fetchone()
+                assert fact[0] == finish.occurred_at
+                activity_row, = json.loads(fact[1])['rows']
+                assert activity_row['table'] == 'device_activities'
+                saved_evidence = activity_row['after']['values']['completion_evidence_json']
+                assert saved_evidence['wait_completed_event_id'] == confirm.evidence['wait_completed_event_id']
+            assert (await runtime.action(action_id))['status'] == 2
+            original = owned.connection.execute(
+                'SELECT id,run_id,attempt_no,status,result_event_id,result_json,error_json'
+                ' FROM operation_attempts ORDER BY id').fetchall()
+            return owned, original, action_id, activity_id
+        except BaseException:
+            from .task_cleanup import close_observer
+            close_observer(owned)
+            raise
 
     async def _advance(self, owned, files: dict, action_id: int = 1) -> CaptureRuntime:
         case = result_case_for()

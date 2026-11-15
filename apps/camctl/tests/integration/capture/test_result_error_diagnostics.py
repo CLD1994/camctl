@@ -43,97 +43,103 @@ async def test_call_error_is_logged_before_failed_business_save_and_replay_logs_
     from camctl.operations.attempts import QueryPurpose
     error = ErrorValue('device_error', 'device', {'operation': operation})
     records = []
-    if operation == 'result':
-        from dataclasses import replace
-        from .result_consumer_fixtures import RESULT_EVIDENCE, result_driver
-        from ..bootstrap.test_binding_transactions import _CommitFailure
-        case = result_case
-        owned, runtime, aid, handler = await case.world(tmp_path, 'photo', evidence_contracts=(
-            replace(RESULT_EVIDENCE.contract('results_returned', 1), max_diagnostic_calls=1),))
-        driver = result_driver(case, actual_call('result', SimpleNamespace(target_id='1'), error=error))
-        enabled, saves = [True], []
-        actual = OperationRepository.finish_attempt
-        def finish(repository, request, key, current):
-            if request.ticket.operation == 'result':
-                saves.append((request, key))
-                if enabled[0]:
-                    current = replace(current, connection=_CommitFailure(current.connection, False))
-            return actual(repository, request, key, current)
-        monkeypatch.setattr(OperationRepository, 'finish_attempt', finish)
-        with error_diagnostics_context(None, records.append):
-            async with diagnostic_scope():
-                with pytest.raises(ConsistencyError):
-                    await capture_handler(handler)(aid, runtime)
-            enabled[0] = False
-            async with diagnostic_scope():
-                await capture_handler(handler)(aid, runtime)
-        assert driver.list_results.await_count == 1
-        ticket = saves[0][0].ticket
-        assert len(saves) >= 2 and all(value == saves[0] for value in saves)
-    else:
-        case = diagnostic_case
-        if operation == 'control':
-            runtime = await call_world(case, tmp_path, control=lambda request: actual_call(operation, request.ticket, error=error))
-            port = case.control
-        elif operation == 'stop':
-            runtime = await started_call(case, tmp_path, stop=lambda request: actual_call(operation, request.ticket, error=error))
-            case.clock.wall += 60_000_000
-            case.clock.monotonic += 60_000_000_000
-            port = case.stop
-        else:
-            from .test_call_result_save import _query_consumer
-            runtime = await _query_consumer(case, tmp_path, QueryPurpose.ACTIVITY_OBSERVATION)
-            case.query.outcome = lambda request: actual_call(operation, request.ticket, error=error)
+    owned = None
+    try:
+        if operation == 'result':
             from dataclasses import replace
-            from ..support.capture import capture_assembly
-            case.options['evidence'] = case.options['evidence'].with_contract(replace(
-                case.options['evidence'].contract('query_returned', 1), max_diagnostic_calls=1))
-            case.factory = capture_assembly(**case.options)
-            runtime = await case.view()
-            port = case.query
-        case.boundary = operation
-        case.fault.arm(port, 'persistent')
-        with error_diagnostics_context(None, records.append):
-            async with diagnostic_scope():
-                with pytest.raises(ConsistencyError):
-                    await capture_handler('camera_record')(case.action_id, runtime)
-            request, = port.calls
-            ticket = request.ticket
-            assert case.owned.connection.execute('SELECT status,result_event_id FROM operation_attempts WHERE run_id=?',
-                (ticket.run_id,)).fetchone() == (1, None)
-            case.fault.enabled = False
-            async with diagnostic_scope():
-                with pytest.raises(SavedCallBoundary):
-                    await capture_handler('camera_record')(case.action_id, await case.restart())
-        assert len(port.calls) == 1
-        saves = [(finish, key) for finish, key in case.saves if finish.ticket == ticket]
-        assert len(saves) >= 2 and all(value == saves[0] for value in saves)
-    owned = case.owned if operation != 'result' else owned
-    finish, key = saves[0]
-    rows = owned.connection.execute(
-        'SELECT a.id,a.status,a.error_json,a.result_json,a.result_event_id,e.occurred_at,t.operation_key'
-        ' FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id'
-        ' JOIN history_transactions t ON t.id=e.transaction_id WHERE a.run_id=? AND a.attempt_no=?',
-        (ticket.run_id, ticket.attempt_id)).fetchall()
-    (attempt_id, status, error_json, result_json, event_id, occurred_at, transaction_key), = rows
-    expected_error = {'code': 'device_error', 'stage': 'device', 'details': {'operation': operation}}
-    assert status == 3 and json.loads(error_json) == expected_error
-    assert occurred_at == finish.occurred_at and transaction_key == str(key)
-    assert owned.connection.execute('SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',
-        (str(key),)).fetchone() == (1,)
-    events = owned.connection.execute(
-        "SELECT e.id FROM history_events e, json_each(e.body_json, '$.rows') r"
-        " WHERE json_extract(r.value, '$.table')='operation_attempts'"
-        " AND json_extract(r.value, '$.id')=?"
-        " AND json_extract(r.value, '$.after.values.result_event_id') IS NOT NULL", (attempt_id,)).fetchall()
-    assert events == [(event_id,)]
-    saved_call, = json.loads(result_json)['diagnostics']['calls']
-    assert saved_call['step_name'] == operation
-    assert saved_call['stderr']['hex'] == b'camera error\xff\n'.hex()
-    document, = _documents(records)
-    assert document['level'] == 'ERROR' and document['error'] == expected_error
-    assert document['ticket']['run_id'] == ticket.run_id
-    assert document['outcome']['diagnostics']['calls'][0]['stderr']['hex'] == b'camera error\xff\n'.hex()
+            from .result_consumer_fixtures import RESULT_EVIDENCE, result_driver
+            from ..bootstrap.test_binding_transactions import _CommitFailure
+            case = result_case
+            owned, runtime, aid, handler = await case.world(tmp_path, 'photo', evidence_contracts=(
+                replace(RESULT_EVIDENCE.contract('results_returned', 1), max_diagnostic_calls=1),))
+            driver = result_driver(case, actual_call('result', SimpleNamespace(target_id='1'), error=error))
+            enabled, saves = [True], []
+            actual = OperationRepository.finish_attempt
+            def finish(repository, request, key, current):
+                if request.ticket.operation == 'result':
+                    saves.append((request, key))
+                    if enabled[0]:
+                        current = replace(current, connection=_CommitFailure(current.connection, False))
+                return actual(repository, request, key, current)
+            monkeypatch.setattr(OperationRepository, 'finish_attempt', finish)
+            with error_diagnostics_context(None, records.append):
+                async with diagnostic_scope():
+                    with pytest.raises(ConsistencyError):
+                        await capture_handler(handler)(aid, runtime)
+                enabled[0] = False
+                async with diagnostic_scope():
+                    await capture_handler(handler)(aid, runtime)
+            assert driver.list_results.await_count == 1
+            ticket = saves[0][0].ticket
+            assert len(saves) >= 2 and all(value == saves[0] for value in saves)
+        else:
+            case = diagnostic_case
+            if operation == 'control':
+                runtime = await call_world(case, tmp_path, control=lambda request: actual_call(operation, request.ticket, error=error))
+                port = case.control
+            elif operation == 'stop':
+                runtime = await started_call(case, tmp_path, stop=lambda request: actual_call(operation, request.ticket, error=error))
+                case.clock.wall += 60_000_000
+                case.clock.monotonic += 60_000_000_000
+                port = case.stop
+            else:
+                from .test_call_result_save import _query_consumer
+                runtime = await _query_consumer(case, tmp_path, QueryPurpose.ACTIVITY_OBSERVATION)
+                case.query.outcome = lambda request: actual_call(operation, request.ticket, error=error)
+                from dataclasses import replace
+                from ..support.capture import capture_assembly
+                case.options['evidence'] = case.options['evidence'].with_contract(replace(
+                    case.options['evidence'].contract('query_returned', 1), max_diagnostic_calls=1))
+                case.factory = capture_assembly(**case.options)
+                runtime = await case.view()
+                port = case.query
+            case.boundary = operation
+            case.fault.arm(port, 'persistent')
+            with error_diagnostics_context(None, records.append):
+                async with diagnostic_scope():
+                    with pytest.raises(ConsistencyError):
+                        await capture_handler('camera_record')(case.action_id, runtime)
+                request, = port.calls
+                ticket = request.ticket
+                assert case.owned.connection.execute('SELECT status,result_event_id FROM operation_attempts WHERE run_id=?',
+                    (ticket.run_id,)).fetchone() == (1, None)
+                case.fault.enabled = False
+                async with diagnostic_scope():
+                    with pytest.raises(SavedCallBoundary):
+                        await capture_handler('camera_record')(case.action_id, await case.restart())
+            assert len(port.calls) == 1
+            saves = [(finish, key) for finish, key in case.saves if finish.ticket == ticket]
+            assert len(saves) >= 2 and all(value == saves[0] for value in saves)
+        owned = case.owned if operation != 'result' else owned
+        finish, key = saves[0]
+        rows = owned.connection.execute(
+            'SELECT a.id,a.status,a.error_json,a.result_json,a.result_event_id,e.occurred_at,t.operation_key'
+            ' FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id'
+            ' JOIN history_transactions t ON t.id=e.transaction_id WHERE a.run_id=? AND a.attempt_no=?',
+            (ticket.run_id, ticket.attempt_id)).fetchall()
+        (attempt_id, status, error_json, result_json, event_id, occurred_at, transaction_key), = rows
+        expected_error = {'code': 'device_error', 'stage': 'device', 'details': {'operation': operation}}
+        assert status == 3 and json.loads(error_json) == expected_error
+        assert occurred_at == finish.occurred_at and transaction_key == str(key)
+        assert owned.connection.execute('SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',
+            (str(key),)).fetchone() == (1,)
+        events = owned.connection.execute(
+            "SELECT e.id FROM history_events e, json_each(e.body_json, '$.rows') r"
+            " WHERE json_extract(r.value, '$.table')='operation_attempts'"
+            " AND json_extract(r.value, '$.id')=?"
+            " AND json_extract(r.value, '$.after.values.result_event_id') IS NOT NULL", (attempt_id,)).fetchall()
+        assert events == [(event_id,)]
+        saved_call, = json.loads(result_json)['diagnostics']['calls']
+        assert saved_call['step_name'] == operation
+        assert saved_call['stderr']['hex'] == b'camera error\xff\n'.hex()
+        document, = _documents(records)
+        assert document['level'] == 'ERROR' and document['error'] == expected_error
+        assert document['ticket']['run_id'] == ticket.run_id
+        assert document['outcome']['diagnostics']['calls'][0]['stderr']['hex'] == b'camera error\xff\n'.hex()
+    finally:
+        if operation == 'result' and owned is not None:
+            from .task_cleanup import close_observer
+            close_observer(owned)
 
 
 

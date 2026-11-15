@@ -213,46 +213,51 @@ class ResultCase:
         world = await consumer_world(tmp_path, consumer, start=False,
             runtime_factory=self._runtime, **options)
         owned, runtime, action_id, handler = world
-        if not start:
-            return world
-        if prepare_start_only or consumer == "photo":
-            await _prepare_through_handler(runtime, action_id, handler, "start")
-        else:
-            await capture_handler(handler)(action_id, runtime)
-        if prepare_start_only:
-            self.clock.wall = _NOW + 700_000_000
-            return world
-        if consumer in ("record", "winddown"):
-            self.clock.wall = _NOW + 60_000_000
-            self.clock.monotonic = 5_000_000_000 + (60_000_000_000 if elapsed is None else elapsed)
-            await _prepare_through_handler(runtime, action_id, handler, "conclude")
-        if handler == "camera_record":
-            processing_id, = owned.connection.execute(
-                "SELECT id FROM recording_processing WHERE action_id=?", (action_id,)).fetchone()
-            receipt = CaptureRepository().save_check_decision(CheckDecisionSave(processing_id,
-                CheckDecisionChoice.NOT_NEEDED, CheckBasis(CheckReason.CONTINUOUS_CONTROL_COMPLETE,
-                    60000, control_elapsed_ns=60_000_000_000), self.clock.wall), new_operation_key(), owned)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        if consumer == "cancel":
-            repository = CancellationRepository()
-            cancel_id = action_id + 1
-            started = repository.start_cancel_action(StartCancelAction(cancel_id, self.clock.wall), new_operation_key(), owned)
-            assert started.kind is DbOutcomeKind.COMPLETED, started.error
-            fixed = repository.fix_cancel_targets(FixCancelTargets(cancel_id, FixedCancelSet((FixedTarget(
-                action_id, SelectionBasis.DIRECT, CancellationEffect.NOT_APPLIED),)), self.clock.wall), new_operation_key(), owned)
-            assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-            item_id, = fixed.value.item_ids
-            applied = repository.apply_cancel_target(ApplyCancelTarget(item_id, CancelApplyMode.WITH_STOP,
-                self.clock.wall), new_operation_key(), owned)
-            assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
-            self.clock.wall = _NOW + 60_000_000
-            self.clock.monotonic = 65_000_000_000
-            await _prepare_through_handler(runtime, action_id, handler, "stop")
-        if consumer == "timelapse":
-            # 新工厂代表前次 START 已保存后的新会话，不继承旧单调等待锚点。
-            self.clock.wall = _NOW + 700_000_000
-            runtime = await self.reopen(owned, cold=True)
-        return owned, runtime, action_id, handler
+        try:
+            if not start:
+                return world
+            if prepare_start_only or consumer == "photo":
+                await _prepare_through_handler(runtime, action_id, handler, "start")
+            else:
+                await capture_handler(handler)(action_id, runtime)
+            if prepare_start_only:
+                self.clock.wall = _NOW + 700_000_000
+                return world
+            if consumer in ("record", "winddown"):
+                self.clock.wall = _NOW + 60_000_000
+                self.clock.monotonic = 5_000_000_000 + (60_000_000_000 if elapsed is None else elapsed)
+                await _prepare_through_handler(runtime, action_id, handler, "conclude")
+            if handler == "camera_record":
+                processing_id, = owned.connection.execute(
+                    "SELECT id FROM recording_processing WHERE action_id=?", (action_id,)).fetchone()
+                receipt = CaptureRepository().save_check_decision(CheckDecisionSave(processing_id,
+                    CheckDecisionChoice.NOT_NEEDED, CheckBasis(CheckReason.CONTINUOUS_CONTROL_COMPLETE,
+                        60000, control_elapsed_ns=60_000_000_000), self.clock.wall), new_operation_key(), owned)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            if consumer == "cancel":
+                repository = CancellationRepository()
+                cancel_id = action_id + 1
+                started = repository.start_cancel_action(StartCancelAction(cancel_id, self.clock.wall), new_operation_key(), owned)
+                assert started.kind is DbOutcomeKind.COMPLETED, started.error
+                fixed = repository.fix_cancel_targets(FixCancelTargets(cancel_id, FixedCancelSet((FixedTarget(
+                    action_id, SelectionBasis.DIRECT, CancellationEffect.NOT_APPLIED),)), self.clock.wall), new_operation_key(), owned)
+                assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+                item_id, = fixed.value.item_ids
+                applied = repository.apply_cancel_target(ApplyCancelTarget(item_id, CancelApplyMode.WITH_STOP,
+                    self.clock.wall), new_operation_key(), owned)
+                assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+                self.clock.wall = _NOW + 60_000_000
+                self.clock.monotonic = 65_000_000_000
+                await _prepare_through_handler(runtime, action_id, handler, "stop")
+            if consumer == "timelapse":
+                # 新工厂代表前次 START 已保存后的新会话，不继承旧单调等待锚点。
+                self.clock.wall = _NOW + 700_000_000
+                runtime = await self.reopen(owned, cold=True)
+            return owned, runtime, action_id, handler
+        except BaseException:
+            from ..capture.task_cleanup import close_observer
+            close_observer(owned)
+            raise
 
     async def reopen(self, owned, *, cold=False, assembly_options=None):
         # 自有文件执行器必须在旧 BusinessDatabase 关闭之前实际收场。
