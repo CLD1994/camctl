@@ -174,11 +174,10 @@ async def test_error_receipt_read_failure_does_not_replace_saved_business_result
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("complete_env", ["a" * 64], indirect=True)
 @pytest.mark.parametrize("exhausted", [False, True])
 async def test_checksum_failure_is_held_before_recopy_registration(complete_env, exhausted):
     owned, roots, prepared = complete_env
-    owned.connection.execute("UPDATE file_copies SET source_sha256=? WHERE id=?", ("a" * 64, prepared.copy_id))
-    owned.connection.commit()
     first = await output_operation(owned, complete_copy, prepared.copy_id, CompletionContext,
         repository=OutputsRepository(), roots=roots, occurred_at=_NOW + 10)
     assert first.phase.value == "recopy_registered"

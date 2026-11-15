@@ -97,18 +97,18 @@ def _owner_action_id(owned, copy_id: int) -> int:
 
 
 @pytest.fixture
-def complete_env(read_targets, tmp_path):
+def complete_env(read_targets, tmp_path, request):
     """已全部可靠保存的 10 字节设备源交付拷贝。
 
-    建档时设备源已支持并携带正确摘要，拷贝记录复用该源摘要；
-    各用例按分区需要改写源能力或已保存源摘要。
+    建档时设备源已支持摘要，默认使用实际内容摘要；调用方可指定源摘要。
+    拷贝记录复用建档时的源摘要。
     """
     owned = read_targets
     owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.execute("UPDATE device_files SET size_bytes=10, checksum_support=2"
                              " WHERE id=501")
     owned.connection.execute(
-        "UPDATE device_files SET sha256=? WHERE id=501", (_CONTENT_DIGEST,))
+        "UPDATE device_files SET sha256=? WHERE id=501", (getattr(request, "param", _CONTENT_DIGEST),))
     owned.connection.commit()
     qualification = _qualified(owned, _command())
     roots = _make_roots(tmp_path)

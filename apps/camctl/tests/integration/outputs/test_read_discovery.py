@@ -1,7 +1,7 @@
 """真实候选查询的全体顺序、容量和错误边界。"""
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -408,7 +408,8 @@ async def test_candidate_capacity_tracks_batch_not_total(two_copies):
     from .test_qualification import _seed_action, _seed_selection_and_item
     from camctl.outputs.read_discovery import ReadDiscoveryOwner
 
-    owned, _, _ = two_copies
+    owned, early, late = two_copies
+    expected_ids = [early.copy_id, late.copy_id]
     seeded = 0
     for total, batch_size in ((12, 1), (120, 1), (120, 3)):
         repository = OutputsRepository(read_batch_size=batch_size)
@@ -419,16 +420,21 @@ async def test_candidate_capacity_tracks_batch_not_total(two_copies):
             owned.connection.commit()
             result = repository.grant_file(replace(_command(), action_id=identity, item_id=identity), new_operation_key(), owned)
             assert result.kind is DbOutcomeKind.COMPLETED and result.value.copy_id is not None, result
+            expected_ids.append(result.value.copy_id)
         seeded = total
         before = tuple(owned.connection.iterdump())
         async with _discovery_database(_scope(owned.connection).database, batch_size=batch_size) as (database, bounded):
             owner = ReadDiscoveryOwner(batch_size)
             await owner.begin_round(database, _NOW)
             returned = seen = largest = 0
+            actual_ids = []
             while True:
                 page = await owner.reads(database, "reads", _NOW)
                 returned = len(page.items)
                 seen += returned
+                actual_ids.extend(candidate.copy_id for candidate in page.items)
+                assert actual_ids == expected_ids[:len(actual_ids)]
+                assert len(actual_ids) == len(set(actual_ids))
                 largest = max(largest, returned)
                 assert returned <= batch_size and owner.cursor_count <= 1
                 references = tuple(weakref.ref(candidate) for candidate in page.items)
@@ -443,6 +449,7 @@ async def test_candidate_capacity_tracks_batch_not_total(two_copies):
                 if exhausted:
                     break
             connection, = bounded
+            assert actual_ids == expected_ids
             assert seen == total + 2
             assert connection.query_plan and max(connection.returned) == batch_size
         assert tuple(owned.connection.iterdump()) == before
@@ -577,7 +584,16 @@ async def test_idle_deadline_returns_only_nearest_pending_metadata(
     )
     task = asyncio.create_task(run_session(context, None))
     try:
-        await asyncio.wait_for(notifier.waiting.wait(), 10)
+        signal = asyncio.create_task(notifier.waiting.wait())
+        try:
+            done, _ = await asyncio.wait({signal, task}, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+            if task in done:
+                task.result()
+                pytest.fail("会话在进入等待前结束")
+            assert signal in done, "会话未在十秒内进入等待"
+        finally:
+            signal.cancel()
+            await asyncio.gather(signal, return_exceptions=True)
         assert notifier.delays[0] == pytest.approx(expected, abs=0.05)
         assert (
             probes and probes[0].returned and max(probes[0].returned) <= 1
@@ -591,11 +607,12 @@ def test_device_holder_query_detects_multiple_holders():
     from camctl.outputs.read_discovery import device_holder
 
     # 受损结构不能依赖 UNIQUE 来代替读方核实；探测只需要最多两行。
-    with sqlite3.connect(":memory:") as connection:
-        connection.execute("CREATE TABLE file_copies (id INTEGER,slot_device_id TEXT)")
-        connection.executemany("INSERT INTO file_copies VALUES (?, 'cam-1')", [(1,), (2,), (3,)])
-        with pytest.raises(ConsistencyError):
-            device_holder(connection, "cam-1")
+    with closing(sqlite3.connect(":memory:")) as connection:
+        with connection:
+            connection.execute("CREATE TABLE file_copies (id INTEGER,slot_device_id TEXT)")
+            connection.executemany("INSERT INTO file_copies VALUES (?, 'cam-1')", [(1,), (2,), (3,)])
+            with pytest.raises(ConsistencyError):
+                device_holder(connection, "cam-1")
 
 
 @pytest.mark.parametrize("case,phase,prepared,failed", [
@@ -614,7 +631,8 @@ def test_obtain_summary_folds_many_items_without_full_materialization(prepared_e
             " VALUES (?,31,?,5,4,0,1,?)", (identity, identity + 10000,
                 '{"requested_output_id":"' + str(identity + 10000) + '"}'))
     if case == "waiting":
-        owned.connection.execute("UPDATE obtain_source_selections SET status=1 WHERE id=31")
+        owned.connection.execute("INSERT INTO action_dependencies (id,action_id,depends_on_action_id) VALUES (9999,31,12)")
+        owned.connection.execute("INSERT INTO obtain_source_selections (id,dependency_id,status,error_code,error_details_json) VALUES (9999,9999,1,NULL,NULL)")
     elif case == "unresolved":
         owned.connection.execute("UPDATE obtain_items SET status=1,error_code=NULL,error_details_json=NULL WHERE id=1000")
     elif case == "empty":
@@ -622,7 +640,62 @@ def test_obtain_summary_folds_many_items_without_full_materialization(prepared_e
     elif case == "failed":
         owned.connection.execute("UPDATE deliveries SET status=6,error_json='{}' WHERE id=?", (qualified.delivery_id,))
     owned.connection.commit()
-    facts = load_obtain_facts(owned.connection, 31)
-    assert not hasattr(facts, "items") and not hasattr(facts, "sources")
+    (item_count,) = owned.connection.execute(
+        "SELECT COUNT(*) FROM obtain_items WHERE selection_id=31").fetchone()
+    assert item_count == (0 if case == "empty" else 132)
+
+    class ObservedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.delivered = []
+            self.rows = []
+
+        def execute(self, sql, parameters=()):
+            cursor = self.connection.execute(sql, parameters)
+            counts = self.delivered
+            observed_rows = self.rows
+            counts.append(0)
+            index = len(counts) - 1
+
+            class Cursor:
+                def __getattr__(self, name):
+                    return getattr(cursor, name)
+
+                def fetchone(self):
+                    row = cursor.fetchone()
+                    counts[index] += row is not None
+                    if row is not None:
+                        observed_rows.append(row)
+                    return row
+
+                def fetchmany(self, *args):
+                    rows = cursor.fetchmany(*args)
+                    counts[index] += len(rows)
+                    observed_rows.extend(rows)
+                    return rows
+
+                def fetchall(self):
+                    rows = cursor.fetchall()
+                    counts[index] += len(rows)
+                    observed_rows.extend(rows)
+                    return rows
+
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    row = next(cursor)
+                    counts[index] += 1
+                    observed_rows.append(row)
+                    return row
+
+            return Cursor()
+
+    observed = ObservedConnection(owned.connection)
+    facts = load_obtain_facts(observed, 31)
+    # 此样本最多有两种条目与交付状态组合，加上一行来源计数。
+    assert observed.delivered and sum(observed.delivered) <= 3
+    assert all(len(row) <= 3 and all(value is None or isinstance(value, int)
+                                      for value in row) for row in observed.rows)
     decision = decide_obtain_finish(facts)
     assert (decision.phase.value, decision.prepared, decision.failed) == (phase, prepared, failed)
