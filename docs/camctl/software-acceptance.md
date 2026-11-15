@@ -1526,8 +1526,8 @@
 - 归属：R 生成（reporting 计划）。
 - 生产入口：apps/camctl/src/camctl/reporting/generation.py、apps/camctl/src/camctl/persistence/repositories/history.py、apps/camctl/src/camctl/reporting/supervisor.py、apps/camctl/src/camctl/reporting/worker.py
 - 测试：apps/camctl/tests/integration/reporting/test_generation.py、apps/camctl/tests/integration/reporting/test_freeze_reuse.py、apps/camctl/tests/integration/reporting/test_result_error_generation.py、apps/camctl/tests/integration/history/test_report_selection.py、apps/camctl/tests/integration/reporting/test_worker.py
-- 证据：有界选择首批交付后真实保存旧动作的新状态、新产物及新计划；大范围选择在原4200动作的第一页交付后，真实保存该集合内旧动作过期及新计划。原游标和新连接重读均保持原范围，全部4206动作与旧状态正确。生成用例在冻结范围内含两个计划及动作，经正式受理吸收ACK，以批次一实际跨两页复用候选后重建，完整字节与首次相同。真实报告进程遇到已选计划的历史目录缺行时按一致性错误退出，恢复原行后新进程沿原身份/H重建字节相同。查询错误／取消关闭选择及数据库重开后重建另有分层验证。
-- 未核验前提：读取中SQL错误或取消与新进程重建的交叉仍须核验。单行历史目录故障不承接全部错误分区，正常候选复用不泛化为一般历史读取缓存的全部条件；两类页间选择不证明完整报告字节，ACK用例不承担客户端接收和传输闭环。当前补强与边界见[工作记录](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
+- 证据：有界选择首批交付后真实保存旧动作的新状态、新产物及新计划；大范围选择在原4200动作的第一页交付后，真实保存该集合内旧动作过期及新计划。原游标和新连接重读均保持原范围，全部4206动作与旧状态正确。双计划生成用例经正式受理吸收ACK，以批次一跨页复用候选，实际取消页间读取任务并关闭旧选择后，沿原报告身份/H重建完整字节仍相同。真实报告进程遇到已选计划的历史目录缺行时按一致性错误退出，恢复原行后新进程沿原身份/H重建字节相同。连接结束和进程重建分别保留实际边界。
+- 未核验前提：实际候选SQL读取被拒绝时，生成入口交付普通报告错误，违反状态库错误分类，按R7待讨论，不能认定此项全部通过。取消见证发生在页间，未验证SQLite执行中取消；正常候选复用不泛化为所有历史缓存条件，两类页间选择不证明整份报告字节，ACK用例不承担客户端接收和传输闭环。各事件分别验证，不要求所有条件同时组合。当前补强与边界见[工作记录](integration-test-refactor-2026-10-26.md#本阶段已核事项与验收结果)。
 
 #### 验收 P-06
 - 原文：[验收 P-06](database/consistency-verification.md#报告对象分页的具体查询验证)（候选峰值与完整选择工作量）。
