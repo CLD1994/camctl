@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import multiprocessing
 import os
 import time
@@ -19,6 +20,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from camctl.contracts.enums import load_registry
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.maintenance import MaintenanceLimits
 from camctl.reporting.messages import (
@@ -185,10 +187,74 @@ class TestRealWorkerProcess:
             assert len(second_payload) == second.success.size_bytes
             assert hashlib.sha256(second_payload).hexdigest() == second.success.sha256
             assert len(processes) == 1 and processes[0].is_alive()
+
+            # 计划已入选报告；仅破坏其历史恢复目录，报告选择目录保持完整。
+            assert [plan["plan_instance_id"] for plan in json.loads(payload)["plans"]] == ["1"]
+            plan_type = load_registry()["history_objects"]["plan"]["id"]
+            owned = open_existing(db_path, DbOpenMode.EXISTING_RW, DbConfig())
+            try:
+                connection = owned.connection
+                link = connection.execute(
+                    "SELECT id,entity_type,entity_id,event_id,change_count,before_status,after_status "
+                    "FROM entity_event_links WHERE entity_type=? AND entity_id=? "
+                    "ORDER BY event_id DESC LIMIT 1", (plan_type, 1),
+                ).fetchone()
+                assert link is not None
+                assert connection.execute(
+                    "SELECT COUNT(*) FROM report_entity_changes WHERE entity_type=? AND entity_id=? "
+                    "AND change_seq>? AND change_seq<=? AND event_id<=?",
+                    (plan_type, 1, report.from_wm, report.to_wm, report.boundary.last_event_id),
+                ).fetchone()[0] > 0
+                deleted = False
+                try:
+                    deleted = connection.execute(
+                        "DELETE FROM entity_event_links WHERE id=?", (link[0],),
+                    ).rowcount == 1
+                    assert deleted
+                    failed_job = _job(db_path, instance_id, report, tmp_path,
+                                      name="worker-report-failed.json")
+                    failure = await supervisor.generate(failed_job)
+                    assert failure.kind is GenerationOutcomeKind.STATE_FAILURE
+                    assert failure.failure is not None
+                    assert failure.failure.error_kind is ErrorKind.STATE
+                    assert failure.success is None
+                    assert not supervisor.reusable
+                    assert not processes[0].is_alive()
+                    assert processes[0].exitcode is not None
+                    assert not Path(failed_job.staging_path).exists()
+                finally:
+                    if deleted:
+                        connection.execute(
+                            "INSERT INTO entity_event_links "
+                            "(id,entity_type,entity_id,event_id,change_count,before_status,after_status) "
+                            "VALUES (?,?,?,?,?,?,?)", link,
+                        )
+                assert connection.execute(
+                    "SELECT id,entity_type,entity_id,event_id,change_count,before_status,after_status "
+                    "FROM entity_event_links WHERE id=?", (link[0],),
+                ).fetchone() == link
+            finally:
+                owned.connection.close()
+
+            startup = await supervisor.start()
+            assert startup.ready, startup.detail
+            assert len(processes) == 2 and processes[1].is_alive()
+            assert processes[1].pid != processes[0].pid
+            rebuilt = await supervisor.generate(
+                _job(db_path, instance_id, report, tmp_path,
+                     name="worker-report-rebuilt.json"))
+            assert rebuilt.kind is GenerationOutcomeKind.SUCCESS, rebuilt.detail
+            assert rebuilt.success is not None
+            rebuilt_payload = Path(rebuilt.success.path).read_bytes()
+            assert rebuilt_payload == payload
+            assert len(rebuilt_payload) == rebuilt.success.size_bytes
+            assert hashlib.sha256(rebuilt_payload).hexdigest() == rebuilt.success.sha256
         finally:
             shutdown = await supervisor.stop()
         assert shutdown.exitcode == 0
         assert not shutdown.forced
+        assert all(not process.is_alive() and process.exitcode is not None
+                   for process in processes)
 
     async def test_state_failure_retires_real_worker(self, frozen_report) -> None:
         db_path, instance_id, report, tmp_path = frozen_report
