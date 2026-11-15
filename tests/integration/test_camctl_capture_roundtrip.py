@@ -11,6 +11,7 @@ from __future__ import annotations
 import glob
 import json
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 
@@ -57,7 +58,11 @@ def _await_row(state_db: Path, sql: str, params=(), *,
                 (request_id, action, *(int(statuses[name]) for name in ("FAILED", "CANCELED", "EXPIRED"))))
             assert not failed, f"请求 {request_id} 的动作 {action} 进入不相容终态: {failed}"
             if process is not None and process.poll() is not None:
-                stdout, stderr = process.communicate()
+                try:
+                    stdout, stderr = process.communicate(
+                        timeout=min(0.2, max(0, deadline - time.monotonic())))
+                except subprocess.TimeoutExpired as error:
+                    stdout, stderr = error.stdout, error.stderr
                 raise AssertionError(f"会话在等待期间退出 ({process.returncode}): {stdout}\n{stderr}")
             next_failure_check = now + 0.05
         assert time.monotonic() < deadline, f"等待超时: {sql}"
