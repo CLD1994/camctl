@@ -138,24 +138,29 @@ def _error_text(error):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source_kind", ["device"])
-@pytest.mark.parametrize("failure", ["not_started", "exited", "exited_cleanup", "no_exit", "transport_error", "bare_cancel", "verify_close", "dispose_close"])
+@pytest.mark.parametrize("failure", ["not_started", "exited", "exited_cleanup", "no_exit", "transport_error", "bare_cancel"])
 async def test_preparation_settlement_survives_real_consumer_and_result_save(photo_read_request, tmp_path, source_kind, failure, monkeypatch):
     assert source_kind == "device"
-    if failure in ("verify_close", "dispose_close"):
-        process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "integration.outputs.test_read_preparation_settlement",
-            str(tmp_path / "isolated"), failure,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
-        finally:
-            if process.returncode is None:
-                process.kill()
-                await process.communicate()
-        assert process.returncode == 0, (process.returncode, stdout.decode(errors="replace"),
-                                         stderr.decode(errors="replace"))
-        return
     await _run_preparation_case(photo_read_request, tmp_path, failure, monkeypatch)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_kind", ["device"])
+@pytest.mark.parametrize("failure", ["verify_close", "dispose_close"])
+async def test_unconfirmed_close_preserves_read_in_isolated_process(tmp_path, source_kind, failure):
+    assert source_kind == "device"
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "integration.outputs.test_read_preparation_settlement",
+        str(tmp_path / "isolated"), failure,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+    assert process.returncode == 0, (process.returncode, stdout.decode(errors="replace"),
+                                     stderr.decode(errors="replace"))
 
 
 async def _run_preparation_case(photo_read_request, tmp_path, failure, monkeypatch):
