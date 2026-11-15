@@ -149,10 +149,15 @@ async def test_preparation_settlement_survives_real_consumer_and_result_save(pho
 @pytest.mark.parametrize("failure", ["verify_close", "dispose_close"])
 async def test_unconfirmed_close_preserves_read_in_isolated_process(tmp_path, source_kind, failure):
     assert source_kind == "device"
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(Path(__file__).resolve().parents[2]), environment.get("PYTHONPATH"),
+    )))
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "integration.outputs.test_read_preparation_settlement",
         str(tmp_path / "isolated"), failure,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=environment)
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
     finally:
