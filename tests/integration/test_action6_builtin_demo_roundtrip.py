@@ -205,14 +205,19 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
     assert params["duration_s"] == 10
     calls_path = deployment.root / "adb-calls.jsonl"
     demo = HostDemo(deployment, host_demo, launcher=str(package.camctl))
+    failure = demo.watch_failures(
+        request_id=json.loads(capture_plan.read_text())["request_id"],
+        expected_statuses={"capture": "SUCCEEDED"},
+    )
     try:
         demo.start(env=environment)
         demo.submit(capture_plan)
         start_call = wait_for(lambda: next((call for call in _calls(calls_path)
                             if call["kind"] == "start"), None),
-                            60, "没有取得唯一 START 原始调用")
+                            60, "没有取得唯一 START 原始调用", failure=failure)
         stop_call = wait_for(lambda: next((call for call in _calls(calls_path)
-                            if call["kind"] == "stop"), None), 60, "没有取得正常 STOP 原始调用")
+                            if call["kind"] == "stop"), None), 60, "没有取得正常 STOP 原始调用",
+                            failure=failure)
         assert stop_call["started_ns"] - start_call["returned_ns"] >= 11_000_000_000
         stop_ns = stop_call["returned_ns"]
         # 文件在 START 时已存在也不能提前成功；至少检查停止后的前三秒。
@@ -221,7 +226,7 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
             assert query_state(deployment.state_db, "SELECT id FROM outputs") == []
             time.sleep(0.02)
         report = wait_for(lambda: _report_with_statuses(deployment.ready, {"capture": "succeeded"}),
-                          60, "安装后的内建录像未成功或未发布报告")
+                          60, "安装后的内建录像未成功或未发布报告", failure=failure)
         action_id = int(_action(report, "capture")["action_instance_id"])
         rows = query_state(deployment.state_db,
             "SELECT effective_params_json,execution_spec_json FROM actions WHERE id=?", (action_id,))
@@ -384,9 +389,13 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         _run([str(package.python), str(generator), "obtain", "--delay-s", "1",
               "--source-action-id", str(action_id), "--last-report-id", report["report_id"],
               "--output", str(obtain_plan)], cwd=deployment.root, env=environment)
+        failure = demo.watch_failures(
+            request_id=json.loads(obtain_plan.read_text())["request_id"],
+            expected_statuses={"obtain": "SUCCEEDED"},
+        )
         demo.submit(obtain_plan)
         obtained = wait_for(lambda: _report_with_statuses(deployment.ready, {"obtain": "succeeded"}),
-                            60, "内建驱动的独立取回未成功")
+                            60, "内建驱动的独立取回未成功", failure=failure)
         delivered = [path for path in deployment.ready.iterdir()
                      if path.is_file() and not path.name.startswith("status-report-")]
         assert len(delivered) == 1 and delivered[0].read_bytes() == content
@@ -407,10 +416,15 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         ack_plan = deployment.root / "report-ack-plan.json"
         _run([str(package.python), str(generator), "report-ack", "--last-report-id", obtained["report_id"],
               "--output", str(ack_plan)], cwd=deployment.root, env=environment)
+        failure = demo.watch_failures(
+            request_id=json.loads(ack_plan.read_text())["request_id"],
+            expected_statuses={"report": "SUCCEEDED"},
+        )
         demo.submit(ack_plan)
         wait_for(lambda: query_state(deployment.state_db,
             "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state")
-            == [(int(obtained["report_id"]), obtained["to_wm"])], 60, "领取报告的累计确认未吸收")
+            == [(int(obtained["report_id"]), obtained["to_wm"])], 60, "领取报告的累计确认未吸收",
+            failure=failure)
         assert (remote_root / _VIDEO_PATH.lstrip("/")).read_bytes() == content
         assert (remote_root / _PREVIEW_PATH.lstrip("/")).is_file()
         assert old.read_bytes() == content

@@ -88,8 +88,11 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             "policy": {"max_delay_ms": 30000},
         }],
     }
-    plan, _ = deployment.export_plan_with_client(body)
+    plan, receipt = deployment.export_plan_with_client(body)
     demo = HostDemo(deployment, host_demo, launcher=str(camctl))
+    failure = demo.watch_failures(
+        request_id=receipt["request_id"], expected_statuses={"capture": "SUCCEEDED"},
+    )
     monkeypatch.chdir(deployment.root)
     try:
         demo.start(env=environment)
@@ -103,6 +106,7 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             ),
             90,
             "Action6 START 未可靠保存",
+            failure=failure,
         )
         assert len(started) == 1
         action_id = started[0][0]
@@ -116,6 +120,7 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             lambda: _report_with_statuses(deployment.ready, {"capture": "succeeded"}),
             180,
             "Action6 分段拍摄未发布成功来源报告",
+            failure=failure,
         )
         source = _action(report, "capture")
         assert int(source["action_instance_id"]) == action_id
@@ -212,7 +217,7 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
         imported_report_ids = list(saved_source["saved_report_ids"])
         for name, selection, expected_ids in selections:
             instant = format_utc(read_clock(clock_file)["utc_us"])
-            obtain_plan, _ = deployment.export_plan_with_client({
+            obtain_plan, obtain_receipt = deployment.export_plan_with_client({
                 "name": name,
                 "actions": [{
                     "name": name,
@@ -225,12 +230,16 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
                     },
                 }],
             })
+            failure = demo.watch_failures(
+                request_id=obtain_receipt["request_id"], expected_statuses={name: "SUCCEEDED"},
+            )
             demo.submit(obtain_plan)
             final_report = wait_for(
                 lambda action_name=name: _report_with_statuses(
                     deployment.ready, {action_name: "succeeded"}),
                 120,
                 f"{name} 未成功",
+                failure=failure,
             )
             obtained = _action(final_report, name)
             deliveries = obtained["deliveries"]
@@ -287,6 +296,9 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             }],
         })
         assert receipt["last_report_id"] == final_report["report_id"]
+        failure = demo.watch_failures(
+            request_id=receipt["request_id"], expected_statuses={"ack": "SUCCEEDED"},
+        )
         demo.submit(ack)
         wait_for(
             lambda: query_state(
@@ -295,6 +307,7 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             ) == [(int(final_report["report_id"]), final_report["to_wm"])],
             120,
             "客户端累计 ACK 未吸收",
+            failure=failure,
         )
         ack_state = query_state(
             deployment.state_db,

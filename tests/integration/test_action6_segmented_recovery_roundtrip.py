@@ -247,7 +247,7 @@ def _prepare_installed_action6(
     )
     action_type = "camera_timelapse" if native else "camera_record"
     name = "capture"
-    plan, _ = deployment.export_plan_with_client({
+    plan, receipt = deployment.export_plan_with_client({
         "name": "Action6 segmented native" if native else "Action6 segmented record",
         "actions": [{
             "name": name,
@@ -272,6 +272,7 @@ def _prepare_installed_action6(
         "action_type": action_type,
         "action_name": name,
         "plan": plan,
+        "request_id": receipt["request_id"],
         "store": store,
     }
 
@@ -279,7 +280,9 @@ def _prepare_installed_action6(
 def _start_installed_capture(host_demo, package, scenario, monkeypatch):
     deployment = scenario["deployment"]
     demo = HostDemo(deployment, host_demo, launcher=str(scenario["camctl"]))
-    failure = demo.watch_failures()
+    failure = demo.watch_failures(
+        request_id=scenario["request_id"], expected_statuses={"capture": "SUCCEEDED"},
+    )
     try:
         monkeypatch.chdir(package.python.parents[2])
         demo.start(env=scenario["environment"])
@@ -307,7 +310,7 @@ def _start_installed_capture(host_demo, package, scenario, monkeypatch):
 
 def _submit_obtain(demo, deployment, *, action_name, source_id, selection):
     instant = format_utc(read_clock(deployment.root / "clock.json")["utc_us"])
-    plan, _ = deployment.export_plan_with_client({
+    plan, receipt = deployment.export_plan_with_client({
         "name": action_name,
         "actions": [{
             "name": action_name,
@@ -320,6 +323,9 @@ def _submit_obtain(demo, deployment, *, action_name, source_id, selection):
             },
         }],
     })
+    failure = demo.watch_failures(
+        request_id=receipt["request_id"], expected_statuses={action_name: "SUCCEEDED"},
+    )
     demo.submit(plan)
     action = wait_for(
         lambda: query_state(
@@ -329,12 +335,35 @@ def _submit_obtain(demo, deployment, *, action_name, source_id, selection):
         ),
         60,
         f"取回动作未受理: {action_name}",
+        failure=failure,
     )
     assert len(action) == 1
-    return int(action[0][0])
+    return int(action[0][0]), failure
 
 
-def _wait_for_waiting_obtains(deployment, source_id, names):
+def _watch_actions(demo, deployment, expected, host_failure=None):
+    watchers = []
+    for action_id, status in expected.items():
+        rows = query_state(
+            deployment.state_db,
+            "SELECT p.request_id,a.name FROM actions a JOIN plans p ON p.id=a.plan_id "
+            "WHERE a.id=?", (action_id,),
+        )
+        assert len(rows) == 1
+        request_id, name = rows[0]
+        watchers.append(demo.watch_failures(
+            request_id=request_id, expected_statuses={name: status.upper()},
+        ))
+
+    def failure():
+        if host_failure is not None and (reason := host_failure()):
+            return reason
+        return next((reason for watch in watchers if (reason := watch())), None)
+
+    return failure
+
+
+def _wait_for_waiting_obtains(deployment, source_id, names, failure):
     expected_action_status = int(enum_for("actions.status").RUNNING)
     expected_selection_status = int(enum_for("obtain_source_selections.status").PENDING)
 
@@ -363,6 +392,7 @@ def _wait_for_waiting_obtains(deployment, source_id, names):
         complete,
         90,
         "两个正式取回没有同时进入 RUNNING/PENDING 等待来源",
+        failure=failure,
     )
     assert len(waiting) == 2
     return waiting
@@ -473,11 +503,12 @@ def _assert_probe_input_facts(probes, facts, contents):
         assert probe["input_sha256"] == hashlib.sha256(expected).hexdigest()
 
 
-def _action_status_report(deployment, action_name, expected_status):
+def _action_status_report(deployment, action_name, expected_status, failure):
     return wait_for(
         lambda: _report_with_statuses(deployment.ready, {action_name: expected_status}),
         180,
         f"{action_name} 未进入预期报告终态 {expected_status}",
+        failure=failure,
     )
 
 
@@ -546,6 +577,9 @@ def _assert_ack(demo, scenario, report):
         }],
     })
     assert receipt["last_report_id"] == report["report_id"]
+    failure = demo.watch_failures(
+        request_id=receipt["request_id"], expected_statuses={"ack": "SUCCEEDED"},
+    )
     demo.submit(ack)
     acked = wait_for(
         lambda: query_state(
@@ -554,6 +588,7 @@ def _assert_ack(demo, scenario, report):
         ) == [(int(report["report_id"]), report["to_wm"])],
         120,
         "实际客户端累计 ACK 未吸收",
+        failure=failure,
     )
     assert acked
     return receipt
@@ -720,15 +755,21 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
     demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
     try:
         waiter_names = ("pre-default-a", "pre-default-b")
-        waiter_ids = [
+        failure = demo.watch_failures()
+        waiters = [
             _submit_obtain(
                 demo, deployment, action_name=name, source_id=source_id,
                 selection={"filter": "default"},
             )
             for name in waiter_names
         ]
-        _wait_for_waiting_obtains(deployment, source_id, waiter_names)
-        failure = demo.watch_failures()
+        waiter_ids = [identity for identity, _ in waiters]
+        expected_actions = {source_id: "succeeded", **{identity: "succeeded" for identity in waiter_ids}}
+        host_failure = failure
+        failure = _watch_actions(demo, deployment, expected_actions, host_failure)
+        _wait_for_waiting_obtains(deployment, source_id, waiter_names, failure)
+        expected_actions[source_id] = source_status
+        failure = _watch_actions(demo, deployment, expected_actions, host_failure)
         if case != "unknown":
             runs = [record for record in _records(deployment.root / "cli-processes.jsonl")
                     if record["stage"] == "started" and record["command"][:1] == ["run"]]
@@ -758,7 +799,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             assert not [call for call in _records(deployment.root / "adb-calls.jsonl")
                         if call.get("kind") == "stop"]
             demo = HostDemo(deployment, host_demo, launcher=str(scenario["camctl"]))
-            failure = demo.watch_failures()
+            failure = _watch_actions(demo, deployment, expected_actions)
             demo.start(env=scenario["environment"])
             demo.submit(scenario["plan"])
         _release_clock(scenario, 75)
@@ -781,6 +822,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 if (adb_gate / "read-entered.json").is_file() else None,
                 180,
                 "Action6 检查副本未在真实首个进度段字节流出后暂停",
+                failure=failure,
             )
             observed = json.loads(gate_marker.read_text(encoding="utf-8"))
             assert observed["stage"] == "after_first_copy_segment_bytes_streamed"
@@ -797,6 +839,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 else None,
                 30,
                 "首块已转发后，检查副本没有提交对应的部分字节",
+                failure=failure,
             )
             assert len(first_copies) == 1
             resume_copy_before = first_copies[0]
@@ -820,6 +863,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 lambda: marker if marker.is_file() else None,
                 180,
                 f"Action6 未到达持久化同步点: {boundary}",
+                failure=failure,
             )
             snapshot = json.loads(gate_marker.read_text(encoding="utf-8"))
             assert snapshot["stage"] == boundary
@@ -841,10 +885,11 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 )
                 post_h_waiter_name = "post-h-default"
                 post_h_submit_ns = time.monotonic_ns()
-                post_h_waiter_id = _submit_obtain(
+                post_h_waiter_id, _ = _submit_obtain(
                     demo, deployment, action_name=post_h_waiter_name,
                     source_id=source_id, selection={"filter": "default"},
                 )
+                expected_actions[post_h_waiter_id] = "succeeded"
                 assert post_h_waiter_id not in {row[0] for row in at_commit}
         elif boundary == "local_read":
             marker = local_gate / "local-read-entered.json"
@@ -852,6 +897,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 lambda: marker if marker.is_file() else None,
                 180,
                 "绑定取回未在真实本地检查副本读取边界暂停",
+                failure=failure,
             )
             read = json.loads(gate_marker.read_text(encoding="utf-8"))
             assert read["bytes_read"] > 0 and read["position"] >= read["bytes_read"]
@@ -880,6 +926,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 and rows[1][1:] == (checked_count, checked_count, 0, 0) else None,
                 120,
                 "一组绑定取回的副本未全部准备、另一组仍未开始本地读取",
+                failure=failure,
             )
             assert len(first_complete_one_waiting) == 2
             required = int(enum_for("intermediate_files.retention_state").REQUIRED)
@@ -910,7 +957,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             demo = HostDemo(
                 scenario["deployment"], host_demo, launcher=str(scenario["camctl"])
             )
-            failure = demo.watch_failures()
+            failure = _watch_actions(demo, deployment, expected_actions)
             monkeypatch.chdir(package.python.parents[2])
             demo.start(env=scenario["environment"])
             demo.submit(scenario["plan"])
@@ -926,6 +973,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                     )) == 1 else None,
                     120,
                     "重启调度后 post-H 取回未保存来源依赖与选择行",
+                    failure=failure,
                 )
                 assert post_h_dependency[0][:2] == (post_h_waiter_id, source_id)
             if boundary == "copy_progress":
@@ -941,6 +989,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                     ]) else None,
                     120,
                     "重启后没有对同一源文件发起续偏移设备读取",
+                    failure=failure,
                 )
                 first_resumed_read = min(resumed_reads, key=lambda call: call["started_ns"])
                 skip_match = re.search(r"(?:^| )skip=([0-9]+)$", first_resumed_read["script"])
@@ -951,6 +1000,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                     lambda: state if len(state := _inspection_copy_state(deployment, source_id)) == 1 else None,
                     30,
                     "恢复后的分段检查读取流程未保留原拷贝状态",
+                    failure=failure,
                 )
                 after_copy = after_copy_rows[0]
                 assert after_copy[:7] == resume_copy_before[:7]
@@ -1153,11 +1203,11 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         if len(video_paths) > checked_count:
             late_path = video_paths[-1]
             late_name = "late-explicit"
-            late_id = _submit_obtain(
+            late_id, failure = _submit_obtain(
                 demo, deployment, action_name=late_name, source_id=source_id,
                 selection={"output_ids": [output_rows[late_path]["output_id"]]},
             )
-            final_report = _action_status_report(deployment, late_name, "succeeded")
+            final_report = _action_status_report(deployment, late_name, "succeeded", failure)
             late_report_path = _save_report_snapshot(
                 deployment, final_report, "action6-ordinary-late-obtain-report"
             )
@@ -1230,15 +1280,21 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
     demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
     try:
         waiter_names = ("native-prefix-a", "native-prefix-b")
-        waiter_ids = [
+        failure = demo.watch_failures()
+        waiters = [
             _submit_obtain(
                 demo, deployment, action_name=name, source_id=source_id,
                 selection={"filter": "default"},
             )
             for name in waiter_names
         ]
-        _wait_for_waiting_obtains(deployment, source_id, waiter_names)
-        failure = demo.watch_failures()
+        waiter_ids = [identity for identity, _ in waiters]
+        expected_actions = {source_id: "succeeded", **{identity: "succeeded" for identity in waiter_ids}}
+        host_failure = failure
+        failure = _watch_actions(demo, deployment, expected_actions, host_failure)
+        _wait_for_waiting_obtains(deployment, source_id, waiter_names, failure)
+        expected_actions[source_id] = "failed"
+        failure = _watch_actions(demo, deployment, expected_actions, host_failure)
         _release_clock(scenario, 330)
         report = wait_for(
             lambda: _report_with_statuses(
