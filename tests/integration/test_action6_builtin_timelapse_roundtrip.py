@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import sys
 import time
 
 import pytest
@@ -18,7 +19,7 @@ from camctl_fixtures import Deployment
 from test_camctl_c_module_roundtrip import _report_with_statuses
 from test_osmo_builtin_timelapse_roundtrip import (
     osmo_package, _run, _client_driver, _wait_for_run_process, _wait_for_boundary_reads,
-    _assert_recovery_boundary_empty, _records, _action,
+    _assert_recovery_boundary_empty, _records, _action, _wait_for_running_read,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -94,7 +95,7 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
             cwd=deployment.root, env=environment, log_dir=package.log_dir, camctl=True)
     described = json.loads(result.stdout)
     source_env = dict(package.environment, PYTHONPATH=str(REPO / "apps/camctl/src"))
-    source = _run([str(REPO / "apps/camctl/.venv311/bin/python"), "-m", "camctl", "describe",
+    source = _run([sys.executable, "-m", "camctl", "describe",
         "--config", str(deployment.config_path)], cwd=deployment.root, env=source_env, log_dir=package.log_dir, camctl=True)
     assert json.loads(source.stdout) == described
     device = described["devices"][0]
@@ -114,12 +115,14 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
     monkeypatch.chdir(package.root)
     try:
         demo.start(env=environment)
+        failure = demo.watch_failures(request_id=int(json.loads(plan.read_text())["request_id"]),
+                                      expected_statuses={"capture": "SUCCEEDED"})
         demo.submit(plan)
         starts = wait_for(lambda: query_state(deployment.state_db,
             "SELECT a.id,a.effective_params_json,a.execution_spec_json,t.result_json,v.id,v.sent_at,v.started_at"
             " FROM actions a JOIN operation_runs r ON r.action_id=a.id JOIN operation_attempts t ON t.run_id=r.id"
             " JOIN device_activities v ON v.action_id=a.id WHERE r.kind=1 AND t.result_json IS NOT NULL"),
-            90, "Action6 START 没有可靠保存")
+            90, "Action6 START 没有可靠保存", failure=failure)
         assert len(starts) == 1
         action_id, effective, execution, start_json, activity_id, sent, started = starts[0]
         assert json.loads(effective) == params and sent == initial["utc_us"] and started is None
@@ -134,17 +137,25 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
         previous_pids = {r["pid"] for r in _records(process_log)}
         demo = HostDemo(deployment, host_demo, launcher=str(camctl))
         demo.start(env=environment)
+        failure = demo.watch_failures(request_id=int(json.loads(plan.read_text())["request_id"]),
+                                      expected_statuses={"capture": "SUCCEEDED"})
         demo.submit(plan)
-        resumed = _wait_for_run_process(process_log, demo.log_path, previous_pids)
+        resumed = _wait_for_run_process(process_log, demo.log_path, previous_pids, failure=failure)
         _wait_for_boundary_reads(clock_log, pid=resumed["pid"], epoch=negative["epoch"],
-            module="camctl.capture.handlers", function="_advance_timelapse_natural_wait", kind="monotonic_ns",
-            utc_us=initial["utc_us"] + 329_000_000, monotonic_ns=initial["monotonic_ns"] + 329_000_000_000)
+            kind="monotonic_ns",
+            utc_us=initial["utc_us"] + 329_000_000, monotonic_ns=initial["monotonic_ns"] + 329_000_000_000, failure=failure)
+        installed_site = (package.python.parent.parent / "lib" / "python3.11" / "site-packages").resolve()
+        assert installed_site in Path(resumed["import_origins"]["camctl.bootstrap.capture_assembly"]).resolve().parents
         _assert_action6_recovery_boundary_empty(deployment, adb_log, action_id=action_id, activity_id=activity_id,
             recovery_started_ns=resumed["started_ns"])
         release = set_running(clock, utc_us=initial["utc_us"] + 330_000_000,
             monotonic_ns=initial["monotonic_ns"] + 330_000_000_000)
+        _wait_for_running_read(clock_log, pid=resumed["pid"], epoch=release["epoch"],
+            kind="monotonic_ns", utc_us=initial["utc_us"] + 330_000_000,
+            monotonic_ns=initial["monotonic_ns"] + 330_000_000_000,
+            real_monotonic_anchor_ns=release["real_monotonic_anchor_ns"], failure=failure)
         report = wait_for(lambda: _report_with_statuses(deployment.ready, {"capture": "succeeded"}),
-            90, "Action6 延时自然完成未成功")
+            90, "Action6 延时自然完成未成功", failure=failure)
         assert query_state(deployment.state_db, "SELECT effective_params_json,execution_spec_json FROM actions WHERE id=?", (action_id,)) == [(effective, execution)]
         calls = _records(adb_log)
         assert len([c for c in calls if c["kind"] == "start"]) == 1
@@ -176,8 +187,10 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
             obtain, _ = deployment.export_plan_with_client({"name": name, "actions": [{
                 "name": name, "type": "obtain_action_outputs", "scheduled_at": format_utc(read_clock(clock)["utc_us"]),
                 "params": {"source": {"action_instance_id": str(action_id)}, "output_ids": [str(by_path[path][4])]}}]})
+            failure = demo.watch_failures(request_id=int(json.loads(obtain.read_text())["request_id"]),
+                                          expected_statuses={name: "SUCCEEDED"})
             demo.submit(obtain)
-            obtained = wait_for(lambda: _report_with_statuses(deployment.ready, {name: "succeeded"}), 90, name)
+            obtained = wait_for(lambda: _report_with_statuses(deployment.ready, {name: "succeeded"}), 90, name, failure=failure)
             delivery = _action(obtained, name)["deliveries"][0]
             demo.claim()
             assert (deployment.processing / delivery["file_name"]).read_bytes() == expected_contents[path]
@@ -188,8 +201,10 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
             cleanup, _ = deployment.export_plan_with_client({"name": name, "actions": [{
                 "name": name, "type": "delete_action_outputs", "scheduled_at": format_utc(read_clock(clock)["utc_us"]),
                 "params": {"output_ids": [str(by_path[path][4])]}}]})
+            failure = demo.watch_failures(request_id=int(json.loads(cleanup.read_text())["request_id"]),
+                                          expected_statuses={name: "SUCCEEDED"})
             demo.submit(cleanup)
-            deleted = wait_for(lambda: _report_with_statuses(deployment.ready, {name: "succeeded"}), 90, name)
+            deleted = wait_for(lambda: _report_with_statuses(deployment.ready, {name: "succeeded"}), 90, name, failure=failure)
             assert not (remote / path.lstrip("/")).exists()
             assert (remote / NEW_PHOTO.lstrip("/")).read_bytes() == expected_contents[NEW_PHOTO]
             if index == 0:
@@ -201,8 +216,10 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
         ack, receipt = deployment.export_plan_with_client({"name": "ack", "actions": [{"name": "ack", "type": "report_status",
             "scheduled_at": format_utc(read_clock(clock)["utc_us"]), "params": {"scope": "full"}}]})
         assert receipt["last_report_id"] == deleted["report_id"]
+        failure = demo.watch_failures(request_id=int(json.loads(ack.read_text())["request_id"]),
+                                      expected_statuses={"ack": "SUCCEEDED"})
         demo.submit(ack)
         wait_for(lambda: query_state(deployment.state_db, "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [
-            (int(deleted["report_id"]), deleted["to_wm"])], 90, "累计 ACK 未吸收")
+            (int(deleted["report_id"]), deleted["to_wm"])], 90, "累计 ACK 未吸收", failure=failure)
     finally:
         demo.stop()

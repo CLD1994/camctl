@@ -39,6 +39,15 @@ def _install_clock_ports(controlled_time) -> None:
     obtain_assembly.time = controlled_time
     cleanup_assembly.time = controlled_time
 
+    original_capture_assembly = capture_assembly.session_capture_assembly
+
+    def capture_assembly_with_clock(**kwargs):
+        kwargs["wall_us"] = controlled_time.capture_wall_us
+        kwargs["monotonic_ns"] = controlled_time.capture_monotonic_ns
+        return original_capture_assembly(**kwargs)
+
+    capture_assembly.session_capture_assembly = capture_assembly_with_clock
+
 
 def main() -> int:
     started_ns = _real_time.monotonic_ns()
@@ -64,6 +73,7 @@ def main() -> int:
             install()
         import camctl
         from camctl import cli as camctl_cli
+        from camctl.bootstrap import capture_assembly
         from camctl.capture import handlers
         from camctl.devices.drivers.adb_cameras import osmo360ii_capture, osmo360ii_results
 
@@ -71,6 +81,7 @@ def main() -> int:
             "camctl": camctl.__file__,
             "camctl.cli": camctl_cli.__file__,
             "camctl.capture.handlers": handlers.__file__,
+            "camctl.bootstrap.capture_assembly": capture_assembly.__file__,
             "camctl.devices.drivers.adb_cameras.osmo360ii_capture": osmo360ii_capture.__file__,
             "camctl.devices.drivers.adb_cameras.osmo360ii_results": osmo360ii_results.__file__,
         }

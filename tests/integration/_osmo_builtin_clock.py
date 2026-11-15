@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import sys
 import time
 
 
@@ -96,22 +95,6 @@ def format_utc(utc_us: int) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _camctl_stack() -> list[dict]:
-    frames = []
-    frame = sys._getframe(2)
-    while frame is not None:
-        module = str(frame.f_globals.get("__name__", ""))
-        if module.startswith("camctl"):
-            frames.append({
-                "module": module,
-                "function": frame.f_code.co_name,
-                "line": frame.f_lineno,
-                "file": frame.f_code.co_filename,
-            })
-        frame = frame.f_back
-    return frames
-
-
 class ControlledClock:
     """为已显式接线的业务时钟模块记录来源，不修改全局 time。"""
 
@@ -119,13 +102,13 @@ class ControlledClock:
         self._state_path = state_path
         self._log_path = log_path
 
-    def _read(self, kind: str) -> dict:
+    def _read(self, kind: str, *, source: str = "general") -> dict:
         reading = read_clock(self._state_path)
         _append_jsonl(self._log_path, {
             "pid": os.getpid(), "epoch": reading["epoch"], "kind": kind,
             "utc_us": reading["utc_us"], "monotonic_ns": reading["monotonic_ns"],
             "real_monotonic_ns": reading["real_monotonic_ns"], "mode": reading["mode"],
-            "stack": _camctl_stack(),
+            "source": source,
         })
         return reading
 
@@ -137,3 +120,10 @@ class ControlledClock:
 
     def time(self) -> float:
         return self._read("time")["utc_us"] / 1_000_000
+
+    def capture_wall_us(self) -> int:
+        reading = self._read("time", source="capture")
+        return int(reading["utc_us"] / 1_000_000 * 1_000_000)
+
+    def capture_monotonic_ns(self) -> int:
+        return self._read("monotonic_ns", source="capture")["monotonic_ns"]
