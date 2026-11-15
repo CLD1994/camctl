@@ -28,7 +28,7 @@ class MemoryMarker:
         return MarkerSave(SaveOutcome.SAVED)
 
 
-async def test_unreadable_group_copy_receipt_still_finds_reliable_leaf():
+async def test_unreadable_group_copy_receipt_still_finds_reliable_leaf(tmp_path):
     class UnreadableLeaf(asyncio.CancelledError):
         @property
         def copy_receipt(self):
@@ -42,45 +42,60 @@ async def test_unreadable_group_copy_receipt_still_finds_reliable_leaf():
     reliable = asyncio.CancelledError("actual copy control")
     fact = reliable.copy_receipt = CopyReceipt(CopyOutcome.COPY_UNKNOWN, error="known copy fact")
     original = UnreadableGroup("copy controls", [UnreadableLeaf("unreadable"), reliable])
-    messages = await run_failed_session_delivery(original)
+    messages = await run_failed_session_delivery(original, tmp_path)
     assert len(messages) == 1
     assert fact.error in messages[0]
 
 
-async def test_unreadable_copy_receipt_without_reliable_fact_remains_unknown():
+async def test_unreadable_copy_receipt_without_reliable_fact_remains_unknown(tmp_path):
     class OriginalControl(asyncio.CancelledError):
         @property
         def copy_receipt(self):
             raise RuntimeError("copy facts getter failed")
 
     original = OriginalControl("original copy control")
-    messages = await run_failed_session_delivery(original)
+    messages = await run_failed_session_delivery(original, tmp_path)
     assert len(messages) == 1
     assert "outcome=unknown" in messages[0]
     assert "original copy control" in messages[0]
 
 
-async def test_session_consumer_keeps_original_control_and_delivers_unknown_copy_diagnostic():
+async def test_session_consumer_keeps_original_control_and_delivers_unknown_copy_diagnostic(tmp_path):
     class OriginalControl(asyncio.CancelledError):
         @property
         def copy_receipt(self):
             raise asyncio.CancelledError("secondary getter control")
 
     original = OriginalControl("original copy control")
-    messages = await run_failed_session_delivery(original)
+    messages = await run_failed_session_delivery(original, tmp_path)
     assert len(messages) == 1
     assert "original report" in messages[0]
     assert "original copy control" in messages[0]
     assert "outcome=unknown" in messages[0]
 
 
-async def run_failed_session_delivery(original):
+async def run_failed_session_delivery(original, tmp_path):
     from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.session.service import run_session
     from camctl.session.supervision import Supervisor
-    from integration.session.test_custom_delivery_durability import session_world
+    from camctl.session.locks import acquire_session, probe_admission
+    from camctl.session.work import WorkFacts
+    from integration.session.support import assert_database_closed, session_context
+    from integration.support.database import create_test_database
 
-    context, database, session, admission = session_world()
+    class Clock:
+        def utc_micros(self):
+            return 1_735_689_660_000_000
+
+        def monotonic_ns(self):
+            return 0
+
+    state_path = tmp_path / "state.db"
+    create_test_database(state_path)
+    context = session_context(
+        state_path, clock=Clock(),
+        facts_query=lambda _connection: WorkFacts(0, 0, False, True, False, False, False, False),
+    )
     messages = []
 
     async def diagnose(message):
@@ -109,8 +124,9 @@ async def run_failed_session_delivery(original):
         await run_session(context, None)
 
     assert raised.value is original
-    database.close.assert_awaited_once()
-    session.close.assert_called_once()
-    admission.close.assert_called()
+    await assert_database_closed(context.database)
+    assert probe_admission(context.paths.admission_lock).is_free
+    session = acquire_session(context.paths.session_lock)
+    session.close()
     copy_channel.copy_with_write.assert_not_called()
     return messages
