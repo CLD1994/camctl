@@ -383,7 +383,10 @@ class TestGenerateReportFile:
     async def test_regeneration_is_byte_identical_despite_later_changes(
         self, environment
     ):
+        import asyncio
         from types import SimpleNamespace
+        from camctl.history.queries import ReportScopeRequest
+        from camctl.persistence.repositories.history import HistoryRepository
 
         owned, tmp_path = environment
         await _submit(owned, tmp_path, "1")
@@ -432,9 +435,53 @@ class TestGenerateReportFile:
         assert owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone() == (latest_wm,)
         assert read_frozen_definition() == frozen
 
+        repository = HistoryRepository(tmp_path / 'state.db')
+        request = ReportScopeRequest(report.boundary, report.from_wm, report.to_wm, 1)
+        loop = asyncio.get_running_loop()
+        first_page = loop.create_future()
+        page_gate = loop.create_future()
+
+        async def read_first_page():
+            with repository.report_read_scope():
+                with repository.open_report_selection(request) as selection:
+                    page = selection.read_page('plan')
+                    first_page.set_result((selection, page))
+                    await page_gate
+
+        consumer = asyncio.create_task(read_first_page())
+        try:
+            done, _ = await asyncio.wait(
+                (first_page, consumer), timeout=10, return_when=asyncio.FIRST_COMPLETED)
+            if consumer in done:
+                await consumer
+                pytest.fail('报告选择在交付第一页前意外结束')
+            assert first_page in done, '等待报告选择第一页超时'
+            selection, page = first_page.result()
+            assert page.items == (1,) and page.next_cursor is not None
+            assert not consumer.done()
+            assert consumer.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consumer
+            assert consumer.cancelled()
+            with pytest.raises(ConsistencyError):
+                selection.read_page('plan', cursor=page.next_cursor)
+        finally:
+            if not consumer.done():
+                consumer.cancel()
+                try:
+                    await consumer
+                except asyncio.CancelledError:
+                    pass
+            elif not consumer.cancelled():
+                consumer.exception()
+            if not first_page.done():
+                first_page.cancel()
+            if not page_gate.done():
+                page_gate.cancel()
+
         third = generate_report_file(_spec(
             tmp_path, report, name="staging/third.json",
-            entity_batch_size=1, event_batch_size=1), buffer_size=3)
+            entity_batch_size=1, event_batch_size=1), repository=repository, buffer_size=3)
         assert third.path.read_bytes() == first_bytes
         assert first.path.read_bytes() == first_bytes
         assert read_frozen_definition() == frozen
