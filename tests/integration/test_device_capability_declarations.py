@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from camctl_memory_plugin import run_test_command
 from python_test_build import prepare_standard_wheel
+from client_test_build import prepare_standard_client
 
 from contextlib import closing
 from dataclasses import dataclass
@@ -110,7 +111,7 @@ def package(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def client_build(package):
-    package.run(["npm", "run", "build"], cwd=CLIENT)
+    prepare_standard_client(CLIENT, package.run)
 
 
 def _config(package, directory, *, host_storage="host", fixtures=False, fixture_host_storage="host"):
