@@ -83,6 +83,10 @@ class _Connection:
             return _Cursor(rows)
         if sql.startswith("SELECT a.status,a.effect_state,e.occurred_at FROM operation_attempts"):
             return _Cursor(())
+        if sql.startswith("SELECT c.id,r.error_json,c.processing_id,c.inspection_id FROM operation_runs"):
+            return _Cursor(())
+        if sql == "SELECT format_version FROM database_metadata WHERE id=1":
+            return _Cursor(((world.database.metadata.format_version,),))
         if sql.startswith("SELECT id, device_id, scheduled_at, max_delay_ms, first_window_observed_at FROM actions"):
             now = parameters[0]
             if "device_id=?" in sql:
@@ -192,7 +196,9 @@ class _World:
         self.runtime.pending_capture_completions = {}
         self.runtime.pending_file_observations = {}
         self.runtime.pending_start_results = {}
+        self.runtime.pending_media_results = {}
         self.runtime.pending_segment_writes = {}
+        self.runtime.pending_segment_inspection_results = {}
         self.runtime.pending_read_business = {}
         self.runtime.pending_read_results = {}
         self.runtime.pending_read_ends = {}

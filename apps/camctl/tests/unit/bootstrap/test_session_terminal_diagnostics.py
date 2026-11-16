@@ -47,9 +47,12 @@ def _cli_document(message):
     return json.loads(message)["exception"]
 
 
-def _assert_complete(document, kind):
+def _assert_complete(document, kind, *, log_projection=False):
     if kind == "ordinary":
-        assert document["diagnostic_details"] == {"stderr_hex": "ff00", "remaining": 17}
+        details = {"stderr_hex": "ff00", "remaining": 17}
+        if log_projection:
+            details["stderr_text"] = "\\xff\x00"
+        assert document["diagnostic_details"] == details
     elif kind == "read_close":
         assert document["exceptions"][0]["diagnostic_details"]["stderr_hex"] == "ff00"
         assert document["exceptions"][1]["message"] == "close failed"
@@ -299,7 +302,7 @@ async def test_actual_session_failure_is_fully_logged_and_rethrows_the_same_obje
 
     assert caught.value is failure
     assert len(records) == 1
-    _assert_complete(json.loads(records[0].message)["exception"], kind)
+    _assert_complete(json.loads(records[0].message)["exception"], kind, log_projection=True)
 
 
 @pytest.mark.asyncio
