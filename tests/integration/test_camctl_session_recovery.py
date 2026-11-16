@@ -155,7 +155,7 @@ def _past_schedule(seconds: int) -> str:
     return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def test_process_restart_resumes_interrupted_work(tmp_path: Path, start_owned_camctl) -> None:
+def test_process_restart_resumes_interrupted_work(tmp_path: Path, start_owned_camctl, reuse_client) -> None:
     """run 进程执行中被终止：已保存事实不丢，下一个会话恢复剩余等
     待并完成迟到提交的新计划；运行间配置重载不破坏既有事实。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -173,6 +173,7 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path, start_owned_ca
         device_files={"seq-1": _CLIP_CONTENT,
                       "shot-a": "photo-payload-a"})
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
 
     shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
@@ -266,7 +267,7 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path, start_owned_ca
     assert statuses == {"timelapse": "succeeded", "shoot": "succeeded"}
 
 
-def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned_camctl) -> None:
+def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned_camctl, reuse_client) -> None:
     """启动调用在途时进程被终止：恢复会话不重复启动、不补造发送时
     间，按无法确认失败收场；同设备后续动作不被遗留活动阻塞，会话
     正常退出。"""
@@ -283,6 +284,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned
         gates={"control": "control.gate"},
         device_files={"shot-late": "photo-payload-late"})
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
 
     shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
@@ -380,7 +382,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned
     assert statuses == {"timelapse": "failed", "shoot": "succeeded"}
 
 
-def test_concurrent_submits_and_duplicate_identity(tmp_path: Path, start_owned_camctl) -> None:
+def test_concurrent_submits_and_duplicate_identity(tmp_path: Path, start_owned_camctl, reuse_client) -> None:
     """并发 submit 交错执行互不干扰；同请求身份重送不重复受理。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
@@ -392,6 +394,7 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path, start_owned_c
         device_files={"shot-1": "content-one",
                       "shot-2": "content-two"})
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
     shoot_at = deployment.schedule(1)
 
     def body(request_id: str, action: str) -> dict:
@@ -554,7 +557,7 @@ def test_future_action_waits_and_past_window_expires(
 
 
 def test_report_failure_preserves_device_work_and_redelivers(
-        tmp_path: Path, start_owned_camctl) -> None:
+        tmp_path: Path, start_owned_camctl, reuse_client) -> None:
     """报告文件交接失败不阻止设备动作：动作与计划按事实终态，报告
     责任保留并由后续会话补交付。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -566,6 +569,7 @@ def test_report_failure_preserves_device_work_and_redelivers(
         {"1": [photo_file("shot-1")]},
         device_files={"shot-1": "content-one"})
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
 
     # ready 位置被普通文件占据：报告无法写入部署绑定目录。
     shutil.rmtree(deployment.ready)
