@@ -35,6 +35,8 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+
+from python_test_build import prepare_standard_wheel
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
@@ -144,18 +146,7 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> _Installed:
     """构建正式 wheel 并安装到仓库之外的独立环境。"""
     root = tmp_path_factory.mktemp("b7-distribution")
 
-    dist_dir = root / "dist"
-    dist_dir.mkdir()
-    _run(["uv", "build", "--project", str(PROJECT_DIR), "--wheel",
-          "--out-dir", str(dist_dir)])
-    wheels = sorted(dist_dir.glob("camctl-*.whl"))
-    assert len(wheels) == 1, f"期望恰好一个 wheel，实际: {wheels}"
-    wheel = wheels[0]
-
-    # 运行时依赖只从锁文件导出版本取得；--no-dev 排除测试组。
-    requirements = root / "requirements.txt"
-    _run(["uv", "export", "--project", str(PROJECT_DIR), "--frozen",
-          "--no-dev", "--no-emit-project", "-o", str(requirements)])
+    wheel, requirements = prepare_standard_wheel(PROJECT_DIR, root, _run)
 
     # 独立解释器环境：复用当前测试解释器（目标 Python 3.11，
     # 实际链接的 SQLite 已满足统一运行条件）。

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from camctl_memory_plugin import run_test_command
+from python_test_build import prepare_standard_wheel
 
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -176,13 +177,7 @@ def installed_camctl(tmp_path_factory) -> InstalledCamctl:
     root = tmp_path_factory.mktemp("hasselblad-photo-installed")
     environment = _clean_environment()
     package = InstalledCamctl(root, root / "venv/bin/python", environment)
-    package.run(["uv", "build", "--project", PROJECT, "--wheel", "--out-dir", root / "dist"])
-    wheels = list((root / "dist").glob("*.whl"))
-    assert len(wheels) == 1
-    wheel = wheels[0]
-    requirements = root / "requirements.txt"
-    package.run(["uv", "export", "--project", PROJECT, "--frozen", "--no-dev",
-                 "--no-emit-project", "-o", requirements])
+    wheel, requirements = prepare_standard_wheel(PROJECT, root, package.run)
     package.run(["uv", "venv", "--python", sys.executable, root / "venv"])
     package.run(["uv", "pip", "install", "--python", package.python,
                  "--require-hashes", "-r", requirements])

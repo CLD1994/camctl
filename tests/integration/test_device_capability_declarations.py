@@ -7,6 +7,7 @@ wheel 与锁定运行依赖在仓库外离线安装，设备工具只作为禁�
 from __future__ import annotations
 
 from camctl_memory_plugin import run_test_command
+from python_test_build import prepare_standard_wheel
 
 from contextlib import closing
 from dataclasses import dataclass
@@ -83,13 +84,8 @@ def package(tmp_path_factory):
     assert sys.version_info[:2] == (3, 11), "安装链使用部署版 Python 3.11"
     root = tmp_path_factory.mktemp("device-declarations-installed")
     package = Installed(root, root / "venv/bin/python", root / "pending.whl", _environment())
-    package.run(["uv", "build", "--project", PROJECT, "--wheel", "--out-dir", root / "dist"])
-    wheels = list((root / "dist").glob("*.whl"))
-    assert len(wheels) == 1
-    package.wheel = wheels[0]
-    requirements = root / "requirements.txt"
-    package.run(["uv", "export", "--project", PROJECT, "--frozen", "--no-dev",
-                 "--no-emit-project", "-o", requirements])
+    wheel, requirements = prepare_standard_wheel(PROJECT, root, package.run)
+    package.wheel = wheel
     package.run(["uv", "venv", "--python", sys.executable, root / "venv"])
     package.run(["uv", "pip", "install", "--python", package.python,
                  "--require-hashes", "-r", requirements])

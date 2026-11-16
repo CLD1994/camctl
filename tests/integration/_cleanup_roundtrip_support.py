@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from camctl_memory_plugin import finalize_receipts, run_test_command
+from python_test_build import prepare_standard_wheel
 
 import base64
 from contextlib import closing, contextmanager
@@ -132,13 +133,10 @@ def cleanup_package(tmp_path_factory):
                                    if str(REPO) not in part)
     def command(*args):
         return run(args, cwd=root, env=env, logs=logs)
-    command("uv", "build", "--project", REPO / "apps/camctl", "--wheel", "--out-dir", root / "dist")
-    wheel, = (root / "dist").glob("*.whl")
-    command("uv", "export", "--project", REPO / "apps/camctl", "--frozen", "--no-dev",
-            "--no-emit-project", "-o", root / "requirements.txt")
+    wheel, requirements = prepare_standard_wheel(REPO / "apps/camctl", root, lambda args: command(*args))
     command("uv", "venv", "--python", sys.executable, root / "venv")
     python = root / "venv/bin/python"
-    command("uv", "pip", "install", "--python", python, "--require-hashes", "-r", root / "requirements.txt")
+    command("uv", "pip", "install", "--python", python, "--require-hashes", "-r", requirements)
     command("uv", "pip", "install", "--python", python, "--no-deps", wheel)
     env.pop("UV_PYTHON")
     provenance = command(python, "-c", '''import importlib,importlib.metadata,json,sys

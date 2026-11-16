@@ -6,6 +6,8 @@
 
 import pytest
 
+from python_test_build import prepare_standard_wheel
+
 import hashlib
 import json
 import runpy
@@ -60,16 +62,12 @@ def _venv_cli(env_dir: Path) -> Path:
 
 @pytest.mark.acceptance
 def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
-    dist_dir = tmp_path / "dist"
-    dist_dir.mkdir()
-    _run(["uv", "build", "--project", str(PROJECT_DIR), "--wheel", "--out-dir", str(dist_dir)])
-    wheels = list(dist_dir.glob("camctl-*.whl"))
-    assert len(wheels) == 1, f"期望恰好一个 wheel，实际: {wheels}"
+    wheel, _requirements = prepare_standard_wheel(PROJECT_DIR, tmp_path, _run)
 
     env_dir = tmp_path / "env"
     _run(["uv", "venv", "--python", sys.executable, str(env_dir)])
     # resource_bytes 只依赖标准库；--no-deps 使安装不依赖网络解析生产依赖。
-    _run(["uv", "pip", "install", "--no-deps", "--python", str(_venv_python(env_dir)), str(wheels[0])])
+    _run(["uv", "pip", "install", "--no-deps", "--python", str(_venv_python(env_dir)), str(wheel)])
 
     probe = _run([str(_venv_python(env_dir)), "-c", _PROBE_SCRIPT])
     installed_digests = json.loads(probe.stdout)

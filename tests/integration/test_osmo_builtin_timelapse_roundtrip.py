@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from camctl_memory_plugin import finalize_receipts, run_test_command
+from python_test_build import prepare_standard_wheel
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -126,15 +127,9 @@ def osmo_package(tmp_path_factory) -> _InstalledPackage:
     log_dir = root / "command-logs"
     build_environment = _clean_environment()
     assert _PYTHON311.is_file(), f"Python 3.11 interpreter is unavailable: {_PYTHON311}"
-    dist = root / "dist"
-    _run(["uv", "build", "--project", str(_PROJECT), "--wheel",
-          "--out-dir", str(dist)], cwd=root, env=build_environment, log_dir=log_dir)
-    wheels = list(dist.glob("camctl-*.whl"))
-    assert len(wheels) == 1, wheels
-    requirements = root / "requirements.txt"
-    _run(["uv", "export", "--project", str(_PROJECT), "--frozen", "--no-dev",
-          "--no-emit-project", "-o", str(requirements)],
-         cwd=root, env=build_environment, log_dir=log_dir)
+    wheel, requirements = prepare_standard_wheel(
+        _PROJECT, root,
+        lambda args: _run(args, cwd=root, env=build_environment, log_dir=log_dir))
     venv = root / "venv"
     _run(["uv", "venv", "--python", str(_PYTHON311), str(venv)],
          cwd=root, env=build_environment, log_dir=log_dir)
@@ -142,7 +137,7 @@ def osmo_package(tmp_path_factory) -> _InstalledPackage:
     _run(["uv", "pip", "install", "--python", str(python), "--require-hashes",
           "-r", str(requirements)], cwd=root, env=build_environment, log_dir=log_dir)
     _run(["uv", "pip", "install", "--python", str(python), "--no-deps",
-          str(wheels[0])], cwd=root, env=build_environment, log_dir=log_dir)
+          str(wheel)], cwd=root, env=build_environment, log_dir=log_dir)
     runtime_environment = dict(build_environment)
     runtime_environment.pop("UV_PYTHON", None)
     package = _InstalledPackage(root, python, venv / "bin/camctl",

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from camctl_memory_plugin import run_test_command
+from python_test_build import prepare_standard_wheel
 
 import base64
 from dataclasses import dataclass
@@ -90,20 +91,14 @@ def action6_package(tmp_path_factory):
     for name in tuple(environment):
         if name in ("PYTHONPATH", "PYTHONHOME") or name.startswith("CAMCTL_TEST_"):
             environment.pop(name)
-    dist = root / "dist"
-    _run(["uv", "build", "--project", str(_PROJECT), "--wheel", "--out-dir", str(dist)],
-         cwd=root, env=environment)
-    wheels = list(dist.glob("camctl-*.whl"))
-    assert len(wheels) == 1, wheels
-    requirements = root / "requirements.txt"
-    _run(["uv", "export", "--project", str(_PROJECT), "--frozen", "--no-dev",
-          "--no-emit-project", "-o", str(requirements)], cwd=root, env=environment)
+    wheel, requirements = prepare_standard_wheel(
+        _PROJECT, root, lambda args: _run(args, cwd=root, env=environment))
     venv = root / "venv"
     _run(["uv", "venv", "--python", sys.executable, str(venv)], cwd=root, env=environment)
     python = venv / "bin/python"
     _run(["uv", "pip", "install", "--python", str(python), "--require-hashes",
           "-r", str(requirements)], cwd=root, env=environment)
-    _run(["uv", "pip", "install", "--python", str(python), "--no-deps", str(wheels[0])],
+    _run(["uv", "pip", "install", "--python", str(python), "--no-deps", str(wheel)],
          cwd=root, env=environment)
     return _Package(python, venv / "bin/camctl", environment)
 
