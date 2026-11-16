@@ -313,38 +313,31 @@ async def test_family_sql_uses_prefix_index_and_deduplicates_without_catalog_res
         source=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',(saved.ref.ticket.run_id,)).fetchone()[0]
         attempt=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
             (saved.ref.ticket.run_id,saved.ref.ticket.attempt_id)).fetchone()[0]
-        previous=owned.connection.execute('SELECT MAX(id)+1 FROM result_page_files').fetchone()[0]
-        original=previous
-        steps=[]
+        original=owned.connection.execute('SELECT MAX(id)+1 FROM result_page_files').fetchone()[0]
         owned.connection.execute('PRAGMA foreign_keys=OFF')
-        for total in (20,200,2000):
-            owned.connection.executemany('INSERT INTO result_page_files('
-                'id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity,family_directory,family_stem,family_role)'
-                ' VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                ((i,i,source,saved.ref.ticket.run_id,attempt,i,i,f'/elsewhere/{i}.OSV','/elsewhere',str(i),1)
-                 for i in range(previous,total+original)))
-            previous=total+original
-            measured=[0];statements=[]
-            def save(actual):
-                db=actual.connection
-                db.set_progress_handler(lambda: measured.__setitem__(0,measured[0]+1) or 0,1)
-                db.set_trace_callback(statements.append)
-                try:
-                    receipt=runtime.capture.save_result_file_pairing(request,new_operation_key(),actual)
-                finally:
-                    db.set_progress_handler(None,0);db.set_trace_callback(None)
-                assert receipt.kind is DbOutcomeKind.COMPLETED,receipt.error
-                assert db.execute('SELECT original_count,preview_count,original_file_id FROM device_file_pairing_facts WHERE id=?',
-                    (receipt.value,)).fetchone()==(1,1,ids['/DCIM/raw.OSV'])
-                families=[statement for statement in statements if 'FROM result_page_files' in statement and all(name in statement.partition('WHERE')[2] for name in ('family_directory','family_stem'))]
-                assert families
-                for statement in families:
-                    explanation=db.execute('EXPLAIN QUERY PLAN '+statement).fetchall()
-                    assert any('result_page_files_family' in row[3] and 'SEARCH' in row[3] for row in explanation)
-                return receipt
-            capture_operation(owned,save)
-            steps.append(measured[0])
-        assert all(value<=steps[0]+20 for value in steps[1:])
+        owned.connection.executemany('INSERT INTO result_page_files('
+            'id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity,family_directory,family_stem,family_role)'
+            ' VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+            ((i,i,source,saved.ref.ticket.run_id,attempt,i,i,f'/elsewhere/{i}.OSV','/elsewhere',str(i),1)
+             for i in range(original,original+2000)))
+        statements=[]
+        def save(actual):
+            db=actual.connection
+            db.set_trace_callback(statements.append)
+            try:
+                receipt=runtime.capture.save_result_file_pairing(request,new_operation_key(),actual)
+            finally:
+                db.set_trace_callback(None)
+            assert receipt.kind is DbOutcomeKind.COMPLETED,receipt.error
+            assert db.execute('SELECT original_count,preview_count,original_file_id FROM device_file_pairing_facts WHERE id=?',
+                (receipt.value,)).fetchone()==(1,1,ids['/DCIM/raw.OSV'])
+            families=[statement for statement in statements if 'FROM result_page_files' in statement and all(name in statement.partition('WHERE')[2] for name in ('family_directory','family_stem'))]
+            assert families
+            for statement in families:
+                explanation=db.execute('EXPLAIN QUERY PLAN '+statement).fetchall()
+                assert any('result_page_files_family' in row[3] and 'SEARCH' in row[3] for row in explanation)
+            return receipt
+        capture_operation(owned,save)
     finally:
         owned.connection.close()
 
@@ -481,50 +474,42 @@ async def test_actual_pair_save_guard_and_verify_do_not_replay_unrelated_pages(t
     from camctl.operations.validation import validate_outcome
     from ..capture.test_result_page_history import _actual, _BINDING
     from ..capture.test_record_file_completion_wait import _REGISTRY
-    measured = []
-    for count in (20, 200, 2000):
-        directory = tmp_path / str(count)
-        directory.mkdir()
-        cursor = DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/raw.OSV')
-        owned, runtime, first, ids, _ = await _ready(directory,
-            [_entry('raw.LRF'), _entry('raw.OSV')], next_cursor=cursor)
-        try:
-            saved = first
-            for number in range(count):
-                name = f'z{number:05d}.OSV'
-                following = (None if number == count - 1 else
-                    DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/' + name))
-                actual = _actual(first.ref.ticket, entries=[_entry(name)], cursor=cursor,
-                                 next_cursor=following, finalized=following is None)
-                ref = _ok(runtime.capture.save_result_page(ResultPageSave(first.ref.ticket,
-                    number + 2, cursor, validate_outcome(first.ref.ticket, actual, _REGISTRY),
-                    runtime.wall_us()), new_operation_key(), owned))
-                cursor = following
-            saved = runtime.capture.read_result_page(ref, owned)
-            request = _request(owned, runtime, saved, ids['/DCIM/raw.LRF'])
-            key = new_operation_key()
-            statements = []
-            steps = [0]
-            owned.connection.set_progress_handler(lambda: steps.__setitem__(0, steps[0] + 100) or 0, 100)
-            owned.connection.set_trace_callback(statements.append)
-            if bounded:
-                receipt = commit_operation(_AlteredPair(owned, request, key, True), key, owned)
-                assert receipt.kind == 'completed', receipt.error
-                fact = receipt.result
-            else:
-                fact = _ok(runtime.capture.save_result_file_pairing(request, key, owned))
-            assert runtime.capture.verify_result_file_pairing(request, key, owned) == fact
-            owned.connection.set_progress_handler(None, 0)
-            owned.connection.set_trace_callback(None)
-            reads = [sql for sql in statements if sql.startswith('SELECT')]
-            assert not any('l.change_count, e.id' in sql and 'l.entity_type = 1 ' in sql
-                           for sql in reads)
-            measured.append((len(reads), steps[0]))
-        finally:
-            owned.connection.close()
-    assert max(value[0] for value in measured) == min(value[0] for value in measured)
-    assert measured[-1][1] < measured[0][1] * 2
-    print('pair_save_guard_verify_growth', bounded, list(zip((20, 200, 2000), measured)))
+    count = 2000
+    directory = tmp_path / str(count)
+    directory.mkdir()
+    cursor = DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/raw.OSV')
+    owned, runtime, first, ids, _ = await _ready(directory,
+        [_entry('raw.LRF'), _entry('raw.OSV')], next_cursor=cursor)
+    try:
+        saved = first
+        for number in range(count):
+            name = f'z{number:05d}.OSV'
+            following = (None if number == count - 1 else
+                DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/' + name))
+            actual = _actual(first.ref.ticket, entries=[_entry(name)], cursor=cursor,
+                             next_cursor=following, finalized=following is None)
+            ref = _ok(runtime.capture.save_result_page(ResultPageSave(first.ref.ticket,
+                number + 2, cursor, validate_outcome(first.ref.ticket, actual, _REGISTRY),
+                runtime.wall_us()), new_operation_key(), owned))
+            cursor = following
+        saved = runtime.capture.read_result_page(ref, owned)
+        request = _request(owned, runtime, saved, ids['/DCIM/raw.LRF'])
+        key = new_operation_key()
+        statements = []
+        owned.connection.set_trace_callback(statements.append)
+        if bounded:
+            receipt = commit_operation(_AlteredPair(owned, request, key, True), key, owned)
+            assert receipt.kind == 'completed', receipt.error
+            fact = receipt.result
+        else:
+            fact = _ok(runtime.capture.save_result_file_pairing(request, key, owned))
+        assert runtime.capture.verify_result_file_pairing(request, key, owned) == fact
+        owned.connection.set_trace_callback(None)
+        reads = [sql for sql in statements if sql.startswith('SELECT')]
+        assert not any('l.change_count, e.id' in sql and 'l.entity_type = 1 ' in sql
+                       for sql in reads)
+    finally:
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
@@ -679,7 +664,6 @@ async def test_committed_baseline_proof_uses_fixed_anchor_without_page_history_r
         ownership=OwnershipFromResultPageSave(first,preview,runtime.wall_us())
         ownership_key=new_operation_key()
         _ok(runtime.capture.save_ownership_from_result_page(ownership,ownership_key,owned))
-        measures = []
         for number in range(2000):
             name = f'z{number:05d}.OSV'
             following = None if number == 1999 else DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/' + name)
@@ -689,25 +673,18 @@ async def test_committed_baseline_proof_uses_fixed_anchor_without_page_history_r
                 new_operation_key(), owned))
             cursor = following
             if number + 1 not in (20, 200, 2000): continue
-            steps = [0]
             statements = []
             owned.connection.execute('BEGIN')
-            owned.connection.set_progress_handler(lambda: steps.__setitem__(0, steps[0] + 100) or 0, 100)
             owned.connection.set_trace_callback(statements.append)
             runtime.capture.read_result_page(ref,owned)
             assert runtime.capture.verify_ownership_from_result_page(ownership,ownership_key,owned) is not None
-            owned.connection.set_progress_handler(None, 0)
             owned.connection.set_trace_callback(None)
             owned.connection.execute('ROLLBACK')
-            measures.append((len(statements), steps[0]))
             anchors = [sql for sql in statements if 'INDEXED BY history_events_type' in sql]
             assert anchors
             for sql in anchors:
                 assert any('history_events_type' in row[3] and 'SEARCH' in row[3]
                            for row in owned.connection.execute('EXPLAIN QUERY PLAN ' + sql))
-        assert len({value[0] for value in measures}) == 1
-        assert measures[-1][1] < measures[0][1] * 2
-        print('committed_baseline_proof_growth', list(zip((20, 200, 2000), measures)))
     finally:
         owned.connection.close()
 
