@@ -18,6 +18,199 @@ RUNNER = Path(__file__).resolve().parents[1] / 'run-integration.py'
 
 
 class IntegrationRunnerTest(unittest.TestCase):
+    def _host_build_fixture(self, root, *, failing=False):
+        source = root / 'input'
+        body = (
+            'import json, os, subprocess, sys, time\nfrom pathlib import Path\n'
+            'def test_host(host_demo):\n'
+            '    private = Path(host_demo)\n'
+            '    shared = Path(os.environ["CAMCTL_HOST_DEMO_BUILD_DIR"]) / "build"\n'
+            '    receipt = Path(os.environ["TEST_HOST_RECEIPTS"]) / Path(__file__).stem\n'
+            '    assert subprocess.check_output([str(private)], text=True).strip() == "frozen"\n'
+            '    assert sys.executable in (private.parent / "camctl-launcher.sh").read_text()\n'
+            '    for name in ("host-demo", "libcamctl_host.a"):\n'
+            '        assert (private.parent / name).stat().st_ino != (shared / name).stat().st_ino\n'
+            '        assert not (shared / name).stat().st_mode & 0o222\n'
+            '    receipt.write_text(json.dumps({"private": str(private.parent)}))\n'
+            '    deadline = time.monotonic() + 20\n'
+            '    while len(list(receipt.parent.glob("test_host_*"))) < 2:\n'
+            '        assert time.monotonic() < deadline\n        time.sleep(.02)\n'
+            '    (private.parent / "libcamctl_host.a").write_bytes(b"private")\n'
+            '    assert (shared / "libcamctl_host.a").read_bytes() != b"private"\n')
+        self._fixture_repository(source, 'test_host_a.py', body)
+        (source / 'tests/integration/test_host_b.py').write_text(body)
+        for name in ('conftest.py', '_wsl_host_demo.py'):
+            shutil.copy2(RUNNER.parent.parent / 'tests/integration' / name, source / 'tests/integration' / name)
+        with (source / 'tests/integration/conftest.py').open('a') as stream:
+            stream.write('\n@pytest.fixture(scope="session", autouse=True)\ndef change_live_source():\n'
+                         '    import os\n    from pathlib import Path\n'
+                         '    Path(os.environ["TEST_LIVE_SOURCE"]).write_text(\'const char *value(void) { return "changed"; }\\n\')\n')
+        host = source / 'apps/host-demo'
+        host.mkdir()
+        (host / 'CMakeLists.txt').write_text(
+            'cmake_minimum_required(VERSION 3.10)\nproject(test_host C)\n'
+            'add_library(camctl_host STATIC lib.c)\nadd_executable(host-demo main.c)\n'
+            'target_link_libraries(host-demo PRIVATE camctl_host)\n')
+        (host / 'lib.c').write_text('const char *value(void) { return "frozen"; }\n')
+        (host / 'main.c').write_text('#include <stdio.h>\nconst char *value(void);\nint main(void) { puts(value()); return 0; }\n')
+        binaries, receipts = root / 'bin', root / 'receipts'
+        binaries.mkdir()
+        receipts.mkdir()
+        cmake = binaries / 'cmake'
+        cmake.write_text('#!/bin/sh\nif [ "$1" = "-S" ]; then\n'
+                         '  echo configure >> "$TEST_HOST_CMAKE_CALLS"\n' +
+                         ('  echo injected-build-failure >&2; exit 19\n' if failing else '') +
+                         'fi\nexec /usr/bin/cmake "$@"\n')
+        cmake.chmod(0o755)
+        return source, {'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
+                        'TEST_HOST_RECEIPTS': str(receipts), 'TEST_HOST_CMAKE_CALLS': str(root / 'calls'),
+                        'TEST_LIVE_SOURCE': str(host / 'lib.c')}
+
+    def _run_host_fixture(self, root, source, environment, *options):
+        previous = {name: os.environ.get(name) for name in environment}
+        os.environ.update(environment)
+        try:
+            return self._run_fixture(root, source, '--scope', 'root', *options)
+        finally:
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+    def test_host_build_is_shared_only_within_round_and_copies_are_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, environment = self._host_build_fixture(root)
+            result, output = self._run_host_fixture(root, source, environment)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((root / 'calls').read_text().splitlines(), ['configure'])
+            receipts = [json.loads(path.read_text()) for path in (root / 'receipts').iterdir()]
+            self.assertEqual(len(receipts), 2)
+            self.assertNotEqual(receipts[0]['private'], receipts[1]['private'])
+            self.assertTrue(all(not Path(item['private']).exists() for item in receipts))
+            self.assertFalse((output / 'host-demo-build').exists())
+            summary = json.loads((output / 'summary.json').read_text())
+            self.assertTrue(all(task['status'] == 'passed' for task in summary['tasks']))
+            self.assertEqual(summary['host_demo_build']['status'], 'ready')
+            self.assertEqual(summary['host_demo_build']['build_count'], 1)
+            self.assertGreater(summary['host_demo_build']['wall_seconds'], 0)
+            (source / 'apps/host-demo/lib.c').write_text('const char *value(void) { return "frozen"; }\n')
+            for receipt in (root / 'receipts').iterdir():
+                receipt.unlink()
+            second = subprocess.run([sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
+                '--uv-cache', str(root / 'cache'), '--node-modules', str(root / 'node_modules'),
+                '--output', str(root / 'output-second'), '--jobs', '2', '--scope', 'root'],
+                capture_output=True, text=True, env={**os.environ, **environment})
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            self.assertEqual((root / 'calls').read_text().splitlines(), ['configure', 'configure'])
+            self.assertFalse((root / 'output-second/host-demo-build').exists())
+
+    def test_direct_pytest_builds_current_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, environment = self._host_build_fixture(root)
+            direct = source / 'tests/integration/test_direct.py'
+            direct.write_text('import subprocess\n'
+                              'def test_direct(host_demo):\n'
+                              '    assert subprocess.check_output([host_demo], text=True).strip() == "changed"\n')
+            temporary_build = root / 'direct-tmp'
+            temporary_build.mkdir()
+            environment.update(PYTHONPATH=str(RUNNER.parent), TMPDIR=str(temporary_build))
+            direct_env = {**os.environ, **environment}
+            direct_env.pop('CAMCTL_HOST_DEMO_BUILD_DIR', None)
+            direct_env.pop('CAMCTL_HOST_DEMO_SOURCE', None)
+            direct_env.pop('CAMCTL_HOST_DEMO_RECEIPT', None)
+            result = subprocess.run([sys.executable, '-m', 'pytest', '-q', str(direct)], cwd=source,
+                                    env=direct_env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((root / 'calls').read_text().splitlines(), ['configure'])
+            self.assertFalse(list(temporary_build.glob('camctl-host-build-*')))
+
+    def test_host_build_failure_propagates_and_does_not_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, environment = self._host_build_fixture(root, failing=True)
+            result, output = self._run_host_fixture(root, source, environment)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertEqual((root / 'calls').read_text().splitlines(), ['configure'])
+            tasks = json.loads((output / 'summary.json').read_text())['tasks']
+            self.assertTrue(all(task['status'] == 'failed' for task in tasks))
+            receipt = json.loads((output / 'summary.json').read_text())['host_demo_build']
+            self.assertEqual((receipt['status'], receipt['build_count']), ('failed', 1))
+            logs = ''.join((Path(task['artifacts']) / 'output.log').read_text() for task in tasks)
+            self.assertIn('injected-build-failure', logs)
+            self.assertIn('本轮 host-demo 构建未完成或失败', logs)
+            self.assertFalse((output / 'host-demo-build').exists())
+            self.assertFalse(list(output.glob('tasks/*/tmp/camctl-host-build-*')))
+
+    def test_host_copy_failure_propagates_without_rebuilding(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, environment = self._host_build_fixture(root)
+            conftest = source / 'tests/integration/conftest.py'
+            with conftest.open('a') as stream:
+                stream.write('\n@pytest.fixture(scope="session", autouse=True)\ndef deny_host_copy():\n'
+                             '    import host_demo_build\n'
+                             '    original = host_demo_build.shutil.copyfile\n'
+                             '    def deny(*args, **kwargs):\n        raise OSError("copy denied")\n'
+                             '    host_demo_build.shutil.copyfile = deny\n'
+                             '    yield\n    host_demo_build.shutil.copyfile = original\n')
+            result, output = self._run_host_fixture(root, source, environment)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertEqual((root / 'calls').read_text().splitlines(), ['configure'])
+            tasks = json.loads((output / 'summary.json').read_text())['tasks']
+            self.assertTrue(all(task['status'] == 'failed' for task in tasks))
+            self.assertTrue(all('copy denied' in (Path(task['artifacts']) / 'output.log').read_text() for task in tasks))
+            self.assertFalse((output / 'host-demo-build').exists())
+            self.assertFalse(list(output.glob('tasks/*/tmp/camctl-host-build-*')))
+
+    def test_interrupt_stops_build_descendants_before_shared_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, environment = self._host_build_fixture(root)
+            cmake = root / 'bin/cmake'
+            cmake.write_text('#!/bin/sh\ntrap "" INT\necho $$ > "$TEST_HOST_CMAKE_CALLS"\n'
+                             'sleep 60 &\necho $! >> "$TEST_HOST_CMAKE_CALLS"\nwait\n')
+            cache, modules, output = root / 'cache', root / 'node_modules', root / 'output'
+            cache.mkdir()
+            modules.mkdir()
+            process = subprocess.Popen([sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
+                '--uv-cache', str(cache), '--node-modules', str(modules), '--output', str(output),
+                '--jobs', '1', '--scope', 'root'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, **environment})
+            deadline = time.monotonic() + 20
+            while not (root / 'calls').exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(.05)
+            self.assertTrue((root / 'calls').exists())
+            process.send_signal(signal.SIGINT)
+            stdout, _ = process.communicate(timeout=20)
+            self.assertEqual(process.returncode, 130, stdout)
+            for pid in (root / 'calls').read_text().splitlines():
+                status = Path(f'/proc/{pid}/stat')
+                # 已杀死但尚待 init 回收的僵尸不能继续写构建目录。
+                self.assertTrue(not status.exists() or status.read_text().split(') ')[1][0] == 'Z', pid)
+            self.assertFalse((output / 'host-demo-build').exists())
+            self.assertFalse(list(output.glob('tasks/*/tmp/camctl-host-build-*')))
+            summary = json.loads((output / 'summary.json').read_text())
+            self.assertEqual(summary['status'], 'interrupted')
+            self.assertEqual(summary['host_demo_build']['build_count'], 1)
+            self.assertIn(summary['host_demo_build']['status'], ('building', 'failed'))
+            self.assertGreater(summary['host_demo_build']['wall_seconds'], 0)
+
+    def test_host_build_is_not_started_for_plan_or_unrelated_test(self):
+        for options in (('--plan-only', '--force-root-shards'), ('--target', 'tests/integration/test_other.py')):
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, environment = self._host_build_fixture(root)
+                (source / 'tests/integration/test_other.py').write_text('def test_other(): pass\n')
+                result, output = self._run_host_fixture(root, source, environment, *options)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse((root / 'calls').exists())
+                self.assertFalse((output / 'host-demo-build').exists())
+                self.assertEqual(json.loads((output / 'summary.json').read_text())['host_demo_build'],
+                                 {'status': 'not_requested', 'build_count': 0})
+
     def test_kind_selection_matches_shards_and_recorded_cases(self):
         cases = (((), {'test_a', 'test_b'}, 'functional'),
                  (('--test-kind', 'performance'), {'test_p', 'test_q'}, 'performance'),

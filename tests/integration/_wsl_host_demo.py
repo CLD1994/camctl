@@ -22,10 +22,12 @@ import uuid
 from pathlib import Path
 
 from camctl_memory_plugin import budgeted_host_launcher
+from host_demo_build import build, copy_round_build
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 
-_WSL_BUILD = f"/tmp/camctl-host-build-{uuid.uuid4().hex}"
+_BUILD_ROOT = os.environ.get('TMPDIR', '/tmp') if os.name == 'posix' else '/tmp'
+_WSL_BUILD = f"{_BUILD_ROOT}/camctl-host-build-{uuid.uuid4().hex}"
 _WSL_DEMO = f"{_WSL_BUILD}/host-demo"
 _WSL_LAUNCHER = f"{_WSL_BUILD}/camctl-launcher.sh"
 
@@ -123,8 +125,9 @@ def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
 
 
 def _write_launcher(wsl_path: str, body: str) -> None:
+    path = shlex.quote(wsl_path)
     written = run_wsl(
-        f"cat > {wsl_path} <<'LAUNCHER'\n{body}LAUNCHER\nchmod +x {wsl_path}")
+        f"cat > {path} <<'LAUNCHER'\n{body}LAUNCHER\nchmod +x {path}")
     assert written.returncode == 0, written.stderr
 
 
@@ -170,15 +173,15 @@ def build_host_demo(register_cleanup) -> str:
     # 避免清理异常覆盖原来的构建失败。
     register_cleanup(remove_build)
     python = Path(sys.executable)
-    steps = [
-        (f"cmake -S {shlex.quote(to_wsl(_REPO / 'apps/host-demo'))} -B {_WSL_BUILD}"
-         " -DCMAKE_BUILD_TYPE=Release >/dev/null"),
-        (f"cmake --build {_WSL_BUILD} --target host-demo -j4 >/dev/null"),
-    ]
-    for step in steps:
-        result = run_wsl(step)
-        assert result.returncode == 0, (
-            f"WSL 构建步骤失败: {step}\n{result.stderr}")
+    shared = os.environ.get('CAMCTL_HOST_DEMO_BUILD_DIR')
+    source = os.environ.get('CAMCTL_HOST_DEMO_SOURCE')
+    receipt = os.environ.get('CAMCTL_HOST_DEMO_RECEIPT')
+    if shared or source or receipt:
+        if not _NATIVE_POSIX or not shared or not source or not receipt:
+            raise RuntimeError('本轮 host-demo 构建目录、源码路径和凭据路径必须同时提供，且仅支持 Linux')
+        copy_round_build(Path(source), Path(shared), Path(_WSL_BUILD), Path(receipt), run_wsl)
+    else:
+        build(to_wsl(_REPO / 'apps/host-demo'), _WSL_BUILD, run_wsl)
     direct = (
         f"exec {shlex.quote(to_wsl(python))} -c"
         " 'import sys; from camctl.cli import main; sys.exit(main(sys.argv[1:]))'"

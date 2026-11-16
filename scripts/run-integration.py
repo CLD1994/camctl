@@ -393,7 +393,29 @@ async def managed_wait(process):
             except asyncio.TimeoutError:
                 os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
+        # pytest 可能先于忽略 SIGINT 的构建后代退出。清理共享构建前
+        # 还要终止本任务进程组中仍存活的直接受管后代。
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        while process_group_is_running(process.pid):
+            await asyncio.sleep(.05)
         raise
+
+
+def process_group_is_running(group):
+    """检查本次任务组内是否仍有可以执行的进程；僵尸已经退出。"""
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / 'stat').read_text().rsplit(') ', 1)[1].split()
+        except FileNotFoundError:
+            continue
+        if int(fields[2]) == group and fields[0] not in ('Z', 'X'):
+            return True
+    return False
 
 
 async def run_blocking(function, *args, **kwargs):
@@ -424,6 +446,11 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
     shutil.copy2(Path(__file__).with_name('integration_progress.py'), control)
 
     def save():
+        receipt = output / 'host-demo-build.json'
+        summary['host_demo_build'] = (json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists()
+                                      else {'status': 'not_requested', 'build_count': 0})
+        if summary['host_demo_build']['status'] == 'building':
+            summary['host_demo_build']['wall_seconds'] = time.time() - summary['host_demo_build']['started_unix_seconds']
         for task in tasks:
             if task.get('artifacts'):
                 progress = read_progress(Path(task['artifacts']))
@@ -458,6 +485,10 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 temporary = directory / 'tmp'
                 temporary.mkdir()
                 environment = test_environment(python, project, control, private, temporary)
+                if task['scope'] == 'root':
+                    environment['CAMCTL_HOST_DEMO_BUILD_DIR'] = str(output / 'host-demo-build')
+                    environment['CAMCTL_HOST_DEMO_SOURCE'] = str(seed / 'apps/host-demo')
+                    environment['CAMCTL_HOST_DEMO_RECEIPT'] = str(output / 'host-demo-build.json')
                 if task['scope'] != 'node':
                     environment_root = project / '.venv311'
                     await run_blocking(subprocess.run,
@@ -541,6 +572,10 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 task.update(status='failed', exit_code=2, error=f'{type(error).__name__}: {error}')
             finally:
                 task.update(finished_utc=utc(), wall_seconds=time.monotonic() - task_started)
+                temporary = directory / 'tmp'
+                if temporary.exists():
+                    for host_build in temporary.glob('camctl-host-build-*'):
+                        remove_owned_tree(host_build)
                 save()
                 write_json(artifacts / 'result.json', task)
                 if task['status'] in ('passed', 'not_selected'):
@@ -586,9 +621,15 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
         for item in workers:
             if not item.done():
                 item.cancel()
-        await asyncio.gather(*workers, return_exceptions=True)
+        results = await asyncio.gather(*workers, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise result
         for private in (output / 'workers').iterdir():
             remove_owned_tree(private)
+        shared_build = output / 'host-demo-build'
+        if shared_build.exists():
+            remove_owned_tree(shared_build)
         summary['finished_utc'] = utc()
         save()
     return summary['exit_code']
@@ -677,11 +718,13 @@ def main():
                      output / 'control' / 'camctl_memory_plugin.py')
         shutil.copy2(Path(camctl_memory.__file__), output / 'control' / 'camctl_memory.py')
         shutil.copy2(Path(__file__).with_name('test_kind_plugin.py'), output / 'control')
+        shutil.copy2(Path(__file__).with_name('host_demo_build.py'), output / 'control')
         tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity, history[1])
         write_json(output / 'plan.json', tasks)
         if args.plan_only:
             write_json(output / 'summary.json', {'status': 'planned', 'exit_code': 0,
                 'started_utc': started_utc, 'finished_utc': utc(), 'wall_seconds': time.monotonic() - started,
+                'host_demo_build': {'status': 'not_requested', 'build_count': 0},
                 'source': {key: value for key, value in identity.items() if key != 'files'},
                 'versions': versions, 'test_kind': args.test_kind, 'tasks': tasks})
             remove_owned_tree(seed)
