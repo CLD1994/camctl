@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import shutil
+import sys
 from typing import Callable
 
 from round_test_build import build_once, clone_build_source, load_round_context
@@ -19,7 +20,7 @@ def prepare_standard_wheel(
         requirements = output / "requirements.txt"
         run(["uv", "export", "--project", str(source_project), "--frozen", "--no-dev",
              "--no-emit-project", "-o", str(requirements)])
-        run(["uv", "build", "--project", str(source_project), "--wheel", "--out-dir",
+        run(["uv", "build", "--project", str(source_project), "--python", sys.executable, "--wheel", "--out-dir",
              str(dist), "--build-constraints", str(requirements)])
         wheels = list(dist.glob("camctl-*.whl"))
         if len(wheels) != 1:
