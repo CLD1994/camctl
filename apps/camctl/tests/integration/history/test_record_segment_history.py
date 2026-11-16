@@ -824,11 +824,10 @@ async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
     from camctl.contracts.history_values import HistoryBoundary
     from camctl.history.snapshots import prepare_snapshot
     from camctl.persistence.repositories.transactions import encode_json_value
-    from ..support.segment_history_corpus import generate, verify_output
+    from ..support.segment_history_corpus import prepare_source, verify_output
 
     directory=tmp_path/'world'
-    await generate(directory,130,start_number=870)
-    manifest=json.loads((directory/'segment-history-130.json').read_text())
+    manifest=await prepare_source(directory,130,start_number=870)
     ref=SegmentSetRef(*(manifest[name] for name in ('action_id','scan_id','final_page_event_id','version')))
     boundary=HistoryBoundary(**manifest['boundary'])
     history=HistoryRepository(directory/'state.db')

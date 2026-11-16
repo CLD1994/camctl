@@ -126,38 +126,47 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock,start_numb
 
 
 
-async def generate(directory, count, start_number=0):
-    from contextlib import closing
-    import gzip
-    import hashlib
-    import json
-    import shutil
-    import sqlite3
-    import time
-    started=time.monotonic()
+async def prepare_source(directory, count, start_number=0):
+    """经真实入口准备来源，关闭资源并返回读取所需身份和边界。"""
     directory.mkdir(parents=True, exist_ok=False)
     owned, runtime, repo, ref, history = await _large_fixture(directory, count, start_number)
-    path=history.path
     try:
         boundary=history.current_boundary()
-        with history.open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
-            for table, expected in (('segment_members',count),('segment_gaps',count-2)):
-                cursor=None
-                total=0
-                while True:
-                    page=handle.read_page(table,ref=ref,cursor=cursor,limit=7)
-                    total+=len(page.items)
-                    cursor=page.next_cursor
-                    if cursor is None:break
-                assert total==expected
         metadata={'count':count,'action_id':ref.action_id,'scan_id':ref.scan_id,
             'final_page_event_id':ref.final_page_event_id,'version':ref.version,
             'boundary':{'txn_id':boundary.txn_id,'last_event_id':boundary.last_event_id}}
         if start_number:
             metadata['start_number']=start_number
         owned.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
+        return metadata
     finally:
         owned.connection.close()
+
+
+async def generate(directory, count, start_number=0):
+    from contextlib import closing
+    import gzip
+    import hashlib
+    import json
+    import sqlite3
+    import time
+    from camctl.capture.segment_models import SegmentSetRef
+    from camctl.contracts.history_values import HistoryBoundary
+    started=time.monotonic()
+    metadata=await prepare_source(directory,count,start_number)
+    path=directory/'state.db'
+    ref=SegmentSetRef(*(metadata[name] for name in ('action_id','scan_id','final_page_event_id','version')))
+    boundary=HistoryBoundary(**metadata['boundary'])
+    with HistoryRepository(path).open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
+        for table, expected in (('segment_members',count),('segment_gaps',count-2)):
+            cursor=None
+            total=0
+            while True:
+                page=handle.read_page(table,ref=ref,cursor=cursor,limit=7)
+                total+=len(page.items)
+                cursor=page.next_cursor
+                if cursor is None:break
+            assert total==expected
     with closing(sqlite3.connect(path, isolation_level=None)) as connection:
         assert connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0] == 0
         assert connection.execute('PRAGMA integrity_check').fetchone() == ('ok',)
