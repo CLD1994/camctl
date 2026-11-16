@@ -28,7 +28,7 @@ class DbPublicationSession:
                 lambda owned: method(key, owned, *args, occurred_at=occurred_at, **kwargs), key=key)
         except sqlite3.Error as error:
             raise transfer_db_outcome(error, StateDatabaseError(
-                f"报告状态库写入失败: {error}")) from error
+                f"报告状态库操作遇错: {error}")) from error
 
     async def prepare(self, report_id, contents):
         return await self._write(policy.record_report_bytes, report_id, contents)
