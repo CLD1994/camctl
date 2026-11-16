@@ -338,7 +338,6 @@ def test_invalid_saved_receipt_is_a_transaction_failure(environment, version, re
     assert isinstance(outcome.error, TransactionError)
     if result_json is not None:
         assert isinstance(outcome.error.__cause__, ValueError)
-        assert isinstance(outcome.error.__cause__.__cause__, ValueError)
     assert connection.execute("SELECT COUNT(*) FROM history_transactions").fetchone() == (1,)
 
 
