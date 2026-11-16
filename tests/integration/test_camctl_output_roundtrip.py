@@ -63,7 +63,7 @@ def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
 
 def _await_row(state_db: Path, sql: str, params=(), *,
                timeout_s: float = 30.0, process=None) -> list[tuple]:
-    """轮询查询直到出现行；同步点，不使用随机 sleep。"""
+    """每25毫秒查询已持久化的同步点，保持原保护期限。"""
     deadline = time.monotonic() + timeout_s
     while True:
         rows = _query(state_db, sql, params)
@@ -72,7 +72,9 @@ def _await_row(state_db: Path, sql: str, params=(), *,
         if process is not None and process.poll() is not None:
             raise AssertionError(
                 f"本次 run 已退出，退出码={process.returncode}，尚未保存所等事实: {sql}")
-        assert time.monotonic() < deadline, f"等待超时: {sql}"
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, f"等待超时: {sql}"
+        time.sleep(min(0.025, remaining))
 
 
 def _ready_report(deployment: Deployment) -> dict:
