@@ -21,6 +21,7 @@ import time
 
 import camctl_memory
 from camctl_memory import DEFAULT_MEMORY_LIMIT, parse_memory_limit
+from test_kind_plugin import TEST_KINDS, DEFAULT_TEST_KIND
 
 CAMCTL = 'apps/camctl/tests/integration'
 ROOT = 'tests/integration'
@@ -322,7 +323,8 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity, cos
             if code:
                 raise subprocess.CalledProcessError(code, command)
         command = [str(python), '-m', 'pytest', f'--rootdir={work}', *task['targets'], '--collect-only', '-q', '-p', 'integration_progress',
-                   '-p', 'camctl_memory_plugin', *memory_pytest_arguments(args)]
+                   '-p', 'camctl_memory_plugin', '-p', 'test_kind_plugin', '--test-kind', args.test_kind,
+                   *memory_pytest_arguments(args)]
         record = {'command': command, 'cwd': str(work), 'started_utc': utc(),
                   'source': identity['snapshot_sha256'], 'versions': versions}
         started = time.monotonic()
@@ -336,9 +338,11 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity, cos
                 finally:
                     record.update(exit_code=process.returncode, finished_utc=utc(), wall_seconds=time.monotonic() - started)
                     write_json(artifacts / 'command.json', record)
-        if record['exit_code']:
+        inventory = artifacts / 'inventory.json'
+        if record['exit_code'] and not (record['exit_code'] == 5 and inventory.exists()
+                                        and json.loads(inventory.read_text()) == []):
             raise ValueError(f"{task['id']}收集失败，见 {artifacts / 'output.log'}")
-        nodes = json.loads((artifacts / 'inventory.json').read_text())
+        nodes = json.loads(inventory.read_text())
         if len(nodes) != len(set(nodes)):
             raise ValueError(f"{task['id']}收集到重复节点，见 {artifacts / 'inventory.json'}")
         def release_collection():
@@ -348,6 +352,11 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity, cos
                 remove_owned_tree(directory / 'python-cache')
 
         count = min(args.root_shards, len(nodes))
+        if not nodes:
+            result.append({**task, 'status': 'not_selected', 'exit_code': 5,
+                           'collection': str(artifacts), 'collected_nodes': 0})
+            release_collection()
+            continue
         if count <= 1:
             result.append(task)
             release_collection()
@@ -399,12 +408,16 @@ async def run_blocking(function, *args, **kwargs):
 async def execute(args, tasks, output, seed, python, cache, node_modules, versions, identity, started, started_utc):
     summary = {'started_utc': started_utc, 'source': {key: value for key, value in identity.items() if key != "files"}, 'versions': versions,
                'runner_pid': os.getpid(), 'jobs': args.jobs, 'scope': args.scope,
-               'selection': args.target, 'status': 'running', 'tasks': tasks}
+               'selection': args.target, 'test_kind': args.test_kind, 'status': 'running', 'tasks': tasks}
     queue = asyncio.Queue()
     for number, task in enumerate(tasks):
-        task.update(status='pending', number=number + 1)
-        queue.put_nowait(task)
-    for worker in range(min(args.jobs, len(tasks))):
+        task['number'] = number + 1
+        if task.get('status') != 'not_selected':
+            task['status'] = 'pending'
+            queue.put_nowait(task)
+    worker_count = min(args.jobs, queue.qsize())
+    (output / 'workers').mkdir(exist_ok=True)
+    for worker in range(worker_count):
         (output / 'workers' / str(worker)).mkdir(parents=True)
     control = output / 'control'
     control.mkdir(exist_ok=True)
@@ -464,6 +477,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                     command = [str(project / '.venv311/bin/python'), '-m', 'pytest', *root_arguments, *task['targets'],
                                '-q', '--durations=0', '-p', 'integration_progress',
                                '--basetemp', str(temporary / 'pytest'), '-p', 'camctl_memory_plugin',
+                               '-p', 'test_kind_plugin', '--test-kind', args.test_kind,
                                *memory_pytest_arguments(args)]
                 task['command'] = command
                 task['environment'] = {key: environment[key] for key in (
@@ -515,7 +529,11 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                     counts = {name: int(value) for name, value in re.findall(r'^# (tests|pass|fail|skipped) (\d+)$', content, re.M)}
                     task['progress'] = {'status': 'finished', 'exit_code': task['exit_code'], 'outcomes': counts}
                     write_json(artifacts / 'progress.json', task['progress'])
-                task['status'] = 'passed' if task['exit_code'] == 0 else 'failed'
+                inventory = artifacts / 'inventory.json'
+                if task['exit_code'] == 5 and inventory.exists() and json.loads(inventory.read_text()) == []:
+                    task['status'] = 'not_selected'
+                else:
+                    task['status'] = 'passed' if task['exit_code'] == 0 else 'failed'
             except asyncio.CancelledError:
                 task.update(status='interrupted', exit_code=130)
                 raise
@@ -525,7 +543,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 task.update(finished_utc=utc(), wall_seconds=time.monotonic() - task_started)
                 save()
                 write_json(artifacts / 'result.json', task)
-                if task['status'] == 'passed':
+                if task['status'] in ('passed', 'not_selected'):
                     try:
                         for name in ('source', 'tmp', 'client-candidate'):
                             path = directory / name
@@ -542,7 +560,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
             task = queue.get_nowait()
 
     save()
-    workers = [asyncio.create_task(worker(number)) for number in range(min(args.jobs, len(tasks)))]
+    workers = [asyncio.create_task(worker(number)) for number in range(worker_count)]
     last_print = time.monotonic()
     try:
         while not all(item.done() for item in workers):
@@ -554,8 +572,10 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 print('进度 ' + ' | '.join(current), flush=True)
                 last_print = time.monotonic()
         await asyncio.gather(*workers)
-        summary['exit_code'] = 1 if any(task['exit_code'] != 0 for task in tasks) else 0
-        summary['status'] = 'finished'
+        failures = any(task['status'] == 'failed' for task in tasks)
+        selected = any(task['status'] == 'passed' for task in tasks)
+        summary['exit_code'] = 1 if failures or not selected else 0
+        summary['status'] = 'finished' if selected or failures else 'not_selected'
     except asyncio.CancelledError:
         summary.update(status='interrupted', exit_code=130)
         for task in tasks:
@@ -583,6 +603,8 @@ def main():
                         help='对本次所选根pytest模块收集并分片，不受历史时长和失败记录限制')
     parser.add_argument('--timing-history', type=Path, help='可选的本地计时 CSV 目录')
     parser.add_argument('--scope', choices=('all', 'camctl', 'root', 'node'), default='all')
+    parser.add_argument('--test-kind', choices=TEST_KINDS, default=DEFAULT_TEST_KIND,
+                        help='选择功能测试、性能专项或全部测试')
     parser.add_argument('--target', action='append', default=[], help='仓库相对目录、文件或 pytest nodeid，可重复')
     parser.add_argument('--python', type=Path, default=Path(sys.executable), help='已准备测试依赖的外部 Python 3.11')
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1], help='待验证的 Git 工作区')
@@ -609,6 +631,8 @@ def main():
         timing_directory = args.timing_history.resolve() if args.timing_history is not None else None
         history = load_timing_history(timing_directory)
         tasks = select(discover(source), args.scope, args.target)
+        if args.test_kind == 'performance':
+            tasks = [task for task in tasks if task['scope'] != 'node']
         if not tasks:
             raise ValueError('所选范围没有集成测试')
         for target in args.target:
@@ -637,24 +661,29 @@ def main():
             output = Path(tempfile.mkdtemp(prefix='camctl-integration-'))
         print(f'证据目录 {output}', flush=True)
         write_json(output / 'summary.json', {'status': 'preparing', 'runner_pid': os.getpid(),
-                   'started_utc': started_utc, 'tasks': [{**task, 'status': 'pending'} for task in tasks]})
+                   'started_utc': started_utc, 'test_kind': args.test_kind,
+                   'tasks': [{**task, 'status': 'pending'} for task in tasks]})
         seed = output / 'snapshot'
         identity = snapshot(source, seed, timing_directory)
         write_json(output / 'source.json', identity)
         # 调度清单由冻结后的实际源码生成，确保与执行来源一致。
-        tasks = order_by_measurement(select(discover(seed), args.scope, args.target), history)
+        tasks = select(discover(seed), args.scope, args.target)
+        if args.test_kind == 'performance':
+            tasks = [task for task in tasks if task['scope'] != 'node']
+        tasks = order_by_measurement(tasks, history)
         (output / 'control').mkdir()
         shutil.copy2(Path(__file__).with_name('integration_progress.py'), output / 'control')
         shutil.copy2(Path(__file__).with_name('camctl_memory_plugin.py'),
                      output / 'control' / 'camctl_memory_plugin.py')
         shutil.copy2(Path(camctl_memory.__file__), output / 'control' / 'camctl_memory.py')
+        shutil.copy2(Path(__file__).with_name('test_kind_plugin.py'), output / 'control')
         tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity, history[1])
         write_json(output / 'plan.json', tasks)
         if args.plan_only:
             write_json(output / 'summary.json', {'status': 'planned', 'exit_code': 0,
                 'started_utc': started_utc, 'finished_utc': utc(), 'wall_seconds': time.monotonic() - started,
                 'source': {key: value for key, value in identity.items() if key != 'files'},
-                'versions': versions, 'tasks': tasks})
+                'versions': versions, 'test_kind': args.test_kind, 'tasks': tasks})
             remove_owned_tree(seed)
             print(f'计划 {output / "plan.json"}；未执行测试。', flush=True)
             return 0

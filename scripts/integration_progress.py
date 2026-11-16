@@ -10,6 +10,7 @@ from pathlib import Path
 import time
 
 import pytest
+from test_kind_plugin import item_test_kind
 
 # 产品测试会替换这些共享模块上的函数；观测器保留自己的原始调用边界。
 _open = builtins.open
@@ -25,6 +26,7 @@ _stream = None
 _started = None
 _primary = {}
 _subchecks = Counter()
+_kinds = {}
 
 
 def _write_json(name, value):
@@ -54,6 +56,7 @@ def pytest_configure(config):
 
 
 def pytest_collection_finish(session):
+    _kinds.update({item.nodeid: item_test_kind(item) for item in session.items})
     _write_json('inventory.json', [item.nodeid for item in session.items])
     _write({'status': 'collected', 'collected': len(session.items)})
 
@@ -103,6 +106,7 @@ def pytest_runtest_logreport(report):
 def pytest_sessionfinish(session, exitstatus):
     cases = list(_primary.values())
     for case in cases:
+        case['test_kind'] = _kinds[case['nodeid']]
         case['duration_seconds'] = sum(phase['duration_seconds'] for phase in case['phases'].values())
     _write_json('cases.json', cases)
     _write({'status': 'finished', 'exit_code': int(exitstatus),

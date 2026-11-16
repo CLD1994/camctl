@@ -5,6 +5,7 @@ import errno
 import importlib.util
 import json
 import os
+import shutil
 import signal
 from pathlib import Path
 import subprocess
@@ -17,6 +18,77 @@ RUNNER = Path(__file__).resolve().parents[1] / 'run-integration.py'
 
 
 class IntegrationRunnerTest(unittest.TestCase):
+    def test_kind_selection_matches_shards_and_recorded_cases(self):
+        cases = (((), {'test_a', 'test_b'}, 'functional'),
+                 (('--test-kind', 'performance'), {'test_p', 'test_q'}, 'performance'),
+                 (('--test-kind', 'all'), {'test_a', 'test_b', 'test_p', 'test_q'}, None))
+        for options, expected, kind in cases:
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as temporary:
+                root, source = Path(temporary), Path(temporary) / 'input'
+                self._fixture_repository(source, 'test_matrix.py',
+                    'import pytest\ndef test_a(): pass\ndef test_b(): pass\n'
+                    '@pytest.mark.performance\ndef test_p(): pass\n'
+                    '@pytest.mark.performance\ndef test_q(): pass\n')
+                shutil.copy2(RUNNER.parent.parent / 'conftest.py', source / 'conftest.py')
+                shutil.copy2(RUNNER.parent.parent / 'apps/camctl/conftest.py', source / 'apps/camctl/conftest.py')
+                result, output = self._run_fixture(root, source, '--scope', 'root',
+                    '--force-root-shards', '--root-shards', '2', *options)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                summary = json.loads((output / 'summary.json').read_text())
+                self.assertEqual(summary['test_kind'], kind or 'all')
+                plan = json.loads((output / 'plan.json').read_text())
+                collected = json.loads((Path(plan[0]['collection']) / 'inventory.json').read_text())
+                assigned = [node for task in plan for node in task['targets']]
+                self.assertCountEqual(assigned, collected)
+                records = [case for task in summary['tasks'] for case in json.loads(
+                    (Path(task['artifacts']) / 'cases.json').read_text())]
+                self.assertCountEqual([case['nodeid'].split('::')[-1] for case in records], expected)
+                for case in records:
+                    name = case['nodeid'].split('::')[-1]
+                    self.assertEqual(case['test_kind'], 'performance' if name in ('test_p', 'test_q') else 'functional')
+
+    def test_empty_selection_and_invalid_node_are_distinct(self):
+        for options, expected_status, expected_exit in (
+            ((), 'not_selected', 1),
+            (('--force-root-shards',), 'not_selected', 1),
+            (('--target', 'tests/integration/test_matrix.py::test_p'), 'not_selected', 1),
+            (('--target', 'tests/integration/test_matrix.py::test_missing'), 'failed', 1),
+        ):
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as temporary:
+                root, source = Path(temporary), Path(temporary) / 'input'
+                self._fixture_repository(source, 'test_matrix.py',
+                    'import pytest\n@pytest.mark.performance\ndef test_p(): pass\n')
+                result, output = self._run_fixture(root, source, '--scope', 'root', *options)
+                self.assertEqual(result.returncode, expected_exit, result.stdout + result.stderr)
+                summary = json.loads((output / 'summary.json').read_text())
+                self.assertEqual(summary['status'], expected_status if expected_status == 'not_selected' else 'finished')
+                task, = summary['tasks']
+                self.assertEqual(task['status'], expected_status)
+                self.assertEqual(task['exit_code'], 5 if expected_status == 'not_selected' else 4)
+
+    def test_performance_excludes_node_and_empty_tasks_do_not_hide_passes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_performance.py',
+                'import pytest\n@pytest.mark.performance\ndef test_perf(): pass\n')
+            (source / 'tests/integration/test_functional.py').write_text('def test_functional(): pass\n')
+            (source / 'tests/integration/ordinary.test.mjs').write_text('throw Error("must not run")\n')
+            result, output = self._run_fixture(root, source, '--test-kind', 'performance')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            summary = json.loads((output / 'summary.json').read_text())
+            self.assertEqual(sorted(task['status'] for task in summary['tasks']), ['not_selected', 'passed'])
+            self.assertTrue(all(task['scope'] == 'root' for task in summary['tasks']))
+
+    def test_shard_collection_error_is_not_empty_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_broken.py', 'raise RuntimeError("collection failure")\n')
+            result, output = self._run_fixture(root, source, '--scope', 'root', '--force-root-shards')
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            summary = json.loads((output / 'summary.json').read_text())
+            self.assertEqual(summary['status'], 'failed')
+            self.assertIn('收集失败', summary['error'])
+
     def test_success_releases_readonly_trees_without_changing_external_symlink_target(self):
         with tempfile.TemporaryDirectory() as temporary:
             root, source = Path(temporary), Path(temporary) / 'input'

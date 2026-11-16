@@ -18,7 +18,8 @@ class MemoryBudgetCollectionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for relative in ("conftest.py", "apps/camctl/conftest.py", "apps/camctl/pyproject.toml",
-                             "scripts/camctl_memory.py", "scripts/camctl_memory_plugin.py"):
+                             "scripts/camctl_memory.py", "scripts/camctl_memory_plugin.py",
+                             "scripts/test_kind_plugin.py"):
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / relative, target)
