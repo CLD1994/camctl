@@ -360,7 +360,6 @@ def test_duplicate_auto_preview_fails_at_admission(tmp_path: Path) -> None:
         {"1": [photo_file("shot-1")]},
         device_files={"shot-1": _PHOTO_CONTENT},
         photo_preview_supported=True)
-    deployment.install_client_capabilities(spec)
 
     shoot_at = future_schedule(1)
     body = {
