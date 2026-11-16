@@ -7,14 +7,13 @@ from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.service import AcceptanceResult, AckDisposition, PlanDisposition
 from camctl.contracts.json_encoding import encode_exact_json
 from camctl.contracts.json_values import parse_exact_json
-from camctl.persistence.atomic import TransactionError
-from camctl.persistence.fact_reads import read_operation_transaction
 
 
-_VERSION = 1
+class ReceiptError(ValueError):
+    """受理申请或首次答复无法编码、解释或核对。"""
 
 
-def _identity_value(value):
+def _encode_identity_value(value):
     # 标签避免对象与数字类型混淆；Decimal 的编码不经过浮点或舍入。
     if value is None:
         return ["null"]
@@ -24,51 +23,41 @@ def _identity_value(value):
         return ["int", str(value)]
     if isinstance(value, Decimal):
         if not value.is_finite():
-            raise TransactionError("受理申请包含非有限数值")
+            raise ReceiptError("受理申请包含非有限数值")
         return ["decimal", str(value)]
     if isinstance(value, str):
         return ["string", value]
     if isinstance(value, list):
-        return ["array", [_identity_value(item) for item in value]]
+        return ["array", [_encode_identity_value(item) for item in value]]
     if isinstance(value, dict):
         if any(not isinstance(key, str) for key in value):
-            raise TransactionError("受理申请的对象键必须是字符串")
-        return ["object", [[key, _identity_value(value[key])] for key in sorted(value)]]
-    raise TransactionError("受理申请包含无法编码的值")
+            raise ReceiptError("受理申请的对象键必须是字符串")
+        return ["object", [[key, _encode_identity_value(value[key])] for key in sorted(value)]]
+    raise ReceiptError("受理申请包含无法编码的值")
 
 
-def _identity(command):
+def calculate_request_identity(command):
     source = command.source
     if isinstance(source, ParsedInput):
         payload = {"kind": "parsed", "document": source.document}
     elif isinstance(source, InputDiagnostic):
         payload = {"kind": "diagnostic", "stage": source.stage.value, "detail": source.detail}
     else:
-        raise TransactionError("无法识别受理申请")
+        raise ReceiptError("无法识别受理申请")
     data = {"source": payload, "path": source.path, "mode": command.mode.value,
             "occurred_at": command.occurred_at}
-    encoded = encode_exact_json(_identity_value(data), error_type=TransactionError)
+    encoded = encode_exact_json(_encode_identity_value(data), error_type=ReceiptError)
     return sha256(encoded.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
-def _table_exists(connection):
-    return connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='acceptance_receipts'").fetchone() is not None
+def verify_request_identity(identity, command):
+    """核对保存的身份与本次完整申请。"""
+    if identity != calculate_request_identity(command):
+        raise ReceiptError("原受理申请与重送申请不一致")
 
 
-def recover_result(connection, key, command):
-    transaction = read_operation_transaction(connection, key)
-    if transaction is None:
-        return None
-    if not _table_exists(connection):
-        raise TransactionError("原受理事务缺少完整答复依据，请先升级数据库；无法恢复原答复")
-    row = connection.execute("SELECT version, request_identity, result_json FROM acceptance_receipts WHERE transaction_id = ?", (transaction.txn_id,)).fetchone()
-    if row is None:
-        raise TransactionError("原事务缺少受理申请和完整答复依据，无法恢复原答复")
-    version, identity, encoded = row
-    if version != _VERSION:
-        raise TransactionError("不支持的受理答复格式")
-    if identity != _identity(command):
-        raise TransactionError("原受理申请与重送申请不一致")
+def decode_result(encoded):
+    """解释并校验首次完整答复。"""
     try:
         data = parse_exact_json(encoded)
         expected = {"plan_disposition", "plan_id", "ack_disposition", "ack_watermark",
@@ -90,16 +79,13 @@ def recover_result(connection, key, command):
             ack_watermark=data["ack_watermark"], diagnostic_id=data["diagnostic_id"],
             needs_run=data["needs_run"], diagnostics=tuple(data["diagnostics"]))
     except (ValueError, KeyError, TypeError) as error:
-        raise TransactionError("原受理答复无法解释") from error
+        raise ReceiptError("原受理答复无法解释") from error
 
 
-def save_result(connection, transaction_id, command, result):
-    if not _table_exists(connection):
-        raise TransactionError("保存受理答复需要先升级数据库格式")
+def encode_result(result):
+    """编码首次完整答复。"""
     data = {"plan_disposition": result.plan_disposition.value, "plan_id": result.plan_id,
             "ack_disposition": result.ack_disposition.value, "ack_watermark": result.ack_watermark,
             "diagnostic_id": result.diagnostic_id, "needs_run": result.needs_run,
             "diagnostics": list(result.diagnostics)}
-    connection.execute("INSERT INTO acceptance_receipts(transaction_id, version, request_identity, result_json) VALUES(?,?,?,?)",
-                       (transaction_id, _VERSION, _identity(command),
-                        encode_exact_json(data, error_type=TransactionError)))
+    return encode_exact_json(data, error_type=ReceiptError)

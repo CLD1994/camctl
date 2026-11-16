@@ -46,7 +46,7 @@
 | `request_identity` | 原申请身份的摘要，用于核对恢复申请。 |
 | `result_json` | 首次完整业务答复的 JSON 对象。 |
 
-受理答复的保存和恢复规则见[受理事务](transactions.md)；字段与约束以 [history.sql](schema/history.sql) 为准。
+受理业务规则负责计算完整申请身份、编码和解释答复，并核对申请语义。受理业务存储负责检查表和格式、核实原完整事务、读取与保存答复，并将规则错误交给事务结果边界。保存和恢复规则见[受理事务](transactions.md)；字段与约束以 [history.sql](schema/history.sql) 为准。
 
 ## 对象与事件关联
 

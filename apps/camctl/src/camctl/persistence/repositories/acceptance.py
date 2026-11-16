@@ -21,6 +21,9 @@ from camctl.acceptance.storage_rules import (
     validate_acknowledged_sync_status, validate_acknowledged_sync, validate_acknowledged_watermark,
 )
 from camctl.acceptance.rules import extract_request_identity, validate_new_body
+from camctl.acceptance.receipts import (
+    ReceiptError, calculate_request_identity, decode_result, encode_result, verify_request_identity,
+)
 from camctl.acceptance.service import (
     AcceptanceResult,
     AckDisposition,
@@ -35,6 +38,7 @@ from camctl.contracts.workflow_errors import action_error_id, action_error_ids, 
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.reads import AdmissionSourceReadScope
 from camctl.history.validators import EventValidationError
+from camctl.persistence.fact_reads import read_operation_transaction
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection, require_host_photo_format, require_deferred_photo_format
 from camctl.persistence.repositories.reporting import (
@@ -49,6 +53,8 @@ from camctl.persistence.repositories.transactions import (
     TransactionError,
     commit_operation,
 )
+
+_RECEIPT_VERSION = 1
 
 _OBTAIN_TYPE = "obtain_action_outputs"
 _ACK_EVENT = 30
@@ -174,6 +180,48 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
     )
 
 
+def _has_receipt_table(connection):
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='acceptance_receipts'"
+    ).fetchone() is not None
+
+
+def _recover_receipt(connection, key, command):
+    transaction = read_operation_transaction(connection, key)
+    if transaction is None:
+        return None
+    if not _has_receipt_table(connection):
+        raise TransactionError("原受理事务缺少完整答复依据，请先升级数据库；无法恢复原答复")
+    row = connection.execute(
+        "SELECT version, request_identity, result_json FROM acceptance_receipts WHERE transaction_id = ?",
+        (transaction.txn_id,),
+    ).fetchone()
+    if row is None:
+        raise TransactionError("原事务缺少受理申请和完整答复依据，无法恢复原答复")
+    version, identity, encoded = row
+    if version != _RECEIPT_VERSION:
+        raise TransactionError("不支持的受理答复格式")
+    try:
+        verify_request_identity(identity, command)
+        return decode_result(encoded)
+    except ReceiptError as error:
+        raise TransactionError(str(error)) from error
+
+
+def _save_receipt(connection, transaction_id, command, result):
+    if not _has_receipt_table(connection):
+        raise TransactionError("保存受理答复需要先升级数据库格式")
+    try:
+        identity = calculate_request_identity(command)
+        encoded = encode_result(result)
+    except ReceiptError as error:
+        raise TransactionError(str(error)) from error
+    connection.execute(
+        "INSERT INTO acceptance_receipts(transaction_id, version, request_identity, result_json) VALUES(?,?,?,?)",
+        (transaction_id, _RECEIPT_VERSION, identity, encoded),
+    )
+
+
 class ProcessInputCommand:
     """一次输入处理的完整事务命令。"""
 
@@ -201,14 +249,13 @@ class ProcessInputCommand:
             complete = None
         else:
             raise TransactionError("输入命令模式与接管端口不符")
-        from camctl.acceptance.receipts import recover_result, save_result
-        recovered = recover_result(scope.connection, self._key, self._command)
+        recovered = _recover_receipt(scope.connection, self._key, self._command)
         if recovered is not None:
             return CommandPlan(events=(), owners={}, state_rows={}, result=recovered, read_only=True)
         plan = self._plan_input(scope)
         return replace(plan, complete_result=complete,
                        save_result=lambda connection, txn_id, result:
-                           save_result(connection, txn_id, self._command, result))
+                           _save_receipt(connection, txn_id, self._command, result))
 
     def _complete_handoff(self, connection, result: AcceptanceResult) -> AcceptanceResult:
         needs_run = self._command.submit_handoff.needs_run(connection)

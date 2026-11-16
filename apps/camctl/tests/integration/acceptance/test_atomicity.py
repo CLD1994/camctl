@@ -323,6 +323,25 @@ def test_existing_history_without_receipt_cannot_reconstruct_original(environmen
     assert _process(_plan_body(), connection).value.plan_disposition is PlanDisposition.REUSED
 
 
+@pytest.mark.parametrize("version, result_json", [(2, None), (1, "{}")])
+def test_invalid_saved_receipt_is_a_transaction_failure(environment, version, result_json):
+    from camctl.persistence.atomic import TransactionError
+
+    connection, _ = environment
+    key = new_operation_key()
+    body = _plan_body()
+    assert _process(body, connection, key).kind is DbOutcomeKind.COMPLETED
+    connection.execute("UPDATE acceptance_receipts SET version = ?, result_json = COALESCE(?, result_json)",
+                       (version, result_json))
+    outcome = _process(body, connection, key)
+    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(outcome.error, TransactionError)
+    if result_json is not None:
+        assert isinstance(outcome.error.__cause__, ValueError)
+        assert isinstance(outcome.error.__cause__.__cause__, ValueError)
+    assert connection.execute("SELECT COUNT(*) FROM history_transactions").fetchone() == (1,)
+
+
 @pytest.mark.asyncio
 async def test_absorbed_ack_restores_original_watermark_after_later_changes(environment, tmp_path):
     connection, _ = environment
