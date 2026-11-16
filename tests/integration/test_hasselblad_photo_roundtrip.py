@@ -25,9 +25,16 @@ from test_hasselblad_photo_parameters import InstalledCamctl, installed_camctl
 from _wsl_host_demo import HostDemo, query_state, wait_for
 from camctl_fixtures import Deployment
 from _client_session import ClientSession
+from client_test_build import prepare_standard_client
 
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="module")
+def client_build(installed_camctl):
+    candidate = Path(os.environ["CAMCTL_HB_TEST_CLIENT_ROOT"]).resolve()
+    prepare_standard_client(candidate / "apps/client", installed_camctl.run)
 
 
 def _client(package: InstalledCamctl, *args: str, output: Path) -> dict:
@@ -56,7 +63,7 @@ def _token(text: str, path: tuple[str | int, ...]) -> str:
 @pytest.mark.acceptance
 @pytest.mark.parametrize("shutter", ("1/1500", "1/3000", "1/4000"))
 def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
-    tmp_path: Path, installed_camctl: InstalledCamctl, shutter: str,
+    tmp_path: Path, installed_camctl: InstalledCamctl, shutter: str, client_build,
 ):
     package = installed_camctl
     store = tmp_path / "client-store"
@@ -147,7 +154,7 @@ def _upload_fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
 @pytest.mark.acceptance
 @pytest.mark.parametrize("media_first", (False, True))
 def test_installed_hasselblad_files_upload_preserves_arrival_order(
-    tmp_path: Path, installed_camctl: InstalledCamctl, media_first: bool,
+    tmp_path: Path, installed_camctl: InstalledCamctl, media_first: bool, client_build,
 ):
     media, report, delivery = _upload_fixture(tmp_path)
     store = tmp_path / "upload-store"
@@ -703,7 +710,7 @@ class PhotoWorld:
 
 @pytest.mark.acceptance
 @pytest.mark.parametrize("case", NORMAL_CASES, ids=lambda case: case.name)
-def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_demo, monkeypatch, case, client_build):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
     try:
@@ -945,7 +952,7 @@ def _fault_pair(world, capture):
 
 @pytest.mark.acceptance
 @pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '1/1500'), PhotoCase('raw', 'device', '1/3000')), ids=lambda c:c.name)
-def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, installed_camctl, host_demo, monkeypatch, case, client_build):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
     try:
@@ -995,7 +1002,7 @@ def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, inst
 
 @pytest.mark.acceptance
 @pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '1/1500'), PhotoCase('jpeg', 'device', '1/3000')), ids=lambda c:c.name)
-def test_installed_hasselblad_complete_commit_receipt_loss_reuses_request(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+def test_installed_hasselblad_complete_commit_receipt_loss_reuses_request(tmp_path, installed_camctl, host_demo, monkeypatch, case, client_build):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
     try:
@@ -1077,7 +1084,7 @@ def _no_private_details(action, world):
 
 
 @pytest.mark.acceptance
-def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, installed_camctl, host_demo, monkeypatch):
+def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, installed_camctl, host_demo, monkeypatch, client_build):
     case = PhotoCase('jpeg', 'host', '1/4000', focus_override=('MF', 5))
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
@@ -1154,7 +1161,7 @@ def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, insta
 
 
 @pytest.mark.acceptance
-def test_installed_hasselblad_report_rebuild_keeps_frozen_bytes(tmp_path, installed_camctl, host_demo, monkeypatch):
+def test_installed_hasselblad_report_rebuild_keeps_frozen_bytes(tmp_path, installed_camctl, host_demo, monkeypatch, client_build):
     case = PhotoCase('jpeg', 'device', '1/1500', focus_override=('MF', None))
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)

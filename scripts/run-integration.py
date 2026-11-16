@@ -544,9 +544,6 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                     environment['npm_config_cache'] = str(private / 'npm-cache')
                     task['client_candidate'] = str(candidate)
                     task['environment']['CAMCTL_HB_TEST_CLIENT_ROOT'] = environment['CAMCTL_HB_TEST_CLIENT_ROOT']
-                    await prepare('hasselblad-client-build',
-                                  [str(python), str(control / 'client_test_build.py'),
-                                   '--project', str(candidate / 'apps/client')], candidate / 'apps/client')
                 with (artifacts / 'output.log').open('wb') as log:
                     process = await asyncio.create_subprocess_exec(*command, cwd=work, env=environment,
                                                                   stdout=log, stderr=log, start_new_session=True)

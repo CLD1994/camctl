@@ -489,11 +489,12 @@ class IntegrationRunnerTest(unittest.TestCase):
             root = Path(temporary)
             source = root / 'input'
             self._fixture_repository(source, 'test_hasselblad_photo_roundtrip.py',
-                'import os\nfrom pathlib import Path\n'
+                'import os, subprocess\nfrom pathlib import Path\nfrom client_test_build import prepare_standard_client\n'
                 'def test_candidate():\n'
                 '    repo = Path(__file__).resolve().parents[2]\n'
                 '    candidate = Path(os.environ["CAMCTL_HB_TEST_CLIENT_ROOT"]).resolve()\n'
                 '    assert candidate != repo and repo not in candidate.parents\n'
+                '    prepare_standard_client(candidate / "apps/client", lambda command, *, cwd: subprocess.run(command, cwd=cwd, check=True))\n'
                 '    assert (candidate / "apps/client/dist/web/built").read_text() == "current"\n'
                 '    assert (candidate / "protocol/marker").read_text() == "current"\n'
                 '    assert (candidate / "tests/integration/client_driver.ts").read_text() == "current"\n'
@@ -507,6 +508,17 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertFalse(Path(task['cwd']).exists())
             self.assertFalse(Path(task['worker_cache']).exists())
             self.assertFalse((output / 'snapshot').exists())
+
+    def test_hasselblad_observer_does_not_build_standard_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_hasselblad_photo_roundtrip.py',
+                                     'def test_observer(): pass\n')
+            result, output = self._run_fixture(root, source)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            summary = json.loads((output / 'summary.json').read_text())
+            for name in ('host_demo_build', 'python_wheel_build', 'client_web_build'):
+                self.assertEqual(summary[name], {'status': 'not_requested', 'build_count': 0})
 
     def test_root_shards_use_current_collection_including_unmeasured_nodes(self):
         with tempfile.TemporaryDirectory() as temporary:
