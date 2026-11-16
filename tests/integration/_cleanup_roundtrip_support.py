@@ -677,17 +677,35 @@ max_query_attempts={max_q}
         if item["error_code"] is not None:
             assert reported["result"]["items"][0]["error"]["code"] == error_code
 
-    def clean_exact(self, key, *, verify_report=True):
+    def clean_exact(self, key, *, verify_report=True, reuse_host=False):
         before = {name: self.path(name).read_bytes() for name in self.sources
                   if not name.startswith("hb-device") and self.path(name).exists()}
         source = self.sources[key]
         outputs_before = {row["id"]: row for row in rows(self.db, "SELECT * FROM outputs")}
-        self.stop()
+        if reuse_host:
+            assert self.host is not None and self._last_exact_request is not None
+            self.wait_action(self._last_exact_request, "SUCCEEDED")
+            if self._last_exact_device:
+                observed = [record for record in records(self.calls_path)
+                            if record.get("request_id") == self._last_exact_request
+                            and record.get("kind") == "cleanup" and record.get("stage") == "observed"]
+                assert len(observed) == 1
+                try:
+                    current = process_identity(observed[0]["pid"])
+                except FileNotFoundError:
+                    pass
+                else:
+                    assert current["starttime"] != observed[0]["starttime"] or current["state"] in ("Z", "X")
+        else:
+            self.stop()
         plan, receipt = self.export("clean-" + key, [self.action("clean-" + key, "delete_action_outputs", {"output_ids": [str(source["id"])]})])
         self.manifest_for(receipt["request_id"])
-        self.start()
+        if not reuse_host:
+            self.start()
         self.host.submit(plan)
         self.wait_action(receipt["request_id"], "SUCCEEDED")
+        self._last_exact_request = receipt["request_id"]
+        self._last_exact_device = source["device_file_id"] is not None
         assert not self.path(key).exists()
         for name, content in before.items():
             if name != key:
@@ -704,10 +722,15 @@ max_query_attempts={max_q}
     def publish_copies(self):
         keys = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
         with self.reuse_client("obtain"):
-            for key in keys:
-                plan, receipt = self.export("obtain-" + key, [self.action("obtain-" + key, "obtain_action_outputs", {"source": {"action_instance_id": str(self.sources[key]["source_action_id"])}, "output_ids": [str(self.sources[key]["id"])]})])
-                self.host.submit(plan)
-                self.wait_action(receipt["request_id"], "SUCCEEDED")
+            actions = [self.action("obtain-" + key, "obtain_action_outputs", {
+                "source": {"action_instance_id": str(self.sources[key]["source_action_id"])},
+                "output_ids": [str(self.sources[key]["id"])],
+            }) for key in keys]
+            plan, receipt = self.export("obtain-copies", actions)
+            self.host.submit(plan)
+            completed = self.wait_action(receipt["request_id"], "SUCCEEDED")
+            assert len(completed) == len(keys)
+            assert {action["name"] for action in completed} == {"obtain-" + key for key in keys}
         self.assert_report_ack_and_history()
         sources = {self.sources[key]["id"]: key for key in keys}
         deliveries = rows(self.db, "SELECT output_id,file_name FROM deliveries WHERE output_id IN ("

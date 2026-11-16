@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -31,13 +32,24 @@ def test_cleanup_hasselblad_tool_rejects_unrecognized_setting(tmp_path):
 
 def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
+        started = time.monotonic()
         world.prepare_hasselblad()
+        photo_done = time.monotonic()
         world.publish_copies()
+        copies_done = time.monotonic()
         sources = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
         with world.reuse_client("cleanup"):
-            for source in sources:
-                world.clean_exact(source, verify_report=False)
+            for index, source in enumerate(sources):
+                world.clean_exact(source, verify_report=False, reuse_host=index > 0)
+            deletes_done = time.monotonic()
             snapshot = world.assert_report_ack_and_history()
+        report_done = time.monotonic()
+        json_write(world.root / "exact-cleanup-timing.json", {
+            "photo_seconds": photo_done - started,
+            "copies_and_initial_report_seconds": copies_done - photo_done,
+            "deletes_seconds": deletes_done - copies_done,
+            "final_report_seconds": report_done - deletes_done,
+        })
         outputs = {output["output_id"]: output for plan in snapshot["plans"]
                    for action in plan.get("actions", [])
                    for output in action.get("outputs", [])}
