@@ -26,13 +26,13 @@ if TYPE_CHECKING:
     from camctl.capture.handlers import (
         PendingCallResult, PendingFileObservation, PendingCaptureCompletion, PendingResultCheckClose,
     )
+    from camctl.capture.preparation import RuntimePreparationCache
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.clocks import SystemClock
 from camctl.bootstrap.config import ConfigSnapshot
 from camctl.capture.recovery import RecoveryBoundary
-from camctl.capture.preparation import RuntimePreparationCache, resume_preparation_saves
 from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.runtime import (
     DbConfig, DbOpenMode, DirectoryBindingError, OwnedConnection,
@@ -108,9 +108,9 @@ class RuntimeDeps:
     capture_result_closes: dict[int, PendingResultCheckClose] = field(default_factory=dict)
     #: 文件发现及其派生事实具有独立生命周期，三种工厂共用。
     capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
-    #: 基准准备及原页保存由本会话持有，普通、残留与受限工厂共用。
+    #: run 的基准准备及原页保存由本会话持有，普通、残留与受限工厂共用。
     capture_baselines: dict = field(default_factory=dict)
-    capture_preparations: RuntimePreparationCache = field(default_factory=RuntimePreparationCache)
+    capture_preparations: RuntimePreparationCache | None = None
     #: 原结果页保存申请由普通、残留和受限工厂共享。
     capture_result_scans: dict = field(default_factory=dict)
     capture_segment_writes: dict = field(default_factory=dict)
@@ -139,6 +139,12 @@ class RuntimeDeps:
     #: 普通和受限取消共用一次运行的撤回申请。
     withdrawal_session: Any = None
 
+    def __post_init__(self) -> None:
+        if self.mode is CommandMode.RUN and self.capture_preparations is None:
+            from camctl.capture.preparation import RuntimePreparationCache
+
+            self.capture_preparations = RuntimePreparationCache()
+
 
 async def _resume_read_requests(deps: RuntimeDeps, database) -> None:
     """候选读取前保存原 READ、有限耗尽及拍摄申请，不取得设备资格。"""
@@ -156,6 +162,8 @@ async def _resume_read_requests(deps: RuntimeDeps, database) -> None:
 
 async def _resume_capture_requests(deps: RuntimeDeps, database) -> None:
     """核实原拍摄终态及附属收尾，取消入口不取得新的 READ 业务资格。"""
+    from camctl.capture.preparation import resume_preparation_saves
+
     await resume_preparation_saves(database, deps.capture_preparations)
     from camctl.capture.handlers import (
         resume_canceled_recording_results, resume_capture_completions, resume_result_check_closes,
@@ -1615,6 +1623,8 @@ async def _cleanup_pending_for_action(deps, database, action_id):
 
 
 def _local_work(deps, flows, logging_owner=None):
+    if not deps.background_flows and not flows and deps.work_files is None and logging_owner is None:
+        return None
     from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
     from camctl.bootstrap.flows import CaptureFlow
     from camctl.bootstrap.cleanup_assembly import CleanupFlow
