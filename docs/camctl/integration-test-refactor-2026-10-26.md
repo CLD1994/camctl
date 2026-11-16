@@ -226,16 +226,17 @@ PYTHONPATH="$WT/apps/camctl/src:$WT/apps/camctl/tests" "$PYTHON" -m pytest \
 
 跨目录来源功能节点已接入 `e280070e`、`36f7d369`。旧输入从目录起点连续生成1000项，冻结回归为84.535秒；当前从本次可靠起点段号871开始生成130项，保留 `[128,2]` 写批、同一末批的999→下一目录1、全部128个内部零长度缺口、完整分页及快照。第一阶段功能通过，节点合计11.254秒；随后将真实来源准备与未被该功能消费者使用的样本归档分开，去掉功能路径的重复全量读取，节点再次通过，最终合计 **9.038秒**，仍未达九秒目标，不取整或重跑来宣称达标。固定256／2048文件未改，默认生成起点仍为零，归档入口保留原读取、数据库检查和摘要；本轮没有执行归档生成或性能负载。
 
-清理的下一步只调整最慢精确清理节点的准备和普通执行：五份删除对照副本可由一份计划中的五个独立取回动作生成，继续逐份核对来源、交付及完整字节；五次删除保持独立请求与逐次非级联检查。评估在这些普通删除之间复用 host，必须先确认前一动作及其工具实际结束，才更新同一路径的下一份工具输入；首轮仍在输入和环境就绪后启动。取消、故障及 UNKNOWN 所需的重启不动，两次报告与 ACK 的不同观察时点均保留。改动限制在这个正常节点显式使用，验证只补该节点一次，不重复整份清理文件；仍按完整阶段合计判断九秒目标。
+精确清理第二阶段已接入 `9416cea7`：来源准备改为一份计划中的五个独立取回动作，核对每项成功及五份独立交付、完整字节；五次删除仍各有独立请求和逐次非级联检查。首轮在工具输入及环境就绪后启动，后四次普通删除显式复用 host，更新下一份工具输入前核对前次成功及原设备工具身份已退出。其他默认路径、取消、故障和 UNKNOWN 的重启不变，两次不同阶段的报告和 ACK 均保留。只补该正常节点一次，通过，完整阶段合计 **103.942秒**，仍未达标。测试工作区与成功临时材料已释放，没有再次执行整个清理文件。
 
 **优化后的功能耗时**按每个节点的 setup、call、teardown 之和登记，整文件墙钟另列，以下两组使用同一 Python 3.11.17、当前修改后的源码和新选择器，实际执行各一次：
 
-| 功能范围 | 本次通过 | 单项最大合计（秒） | 完整文件外层墙钟（秒） | 九秒目标 |
+| 功能范围 | 本次通过 | 单项最大合计（秒） | 所列范围外层墙钟（秒） | 九秒目标 |
 | --- | ---: | ---: | ---: | --- |
 | `persistence/test_segment_scan_pairing.py` 默认功能范围 | 51 | 1.349 | 21.839 | 全部达标；四项性能专项未执行。 |
 | `contracts/test_dependencies.py` | 3 | 5.169 | 5.921 | 全部达标；最慢项含源码解析共享准备。 |
 | `history/test_record_segment_history.py::test_real_segment_source_crosses_write_batch_and_directory` | 1 | 9.038 | 10.724 | 尚未达标；保留130个真实成员及全部边界检查。 |
-| 根 `test_device_file_cleanup_roundtrip.py` | 10 | 121.640 | 404.962 | 九项仍未达标，继续优化；这次测量发生在性能分组之前，全部本来就是功能。 |
+| 根 `test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade` 最新单项 | 1 | 103.942 | 149.197 | 尚未达标；五类来源、交付、逐次删除及双报告时点保留。 |
+| 根 `test_device_file_cleanup_roundtrip.py` 先前完整文件补验 | 10 | 121.640 | 404.962 | 九项未达标；其中精确清理已由上一行更新，其余八个慢节点沿用原时间，不拼成新完整文件测量。 |
 
 依赖检查与分段配对两组共 **54 项通过、退出零**，没有跳过或超过九秒的节点。分段配对最慢节点的准备、执行、收场分别为 **0.002、1.339、0.008 秒**；依赖检查最慢节点分别为 **5.166、0.002、0.001 秒**。节点合计取未舍入值，不能从逐阶段显示值反算精确末位。计时插件同时记录类别，功能与性能耗时没有混算；不同节点数的完整文件时间不能作为同负载提速比例。
 
@@ -254,6 +255,17 @@ PYTHONPATH="$WT/scripts:$WT/apps/camctl/src:$WT/apps/camctl/tests" \
 "$PYTHON" -m pytest -p pytest_asyncio.plugin -p integration_progress -p no:cacheprovider \
   apps/camctl/tests/integration/history/test_record_segment_history.py::test_real_segment_source_crosses_write_batch_and_directory \
   --test-kind functional -q -s
+```
+
+精确清理最新单项使用隔离入口、Python3.11.17、Node24.22.1及2GiB合计预算，pytest104.24秒、任务墙钟143.855秒、外层149.197秒，均退出零。setup38.659699秒、call65.264495秒、teardown0.017654秒，合计103.941848秒。测试体内部普通计时：照片准备8.181秒，五份副本及首份报告26.139秒，五次删除17.821秒，最终报告12.716秒；这些阶段未覆盖全部断言和世界进出，不能当作完整测试体拆账。准备仍计入单项，不通过移出构建或拍摄来宣称九秒达标。预算委派无收场错误或剩余进程，专属目录已移除。
+
+```bash
+"$PYTHON" scripts/run-memory-budget.py --camctl-memory-limit 2GiB \
+  --evidence-dir "$BUDGET_OUTPUT" -- \
+  "$PYTHON" scripts/run-integration.py --scope root \
+  --target tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade \
+  --python "$PYTHON" --node-modules /workspaces/camctl/apps/client/node_modules \
+  --jobs 1 --output "$RUN_OUTPUT"
 ```
 
 上述观测插件使用本次独立临时输出目录；正式记录保留范围、结论及时间，临时路径与原始文件不进入 Git。十二次收集分别覆盖 history、outputs、persistence 的已标记文件及根数据库文件，在每组比较 functional、performance、all 的实际节点集合；outputs 容量文件的默认选择为空、退出五，明确未运行而非通过。完整运行器没有再次执行，尚无新分组下的全套墙钟，也没有将原完整回归改写为新版本全绿。
