@@ -129,8 +129,8 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
         device_files={"cm-shot": _PHOTO_CONTENT,
                       "cm-clip": _CLIP_CONTENT,
                       "cm-seq": _SEQ_CONTENT})
-    _init_with_capabilities(deployment, spec)
     reuse_client(deployment)
+    _init_with_capabilities(deployment, spec)
     state_db = deployment.state_db
 
     shoot_at = deployment.schedule(1)
@@ -313,8 +313,8 @@ def test_auto_preview_roundtrip_via_c_module(
         device_files={"ap-shot": _PHOTO_CONTENT,
                       "ap-preview": _PREVIEW_CONTENT},
         photo_preview_supported=True)
-    _init_with_capabilities(deployment, spec)
     reuse_client(deployment)
+    _init_with_capabilities(deployment, spec)
     state_db = deployment.state_db
 
     shoot_at = deployment.schedule(1)
@@ -421,8 +421,8 @@ def test_late_cancel_roundtrip_via_c_module(
     spec = stub_driver_spec(
         {"1": [video_file("lc-clip")]},
         device_files={"lc-clip": _CANCEL_CLIP_CONTENT})
-    _init_with_capabilities(deployment, spec)
     reuse_client(deployment)
+    _init_with_capabilities(deployment, spec)
     state_db = deployment.state_db
 
     body = {

@@ -81,8 +81,8 @@ function openApp(storeDir: string) {
   }
 }
 
-function initializeClient(storeDir: string, receiptPath: string) {
-  const app = openApp(storeDir);
+function initializeClient(storeDir: string, receiptPath: string, existing?: ApplicationStore) {
+  const app = existing?.app ?? openApp(storeDir);
   try {
     const state = app.state();
     writeFileSync(
@@ -91,7 +91,7 @@ function initializeClient(storeDir: string, receiptPath: string) {
       "utf-8",
     );
   } finally {
-    app.store.close();
+    if (!existing) app.store.close();
   }
 }
 
@@ -1316,8 +1316,9 @@ type ClientCommand = {
 
 // 独立命令与会话共用完整参数签名；既有照片会话允许省略固定store。
 const clientCommands: Record<string, ClientCommand> = {
-  initialize: { argumentCount: 2, storeIndex: 0,
-    run: ([store, receipt]) => initializeClient(store, receipt) },
+  initialize: { argumentCount: 2, storeIndex: 0, shared: true,
+    run: async ([store, receipt], owner) =>
+      initializeClient(store, receipt, owner ? await owner.application() : undefined) },
   export: { argumentCount: 4, storeIndex: 0, shared: true,
     run: async ([store, body, plan, receipt], owner) =>
       exportPlan(store, body, plan, receipt, owner ? await owner.application() : undefined) },

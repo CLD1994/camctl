@@ -1,8 +1,8 @@
 """根跨组件集成测试共享夹具：真实host-demo与显式客户端会话。
 
 session 级共享一次构建：集成测试按目录前台独占顺序执行，多文件
-复用当前工作区的构建产物不引入并发。客户端会话由调用者在能力
-初始化后显式绑定，每个测试独立拥有并在收场时关闭。
+复用当前工作区的构建产物不引入并发。客户端会话由调用者显式绑定，
+每个测试独立拥有并在收场时关闭。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def host_demo(request) -> str:
 
 @pytest.fixture
 def reuse_client(request, monkeypatch):
-    """能力初始化后复用本世界的客户端；跨重开由报告闭环验证。"""
+    """复用本世界的客户端；调用者选择绑定时点，避免外部写入冲突。"""
     def bind(deployment) -> None:
         if sys.platform != "linux":
             return

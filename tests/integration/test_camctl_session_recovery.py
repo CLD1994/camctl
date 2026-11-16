@@ -172,8 +172,8 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path, start_owned_ca
         gates={"result": "result.gate"},
         device_files={"seq-1": _CLIP_CONTENT,
                       "shot-a": "photo-payload-a"})
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
 
     shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
@@ -283,8 +283,8 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned
         timelapse_duration_s=5.0,
         gates={"control": "control.gate"},
         device_files={"shot-late": "photo-payload-late"})
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
 
     shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
@@ -393,8 +393,8 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path, start_owned_c
         {"1": [photo_file("shot-1")], "2": [photo_file("shot-2")]},
         device_files={"shot-1": "content-one",
                       "shot-2": "content-two"})
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
     shoot_at = deployment.schedule(1)
 
     def body(request_id: str, action: str) -> dict:
@@ -568,8 +568,8 @@ def test_report_failure_preserves_device_work_and_redelivers(
     spec = stub_driver_spec(
         {"1": [photo_file("shot-1")]},
         device_files={"shot-1": "content-one"})
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
 
     # ready 位置被普通文件占据：报告无法写入部署绑定目录。
     shutil.rmtree(deployment.ready)

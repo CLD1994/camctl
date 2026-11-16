@@ -128,8 +128,8 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -
     spec = stub_driver_spec(
         {"1": [video_file("clip-1")]},
         device_files={"clip-1": _CLIP_CONTENT})
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
 
     # 客户端真实导出：录像与取回同计划，取回按名称引用本计划来源。
     body = {
@@ -255,7 +255,7 @@ def _wait_until(moment: str) -> None:
         time.sleep(0.1)
 
 
-def test_auto_preview_obtains_registered_preview(tmp_path: Path) -> None:
+def test_auto_preview_obtains_registered_preview(tmp_path: Path, reuse_client) -> None:
     """自动预览链：驱动按配对关联列举预览文件，预览登记为正式产
     物并保留配对证据，客户端展开的自动取回选择预览产物交付。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -269,6 +269,7 @@ def test_auto_preview_obtains_registered_preview(tmp_path: Path) -> None:
         device_files={"shot-1": _PHOTO_CONTENT,
                       "shot-1-preview": _PREVIEW_CONTENT},
         photo_preview_supported=True)
+    reuse_client(deployment)
     deployment.install_client_capabilities(spec)
 
     # 客户端真实导出：拍摄与自动取回同计划，取回三字段明确填写，
@@ -450,8 +451,8 @@ def test_plan_cancel_before_start_settles_auto_preview(
         device_files={"shot-1": _PHOTO_CONTENT,
                       "shot-1-preview": _PREVIEW_CONTENT},
         photo_preview_supported=True)
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
     shoot_at = future_schedule(30)
     cancel_at = future_schedule(1)
 
@@ -535,7 +536,7 @@ def test_plan_cancel_before_start_settles_auto_preview(
         "cancel": "succeeded"}
 
 
-def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
+def test_three_capture_kinds_partial_obtain(tmp_path: Path, reuse_client) -> None:
     """三种拍摄与部分取回组合：照片、录像与延时同计划顺序执行，
     照片与延时产物被取回交付，录像产物保持登记不建交付。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -551,6 +552,7 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
         device_files={"combo-shot": _COMBO_PHOTO_CONTENT,
                       "combo-clip": _COMBO_CLIP_CONTENT,
                       "combo-seq": _COMBO_SEQ_CONTENT})
+    reuse_client(deployment)
     deployment.install_client_capabilities(spec)
 
     shoot_at = deployment.schedule(1)
@@ -665,7 +667,7 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
 
 
 def test_repeated_obtain_of_same_output_yields_independent_deliveries(
-        tmp_path: Path) -> None:
+        tmp_path: Path, reuse_client) -> None:
     """同一产物的重复取回：两个取回动作各自取得独立交付；源产物保
     持可用、设备原文件保留，两份 ready 副本字节与来源一致且文件名
     互不相同，源文件与副本生命周期分开。"""
@@ -678,6 +680,7 @@ def test_repeated_obtain_of_same_output_yields_independent_deliveries(
     spec = stub_driver_spec(
         {"1": [video_file("repeat-clip", size_bytes=len(content))]},
         device_files={"repeat-clip": content})
+    reuse_client(deployment)
     deployment.install_client_capabilities(spec)
 
     shoot_at = deployment.schedule(1)
@@ -770,8 +773,8 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path, reuse_client) ->
          "2": [photo_file("cross-second")]},
         device_files={"cross-first": _CROSS_FIRST_CONTENT,
                       "cross-second": _CROSS_SECOND_CONTENT})
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
     state_db = deployment.state_db
 
     # 第一个请求：一次拍摄取得稳定动作实例与产物身份。

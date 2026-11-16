@@ -79,8 +79,8 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
     clock = Path(spec["clock_path"])
     result = deployment.camctl("init", "--config", str(deployment.config_path))
     assert result.exit_code == 0, result.stderr
-    deployment.install_client_capabilities(spec)
     reuse_client(deployment)
+    deployment.install_client_capabilities(spec)
     capture, capture_receipt = deployment.export_plan_with_client(_body("camera-demo", [_capture(params, clock)]))
     if action_type == "camera_timelapse":
         exported = parse_exact_json(capture.read_text(encoding="utf-8"))

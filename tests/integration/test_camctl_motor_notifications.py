@@ -308,8 +308,8 @@ def test_motor_and_camera_share_cli_without_device_result_confusion(
     """电机回调阻塞不妨碍相机生产流程，报告保持各自动作的完成含义。"""
     deployment = Deployment(tmp_path)
     spec = stub_driver_spec({"1": [photo_file("motor-camera-shot")]})
-    launcher = _init(deployment, spec)
     reuse_client(deployment)
+    launcher = _init(deployment, spec)
     scheduled = future_schedule(-1)
     body = {"name": "电机与相机共存", "actions": [
         _motor_action("电机", -12, scheduled),
