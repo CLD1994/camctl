@@ -521,7 +521,22 @@ PYTHONPATH=scripts python -m unittest -v \
 
 用户已同意先落实uv缓存共享。运行器的收集与执行入口均直接使用调用方指定的工具缓存，保留 `UV_OFFLINE=1`，新增 `UV_LINK_MODE=copy`；各验收继续独立安装，执行槽退出只删除自身环境与客户端依赖副本，不复制或删除外部uv缓存。uv明确支持缓存的并发读写，见[官方缓存说明](https://docs.astral.sh/uv/concepts/cache/#cache-safety)；共用缓存不等于共用已安装环境。客户端依赖共享前须分离Vite默认写入的 `.vite` 缓存、配置加载产生的 `.vite-temp` 和Vitest结果，本次保持独立复制。源码复制和pytest启动环境保持原状。
 
-相关真实进程验证选择九个运行器方法：新增双进程共用缓存、独立安装后修改文件的检查，以及既有只读目录收场、失败后槽内复用、依赖复制中断、执行与收集准备中断、当前节点分片、并行隔离与私有字节码缓存检查。九项通过、退出零，自报24.015秒、外层24.130秒。双进程验证使用本地最小wheel和真实uv安装，确认缓存保留原文件、安装副本不是同一文件，且运行结束后工具缓存仍在；它不代替正式camctl发行物验收。正式安装流程补验待执行，不追加全量；本表不代表调整后的完整回归收益。
+`33d4fced` 已落实上述调整。相关真实进程验证选择九个运行器方法：新增双进程共用缓存、独立安装后修改文件的检查，以及既有只读目录收场、失败后槽内复用、依赖复制中断、执行与收集准备中断、当前节点分片、并行隔离与私有字节码缓存检查。九项通过、退出零，自报24.015秒、外层24.130秒。双进程验证使用本地最小wheel和真实uv安装，确认缓存保留原文件、安装副本不是同一文件，且运行结束后工具缓存仍在；它不代替正式camctl发行物验收。实际命令如下，使用上述Python3.11环境：
+
+```bash
+PYTHONPATH=scripts python -B -m unittest -v \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_concurrent_installs_share_uv_cache_and_keep_package_files_private \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_success_releases_readonly_trees_without_changing_external_symlink_target \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_failed_worker_cache_is_reused_then_removed_after_later_task \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_interrupt_waits_for_dependency_copy_before_removing_worker \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_prepare_interrupt_reaps_owned_process_and_saves_actual_state \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_collection_prepare_interrupt_reaps_owned_process \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_root_shards_use_current_collection_including_unmeasured_nodes \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_isolated_concurrency_progress_exact_assignment_and_failure \
+  scripts.tests.test_run_integration.IntegrationRunnerTest.test_python_cache_is_private_and_external_dependency_is_unchanged
+```
+
+同一干净源码另经预算启动器运行 `python scripts/run-integration.py --scope camctl --test-kind acceptance --jobs 1 --python <上述解释器> --target apps/camctl/tests/integration/bootstrap/test_distribution.py::test_missing_package_resource_fails_init --output <本次新目录>`，启动器指定2GiB合计预算并正常回收委派，不作为容量专项验收。该单项通过、退出零；运行器9.016秒，含启动器收场的外层9.642秒，任务7.838秒。节点准备2.200秒、执行0.597秒、收场0.002秒，合计2.799秒；wheel实际构建一次、1.983秒，已经包含于节点准备。没有请求C或网页构建。运行记录确认使用调用方缓存、离线模式与复制安装；成功私有目录及本轮调试材料均已回收，外部工具缓存仍在。静态核对标准安装消费者没有清除 `UV_LINK_MODE` 或直接改写工具缓存。本次没有修改生产代码或业务断言，不追加全量，也不将不同选择和并发下的旧时间算作同负载提速比例。
 
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 
