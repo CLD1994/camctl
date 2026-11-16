@@ -19,11 +19,17 @@ from __future__ import annotations
 
 import glob
 import json
+import os
 import shutil
 import sqlite3
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
+
+from _client_session import ClientSession
 
 from camctl_fixtures import (
     CliResult,
@@ -49,6 +55,32 @@ _PREVIEW_CONTENT = ("preview-payload-" * 160)[:2048]
 _COMBO_PHOTO_CONTENT = ("combo-photo-" * 400)[:4096]
 _COMBO_CLIP_CONTENT = ("combo-clip-" * 745)[:8192]
 _COMBO_SEQ_CONTENT = ("combo-seq-" * 820)[:8192]
+
+
+@pytest.fixture
+def reuse_client(request, monkeypatch):
+    """能力初始化后复用本世界的客户端；跨重开由报告闭环验证。"""
+    def bind(deployment: Deployment) -> None:
+        if sys.platform != "linux":
+            return
+        integration = Path(__file__).resolve().parent
+        session = ClientSession(
+            ["node", "--import", "tsx", str(integration / "client_driver.ts")],
+            cwd=integration.parents[1] / "apps/client", env=os.environ.copy(),
+            root=deployment.root, timeout=120,
+        )
+        request.addfinalizer(session.close)
+        sequence = 0
+
+        def call(operation: str, *args: str, output: Path) -> dict:
+            nonlocal sequence
+            sequence += 1
+            receipt = output.with_name(f"{output.stem}-{sequence}{output.suffix}")
+            return session.call(operation, *args, output=receipt)
+
+        monkeypatch.setattr(deployment, "run_client_driver", call)
+
+    return bind
 
 
 def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
@@ -117,7 +149,7 @@ def _delivered_files(directory: Path) -> list[Path]:
         and not path.name.startswith("status-report-"))
 
 
-def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
+def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -> None:
     """录像交付存活迟到取消：拷贝交付到 ready、领取进 processing、
     取消按不可撤回收场后原请求终态与交付字节保持。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -129,6 +161,7 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
         {"1": [video_file("clip-1")]},
         device_files={"clip-1": _CLIP_CONTENT})
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
 
     # 客户端真实导出：录像与取回同计划，取回按名称引用本计划来源。
     body = {
@@ -436,7 +469,7 @@ def _repeat_auto_preview(*names: str, source: str,
 
 
 def test_plan_cancel_before_start_settles_auto_preview(
-        tmp_path: Path) -> None:
+        tmp_path: Path, reuse_client) -> None:
     """拍摄执行前的计划级取消：计划实例入口直接针对计划内动作，
     待执行拍摄与关联的自动预览取回都按取消收场，没有产物或交付。"""
     deployment = Deployment(tmp_path)
@@ -451,6 +484,7 @@ def test_plan_cancel_before_start_settles_auto_preview(
                       "shot-1-preview": _PREVIEW_CONTENT},
         photo_preview_supported=True)
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
     shoot_at = future_schedule(30)
     cancel_at = future_schedule(1)
 
@@ -752,7 +786,7 @@ _CROSS_FIRST_CONTENT = ("cross-plan-first-" * 250)[:4096]
 _CROSS_SECOND_CONTENT = ("cross-plan-second-" * 250)[:4096]
 
 
-def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
+def test_cross_plan_reference_and_multi_request(tmp_path: Path, reuse_client) -> None:
     """跨计划引用与多请求组合：三个请求的计划在同一部署先后执行，
     第二个请求的取回按稳定动作实例 ID 引用第一个请求的拍摄产物并
     交付；第三个请求引用不存在的实例在执行资格取得后按解析失败
@@ -770,6 +804,7 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
         device_files={"cross-first": _CROSS_FIRST_CONTENT,
                       "cross-second": _CROSS_SECOND_CONTENT})
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
     state_db = deployment.state_db
 
     # 第一个请求：一次拍摄取得稳定动作实例与产物身份。
