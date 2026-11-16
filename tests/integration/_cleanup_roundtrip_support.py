@@ -773,19 +773,23 @@ max_query_attempts={max_q}
             if "result=error" in current:
                 raise AssertionError("真实 C host 收到 CLI 错误：\n" + current)
             processing = report_files(self.deployment.processing)
-            if any(matches(content) for content in processing.values()):
-                return processing
-            ready = report_files(self.deployment.ready)
-            if any(matches(content) for content in ready.values()):
-                # 观察后报告允许被替换；以实际领取的文件为准。
-                self.host.claim()
-                processing = report_files(self.deployment.processing)
-                if any(matches(content) for content in processing.values()):
-                    return processing
-            return None
+            if not any(matches(content) for content in processing.values()):
+                ready = report_files(self.deployment.ready)
+                if any(matches(content) for content in ready.values()):
+                    # 观察后报告允许被替换；以实际领取的文件为准。
+                    self.host.claim()
+                    processing = report_files(self.deployment.processing)
+                if not any(matches(content) for content in processing.values()):
+                    return None
+            published = rows(self.db, "SELECT * FROM reports WHERE status=?",
+                             (int(enum_for("reports.status").PUBLISHED),))
+            claimed_ids = {int(json.loads(content)["report_id"]) for content in processing.values()}
+            if not claimed_ids <= {report["id"] for report in published}:
+                # 文件可先被领取，发布事实仍须由原流程可靠保存。
+                return None
+            return processing, published
 
-        claimed = wait(claim_matching_report, "自动报告未覆盖指定清理终态", 120)
-        published = rows(self.db, "SELECT * FROM reports")
+        claimed, published = wait(claim_matching_report, "自动报告未覆盖指定清理终态及发布事实", 120)
         for name, content in claimed.items():
             document = json.loads(content)
             report = next(row for row in published if row["id"] == int(document["report_id"]))

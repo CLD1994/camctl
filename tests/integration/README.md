@@ -71,7 +71,9 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 
 ### 正式源文件清理的安装版联合链
 
-`test_device_file_cleanup_roundtrip.py` 从仓库外构建并独立安装 wheel，核对正式内置登记、DELETE／FILE_QUERY 工厂、端口及模块来源，经真实客户端导出、C host、CLI、SQLite、文件、报告导入及累计 ACK 验证已有独立动作 `delete_action_outputs`。该模块的九个业务分区覆盖 repaired／OSV／LRF／主机原图／主机预览逐份精确清理、已清理产物的新请求，以及删除中断、独立预算、原配置保存、提交回执未知、终态伴随和在途取消恢复。外部 ADB 模型只识别已审阅的精确脚本及原目标，不替换生产文件工厂、解释器或状态机。
+`test_device_file_cleanup_roundtrip.py` 从仓库外构建并独立安装 wheel，核对正式内置登记、DELETE／FILE_QUERY 工厂、端口及模块来源，经真实客户端导出、C host、CLI、SQLite、文件及最终报告导入验证已有独立动作 `delete_action_outputs`。该模块的九个业务分区覆盖 repaired／OSV／LRF／主机原图／主机预览逐份精确清理、已清理产物的新请求，以及删除中断、独立预算、原配置保存、提交回执未知、终态伴随和在途取消恢复。外部 ADB 模型只识别已审阅的精确脚本及原目标，不替换生产文件工厂、解释器或状态机。
+
+副本领取与报告导入分别执行：逐次删除时检查其他来源及已交付副本不变，结束后等待正常报告包含目标结果，再交给真实客户端导入。报告检查不额外重启主程序，也不提交确认或新完整报告请求；故障与取消用例仍执行各自明确安排的中断和恢复。一般报告确认由 `test_camctl_report_roundtrip.py::test_report_import_ack_roundtrip` 验证，本模块不覆盖清理前报告已确认、随后删除或重复删除的交错组合。
 
 设备源不支持删除与主机源混合时，各成员独立处理的行为由 [camctl 组件测试](../../apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py)验证；[设备能力声明测试](test_device_capability_declarations.py)验证不支持删除的声明与网页展示。完整安装链目前不覆盖该混合场景，不能由这些分别验证的结果推断完整链已通过。
 
