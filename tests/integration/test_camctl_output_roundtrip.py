@@ -19,17 +19,11 @@ from __future__ import annotations
 
 import glob
 import json
-import os
 import shutil
 import sqlite3
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-import pytest
-
-from _client_session import ClientSession
 
 from camctl_fixtures import (
     CliResult,
@@ -55,32 +49,6 @@ _PREVIEW_CONTENT = ("preview-payload-" * 160)[:2048]
 _COMBO_PHOTO_CONTENT = ("combo-photo-" * 400)[:4096]
 _COMBO_CLIP_CONTENT = ("combo-clip-" * 745)[:8192]
 _COMBO_SEQ_CONTENT = ("combo-seq-" * 820)[:8192]
-
-
-@pytest.fixture
-def reuse_client(request, monkeypatch):
-    """能力初始化后复用本世界的客户端；跨重开由报告闭环验证。"""
-    def bind(deployment: Deployment) -> None:
-        if sys.platform != "linux":
-            return
-        integration = Path(__file__).resolve().parent
-        session = ClientSession(
-            ["node", "--import", "tsx", str(integration / "client_driver.ts")],
-            cwd=integration.parents[1] / "apps/client", env=os.environ.copy(),
-            root=deployment.root, timeout=120,
-        )
-        request.addfinalizer(session.close)
-        sequence = 0
-
-        def call(operation: str, *args: str, output: Path) -> dict:
-            nonlocal sequence
-            sequence += 1
-            receipt = output.with_name(f"{output.stem}-{sequence}{output.suffix}")
-            return session.call(operation, *args, output=receipt)
-
-        monkeypatch.setattr(deployment, "run_client_driver", call)
-
-    return bind
 
 
 def _query(state_db: Path, sql: str, params=()) -> list[tuple]:

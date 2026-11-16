@@ -67,7 +67,7 @@ def _reading(deployment, demo):
 
 @pytest.mark.parametrize("model", list(CameraModel))
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
-def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, model, action_type):
+def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, model, action_type, reuse_client):
     deployment = Deployment(tmp_path, devices=False)
     params = recording_params(model) if action_type == "camera_record" else timelapse_params(model)
     if action_type == "camera_timelapse":
@@ -80,6 +80,7 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
     result = deployment.camctl("init", "--config", str(deployment.config_path))
     assert result.exit_code == 0, result.stderr
     deployment.install_client_capabilities(spec)
+    reuse_client(deployment)
     capture, capture_receipt = deployment.export_plan_with_client(_body("camera-demo", [_capture(params, clock)]))
     if action_type == "camera_timelapse":
         exported = parse_exact_json(capture.read_text(encoding="utf-8"))
