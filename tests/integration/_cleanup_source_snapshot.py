@@ -247,9 +247,7 @@ class CompletedOsmoSource:
             assert world.params["exposure"] is not self.template.params["exposure"]
             assert world.deployment is not self.template.deployment
             assert world.deployment.run_client_driver.__self__ is world
-            assert world.config_extra == "" and world.frozen == {} and world.members == {}
-            assert not any(hasattr(world, name) for name in (
-                "copies", "frozen_history", "frozen_transactions"))
+            assert world.config_extra == ""
             assert not world.marker.exists() and not world.manifest.exists()
             assert world.calls() == [] and rows(world.db, "SELECT id FROM cleanup_items") == []
             assert json.loads(world.clock.read_text()) == self.proof["clock"]

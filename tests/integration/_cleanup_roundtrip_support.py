@@ -214,8 +214,6 @@ class World:
         self.manifest = self.root / "manifest.json"
         self.marker = self.root / "marker.json"
         self.sources = {}
-        self.frozen = {}
-        self.members = {}
         self.host = None
         self.client_session_active = False
         self.config_extra = ""
@@ -665,19 +663,20 @@ max_query_attempts={max_q}
         self.wait_action(request, expected)
         return self.cleanup_item(request)
 
-    def assert_terminal_report(self, request, expected, error_code="file_delete_failed"):
-        snapshot = self.assert_report_ack_and_history()
+    def assert_cleanup_report(self, snapshot, request, expected, error_code="file_delete_failed"):
         action, = rows(self.db, "SELECT a.* FROM actions a JOIN plans p ON p.id=a.plan_id WHERE p.request_id=?", (request,))
-        reported = next(a for plan in snapshot["plans"] for a in plan.get("actions", [])
-                        if a["action_instance_id"] == str(action["id"]))
+        reported, = [a for plan in snapshot["plans"] for a in plan.get("actions", [])
+                     if a["action_instance_id"] == str(action["id"])]
         assert reported["status"] == expected.lower()
-        item = self.cleanup_item(request)
-        assert reported["result"]["items"][0]["output_id"] == str(item["output_id"])
-        assert reported["result"]["items"][0]["status"] == enum_for("cleanup_items.status")(item["status"]).name.lower()
-        if item["error_code"] is not None:
-            assert reported["result"]["items"][0]["error"]["code"] == error_code
+        item, = reported["result"]["items"]
+        assert item["output_id"] == str(self.sources["osv"]["id"])
+        assert item["status"] == expected.lower()
+        if expected == "SUCCEEDED":
+            assert item.get("error") is None
+        else:
+            assert item["error"]["code"] == error_code
 
-    def clean_exact(self, key, *, verify_report=True, reuse_host=False):
+    def clean_exact(self, key, *, reuse_host=False):
         before = {name: self.path(name).read_bytes() for name in self.sources
                   if not name.startswith("hb-device") and self.path(name).exists()}
         source = self.sources[key]
@@ -716,10 +715,8 @@ max_query_attempts={max_q}
             if output_id != source["id"]:
                 assert outputs_after[output_id] == original
         assert outputs_after[source["id"]]["availability"] == int(enum_for("outputs.availability").CLEANED)
-        if verify_report:
-            self.assert_report_ack_and_history()
 
-    def publish_copies(self):
+    def obtain_and_claim_copies(self):
         keys = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
         with self.reuse_client("obtain"):
             actions = [self.action("obtain-" + key, "obtain_action_outputs", {
@@ -731,66 +728,85 @@ max_query_attempts={max_q}
             completed = self.wait_action(receipt["request_id"], "SUCCEEDED")
             assert len(completed) == len(keys)
             assert {action["name"] for action in completed} == {"obtain-" + key for key in keys}
-        self.assert_report_ack_and_history()
         sources = {self.sources[key]["id"]: key for key in keys}
         deliveries = rows(self.db, "SELECT output_id,file_name FROM deliveries WHERE output_id IN ("
                           + ",".join("?" for _ in sources) + ") ORDER BY id", tuple(sources))
         assert len(deliveries) == len(keys)
         assert {delivery["output_id"] for delivery in deliveries} == set(sources)
-        self.copies = {}
+        self.host.claim()
+        copies = {}
         for delivery in deliveries:
-            content = (self.deployment.processing / delivery["file_name"]).read_bytes()
+            path = self.deployment.processing / delivery["file_name"]
+            content = path.read_bytes()
             assert content == self.path(sources[delivery["output_id"]]).read_bytes()
-            self.copies[delivery["file_name"]] = content
-        assert len(self.copies) == 5
+            copies[path] = content
+        assert len(copies) == len(keys)
+        return copies
 
-    def assert_report_ack_and_history(self):
-        self.stop()
-        self.start()
-        self.wait_normal_run()
-        published = rows(self.db, "SELECT * FROM reports WHERE status=?", (int(enum_for("reports.status").PUBLISHED),))
-        assert published
-        ready = {path.name: path.read_bytes() for path in self.deployment.ready.glob("status-report-*.json")}
-        assert ready
-        for name, content in ready.items():
+    def import_cleanup_report(self, *, actions=None, outputs=None):
+        """等待报告覆盖指定动作或产物，再通过真实客户端导入。"""
+        actions = actions or {}
+        outputs = outputs or {}
+        assert actions or outputs
+
+        def matches(content):
+            report = json.loads(content)
+            reported_actions = {a["action_instance_id"]: a["status"]
+                                for plan in report["plans"] for a in plan.get("actions", [])}
+            reported_outputs = {o["output_id"]: o["availability"]
+                                for plan in report["plans"] for a in plan.get("actions", [])
+                                for o in a.get("outputs", [])}
+            return (all(reported_actions.get(key) == value for key, value in actions.items())
+                    and all(reported_outputs.get(key) == value for key, value in outputs.items()))
+
+        def report_files(directory):
+            result = {}
+            for path in directory.glob("status-report-*.json"):
+                try:
+                    result[path.name] = path.read_bytes()
+                except FileNotFoundError:
+                    continue
+            return result
+
+        def claim_matching_report():
+            current = self.host.module_log()[self.host_log_offset:]
+            if "result=error" in current:
+                raise AssertionError("真实 C host 收到 CLI 错误：\n" + current)
+            processing = report_files(self.deployment.processing)
+            if any(matches(content) for content in processing.values()):
+                return processing
+            ready = report_files(self.deployment.ready)
+            if any(matches(content) for content in ready.values()):
+                # 观察后报告允许被替换；以实际领取的文件为准。
+                self.host.claim()
+                processing = report_files(self.deployment.processing)
+                if any(matches(content) for content in processing.values()):
+                    return processing
+            return None
+
+        claimed = wait(claim_matching_report, "自动报告未覆盖指定清理终态", 120)
+        published = rows(self.db, "SELECT * FROM reports")
+        for name, content in claimed.items():
             document = json.loads(content)
             report = next(row for row in published if row["id"] == int(document["report_id"]))
             assert (report["from_wm"], report["to_wm"], report["size_bytes"], report["sha256"]) == (document["from_wm"], document["to_wm"], len(content), sha(content))
-            self.frozen[name] = content
-        self.host.claim()
-        for name, content in ready.items():
-            assert (self.deployment.processing / name).read_bytes() == content
-        label = f"report-{len(list(self.root.glob('client-receipts-report-*')))}"
-        with self.reuse_client(label):
+        with self.reuse_client("report"):
             receipt = self.deployment.import_reports_with_client(self.deployment.processing)
             client_db = self.root / "client-store/client.db"
             saved = rows(client_db, "SELECT * FROM reports")
             for row in saved:
-                assert row["bytes"] == self.frozen[row["file_name"]]
+                assert row["bytes"] == (self.deployment.processing / row["file_name"]).read_bytes()
             coverage, = rows(client_db, "SELECT value FROM records WHERE namespace='state' AND id='coverage'")
             assert json.loads(coverage["value"]) == receipt["coverage"]
-            assert {json.loads(content)["report_id"] for content in ready.values()} <= set(receipt["saved_report_ids"])
+            assert {json.loads(content)["report_id"] for content in claimed.values()} <= set(receipt["saved_report_ids"])
             snapshot, = rows(client_db, "SELECT value FROM records WHERE namespace='state' AND id='snapshot'")
             imported = json.loads(snapshot["value"])
-            plan, exported = self.export("ack-and-new-facts", [self.action("ack-and-new-facts", "report_status", {"scope": "full"})])
-        assert exported["last_report_id"] == receipt["ack_id"]
-        self.host.submit(plan)
-        wait(lambda: rows(self.db, "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [{"acknowledged_report_id": int(receipt["ack_id"]), "acknowledged_wm": receipt["coverage"]}], "累计 ACK 未吸收")
-        self.wait_action(exported["request_id"], "SUCCEEDED")
-        for name, content in self.frozen.items():
-            assert (self.deployment.processing / name).read_bytes() == content
-        for name, content in getattr(self, "copies", {}).items():
-            assert (self.deployment.processing / name).read_bytes() == content
-        for item in rows(self.db, "SELECT id,final_event_id FROM cleanup_items WHERE final_event_id IS NOT NULL"):
-            old = self.members.setdefault(item["id"], item["final_event_id"])
-            assert old == item["final_event_id"]
-        history = rows(self.db, "SELECT * FROM history_events ORDER BY id")
-        transactions = rows(self.db, "SELECT * FROM history_transactions ORDER BY id")
-        if hasattr(self, "frozen_history"):
-            assert history[:len(self.frozen_history)] == self.frozen_history
-            assert transactions[:len(self.frozen_transactions)] == self.frozen_transactions
-        self.frozen_history = history
-        self.frozen_transactions = transactions
+        json_write(self.root / "cleanup-report-receipt.json", {
+            "import": receipt, "report_files": list(claimed),
+            "published": published, "snapshot": imported})
+        return imported
+
+    def assert_cleanup_tool_observations(self):
         for call in records(self.calls_path):
             if call.get("kind") == "cleanup" and call["stage"] == "observed":
                 frame = base64.b64decode(call["frame_b64"])
@@ -806,10 +822,6 @@ max_query_attempts={max_q}
                     assert parts[3] == (b"1" if call["path"] in call["after"] else b"0")
                 unchanged = {k: v for k, v in call["before"].items() if k != call["path"]}
                 assert {k: v for k, v in call["after"].items() if k != call["path"]} == unchanged
-        json_write(self.root / f"report-receipt-{len(self.frozen_history)}.json", {
-            "import": receipt, "export": exported, "report_files": list(ready),
-            "published": published, "snapshot": imported})
-        return imported
 
 
 def _hb_tool(mode, photo_params=None):

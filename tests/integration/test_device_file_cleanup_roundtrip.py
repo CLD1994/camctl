@@ -36,21 +36,29 @@ def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatc
         started = time.monotonic()
         world.prepare_hasselblad()
         photo_done = time.monotonic()
-        world.publish_copies()
+        copies = world.obtain_and_claim_copies()
         copies_done = time.monotonic()
+        history = rows(world.db, "SELECT * FROM history_events ORDER BY id")
+        transactions = rows(world.db, "SELECT * FROM history_transactions ORDER BY id")
         sources = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
         with world.reuse_client("cleanup"):
             for index, source in enumerate(sources):
-                world.clean_exact(source, verify_report=False, reuse_host=index > 0)
+                world.clean_exact(source, reuse_host=index > 0)
+                for path, content in copies.items():
+                    assert path.read_bytes() == content
             deletes_done = time.monotonic()
-            snapshot = world.assert_report_ack_and_history()
+            snapshot = world.import_cleanup_report(
+                outputs={str(world.sources[source]["id"]): "cleaned" for source in sources})
         report_done = time.monotonic()
         json_write(world.root / "exact-cleanup-timing.json", {
             "photo_seconds": photo_done - started,
-            "copies_and_initial_report_seconds": copies_done - photo_done,
+            "obtain_and_claim_copies_seconds": copies_done - photo_done,
             "deletes_seconds": deletes_done - copies_done,
             "final_report_seconds": report_done - deletes_done,
         })
+        assert rows(world.db, "SELECT * FROM history_events ORDER BY id")[:len(history)] == history
+        assert rows(world.db, "SELECT * FROM history_transactions ORDER BY id")[:len(transactions)] == transactions
+        world.assert_cleanup_tool_observations()
         outputs = {output["output_id"]: output for plan in snapshot["plans"]
                    for action in plan.get("actions", [])
                    for output in action.get("outputs", [])}
@@ -66,6 +74,8 @@ def test_cleanup_new_request_for_cleaned_output(tmp_path, cleanup_osmo_source, m
         old_runs = rows(world.db, "SELECT * FROM operation_runs")
         old_attempts = rows(world.db, "SELECT * FROM operation_attempts")
         old_calls = world.calls()
+        old_history = rows(world.db, "SELECT * FROM history_events ORDER BY id")
+        old_transactions = rows(world.db, "SELECT * FROM history_transactions ORDER BY id")
         request = world.begin_cleanup()
         world.wait_action(request, "SUCCEEDED")
         item = world.cleanup_item(request)
@@ -76,7 +86,11 @@ def test_cleanup_new_request_for_cleaned_output(tmp_path, cleanup_osmo_source, m
         assert rows(world.db, "SELECT * FROM operation_runs") == old_runs
         assert rows(world.db, "SELECT * FROM operation_attempts") == old_attempts
         assert world.calls() == old_calls
-        world.assert_terminal_report(request, "SUCCEEDED")
+        snapshot = world.import_cleanup_report(actions={str(item["action_id"]): "succeeded"})
+        world.assert_cleanup_report(snapshot, request, "SUCCEEDED")
+        assert rows(world.db, "SELECT * FROM history_events ORDER BY id")[:len(old_history)] == old_history
+        assert rows(world.db, "SELECT * FROM history_transactions ORDER BY id")[:len(old_transactions)] == old_transactions
+        world.assert_cleanup_tool_observations()
 
 
 def _assert_original_attempt(world, original, intent):
@@ -125,7 +139,9 @@ def test_cleanup_interrupted_delete_absent(tmp_path, cleanup_osmo_source, monkey
         query = world.attempts(item["id"])[1]
         assert json.loads(query["result_json"])["observations"] == [{"type": "file_presence", "version": 1,
             "data": {"cleanup_item_id": str(item["id"]), "present": False}}]
-        world.assert_terminal_report(original["request"], "SUCCEEDED")
+        snapshot = world.import_cleanup_report(actions={str(item["action_id"]): "succeeded"})
+        world.assert_cleanup_report(snapshot, original["request"], "SUCCEEDED")
+        world.assert_cleanup_tool_observations()
 
 
 @pytest.mark.acceptance
@@ -171,7 +187,9 @@ def test_cleanup_query_present_or_unknown(partition, tmp_path, cleanup_osmo_sour
         assert [r["attempts_used"] for r in runs] == ([2, 1] if partition == "P1" else [1, 1])
         if partition == "P1":
             assert (runs[0]["max_attempts_used"], runs[0]["timeout_s_json"], runs[0]["retry_interval_s_json"]) == (3, "9.25", "0")
-        world.assert_terminal_report(original["request"], expected, expected_error)
+        snapshot = world.import_cleanup_report(actions={str(item["action_id"]): expected.lower()})
+        world.assert_cleanup_report(snapshot, original["request"], expected, expected_error)
+        world.assert_cleanup_tool_observations()
 
 
 @pytest.mark.acceptance
@@ -203,7 +221,9 @@ def test_cleanup_saved_result_and_terminal_companions(phase, tmp_path, cleanup_o
             assert after == before
         runs = rows(world.db, "SELECT * FROM operation_runs WHERE cleanup_item_id=?", (after["id"],))
         assert len(runs) == 1 and runs[0]["status"] == int(enum_for("operation_runs.status").SUCCEEDED)
-        world.assert_terminal_report(request, "SUCCEEDED")
+        snapshot = world.import_cleanup_report(actions={str(after["action_id"]): "succeeded"})
+        world.assert_cleanup_report(snapshot, request, "SUCCEEDED")
+        world.assert_cleanup_tool_observations()
 
 
 @pytest.mark.acceptance
@@ -252,4 +272,6 @@ def test_cleanup_cancel_inflight_delete_recover(tmp_path, cleanup_osmo_source, m
         cancel_item, = rows(world.db, "SELECT * FROM cancel_items WHERE action_id=?", (cancel_action["id"],))
         assert cancel_item["target_action_id"] == final["action_id"]
         assert cancel_item["status"] == int(enum_for("cancel_items.status").FAILED)
-        world.assert_terminal_report(request, "CANCELED")
+        snapshot = world.import_cleanup_report(actions={str(final["action_id"]): "canceled"})
+        world.assert_cleanup_report(snapshot, request, "CANCELED")
+        world.assert_cleanup_tool_observations()
