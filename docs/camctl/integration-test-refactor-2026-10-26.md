@@ -161,7 +161,7 @@
 | 已实施仍慢：根 `test_camctl_cancellation_roundtrip.py`、`test_camctl_c_module_roundtrip.py` | S10清理恢复一项及C交付三项通过，为21.041—38.566秒，包含共享构建等待。保持删除失败与后续成功、真实CLI运行、报告和ACK等不同阶段，不合并业务操作。 |
 | 已实施仍慢：根 `test_video_size_estimate.py`、`test_timelapse_time_parameters.py` | S10两项估算后真实执行及两项时间参数交接通过，为16.585—22.905秒。HTTP估算／重载和浏览器校验保留原独立入口，仅后续多次导出／导入共享客户端；其他参数不改。 |
 | P2：根 `test_camctl_motor_recovery.py`、`test_camctl_process_recovery.py` | 旧最大19.360、34.531秒。故障、恢复、重送及进程退出具有不同目的，保持真实新进程；先核对准备成本，不删必要恢复轮次。 |
-| P2：根 `test_camctl_host_deployment.py`、`test_host_wait_failures.py`、`test_camctl_directory_switch.py` | host部署最近一项20.275秒含16.795秒共享构建等待；其余文件旧最大19.954、37.289秒。构建已经同轮复用，按原公共协议核实其他重复准备；不能把构建等待移走后称达标。 |
+| P2：根 `test_camctl_host_deployment.py`、`test_host_wait_failures.py`、`test_camctl_directory_switch.py` | host部署最近一项20.275秒含16.795秒共享构建等待；另两项为保证删除输入前仍待执行，把报告排在真实十秒之后。当前先尝试沿既有受控业务钟保留这十秒排期及待执行断言，旧进程退出后才推进到原排期，由新进程恢复；不缩短保护期限、不改指南的路径及配置验证。其余文件旧最大19.954、37.289秒，构建已经同轮复用；不能把构建等待移走后称达标。 |
 | P2：组件 `persistence/test_segment_result_batches.py`、`persistence/test_segment_storage.py`、`outputs/test_read_discovery.py` | S10重测前两文件的三个候选：129成员的两个事务入口为12.697、10.800秒；131成员及129缺口节点为7.364秒，已在九秒内。其余节点没有新计时。读取发现仍用旧12.982秒定位。保留跨批、跨页及读取责任；没有具体重复依据时不引入样本快照。 |
 | P2：S7、S8已优化仍慢的组件受理、根交付、电机通知、拍摄、媒体及会话恢复 | 逐节点新测量见原项。保留全部超九秒登记；先处理本表其他明显重复，不反复微调或重跑逼近九秒的首项。 |
 | 保持原状：组件跨目录来源功能节点 | 最近9.038秒，已保留130项跨写批及目录边界。没有新的具体重复依据时，不为0.038秒增加装配或缩小规模。 |
