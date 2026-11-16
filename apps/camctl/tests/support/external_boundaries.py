@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Sequence
 
-from support.source_nodes import source_nodes
+from support.source_nodes import collect_source_nodes
 
 #: 普通业务工具进程由受管入口创建；维护引擎在被更新环境外独立运行。
 SUBPROCESS_OWNERS = ("camctl.operations.process", "camctl.update_engine")
@@ -78,7 +78,7 @@ def _receiver_call(node: ast.Call) -> tuple[str, str] | None:
 
 
 def _bare_excepts(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
-    nodes = source_nodes(source)
+    nodes = collect_source_nodes(source)
     handlers = [
         f"{module}:{handler.lineno}"
         for node in nodes
@@ -90,7 +90,7 @@ def _bare_excepts(module: str, source: str | ast.AST | Sequence[ast.AST]) -> lis
 
 
 def _subprocess_creations(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
-    nodes = source_nodes(source)
+    nodes = collect_source_nodes(source)
     entries: list[str] = []
     for node in nodes:
         if not isinstance(node, ast.Call):
@@ -109,7 +109,7 @@ def _subprocess_creations(module: str, source: str | ast.AST | Sequence[ast.AST]
 
 
 def _network_dependencies(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
-    nodes = source_nodes(source)
+    nodes = collect_source_nodes(source)
     found: list[str] = []
     for node in nodes:
         if isinstance(node, ast.Import):
@@ -129,7 +129,7 @@ def _network_dependencies(module: str, source: str | ast.AST | Sequence[ast.AST]
 
 
 def _file_entries(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
-    nodes = source_nodes(source)
+    nodes = collect_source_nodes(source)
     entries: list[str] = []
     for node in nodes:
         if not isinstance(node, ast.Call):

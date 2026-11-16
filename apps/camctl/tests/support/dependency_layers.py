@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Sequence
 
-from support.source_nodes import source_nodes
+from support.source_nodes import collect_source_nodes
 
 #: 业务流程模块（module-contracts.md 依赖图中的 U 层）。
 FLOW_PREFIXES = (
@@ -81,7 +81,7 @@ def _imported_modules(name: str, source: str | ast.AST | Sequence[ast.AST]) -> d
     普通导入语句没有名字级信息，映射到空集合；``from camctl import x``
     展开为 ``camctl.x``。相对导入按源模块的包层级解析成绝对名。
     """
-    nodes = source_nodes(source)
+    nodes = collect_source_nodes(source)
     imports: dict[str, set[str]] = {}
     package = name.rsplit(".", 1)[0] if "." in name else name
 
