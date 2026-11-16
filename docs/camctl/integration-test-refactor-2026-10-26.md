@@ -439,15 +439,39 @@ PYTHONPATH="$WT/scripts:$WT/apps/camctl/src:$WT/apps/camctl/tests" \
 
 为进一步定位构建，只单独执行同一C源码的Release构建，用编译器启动包装观察每个实际编译调用，不再重跑完整业务链。`cmake -S apps/host-demo -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release` 配置0.375秒；`cmake --build "$BUILD_DIR" --target host-demo -j4` 为16.411秒，两者均退出零。编译选项实际包含 `-O3 -DNDEBUG`；`vendor/yyjson/yyjson.c` 单文件编译14.938秒，其他各文件约0.03～0.70秒。并行文件的耗时重叠，不能相加为墙钟；增加并行度也不能消除这一个文件的主要成本。
 
-当前 `build_host_demo` 的随机新目录只在同一pytest会话复用，隔离任务和分片仍会重复完整编译。用户已授权在同一次冻结源码回归内复用C构建，让各任务使用自己的产物副本并保留原Release选项及来源对应。视频来源准备包含真实拍摄中断、恢复和三秒文件完成等待，若要收紧它与清理目标的关系，需要先说明其覆盖承接。测试侧724次只读 `rows()` 累计约2.374秒，已包含于等待等阶段；后四次删除额外核对上一请求终态的四次查询合计约0.014秒，四次实际host收场合计约0.705秒，均不足以解释主要成本。
+成本定位显示，原 `build_host_demo` 只在同一pytest会话复用，隔离任务和分片会重复完整编译。现已在同一次冻结源码回归内复用C构建，各任务使用自己的产物副本并保留原Release选项及来源对应。视频来源准备包含真实拍摄中断、恢复和三秒文件完成等待，若要收紧它与清理目标的关系，需要先说明其覆盖承接。测试侧724次只读 `rows()` 累计约2.374秒，已包含于等待等阶段；后四次删除额外核对上一请求终态的四次查询合计约0.014秒，四次实际host收场合计约0.705秒，均不足以解释主要成本。
 
 **S3：本轮C构建复用的实施安排。** 共用产物只服务本轮冻结源码；新的回归重新构建。首次真正需要 `host_demo` 时构建一次，未执行相关夹具的功能选择、收集和计划生成不增加C构建。构建使用冻结源码和原Release参数；各任务复制普通独立文件，启动桥仍绑定本任务的解释器和源码。任务只清理自己的副本，本轮运行器负责共享构建目录的生命周期。直接pytest保留当前源码构建入口，独立故障注入和自定义编译不强行复用。生产代码、计划输入及业务断言保持。
 
 | 接入事项 | 当前进度 |
 | --- | --- |
-| 查全构建、启动桥及自定义编译消费者 | 进行中；只读核对共享边界。 |
-| 单一负责人接通运行器、构建辅助及对应测试 | 待实施；验证并发首次请求只构建一次、各副本和清理独立、失败明确传播及未使用时不构建。 |
-| 接入后验证真实多任务运行并记录成本 | 待实施；选择两个已有真实host消费者，核对一次构建及各任务自己的可执行文件、启动桥和运行资源；不追加全量，不将首构成本隐藏到用例之外。 |
+| 查全构建、启动桥及自定义编译消费者 | 已完成。普通host消费者复用可执行文件，电机通知夹具还需同目录静态库；专用进程故障 `host_driver` 保留独立构建，替身启动桥仍由各部署生成。 |
+| 单一负责人接通运行器、构建辅助及对应测试 | 已接入 `571f872d`。构建配方集中到测试侧 `host_demo_build.py`，本轮首次请求持锁构建并复制两个产物；运行器记录构建成本，并在受管进程实际退出后释放共享目录。八项相关真实进程测试通过。 |
+| 接入后验证真实多任务运行并记录成本 | 已完成两个真实消费者的并发验证，均通过；只构建一次，16.807秒，整轮外层47.252秒。任务副本、共享构建及预算委派全部回收。没有追加全量，两个功能节点的完整耗时仍按超过九秒登记。 |
+
+实现者在独立工作区使用Python3.11.17执行下列八项真实进程契约测试，退出零、墙钟25.282秒；覆盖两任务并发只构建一次、冻结来源与私有副本、下一轮重新构建、直接pytest、构建失败、复制失败、中断后代收场，以及不需要C程序时不构建。没有把这些基础设施测试当作产品业务验收。
+
+```bash
+CASE=scripts.tests.test_run_integration.IntegrationRunnerTest
+PYTHONPATH=scripts python -m unittest -v \
+  "$CASE.test_host_build_is_shared_only_within_round_and_copies_are_private" \
+  "$CASE.test_direct_pytest_builds_current_source" \
+  "$CASE.test_host_build_failure_propagates_and_does_not_retry" \
+  "$CASE.test_host_copy_failure_propagates_without_rebuilding" \
+  "$CASE.test_interrupt_stops_build_descendants_before_shared_cleanup" \
+  "$CASE.test_host_build_is_not_started_for_plan_or_unrelated_test" \
+  "$CASE.test_prepare_interrupt_reaps_owned_process_and_saves_actual_state" \
+  "$CASE.test_interrupt_waits_for_cache_copy_before_removing_worker"
+```
+
+协调者在 `571f872d` 冻结源码上，经2GiB合计预算入口运行 `scripts/run-integration.py --scope root --jobs 2 --root-shards 1`，两个 `--target` 分别为下表节点，默认功能类别；指定已有Python3.11.17和锁定Node依赖。所选测试通过源码CLI和客户端执行，不构建或安装Python包，因此显式使用本次空uv缓存，避免复制不会使用的下载缓存。运行器墙钟46.453秒，含预算委派和最终收场的外层47.252秒，退出零。共享构建记录为 `ready`、`build_count=1`、16.807秒；两任务都等待这一次构建，不能将两份setup相加当作两次编译，也不从未测的旧版本推算整轮提速比例。
+
+| 真实功能节点 | 准备／执行／收场（秒） | 节点合计与当前状态 |
+| --- | --- | --- |
+| `test_camctl_host_deployment.py::test_submit_saved_rejection_allows_removing_input` | 16.795／3.449／0.031 | 20.275秒，通过；包含首构等待，仍超过九秒。 |
+| `test_camctl_motor_notifications.py::test_client_export_host_callback_report_import_boundaries` | 16.893／16.889／0.021 | 33.803秒，通过；实际链接私有静态库，经真实客户端、C回调、CLI及报告确认，仍超过九秒。 |
+
+节点均位于 `tests/integration/`。任务墙钟分别30.535、44.011秒，另含各自源码、依赖副本及资源同步准备；首构成本没有移出计量。源码与临时环境、两个任务的构建副本、执行槽缓存、共享构建及预算委派均已确认回收，预算收场无错误或剩余进程。专用故障编译、Windows/WSL、完整安装业务链及新全量未运行；生产实现和业务断言未修改。
 
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 
