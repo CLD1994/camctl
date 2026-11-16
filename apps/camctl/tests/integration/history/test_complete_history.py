@@ -784,6 +784,7 @@ def _grow_catalog_sample(target: Path, scale: int = 4000) -> None:
         connection.close()
 
 
+@pytest.mark.performance
 async def test_paged_selection_and_representative_plan_on_analyzed_sample(world) -> None:
     """带统计信息样本上的手写查询计划与公开有界分页选择。
 
