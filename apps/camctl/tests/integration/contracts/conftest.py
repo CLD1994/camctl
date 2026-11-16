@@ -26,13 +26,14 @@ def source_inspection():
         tree = ast.parse(
             path.read_text(encoding="utf-8"), filename=str(path)
         )
+        nodes = tuple(ast.walk(tree))
         findings[module] = {
-            "imports": _imported_modules(module, tree),
-            "subprocess": _subprocess_creations(module, tree),
-            "network": _network_dependencies(module, tree),
-            "files": _file_entries(module, tree),
-            "bare_excepts": _bare_excepts(module, tree),
+            "imports": _imported_modules(module, nodes),
+            "subprocess": _subprocess_creations(module, nodes),
+            "network": _network_dependencies(module, nodes),
+            "files": _file_entries(module, nodes),
+            "bare_excepts": _bare_excepts(module, nodes),
         }
         # 后续规则只需要发现的事实，不保留整份源码树。
-        del tree
+        del nodes, tree
     return MappingProxyType(findings)

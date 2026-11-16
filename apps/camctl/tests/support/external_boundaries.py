@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
+
+from support.source_nodes import source_nodes
 
 #: 普通业务工具进程由受管入口创建；维护引擎在被更新环境外独立运行。
 SUBPROCESS_OWNERS = ("camctl.operations.process", "camctl.update_engine")
@@ -74,11 +77,11 @@ def _receiver_call(node: ast.Call) -> tuple[str, str] | None:
     return None
 
 
-def _bare_excepts(module: str, source: str | ast.AST) -> list[str]:
-    tree = ast.parse(source) if isinstance(source, str) else source
+def _bare_excepts(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
+    nodes = source_nodes(source)
     handlers = [
         f"{module}:{handler.lineno}"
-        for node in ast.walk(tree)
+        for node in nodes
         if isinstance(node, ast.Try)
         for handler in node.handlers
         if handler.type is None
@@ -86,10 +89,10 @@ def _bare_excepts(module: str, source: str | ast.AST) -> list[str]:
     return handlers
 
 
-def _subprocess_creations(module: str, source: str | ast.AST) -> list[str]:
-    tree = ast.parse(source) if isinstance(source, str) else source
+def _subprocess_creations(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
+    nodes = source_nodes(source)
     entries: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         call = _receiver_call(node)
@@ -98,17 +101,17 @@ def _subprocess_creations(module: str, source: str | ast.AST) -> list[str]:
             entries.append(f"{module}:{node.lineno} ({recv}.{name})")
     imports = [
         f"{module}:{node.lineno} (import subprocess)"
-        for node in ast.walk(tree)
+        for node in nodes
         if isinstance(node, ast.Import)
         and any(alias.name.split(".")[0] == "subprocess" for alias in node.names)
     ]
     return entries + imports
 
 
-def _network_dependencies(module: str, source: str | ast.AST) -> list[str]:
-    tree = ast.parse(source) if isinstance(source, str) else source
+def _network_dependencies(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
+    nodes = source_nodes(source)
     found: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name != "urllib.parse" and alias.name.split(".")[0] in NETWORK_ROOTS:
@@ -125,10 +128,10 @@ def _network_dependencies(module: str, source: str | ast.AST) -> list[str]:
     return found
 
 
-def _file_entries(module: str, source: str | ast.AST) -> list[str]:
-    tree = ast.parse(source) if isinstance(source, str) else source
+def _file_entries(module: str, source: str | ast.AST | Sequence[ast.AST]) -> list[str]:
+    nodes = source_nodes(source)
     entries: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         call = _receiver_call(node)

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
+
+from support.source_nodes import source_nodes
 
 #: 业务流程模块（module-contracts.md 依赖图中的 U 层）。
 FLOW_PREFIXES = (
@@ -72,13 +75,13 @@ def _import_key(module: str) -> str:
     return module.split(".")[0]
 
 
-def _imported_modules(name: str, source: str | ast.AST) -> dict[str, set[str]]:
+def _imported_modules(name: str, source: str | ast.AST | Sequence[ast.AST]) -> dict[str, set[str]]:
     """解析一个模块源码的导入：被导入模块 → from-import 名字。
 
     普通导入语句没有名字级信息，映射到空集合；``from camctl import x``
     展开为 ``camctl.x``。相对导入按源模块的包层级解析成绝对名。
     """
-    tree = ast.parse(source) if isinstance(source, str) else source
+    nodes = source_nodes(source)
     imports: dict[str, set[str]] = {}
     package = name.rsplit(".", 1)[0] if "." in name else name
 
@@ -88,7 +91,7 @@ def _imported_modules(name: str, source: str | ast.AST) -> dict[str, set[str]]:
         if key.startswith("camctl"):
             target.update(names)
 
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 record(alias.name, ())
