@@ -36,12 +36,12 @@ def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatc
         started = time.monotonic()
         world.prepare_hasselblad()
         photo_done = time.monotonic()
-        copies = world.obtain_and_claim_copies()
-        copies_done = time.monotonic()
-        history = rows(world.db, "SELECT * FROM history_events ORDER BY id")
-        transactions = rows(world.db, "SELECT * FROM history_transactions ORDER BY id")
-        sources = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
         with world.reuse_client("cleanup"):
+            copies = world.obtain_and_claim_copies()
+            copies_done = time.monotonic()
+            history = rows(world.db, "SELECT * FROM history_events ORDER BY id")
+            transactions = rows(world.db, "SELECT * FROM history_transactions ORDER BY id")
+            sources = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
             for index, source in enumerate(sources):
                 world.clean_exact(source, reuse_host=index > 0)
                 for path, content in copies.items():
