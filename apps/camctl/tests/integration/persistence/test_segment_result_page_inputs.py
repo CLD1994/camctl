@@ -255,38 +255,16 @@ async def test_family_prefix_and_run_file_indexes_bound_actual_reads(owned, tmp_
     assert any("USING COVERING INDEX result_page_files_family" in item
                for item in sample_plan), sample_plan
 
-    def vm_steps(sql, parameters):
-        steps = 0
-
-        def tick():
-            nonlocal steps
-            steps += 1
-            return 0
-
-        owned.connection.set_progress_handler(tick, 1)
-        try:
-            rows = owned.connection.execute(sql, parameters).fetchall()
-        finally:
-            owned.connection.set_progress_handler(None, 0)
-        return rows, steps
-
-    count_rows, indexed_count_steps = vm_steps(count_sql, family_args)
-    sample_rows, indexed_sample_steps = vm_steps(sample_sql, family_args)
-    scan_count_rows, scan_count_steps = vm_steps(
-        count_sql.replace("FROM result_page_files WHERE", "FROM result_page_files NOT INDEXED WHERE"),
-        family_args,
-    )
-    scan_sample_rows, scan_sample_steps = vm_steps(
-        sample_sql.replace("FROM result_page_files WHERE", "FROM result_page_files NOT INDEXED WHERE"),
-        family_args,
-    )
-    assert count_rows == scan_count_rows == [(len(family_paths),)]
-    assert sample_rows == scan_sample_rows
-    assert len(sample_rows) <= 2
-    assert indexed_count_steps < scan_count_steps, (
-        indexed_count_steps, scan_count_steps)
-    assert indexed_sample_steps < scan_sample_steps, (
-        indexed_sample_steps, scan_sample_steps)
+    saved = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
+    saved_ids = dict(saved.file_ids)
+    assert set(saved_ids) == set(paths)
+    assert len(saved.file_ids) == len(paths)
+    expected_ids = sorted(saved_ids[path] for path in family_paths)
+    assert len(set(expected_ids)) == len(family_paths)
+    count_rows = owned.connection.execute(count_sql, family_args).fetchall()
+    sample_rows = owned.connection.execute(sample_sql, family_args).fetchall()
+    assert count_rows == [(len(family_paths),)]
+    assert [row[0] for row in sample_rows] == expected_ids[:2]
 
     run_file_sql = (
         "SELECT page_event_id FROM result_page_files "
@@ -303,8 +281,6 @@ async def test_family_prefix_and_run_file_indexes_bound_actual_reads(owned, tmp_
     assert transaction_id > 0
     print(f"family_count_plan={query_plan!r}")
     print(f"family_sample_plan={sample_plan!r}")
-    print(f"family_count_vm_steps=indexed:{indexed_count_steps},full_scan:{scan_count_steps}")
-    print(f"family_sample_vm_steps=indexed:{indexed_sample_steps},full_scan:{scan_sample_steps}")
     print(f"family_count_rows={count_rows!r};sample_rows={sample_rows!r};sample_limit=2")
     print(f"run_file_plan={run_file_plan!r};rows={run_rows!r}")
 

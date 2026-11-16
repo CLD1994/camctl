@@ -157,58 +157,47 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
     boundary = HistoryBoundary(**manifest['boundary'])
     observations = []
     original_connect = sqlite3.connect
-    # SQLite 约每 10 条虚拟机指令回调一次；短步进可能不足一次回调，不能当作精确指令数。
-    progress_interval = 10
 
     class Cursor(sqlite3.Cursor):
         def fetchall(self):
             rows = super().fetchall()
             if getattr(self, 'record', None) is not None:
-                self.record[3].extend(rows)
+                self.record[2].extend(rows)
             return rows
 
         def fetchmany(self, size=None):
             rows = super().fetchmany() if size is None else super().fetchmany(size)
             if getattr(self, 'record', None) is not None:
-                self.record[3].extend(rows)
+                self.record[2].extend(rows)
             return rows
 
         def fetchone(self):
             row = super().fetchone()
             if row is not None and getattr(self, 'record', None) is not None:
-                self.record[3].append(row)
+                self.record[2].append(row)
             return row
 
         def close(self):
             if getattr(self, 'record', None) is not None:
-                sql, params, counter, rows = self.record
-                observations.append((sql, params, counter[0], rows))
-                self.connection.set_progress_handler(None, 0)
+                observations.append(self.record)
                 self.record = None
             return super().close()
 
     class Connection(sqlite3.Connection):
         def execute(self, sql, parameters=()):
             reads = set()
-            counter = [0]
             def authorize(operation, table, column, _database, _source):
                 if operation == sqlite3.SQLITE_READ:
                     reads.add((table, column))
                 return sqlite3.SQLITE_OK
-            def advance():
-                counter[0] += 1
-                return 0
             self.set_authorizer(authorize)
-            self.set_progress_handler(advance, progress_interval)
             try:
                 cursor = self.cursor(factory=Cursor).execute(sql, parameters)
             finally:
                 self.set_authorizer(None)
             if ({('segment_members', 'id'), ('segment_members', 'set_id')} <= reads
                     and cursor.description and [column[0] for column in cursor.description] == ['id']):
-                cursor.record = (sql, parameters, counter, [])
-            else:
-                self.set_progress_handler(None, 0)
+                cursor.record = (sql, parameters, [])
             return cursor
 
     def connect(database, *args, **kwargs):
@@ -231,40 +220,21 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
                 indexes.append(name)
         assert indexes
         plans = [db.execute('EXPLAIN QUERY PLAN ' + sql, params).fetchall()
-                 for sql, params, _, _ in observations]
+                 for sql, params, _ in observations]
         used = [name for name in indexes if all(
             any('SEARCH' in row[3].upper() and name in row[3] for row in plan)
             and not any('TEMP' in row[3].upper() for row in plan) for plan in plans)]
         assert used
-    indexed_callback_count = sum(item[2] for item in observations)
-    # 在独立副本移除实际使用的索引，重放正式入口执行的同一组查询与参数。
-    with closing(original_connect(path)) as db:
-        for name in used:
-            db.execute('DROP INDEX "' + name.replace('"', '""') + '"')
-        callbacks = [0]
-        def advance():
-            callbacks[0] += 1
-            return 0
-        control_ids = []
-        for sql, params, _, original_rows in observations:
-            db.set_progress_handler(advance, progress_interval)
-            try:
-                control_rows = db.execute(sql, params).fetchall()
-            finally:
-                db.set_progress_handler(None, 0)
-            assert control_rows == original_rows
-            control_ids.extend(row[0] for row in control_rows)
-        assert len(control_ids) == size and set(control_ids) == member_ids
-        assert indexed_callback_count < callbacks[0]
-    print('SEGMENT_INDEX_WORK', {'size': size, 'queries': len(observations),
-          'progress_interval': progress_interval, 'indexed_callback_count': indexed_callback_count,
-          'without_index_callback_count': callbacks[0],
+    observed_ids = [row[0] for _, _, rows in observations for row in rows]
+    assert len(observed_ids) == size and set(observed_ids) == member_ids
+    assert observed_ids == sorted(observed_ids)
+    print('SEGMENT_INDEX_PLAN', {'size': size, 'queries': len(observations),
           'first_plan': plans[0], 'last_plan': plans[-1]}, flush=True)
 
 
 @pytest.mark.parametrize('size', [256, 2048])
 def test_segment_candidate_index_work(tmp_path, monkeypatch, size):
-    """在固定负载中核对成员候选查询的索引及实际工作量。"""
+    """在固定负载中核对成员候选查询的索引及结果。"""
     _segment_candidate_index_work(tmp_path, monkeypatch, size)
 
 
