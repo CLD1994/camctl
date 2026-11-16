@@ -544,7 +544,9 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                     environment['npm_config_cache'] = str(private / 'npm-cache')
                     task['client_candidate'] = str(candidate)
                     task['environment']['CAMCTL_HB_TEST_CLIENT_ROOT'] = environment['CAMCTL_HB_TEST_CLIENT_ROOT']
-                    await prepare('hasselblad-client-build', ['npm', 'run', 'build'], candidate / 'apps/client')
+                    await prepare('hasselblad-client-build',
+                                  [str(python), str(control / 'client_test_build.py'),
+                                   '--project', str(candidate / 'apps/client')], candidate / 'apps/client')
                 with (artifacts / 'output.log').open('wb') as log:
                     process = await asyncio.create_subprocess_exec(*command, cwd=work, env=environment,
                                                                   stdout=log, stderr=log, start_new_session=True)
@@ -719,6 +721,8 @@ def main():
         shutil.copy2(Path(camctl_memory.__file__), output / 'control' / 'camctl_memory.py')
         shutil.copy2(Path(__file__).with_name('test_kind_plugin.py'), output / 'control')
         shutil.copy2(Path(__file__).with_name('round_test_build.py'), output / 'control')
+        shutil.copy2(Path(__file__).with_name('python_test_build.py'), output / 'control')
+        shutil.copy2(Path(__file__).with_name('client_test_build.py'), output / 'control')
         shutil.copy2(Path(__file__).with_name('host_demo_build.py'), output / 'control')
         tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity, history[1])
         write_json(output / 'plan.json', tasks)

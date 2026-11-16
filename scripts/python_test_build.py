@@ -1,4 +1,4 @@
-"""Prepare the standard camctl wheel for independently installed test environments."""
+"""为独立安装的测试环境准备标准 camctl wheel。"""
 
 from pathlib import Path
 import shutil
@@ -10,7 +10,7 @@ from round_test_build import build_once, clone_build_source, load_round_context
 def prepare_standard_wheel(
     project: Path, destination: Path, run: Callable[[list[str]], object],
 ) -> tuple[Path, Path]:
-    """Return an independent wheel and locked runtime requirements for a consumer."""
+    """为调用方提供独立包文件和锁定运行依赖清单。"""
     context = load_round_context("python-wheel")
 
     def build(source_project: Path, output: Path) -> tuple[Path, Path]:
@@ -23,7 +23,7 @@ def prepare_standard_wheel(
              str(dist), "--build-constraints", str(requirements)])
         wheels = list(dist.glob("camctl-*.whl"))
         if len(wheels) != 1:
-            raise RuntimeError(f"Expected one camctl wheel, got {wheels}")
+            raise RuntimeError(f"构建应生成一个 camctl wheel，实际为: {wheels}")
         return wheels[0], requirements
 
     if context is None:
@@ -40,7 +40,7 @@ def prepare_standard_wheel(
     build_once(context.workspace, context.receipt, action, label="python-wheel")
     wheels = list((artifacts / "dist").glob("camctl-*.whl"))
     if len(wheels) != 1:
-        raise RuntimeError(f"Expected one shared camctl wheel, got {wheels}")
+        raise RuntimeError(f"共享构建应提供一个 camctl wheel，实际为: {wheels}")
     dist = destination / "dist"
     dist.mkdir(parents=True, exist_ok=True)
     wheel = dist / wheels[0].name
