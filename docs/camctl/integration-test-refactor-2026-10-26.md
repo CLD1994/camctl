@@ -158,8 +158,8 @@
 | 优先级与文件 | 当前依据及下一步 |
 | --- | --- |
 | 已实施仍慢：根 `test_real_camera_demo_roundtrip.py` | S9四参数均通过，为21.764—23.181秒；每世界五次导出／导入已共用会话，四种相机／动作组合、真正CLI重启、读取阻塞与必要停止保持。后续没有具体重复依据时保留当前实现。 |
-| P1：根 `test_camctl_cancellation_roundtrip.py`、`test_camctl_c_module_roundtrip.py` | 旧最大38.798、57.807秒。静态可见多次导出与导入；在保持删除失败与后续成功、报告和ACK等不同阶段的前提下，核实简单复用，不合并业务操作。 |
-| P1：根 `test_video_size_estimate.py`、`test_timelapse_time_parameters.py` | 旧最大24.668、35.107秒。分别含HTTP估算／重载及浏览器跨消费者核对，不能直接套用仅支持共享导出／导入的会话；先核对实际调用次数及合法复用边界。 |
+| P1：根 `test_camctl_cancellation_roundtrip.py`、`test_camctl_c_module_roundtrip.py` | 旧最大38.798、57.807秒。当前实施仅将一项清理恢复及三项C模块交付的多次导出／导入接入S9夹具，保持删除失败与后续成功、真实CLI运行、报告和ACK等不同阶段，不合并业务操作。 |
+| P1：根 `test_video_size_estimate.py`、`test_timelapse_time_parameters.py` | 旧最大24.668、35.107秒。当前只处理两项估算后真实执行及两项时间参数交接：HTTP估算／重载和浏览器校验继续走原独立入口，结束后仅为后续多次导出／导入绑定S9夹具。其他参数不改，不扩展客户端驱动协议。 |
 | P2：根 `test_camctl_motor_recovery.py`、`test_camctl_process_recovery.py` | 旧最大19.360、34.531秒。故障、恢复、重送及进程退出具有不同目的，保持真实新进程；先核对准备成本，不删必要恢复轮次。 |
 | P2：根 `test_camctl_host_deployment.py`、`test_host_wait_failures.py`、`test_camctl_directory_switch.py` | host部署最近一项20.275秒含16.795秒共享构建等待；其余文件旧最大19.954、37.289秒。构建已经同轮复用，按原公共协议核实其他重复准备；不能把构建等待移走后称达标。 |
 | P2：组件 `persistence/test_segment_result_batches.py`、`persistence/test_segment_storage.py`、`outputs/test_read_discovery.py` | 旧最大13.645、13.725、12.982秒，当前均含普通功能。保留真实129／131成员跨批、跨页及读取责任；此前静态核对没有发现明显可删步骤，进一步投入须有具体重复依据。 |
