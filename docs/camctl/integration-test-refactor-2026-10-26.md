@@ -542,7 +542,17 @@ PYTHONPATH=scripts python -B -m unittest -v \
 
 以当前依赖单次准备130个入口，耗时0.0054秒，全部为符号链接；完成后移除入口目录。此前5.630秒是完整树复制，二者都不是完整业务流程的耗时，也不据此推算全量比例。最小真实进程检查证明两个槽读取同一普通包、带作用域的包和命令入口，同时各自写入不同缓存而不改外部缓存。原依赖复制已移除，中断等待检查转为仍存在的任务源码准备，继续验证阻塞工作结束后再释放执行槽。
 
-以下七个方法经 `PYTHONPATH=scripts python -B -m unittest -v` 执行，每项完整参数均以 `scripts.tests.test_run_integration.IntegrationRunnerTest.` 开头：`test_client_packages_are_shared_and_tool_caches_are_private`、`test_interrupt_waits_for_source_copy_before_removing_worker`、`test_success_releases_readonly_trees_without_changing_external_symlink_target`、`test_failed_task_keeps_readonly_source_unchanged`、`test_hasselblad_uses_built_external_candidate_from_current_source`、`test_hasselblad_observer_does_not_build_standard_artifacts`、`test_root_shards_use_current_collection_including_unmeasured_nodes`。七项通过、退出零，自报17.851秒、外层17.979秒。真实Vite、Vitest及Node消费者补验待执行，不追加全量；依赖源与冻结来源的客户端锁文件已核对相同。
+以下七个方法经 `PYTHONPATH=scripts python -B -m unittest -v` 执行，每项完整参数均以 `scripts.tests.test_run_integration.IntegrationRunnerTest.` 开头：`test_client_packages_are_shared_and_tool_caches_are_private`、`test_interrupt_waits_for_source_copy_before_removing_worker`、`test_success_releases_readonly_trees_without_changing_external_symlink_target`、`test_failed_task_keeps_readonly_source_unchanged`、`test_hasselblad_uses_built_external_candidate_from_current_source`、`test_hasselblad_observer_does_not_build_standard_artifacts`、`test_root_shards_use_current_collection_including_unmeasured_nodes`。七项通过、退出零，自报17.851秒、外层17.979秒。依赖源与冻结来源的客户端锁文件已核对相同。
+
+在干净源码 `5daf38af` 上，通过预算启动器执行 `python scripts/run-integration.py --scope all --test-kind all --jobs 3 --root-shards 1 --python <Python3.11解释器> --node-modules <已锁定依赖目录> --output <本次新目录>`，只选择下表的两个完整Python节点和一个Node文件。实际三个任务，全部通过、退出零；运行器49.516秒，含启动器及最终收场的外层50.201秒。wheel实际构建一次、2.116秒，网页实际构建一次、4.537秒，未请求C构建。
+
+| 完整节点或文件（相对 `tests/integration/`） | 本次实际耗时（秒） | 结果与范围 |
+| --- | ---: | --- |
+| `test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide` | 准备6.955、执行34.930、收场0.004，合计41.888；任务47.723。 | 一项按需安装验收通过，含真实Vite构建和Vitest浏览器消费，不按功能九秒目标判定。 |
+| `test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers` | 准备3.147、执行12.035、收场0.011，合计15.192；任务21.005。 | 一项按需安装验收通过，含真实tsx、Vite服务与跨消费者参数检查，不按功能九秒目标判定。 |
+| `report-dependencies.test.mjs` | Node自报6.849；含源码和入口准备的任务10.156。 | 32项通过、零失败与跳过，验证Node对已安装依赖的真实读取；不是单个功能用例耗时10.156秒。 |
+
+运行前后仅针对依赖源的 `.vite`、`.vite-temp`、`.vitest-cache` 检查，文件大小和修改时间均保持不变；不据此声称对全部依赖作了逐字节核验。各槽私有依赖入口、任务源码、候选、构建目录和预算委派均正常释放，本轮调试材料已删除，调用方的依赖仍保留。本次不追加全量，不推算完整回归的提速比例，生产源码、生产配置和业务断言均未修改。
 
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 
