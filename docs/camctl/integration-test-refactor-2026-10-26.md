@@ -479,10 +479,29 @@ PYTHONPATH=scripts python -m unittest -v \
 
 | 接入事项 | 当前进度 |
 | --- | --- |
-| 共用构建协调、运行器接入及C既有行为保持 | 待实施；统一并发、状态、计时和清理，保留C原配方与私有副本。 |
-| 标准wheel生产、根与组件安装消费者 | 待实施；核对重复构建入口及真正需要独立构建的目标，各环境仍独立安装。 |
-| 标准网页生产、浏览器与Hasselblad候选消费者 | 待实施；网页构建复用，候选源码、客户端数据库和运行期能力数据仍独立。 |
-| 组合验证及耗时记录 | 待实施；先验证构建基础设施与特殊边界，再选少量已有真实消费者确认两个产物实际复用，不追加全量。 |
+| 共用构建协调、运行器接入及C既有行为保持 | 已接入 `dcdedfda`。三类产物使用同一文件锁、状态、计时与清理；C原配方及副本保持，原八项相关真实进程测试通过。 |
+| 标准wheel生产、根与组件安装消费者 | 已接入 `57a14d04`。七处标准入口改为共享包文件和锁定依赖清单，仍各自安装；构建固定使用本测试解释器与锁定依赖约束，改变输入的构建步骤保持。 |
+| 标准网页生产、浏览器与Hasselblad候选消费者 | 已接入 `887a0faf`、`098f73c3`、`344785cd`。能力声明和Hasselblad网页消费者复用产物，候选源码和运行数据仍独立；参数矩阵的源码服务不新增网页构建，普通历史观察不触发构建。 |
+| 组合验证及耗时记录 | 已完成三任务、四项既有验收，均通过；wheel和网页各构建一次。Hasselblad触发点后移后只补该浏览器单项通过，完整回归未重跑；实际成本见下文。 |
+
+共用协调提取后，在Python3.11.17下沿用上一段八项运行器真实进程命令补验：八项通过、退出零、自报25.331秒、外层25.451秒。合入两个产物准备器并接通候选入口后，执行 `PYTHONPATH=scripts python -m unittest -v scripts.tests.test_python_test_build scripts.tests.test_client_test_build scripts.tests.test_run_integration.IntegrationRunnerTest.test_hasselblad_uses_built_external_candidate_from_current_source`：六项通过，自报4.977秒、外层5.075秒。两类准备器使用最小真实uv／npm项目与双进程，核对冻结输入、同轮一次、独立普通文件、直接构建及失败传播，不使用历史比例门槛。
+
+在 `098f73c3` 上，通过2GiB合计预算入口运行 `scripts/run-integration.py --scope all --test-kind acceptance --jobs 3 --root-shards 1`，显式选择下表四个节点，仅形成三个任务；不是全量。使用Python3.11.17、Node24.22.1、已有锁定客户端依赖及离线uv缓存。四项均通过，运行器118.728秒，含委派和最终收场的外层119.507秒，退出零。wheel实际构建一次、2.522秒，网页实际构建一次、5.809秒；没有请求C产物，C构建次数为零。
+
+| 按需安装验收节点 | 节点耗时（秒） | 验证结果 |
+| --- | ---: | --- |
+| `apps/camctl/tests/integration/bootstrap/test_package.py::test_wheel_contains_authoritative_resources` | 2.867 | 共享wheel在独立环境安装后，资源完整且与权威来源一致。 |
+| `apps/camctl/tests/integration/bootstrap/test_distribution.py::test_missing_package_resource_fails_init` | 1.126 | 只删除自己的安装副本资源，真实init按契约失败；其他消费者继续正常运行。 |
+| `tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart` | 31.600 | 安装版能力说明经过真实网页、重载和重启，清理入口行为正确。 |
+| `tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[1/1500]` | 23.237 | 使用独立候选和同一份网页产物，真实预设重开、导出及精确快门保持。 |
+
+这轮Hasselblad的旧运行器入口仍在pytest前准备网页，5.961秒另计于任务准备，未包含在该节点23.237秒内。为保证只在实际需要时构建，`344785cd` 将网页准备改为七个实际客户端消费者显式依赖的模块夹具。原候选源码及依赖布局仍由运行器准备，普通历史观察无需构建。两个相关真实进程测试通过，退出零、自报4.863秒、外层4.972秒；全部Hasselblad验收仅收集核对23项，退出零、外层0.778秒，不计作23项执行通过。
+
+随后仅补上述Hasselblad浏览器单项：一项通过，轮入口73.365秒、含委派外层74.102秒；节点准备7.240秒、执行17.904秒、收场0.006秒，合计25.150秒。新一轮仍分别构建一次wheel和网页，2.193、4.134秒，构建等待已计入节点准备；没有重复其他三个已通过节点。最后在wheel命令显式传入本测试解释器，原组合运行已通过 `UV_PYTHON` 使用同一解释器；只补两项wheel准备器测试，退出零、自报1.141秒，未另测其外层墙钟。
+
+再以当前源码执行 `PYTHONPATH=apps/camctl/src python -m pytest --test-kind functional -q tests/integration/test_hasselblad_photo_roundtrip.py`，不提供客户端候选和同轮构建环境变量：六项功能测试通过、23项验收未选中，退出零、自报0.33秒、外层0.736秒。该结果确认普通观察用例不依赖网页准备，不代表执行了23项安装验收。
+
+当前四项均属按需安装验收，不按普通功能九秒目标判定。首轮三个任务墙钟69.001、102.846、100.843秒，远高于各节点及构建本身；复制离线缓存、依赖、源码及环境准备尚待细分，不能把这些时间归为wheel或网页编译，也不能据此推算新的完整回归耗时。独立 `npm test` 的既有预构建入口照旧，本次接通统一集成入口实际使用的标准产物；生产源码、协议、锁文件及业务断言未改。两轮成功任务的私有环境、候选、执行槽缓存和共享构建目录均已回收，预算委派回收无错误；本轮调试材料和两个已合入的实施工作区均已释放，任务分支与提交保留。
 
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 
