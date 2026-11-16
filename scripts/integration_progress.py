@@ -10,7 +10,7 @@ from pathlib import Path
 import time
 
 import pytest
-from test_kind_plugin import item_test_kind
+from test_kind_plugin import classify_test_item
 
 # 产品测试会替换这些共享模块上的函数；观测器保留自己的原始调用边界。
 _open = builtins.open
@@ -56,7 +56,7 @@ def pytest_configure(config):
 
 
 def pytest_collection_finish(session):
-    _kinds.update({item.nodeid: item_test_kind(item) for item in session.items})
+    _kinds.update({item.nodeid: classify_test_item(item) for item in session.items})
     _write_json('inventory.json', [item.nodeid for item in session.items])
     _write({'status': 'collected', 'collected': len(session.items)})
 

@@ -33,6 +33,7 @@ _SEED_TRANSACTION_COUNT = 30
 
 
 class TestQueryPlanUnderRepresentativeLoad:
+    @pytest.mark.performance
     def test_history_reads_locate_rows_through_indexes(
             self, tmp_path, plan_guards, monkeypatch) -> None:
         _seed_transactions(tmp_path, _SEED_TRANSACTION_COUNT, plan_guards)

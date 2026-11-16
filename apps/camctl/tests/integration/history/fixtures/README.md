@@ -26,7 +26,7 @@ PYTHONPATH="$PWD/apps/camctl/src:$PWD/apps/camctl/tests" /workspaces/camctl/apps
 在仓库根目录使用已准备的 Python 3.11，可按需对两个固定规模运行增长诊断。该命令仍执行相同的 2 GiB 合计预算和完整结果核对，并在结果与计时收据中标明诊断已启用：
 
 ```bash
-CAMCTL_HISTORY_GROWTH_DIAGNOSTICS=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH="$PWD/apps/camctl/src:$PWD/apps/camctl/tests" /workspaces/camctl/apps/camctl/.venv311/bin/python scripts/run-memory-budget.py --camctl-memory-limit 2GiB -- /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p pytest_asyncio.plugin -p no:cacheprovider apps/camctl/tests/integration/history/test_record_segment_history.py::test_large_segment_history_budget -q -s
+CAMCTL_HISTORY_GROWTH_DIAGNOSTICS=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH="$PWD/apps/camctl/src:$PWD/apps/camctl/tests" /workspaces/camctl/apps/camctl/.venv311/bin/python scripts/run-memory-budget.py --camctl-memory-limit 2GiB -- /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p pytest_asyncio.plugin -p no:cacheprovider apps/camctl/tests/integration/history/test_record_segment_history.py::test_large_segment_history_budget --test-kind performance -q -s
 ```
 
 使用 Python 3.11 并同步资源后，可分别生成一个尚不存在的输出目录：

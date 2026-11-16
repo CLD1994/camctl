@@ -842,6 +842,7 @@ async def test_paged_selection_and_representative_plan_on_analyzed_sample(world)
         connection.close()
 
 
+@pytest.mark.performance
 async def test_candidate_scan_shape_plan_on_analyzed_sample(world) -> None:
     """带统计信息样本上手写候选扫描的索引与有界批量。
 

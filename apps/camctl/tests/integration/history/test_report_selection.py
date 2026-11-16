@@ -807,6 +807,7 @@ def _report_directory_uses_range_index(sql, plan):
         for operation, _, row in accesses)
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_small_window_uses_index_after_physical_report_directory_growth(finished_photo, tmp_path, monkeypatch):
     """同一窄窗口在真实目录增长前后选中相同对象，并观察实际查询。"""
@@ -900,6 +901,7 @@ async def test_small_window_uses_index_after_physical_report_directory_growth(fi
               'reading_s': reading, 'verification_s': verification}, flush=True)
 
 
+@pytest.mark.performance
 @pytest.mark.parametrize('statistics', ['none', 'empty_analyzed', 'representative_analyzed'])
 def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_path, monkeypatch, statistics):
     """三种统计状态均观察报告实际执行的首批和续页。"""
@@ -967,6 +969,7 @@ def test_actual_report_query_plans_with_statistics(report_selection_sample, tmp_
     assert not problems, problems
 
 
+@pytest.mark.performance
 @pytest.mark.parametrize('page_size', [100, 7])
 def test_actual_report_query_work_for_page_sizes(report_selection_sample, monkeypatch, page_size):
     """固定范围完整读出 4200 个动作，分别记录每次真实查询的工作量。"""
@@ -1102,6 +1105,7 @@ async def test_large_selection_keeps_old_boundary_across_page_commits(report_sel
         owned.connection.close()
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_real_source_preparation_preserves_large_report_selection(finished_photo):
     """真实受理与拍摄形成大窗口，并由历史公开入口独立核对。"""

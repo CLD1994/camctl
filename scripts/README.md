@@ -76,7 +76,7 @@
 
 ## 数据库结构与运行库
 
-运行 `~/.venv/bin/python scripts/sync-history-object-sql.py` 核对历史对象登记生成的 SQL；仅在修改登记后使用 `--write` 更新生成区段。运行 `~/.venv/bin/python scripts/check-database-spec.py` 检查真实 SQLite 结构，运行 `~/.venv/bin/python -m unittest discover -s tests/integration -p 'test_database_history_sql.py' -v` 验证历史与报告所需的状态组合、目录范围、外键及分页查询。上述检查不创建实际状态库，也不执行设备操作。
+运行 `~/.venv/bin/python scripts/sync-history-object-sql.py` 核对历史对象登记生成的 SQL；仅在修改登记后使用 `--write` 更新生成区段。运行 `~/.venv/bin/python scripts/check-database-spec.py` 检查真实 SQLite 结构，运行 `~/.venv/bin/python -m pytest tests/integration/test_database_history_sql.py -q` 验证历史与报告所需的状态组合、目录范围、外键及分页查询；覆盖索引性能专项须显式加 `--test-kind performance`，功能与性能一起运行则加 `--test-kind all`。该文件直接启动时也使用相同 pytest 选择入口。上述检查不创建实际状态库，也不执行设备操作。
 
 结构检查在内存 SQLite 中加载全部规格 SQL，核对表目录、STRICT 类型、主键、外键及索引，并用合法与非法样本检查状态组合、完整事务边界和精确整数。样本只验证结构和查询，不作为可回放的业务历史；查询计划通过也不代表目标硬件的性能达标。完整生产验收按[事务验证门槛](../docs/camctl/database/transactions.md#实现与验证门槛)及[数据库一致性验收](../docs/camctl/database/consistency-verification.md)执行。
 

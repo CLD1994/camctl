@@ -537,12 +537,14 @@ async def _run_fixed_batch_capacity(tmp_path):
         timing_path.write_text(json.dumps(timing))
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_fixed_batch_write_and_verification_have_bounded_residency(tmp_path):
     """513项、五个原页及三次同库后续观察均在固定进程组预算内处理。"""
     await _run_fixed_batch_capacity(tmp_path)
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_fixed_batch_reads_and_output_identity_lookup_keep_their_bounds(tmp_path):
     """独立验证真实写入/核实的读取上限与产物身份索引，不作内存验收。"""

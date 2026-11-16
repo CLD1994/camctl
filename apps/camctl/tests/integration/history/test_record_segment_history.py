@@ -232,6 +232,7 @@ def _segment_candidate_index_work(tmp_path, monkeypatch, size):
           'first_plan': plans[0], 'last_plan': plans[-1]}, flush=True)
 
 
+@pytest.mark.performance
 @pytest.mark.parametrize('size', [256, 2048])
 def test_segment_candidate_index_work(tmp_path, monkeypatch, size):
     """在固定负载中核对成员候选查询的索引及结果。"""
@@ -858,6 +859,7 @@ async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
     verify_output(directory,manifest)
 
 
+@pytest.mark.performance
 @pytest.mark.parametrize('size',[256,2048])
 def test_large_segment_history_budget(tmp_path,size):
     """独立进程在合计预算内消费全部分页和快照，组外核对输出。"""

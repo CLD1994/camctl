@@ -51,6 +51,7 @@ def _query_plan(connection: sqlite3.Connection, statement: str, parameters=()):
     return " ".join(str(row[3]) for row in rows)
 
 
+@pytest.mark.performance
 def test_representative_query_shapes_use_indexes(file_world):
     """手写的代表性查询形状按对象键使用索引。
 
@@ -102,6 +103,7 @@ def test_representative_query_shapes_use_indexes(file_world):
         connection.close()
 
 
+@pytest.mark.performance
 def test_member_growth_restore_cost(file_world):
     """动作自身成员增长时的恢复成本与完整性。
 
@@ -163,6 +165,7 @@ def test_member_growth_restore_cost(file_world):
     print(f"\n成员增长 {attempts} 尝试: 恢复 {len(rows)} 行 {elapsed:.3f}s{diagnostic}")
 
 
+@pytest.mark.performance
 def test_event_growth_restore_pages_cost(file_world, monkeypatch):
     """单对象多页历史的恢复成本与每页短事务。
 
@@ -220,6 +223,7 @@ def test_event_growth_restore_pages_cost(file_world, monkeypatch):
     print(f"\n事件增长 {changes} 次: 恢复 {elapsed:.3f}s{diagnostic}，读事务 {len(views)}")
 
 
+@pytest.mark.performance
 def test_unrelated_growth_keeps_target_restore_stable(file_world, monkeypatch):
     """无关对象历史增长不改变目标对象的恢复结果。
 

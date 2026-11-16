@@ -6,6 +6,8 @@ from pathlib import Path
 import sqlite3
 import unittest
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / 'docs/camctl/database/schema'
 META = dict(created_event_id=1, last_event_id=2, change_count=2)
@@ -378,6 +380,7 @@ class DatabaseStructure(unittest.TestCase):
         self.db.commit()
         return kind
 
+    @pytest.mark.performance
     def test_report_probe_and_cursor_use_covering_indexes_with_or_without_statistics(self):
         kind = self.seed_report_directory()
         probe = ('SELECT change_seq,entity_id FROM report_entity_changes WHERE entity_type=? '
@@ -444,4 +447,5 @@ class DatabaseStructure(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    import sys
+    raise SystemExit(pytest.main([__file__, *sys.argv[1:]]))

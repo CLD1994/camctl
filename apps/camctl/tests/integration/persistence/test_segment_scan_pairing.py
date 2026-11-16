@@ -303,6 +303,7 @@ async def test_pair_fact_belongs_to_preview_history_and_snapshot(tmp_path):
         owned.connection.close()
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_family_sql_uses_prefix_index_and_deduplicates_without_catalog_rescan(tmp_path):
     """公开配对在真实小型扫描上核实族；无关关系增长只作索引负载。"""
@@ -466,6 +467,7 @@ async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tm
         owned.connection.close()
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 @pytest.mark.parametrize('bounded', [False, True])
 async def test_actual_pair_save_guard_and_verify_do_not_replay_unrelated_pages(tmp_path, bounded):
@@ -637,6 +639,7 @@ async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage
         owned.connection.close()
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_committed_baseline_proof_uses_fixed_anchor_without_page_history_replay(tmp_path):
     from camctl.capture.baseline_models import BaselineFixSave

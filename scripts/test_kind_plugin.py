@@ -6,7 +6,7 @@ TEST_KINDS = ('functional', 'performance', 'all')
 DEFAULT_TEST_KIND = 'functional'
 
 
-def item_test_kind(item):
+def classify_test_item(item):
     return 'performance' if item.get_closest_marker('performance') else 'functional'
 
 
@@ -26,7 +26,7 @@ def pytest_collection_modifyitems(config, items):
         return
     selected, deselected = [], []
     for item in items:
-        (selected if item_test_kind(item) == kind else deselected).append(item)
+        (selected if classify_test_item(item) == kind else deselected).append(item)
     if deselected:
         config.hook.pytest_deselected(items=deselected)
         items[:] = selected

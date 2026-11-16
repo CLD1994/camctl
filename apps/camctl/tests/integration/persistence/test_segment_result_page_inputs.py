@@ -205,6 +205,7 @@ async def test_128_file_page_keeps_existing_page_bound_and_index_event_bound(own
     )
 
 
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_family_prefix_and_run_file_indexes_bound_actual_reads(owned, tmp_path):
     root = "/mnt/media_rw/emulated/DCIM/CAM"
