@@ -158,11 +158,11 @@
 | 优先级与文件 | 当前依据及下一步 |
 | --- | --- |
 | 已实施仍慢：根 `test_real_camera_demo_roundtrip.py` | S9四参数均通过，为21.764—23.181秒；每世界五次导出／导入已共用会话，四种相机／动作组合、真正CLI重启、读取阻塞与必要停止保持。后续没有具体重复依据时保留当前实现。 |
-| P1：根 `test_camctl_cancellation_roundtrip.py`、`test_camctl_c_module_roundtrip.py` | 旧最大38.798、57.807秒。当前实施仅将一项清理恢复及三项C模块交付的多次导出／导入接入S9夹具，保持删除失败与后续成功、真实CLI运行、报告和ACK等不同阶段，不合并业务操作。 |
-| P1：根 `test_video_size_estimate.py`、`test_timelapse_time_parameters.py` | 旧最大24.668、35.107秒。当前只处理两项估算后真实执行及两项时间参数交接：HTTP估算／重载和浏览器校验继续走原独立入口，结束后仅为后续多次导出／导入绑定S9夹具。其他参数不改，不扩展客户端驱动协议。 |
+| 已实施仍慢：根 `test_camctl_cancellation_roundtrip.py`、`test_camctl_c_module_roundtrip.py` | S10清理恢复一项及C交付三项通过，为21.041—38.566秒，包含共享构建等待。保持删除失败与后续成功、真实CLI运行、报告和ACK等不同阶段，不合并业务操作。 |
+| 已实施仍慢：根 `test_video_size_estimate.py`、`test_timelapse_time_parameters.py` | S10两项估算后真实执行及两项时间参数交接通过，为16.585—22.905秒。HTTP估算／重载和浏览器校验保留原独立入口，仅后续多次导出／导入共享客户端；其他参数不改。 |
 | P2：根 `test_camctl_motor_recovery.py`、`test_camctl_process_recovery.py` | 旧最大19.360、34.531秒。故障、恢复、重送及进程退出具有不同目的，保持真实新进程；先核对准备成本，不删必要恢复轮次。 |
 | P2：根 `test_camctl_host_deployment.py`、`test_host_wait_failures.py`、`test_camctl_directory_switch.py` | host部署最近一项20.275秒含16.795秒共享构建等待；其余文件旧最大19.954、37.289秒。构建已经同轮复用，按原公共协议核实其他重复准备；不能把构建等待移走后称达标。 |
-| P2：组件 `persistence/test_segment_result_batches.py`、`persistence/test_segment_storage.py`、`outputs/test_read_discovery.py` | 旧最大13.645、13.725、12.982秒，当前均含普通功能。保留真实129／131成员跨批、跨页及读取责任；此前静态核对没有发现明显可删步骤，进一步投入须有具体重复依据。 |
+| P2：组件 `persistence/test_segment_result_batches.py`、`persistence/test_segment_storage.py`、`outputs/test_read_discovery.py` | S10重测前两文件的三个候选：129成员的两个事务入口为12.697、10.800秒；131成员及129缺口节点为7.364秒，已在九秒内。其余节点没有新计时。读取发现仍用旧12.982秒定位。保留跨批、跨页及读取责任；没有具体重复依据时不引入样本快照。 |
 | P2：S7、S8已优化仍慢的组件受理、根交付、电机通知、拍摄、媒体及会话恢复 | 逐节点新测量见原项。保留全部超九秒登记；先处理本表其他明显重复，不反复微调或重跑逼近九秒的首项。 |
 | 保持原状：组件跨目录来源功能节点 | 最近9.038秒，已保留130项跨写批及目录边界。没有新的具体重复依据时，不为0.038秒增加装配或缩小规模。 |
 | 暂缓：S6报告恢复两项 | 按用户决定保留约12—13秒，不重开低收益细分；报告文件其余节点仍是普通功能，存在新具体依据时再处理。 |
@@ -727,6 +727,31 @@ PYTHONPATH=scripts python -B -m unittest -v \
 | real_camera_demo：camera_timelapse／dji-osmo360-ii | 0.002 | 22.651 | 0.101 | **22.755** |
 
 上述十项仍全部超过九秒，保留普通功能慢项身份。没有旧版本对照，不据本次和S8的差值推导稳定比例；本次同时证明共享夹具的实际发现、独立回执和关闭，因而包含迁移后的六个原消费者。预算委派已回收；核对后已释放工作区与两处成功临时根，分支和提交保留。没有运行其他节点、性能、安装验收、真机或全量。
+
+**S10：其余多次客户端交接与分段存储当前测量（2026-11-17）。** 补丁 `dcf702dc` 仅给四份测试中的七个函数、八个参数实例增加S9夹具参数及显式绑定，共十四行新增、七行调整。清理失败后成功、C模块领取与取消、HTTP估算后真实执行、时间参数受理与取消，均保留各自原步骤和断言。HTTP估算、精确矩阵及浏览器校验完成后才绑定；其余参数、生成器、共享辅助和客户端驱动均不修改，普通客户端重开交叉的边界沿S9说明。
+
+在基线 `b36efef7` 加本补丁的独立工作区，经相同Python、Node依赖与2GiB预算启动器执行 `scripts/run-integration.py --scope root --jobs 2 --root-shards 2 --force-root-shards`，逐一target下表七个准确函数，显式指定解释器、依赖和独立输出。八项全部通过，运行器122.579秒，外层123.239秒，退出零。C构建一次、16.538秒；两个分片都等待它，已分别计入各自首项准备，不能把等待相加解释为构建两次。单位为秒：
+
+| 文件与用例 | 准备 | 执行 | 收场 | 合计 |
+| --- | ---: | ---: | ---: | ---: |
+| c_module：自动预览 | 16.549 | 13.043 | 0.060 | **29.652** |
+| c_module：迟到取消 | 0.001 | 20.951 | 0.089 | **21.041** |
+| c_module：拍摄、取回及清理 | 16.534 | 21.961 | 0.072 | **38.566** |
+| timelapse_time_parameters：dji-action6 | 0.002 | 22.846 | 0.058 | **22.905** |
+| timelapse_time_parameters：dji-osmo360-ii | 0.003 | 22.000 | 0.057 | **22.059** |
+| video_size_estimate：录像 | 0.002 | 16.525 | 0.058 | **16.585** |
+| video_size_estimate：延时摄影 | 0.002 | 17.866 | 0.054 | **17.922** |
+| cancellation：清理结果未知后继续处理 | 0.002 | 23.308 | 0.059 | **23.368** |
+
+另在干净冻结源码 `b36efef7` 补测两份组件存储文件中的三个候选，未修改这些测试。目的为区分仍慢的功能与已有改进后达标的功能，不从旧文件级最大值猜测当前时间。预算启动器内运行 `scripts/run-integration.py --scope camctl --jobs 1 --target apps/camctl/tests/integration/persistence/test_segment_result_batches.py::test_full_member_batch_and_following_page_fix_all_129_actual_sources --target apps/camctl/tests/integration/persistence/test_segment_storage.py::test_multi_page_members_and_many_zero_gaps_stay_in_finite_batches`，显式指定同一Python与独立输出。一个隔离任务、三项全部通过，运行器39.167秒，外层39.854秒，退出零，没有构建或容量负载。单位为秒：
+
+| 候选功能 | 准备 | 执行 | 收场 | 合计 |
+| --- | ---: | ---: | ---: | ---: |
+| 129成员跨批固定，普通事务 | 0.003 | 12.685 | 0.010 | **12.697** |
+| 129成员跨批固定，有界事务 | 0.002 | 10.789 | 0.009 | **10.800** |
+| 131成员与129个零长度缺口分批保存及分页 | 0.002 | 7.353 | 0.008 | 7.364 |
+
+131成员节点当前已在九秒内，不继续为了旧最大值修改它；不据此认定整个89项文件达标。129成员两入口仍超九秒，保留原129成员、128写批与末页1项，尚无具体测试重复依据，不缩为单页。其余八项也继续保留普通功能慢项身份。两轮没有历史对照或新全量，未修改生产代码；预算委派均已正常移除，无剩余进程。
 
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 
