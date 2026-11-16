@@ -21,14 +21,17 @@ class IntegrationRunnerTest(unittest.TestCase):
     def test_kind_selection_matches_shards_and_recorded_cases(self):
         cases = (((), {'test_a', 'test_b'}, 'functional'),
                  (('--test-kind', 'performance'), {'test_p', 'test_q'}, 'performance'),
-                 (('--test-kind', 'all'), {'test_a', 'test_b', 'test_p', 'test_q'}, None))
+                 (('--test-kind', 'acceptance'), {'test_x', 'test_y'}, 'acceptance'),
+                 (('--test-kind', 'all'), {'test_a', 'test_b', 'test_p', 'test_q', 'test_x', 'test_y'}, None))
         for options, expected, kind in cases:
             with self.subTest(options=options), tempfile.TemporaryDirectory() as temporary:
                 root, source = Path(temporary), Path(temporary) / 'input'
                 self._fixture_repository(source, 'test_matrix.py',
                     'import pytest\ndef test_a(): pass\ndef test_b(): pass\n'
                     '@pytest.mark.performance\ndef test_p(): pass\n'
-                    '@pytest.mark.performance\ndef test_q(): pass\n')
+                    '@pytest.mark.performance\ndef test_q(): pass\n'
+                    '@pytest.mark.acceptance\ndef test_x(): pass\n'
+                    '@pytest.mark.acceptance\ndef test_y(): pass\n')
                 shutil.copy2(RUNNER.parent.parent / 'conftest.py', source / 'conftest.py')
                 shutil.copy2(RUNNER.parent.parent / 'apps/camctl/conftest.py', source / 'apps/camctl/conftest.py')
                 result, output = self._run_fixture(root, source, '--scope', 'root',
@@ -45,12 +48,13 @@ class IntegrationRunnerTest(unittest.TestCase):
                 self.assertCountEqual([case['nodeid'].split('::')[-1] for case in records], expected)
                 for case in records:
                     name = case['nodeid'].split('::')[-1]
-                    self.assertEqual(case['test_kind'], 'performance' if name in ('test_p', 'test_q') else 'functional')
+                    self.assertEqual(case['test_kind'], 'performance' if name in ('test_p', 'test_q') else 'acceptance' if name in ('test_x', 'test_y') else 'functional')
 
     def test_empty_selection_and_invalid_node_are_distinct(self):
         for options, expected_status, expected_exit in (
             ((), 'not_selected', 1),
             (('--force-root-shards',), 'not_selected', 1),
+            (('--test-kind', 'acceptance', '--force-root-shards'), 'not_selected', 1),
             (('--target', 'tests/integration/test_matrix.py::test_p'), 'not_selected', 1),
             (('--target', 'tests/integration/test_matrix.py::test_missing'), 'failed', 1),
         ):
@@ -66,18 +70,19 @@ class IntegrationRunnerTest(unittest.TestCase):
                 self.assertEqual(task['status'], expected_status)
                 self.assertEqual(task['exit_code'], 5 if expected_status == 'not_selected' else 4)
 
-    def test_performance_excludes_node_and_empty_tasks_do_not_hide_passes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root, source = Path(temporary), Path(temporary) / 'input'
-            self._fixture_repository(source, 'test_performance.py',
-                'import pytest\n@pytest.mark.performance\ndef test_perf(): pass\n')
-            (source / 'tests/integration/test_functional.py').write_text('def test_functional(): pass\n')
-            (source / 'tests/integration/ordinary.test.mjs').write_text('throw Error("must not run")\n')
-            result, output = self._run_fixture(root, source, '--test-kind', 'performance')
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            summary = json.loads((output / 'summary.json').read_text())
-            self.assertEqual(sorted(task['status'] for task in summary['tasks']), ['not_selected', 'passed'])
-            self.assertTrue(all(task['scope'] == 'root' for task in summary['tasks']))
+    def test_specialized_kinds_exclude_node_and_empty_tasks_do_not_hide_passes(self):
+        for kind in ('performance', 'acceptance'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root, source = Path(temporary), Path(temporary) / 'input'
+                self._fixture_repository(source, 'test_performance.py',
+                    f'import pytest\n@pytest.mark.{kind}\ndef test_perf(): pass\n')
+                (source / 'tests/integration/test_functional.py').write_text('def test_functional(): pass\n')
+                (source / 'tests/integration/ordinary.test.mjs').write_text('throw Error("must not run")\n')
+                result, output = self._run_fixture(root, source, '--test-kind', kind)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                summary = json.loads((output / 'summary.json').read_text())
+                self.assertEqual(sorted(task['status'] for task in summary['tasks']), ['not_selected', 'passed'])
+                self.assertTrue(all(task['scope'] == 'root' for task in summary['tasks']))
 
     def test_shard_collection_error_is_not_empty_selection(self):
         with tempfile.TemporaryDirectory() as temporary:

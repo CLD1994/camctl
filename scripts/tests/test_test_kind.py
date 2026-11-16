@@ -43,6 +43,9 @@ class TestKindSelection(unittest.TestCase):
                 'import pytest\n'
                 'def test_functional(): pass\n'
                 '@pytest.mark.performance\ndef test_perf(): pass\n'
+                '@pytest.mark.acceptance\ndef test_accept(): pass\n'
+                '@pytest.mark.acceptance\nclass TestAccept:\n'
+                '    def test_accept_member(self): pass\n'
                 '@pytest.mark.performance\nclass TestPerf:\n'
                 '    def test_member(self): pass\n'
             )
@@ -50,11 +53,18 @@ class TestKindSelection(unittest.TestCase):
                 'import pytest\npytestmark = pytest.mark.performance\n'
                 'def test_module(): pass\n'
             )
+            (root / 'test_accept_module.py').write_text(
+                'import pytest\npytestmark = pytest.mark.acceptance\n'
+                'def test_accept_module(): pass\n'
+            )
             environment = dict(os.environ, PYTHONPATH=str(SCRIPTS), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
             for options, expected, code in (
                 ([], ['test_functional'], 0),
                 (['--test-kind=performance'], ['test_perf', 'test_member', 'test_module'], 0),
-                (['--test-kind=all'], ['test_functional', 'test_perf', 'test_member', 'test_module'], 0),
+                (['--test-kind=acceptance'], ['test_accept', 'test_accept_member', 'test_accept_module'], 0),
+                (['--test-kind=all'], ['test_functional', 'test_perf', 'test_member', 'test_module', 'test_accept', 'test_accept_member', 'test_accept_module'], 0),
+                (['--test-kind=acceptance', '-m', 'performance'], [], 5),
+                (['--test-kind=all', '-m', 'acceptance'], ['test_accept', 'test_accept_member', 'test_accept_module'], 0),
                 (['-m', 'performance'], [], 5),
                 (['--test-kind=all', '-m', 'performance'], ['test_perf', 'test_member', 'test_module'], 0),
             ):

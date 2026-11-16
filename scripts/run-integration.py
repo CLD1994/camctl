@@ -604,7 +604,7 @@ def main():
     parser.add_argument('--timing-history', type=Path, help='可选的本地计时 CSV 目录')
     parser.add_argument('--scope', choices=('all', 'camctl', 'root', 'node'), default='all')
     parser.add_argument('--test-kind', choices=TEST_KINDS, default=DEFAULT_TEST_KIND,
-                        help='选择功能测试、性能专项或全部测试')
+                        help='选择功能测试、性能专项、按需验收或全部测试')
     parser.add_argument('--target', action='append', default=[], help='仓库相对目录、文件或 pytest nodeid，可重复')
     parser.add_argument('--python', type=Path, default=Path(sys.executable), help='已准备测试依赖的外部 Python 3.11')
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1], help='待验证的 Git 工作区')
@@ -631,7 +631,7 @@ def main():
         timing_directory = args.timing_history.resolve() if args.timing_history is not None else None
         history = load_timing_history(timing_directory)
         tasks = select(discover(source), args.scope, args.target)
-        if args.test_kind == 'performance':
+        if args.test_kind not in ('functional', 'all'):
             tasks = [task for task in tasks if task['scope'] != 'node']
         if not tasks:
             raise ValueError('所选范围没有集成测试')
@@ -668,7 +668,7 @@ def main():
         write_json(output / 'source.json', identity)
         # 调度清单由冻结后的实际源码生成，确保与执行来源一致。
         tasks = select(discover(seed), args.scope, args.target)
-        if args.test_kind == 'performance':
+        if args.test_kind not in ('functional', 'all'):
             tasks = [task for task in tasks if task['scope'] != 'node']
         tasks = order_by_measurement(tasks, history)
         (output / 'control').mkdir()
