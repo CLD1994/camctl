@@ -117,7 +117,7 @@ def _init_with_capabilities(deployment: Deployment, spec: dict) -> None:
 
 
 def test_capture_obtain_cleanup_roundtrip_via_c_module(
-        tmp_path: Path, host_demo: str) -> None:
+        tmp_path: Path, host_demo: str, reuse_client) -> None:
     """三种拍摄、普通取回与清理经 C 模块递交链：客户端导出计划、
     主程序递交并驱动执行、产物与报告领取进 processing、客户端导入
     并在下一份导出的 ACK 经同一递交入口吸收。"""
@@ -130,6 +130,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
                       "cm-clip": _CLIP_CONTENT,
                       "cm-seq": _SEQ_CONTENT})
     _init_with_capabilities(deployment, spec)
+    reuse_client(deployment)
     state_db = deployment.state_db
 
     shoot_at = deployment.schedule(1)
@@ -302,7 +303,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
 
 
 def test_auto_preview_roundtrip_via_c_module(
-        tmp_path: Path, host_demo: str) -> None:
+        tmp_path: Path, host_demo: str, reuse_client) -> None:
     """自动取回经 C 模块递交链：驱动按配对关联列举预览、预览登记为
     正式产物，客户端展开的自动取回选择预览产物交付并领取导入。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -313,6 +314,7 @@ def test_auto_preview_roundtrip_via_c_module(
                       "ap-preview": _PREVIEW_CONTENT},
         photo_preview_supported=True)
     _init_with_capabilities(deployment, spec)
+    reuse_client(deployment)
     state_db = deployment.state_db
 
     shoot_at = deployment.schedule(1)
@@ -411,7 +413,7 @@ def test_auto_preview_roundtrip_via_c_module(
 
 
 def test_late_cancel_roundtrip_via_c_module(
-        tmp_path: Path, host_demo: str) -> None:
+        tmp_path: Path, host_demo: str, reuse_client) -> None:
     """迟到取消经 C 模块递交链：录像与取回完成后交付已领取，取消计
     划按不可撤回收场；携带 ACK 的取消计划一次递交完成取消与累计
     确认吸收，交付字节与原请求终态保持。"""
@@ -420,6 +422,7 @@ def test_late_cancel_roundtrip_via_c_module(
         {"1": [video_file("lc-clip")]},
         device_files={"lc-clip": _CANCEL_CLIP_CONTENT})
     _init_with_capabilities(deployment, spec)
+    reuse_client(deployment)
     state_db = deployment.state_db
 
     body = {

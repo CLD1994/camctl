@@ -60,7 +60,7 @@ def _action_of(report: dict, name: str) -> dict:
 
 
 def test_cleanup_unknown_preserves_original_request_result(
-        tmp_path: Path) -> None:
+        tmp_path: Path, reuse_client) -> None:
     """删除效果未知耗尽预算后清理失败；拍摄结果与产物保持，随后
     另一精确清理成功也不改写旧请求的失败事实。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -72,6 +72,7 @@ def test_cleanup_unknown_preserves_original_request_result(
         stub_driver_spec(
             {"1": [photo_file("shot-1")]},
             device_files={"shot-1": _PHOTO_CONTENT}))
+    reuse_client(deployment)
     # 客户端真实导出：拍摄与范围清理同计划，清理按名称引用来源。
     shoot_at = deployment.schedule(1)
     body = {

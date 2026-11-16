@@ -152,7 +152,7 @@ def parameter_cases(parameter_type, model):
 
 
 @pytest.mark.parametrize("model", list(CameraModel))
-def test_describe_python_browser_and_node_export_agree(tmp_path, model):
+def test_describe_python_browser_and_node_export_agree(tmp_path, model, reuse_client):
     deployment = Deployment(tmp_path, devices=False)
     driver = camera_spec(deployment, model, {})
     deployment.install_client_capabilities(driver)
@@ -214,6 +214,7 @@ def test_describe_python_browser_and_node_export_agree(tmp_path, model):
     assert parse_exact_json(effective) == original["actions"][0]["params"]
     assert parse_exact_json(execution)["target_duration_ms"] == 300000
     assert "video_size_estimate" not in effective + execution
+    reuse_client(deployment)
     cancel, _ = deployment.export_plan_with_client({"name": "取消未启动采集", "actions": [{
         "name": "取消", "type": "cancel_task", "scheduled_at": future_schedule(1),
         "params": {"target": {"request_id": original["request_id"]}},

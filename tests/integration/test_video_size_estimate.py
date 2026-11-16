@@ -116,7 +116,7 @@ def _execute_and_import(deployment, driver, action, expected_params):
     assert receipt["has_ack"] is False
 
 
-def test_record_estimate_stays_out_of_execution_and_report(tmp_path):
+def test_record_estimate_stays_out_of_execution_and_report(tmp_path, reuse_client):
     deployment = Deployment(tmp_path, controlled_clock=True)
     driver = stub_driver_spec({"1": [video_file("record-1")]})
     driver["video_size_estimate_json"] = {"camera_record": json.dumps({
@@ -133,6 +133,7 @@ def test_record_estimate_stays_out_of_execution_and_report(tmp_path):
     assert result["drafts_before"] == result["drafts_after"]
     assert len(result["drafts_before"]) == 1
     assert result["http_action"] == action
+    reuse_client(deployment)
     initialized = deployment.camctl("init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
     execution_action = {**action, "scheduled_at": deployment.schedule(3)}
@@ -146,7 +147,7 @@ def _schema(parameter_type, properties, required):
             "required": ["type", *required], "additionalProperties": False}
 
 
-def test_timelapse_estimate_uses_same_capture_duration_as_execution(tmp_path):
+def test_timelapse_estimate_uses_same_capture_duration_as_execution(tmp_path, reuse_client):
     deployment = Deployment(tmp_path, controlled_clock=True)
     driver = stub_driver_spec({"1": [video_file("timelapse-1")]})
     driver["parameter_schema_json"] = {"camera_timelapse": json.dumps(_schema(
@@ -168,6 +169,7 @@ def test_timelapse_estimate_uses_same_capture_duration_as_execution(tmp_path):
                 "playbackSeconds": 0.1, "bitrateMbps": 175}
     assert result["estimate"] == result["http_estimate"] == expected
     assert result["http_action"] == action
+    reuse_client(deployment)
     initialized = deployment.camctl("init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
     execution_action = {**action, "scheduled_at": deployment.schedule(3)}
