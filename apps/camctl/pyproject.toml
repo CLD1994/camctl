@@ -13,7 +13,7 @@ dependencies = [
 camctl = "camctl.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "jsonschema>=4.26.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]

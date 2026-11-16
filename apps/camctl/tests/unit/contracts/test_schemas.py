@@ -23,10 +23,13 @@ def resources(monkeypatch):
     }
 
     def read(name: str) -> bytes:
+        if name not in documents:
+            raise schemas.ResourceError(name)
         return documents[name]
 
     schemas._registry.cache_clear()
     schemas._validator.cache_clear()
+    schemas._checked_schema.cache_clear()
     monkeypatch.setattr(schemas, "resource_bytes", read)
     yield documents
     schemas._registry.cache_clear()
@@ -227,3 +230,65 @@ def test_instance_data_does_not_declare_resource_version(resources, entry, keywo
     schema = {"$schema": "https://json-schema.org/draft/2020-12/schema"}
     schema[keyword] = [value] if keyword == "enum" else value
     _validate_rule(resources, schema, value, entry)
+
+
+def test_generated_check_is_used_only_for_matching_content(resources, monkeypatch) -> None:
+    monkeypatch.setattr(schemas, "_validation_context", lambda: {"test": "context"})
+    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"type":"integer"}').encode()
+    resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(resources.copy())
+    original_check = schemas._check_schema
+    calls = []
+
+    def check(schema):
+        calls.append(schema)
+        original_check(schema)
+
+    monkeypatch.setattr(schemas, "_check_schema", check)
+    assert schemas.load_schema(REPORT_SCHEMA)["type"] == "integer"
+    assert not calls
+    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"type":"invalid"}').encode()
+    with pytest.raises(schemas.SchemaRuleError):
+        schemas.load_schema(REPORT_SCHEMA)
+    assert calls
+
+
+@pytest.mark.parametrize("proof", [None, b"invalid", b'{}'])
+def test_missing_or_invalid_generated_check_falls_back(resources, monkeypatch, proof) -> None:
+    monkeypatch.setattr(schemas, "_validation_context", lambda: {"test": "context"})
+    if proof is not None:
+        resources[schemas._VALIDATION_RESOURCE] = proof
+    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"type":"invalid"}').encode()
+    with pytest.raises(schemas.SchemaRuleError):
+        schemas.load_schema(REPORT_SCHEMA)
+
+
+def test_changed_check_environment_falls_back(resources, monkeypatch) -> None:
+    monkeypatch.setattr(schemas, "_validation_context", lambda: {"version": 1})
+    resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(resources.copy())
+    monkeypatch.setattr(schemas, "_validation_context", lambda: {"version": 2})
+    original_check = schemas._check_schema
+    calls = []
+
+    def check(schema):
+        calls.append(schema)
+        original_check(schema)
+
+    monkeypatch.setattr(schemas, "_check_schema", check)
+    schemas.load_schema(REPORT_SCHEMA)
+    assert calls
+
+
+def test_generated_check_rejects_invalid_rule(resources, monkeypatch) -> None:
+    monkeypatch.setattr(schemas, "_validation_context", lambda: {"test": "context"})
+    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"type":"invalid"}').encode()
+    with pytest.raises(schemas.SchemaRuleError):
+        schemas.build_validation_resource(resources.copy())
+
+
+def test_loaded_schema_is_independent_when_generated_check_matches(resources, monkeypatch) -> None:
+    monkeypatch.setattr(schemas, "_validation_context", lambda: {"test": "context"})
+    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"properties":{"a":{"type":"integer"}}}').encode()
+    resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(resources.copy())
+    first = schemas.load_schema(REPORT_SCHEMA)
+    first["properties"]["a"]["type"] = "string"
+    assert schemas.load_schema(REPORT_SCHEMA)["properties"]["a"]["type"] == "integer"

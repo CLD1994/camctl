@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -67,7 +68,15 @@ def sync_package_resources(project_dir: Path, *, check: bool = False, root: Path
     existing: set[Path] = set()
     if target_root.is_dir():
         existing = {p.relative_to(target_root).as_posix() for p in target_root.rglob("*") if p.is_file()}
-    expected = set(RESOURCE_SOURCES)
+    # 派生校验资源由公共 Schema 登记生成，不另维护规则清单。
+    sys.path.insert(0, str(project_dir / "src"))
+    try:
+        from camctl.contracts.schemas import (
+            _SCHEMA_RESOURCES, _VALIDATION_RESOURCE, build_validation_resource,
+        )
+    finally:
+        sys.path.pop(0)
+    expected = set(RESOURCE_SOURCES) | {_VALIDATION_RESOURCE}
 
     for name, source_rel in sorted(RESOURCE_SOURCES.items()):
         source = repo_root / source_rel
@@ -83,6 +92,35 @@ def sync_package_resources(project_dir: Path, *, check: bool = False, root: Path
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
+
+    if all((repo_root / RESOURCE_SOURCES[name]).is_file() for name in _SCHEMA_RESOURCES):
+        contents = {name: (repo_root / RESOURCE_SOURCES[name]).read_bytes()
+                    for name in _SCHEMA_RESOURCES}
+        generated = build_validation_resource(contents)
+        target = target_root / _VALIDATION_RESOURCE
+        if check:
+            try:
+                current = json.loads(target.read_bytes())
+                expected_validation = json.loads(generated)
+                context = current["context"]
+                versions = context["dependencies"]
+                python_version = context["python"]
+                matches = (
+                    current["schemas"] == expected_validation["schemas"]
+                    and context["code"] == expected_validation["context"]["code"]
+                    and isinstance(versions, dict)
+                    and versions.keys() == expected_validation["context"]["dependencies"].keys()
+                    and all(isinstance(version, str) and version for version in versions.values())
+                    and isinstance(python_version, list) and len(python_version) == 2
+                    and all(type(version) is int for version in python_version)
+                )
+            except (OSError, ValueError, KeyError, TypeError):
+                matches = False
+            if not matches:
+                problems.append(f"派生校验资源缺失或不一致: {_VALIDATION_RESOURCE}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(generated)
 
     if not check and target_root.is_dir():
         stale = existing - expected

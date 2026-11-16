@@ -34,7 +34,9 @@ class CustomBuildHook(BuildHookInterface):
 
         repo_root = sync_resources.repo_root_of(_PROJECT_DIR)
         if repo_root.is_dir() and (repo_root / "protocol").is_dir():
-            sync_resources.sync_package_resources(_PROJECT_DIR)
+            problems = sync_resources.sync_package_resources(_PROJECT_DIR)
+            if problems:
+                raise RuntimeError("包资源同步失败: " + "; ".join(problems))
         elif not sync_resources.resource_root(_PROJECT_DIR).is_dir():
             raise RuntimeError(
                 "构建环境既没有仓库权威来源，也没有已生成的包资源；"

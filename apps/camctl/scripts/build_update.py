@@ -28,7 +28,7 @@ def build_payload(project, bundle, build_venv, run):
     run('导出锁定依赖', ['uv', 'export', '--project', project, '--frozen', '--no-dev',
                        '--no-emit-project', '--no-header', '-o', dist / 'requirements.txt'])
     run('构建 wheel', ['uv', 'build', '--project', project, '--python', sys.executable,
-                     '--wheel', '--out-dir', dist])
+                     '--wheel', '--out-dir', dist, '--build-constraints', dist / 'requirements.txt'])
     (dist / '.gitignore').unlink(missing_ok=True)
     wheels = list(dist.glob('*.whl'))
     if len(wheels) != 1:

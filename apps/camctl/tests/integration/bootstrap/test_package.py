@@ -88,6 +88,9 @@ def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
         assert source_path.is_file(), f"权威来源缺失: {source_path}"
         expected_digests[name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
 
+    generated = PROJECT_DIR / "src/camctl/_resources/protocol/schema-validation.json"
+    expected_digests["protocol/schema-validation.json"] = hashlib.sha256(generated.read_bytes()).hexdigest()
+
     assert installed_digests == expected_digests, (
         "安装包资源与权威来源不一致；"
         f"仅安装侧: {sorted(set(installed_digests) - set(expected_digests))}；"

@@ -10,6 +10,10 @@ from __future__ import annotations
 from copy import deepcopy
 from decimal import Decimal
 from functools import lru_cache
+from hashlib import sha256
+from importlib import metadata, resources
+import json
+import sys
 from typing import Any, Iterator
 
 import referencing
@@ -34,6 +38,9 @@ _SCHEMA_RESOURCES = (
     "protocol/capabilities.schema.json",
     "protocol/host-notification.schema.json",
 )
+
+
+_VALIDATION_RESOURCE = "protocol/schema-validation.json"
 
 
 class SchemaValidationError(ValueError):
@@ -93,10 +100,44 @@ def _check_schema(schema: Any) -> None:
         pending.extend((child, False) for child in resource.subresources())
 
 
+@lru_cache(maxsize=1)
+def _validation_context() -> dict[str, Any]:
+    """绑定检查所用代码和依赖，变更后不复用旧结果。"""
+    package = resources.files("camctl.contracts")
+    code = {name: sha256(package.joinpath(name).read_bytes()).hexdigest()
+            for name in ("schemas.py", "json_values.py")}
+    dependencies = {name: metadata.version(name) for name in
+                    ("jsonschema", "referencing", "jsonschema-specifications")}
+    return {"code": code, "dependencies": dependencies, "python": list(sys.version_info[:2])}
+
+
+def build_validation_resource(contents: dict[str, bytes]) -> bytes:
+    """完整检查登记规则，并生成供同一检查环境复用的资源。"""
+    if set(contents) != set(_SCHEMA_RESOURCES):
+        raise SchemaRuleError("生成校验资源时公共 Schema 不完整")
+    for data in contents.values():
+        _check_schema(parse_exact_json(data.decode("utf-8")))
+    result = {"context": _validation_context(), "schemas": {
+        name: sha256(contents[name]).hexdigest() for name in _SCHEMA_RESOURCES
+    }}
+    return (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _has_checked_resource(name: str, contents: bytes) -> bool:
+    try:
+        proof = json.loads(resource_bytes(_VALIDATION_RESOURCE))
+        return (proof["context"] == _validation_context()
+                and proof["schemas"][name] == sha256(contents).hexdigest())
+    except (ResourceError, OSError, UnicodeDecodeError, ValueError, KeyError, TypeError,
+            metadata.PackageNotFoundError):
+        return False
+
+
 @lru_cache(maxsize=len(_SCHEMA_RESOURCES))
-def _checked_schema(contents: bytes) -> Any:
+def _checked_schema(name: str, contents: bytes) -> Any:
     document = parse_exact_json(contents.decode("utf-8"))
-    _check_schema(document)
+    if not _has_checked_resource(name, contents):
+        _check_schema(document)
     return document
 
 
@@ -105,7 +146,7 @@ def load_schema(name: str) -> Any:
     if name not in _SCHEMA_RESOURCES:
         raise SchemaRuleError(f"未打包的公共 Schema: {name}")
     try:
-        document = deepcopy(_checked_schema(resource_bytes(name)))
+        document = deepcopy(_checked_schema(name, resource_bytes(name)))
     except (ResourceError, OSError, UnicodeDecodeError, JsonParseError, SchemaError) as error:
         raise SchemaRuleError(f"Schema 规则不可用: {name}: {error}") from error
     return document
@@ -186,7 +227,7 @@ def validation_errors(validator: Draft202012Validator, document: Any) -> list[Va
 
 @lru_cache(maxsize=len(_SCHEMA_RESOURCES))
 def _validator(schema_name: str) -> Draft202012Validator:
-    return create_validator(load_schema(schema_name))
+    return _precise_draft()(load_schema(schema_name), registry=schema_registry())
 
 
 def validate_document(schema_name: str, document: Any) -> None:
