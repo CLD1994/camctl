@@ -59,7 +59,7 @@ async def test_new_report_has_complete_terminal_creation_times(environment):
 async def test_full_history_survives_incremental_window_and_local_completion(environment):
     from camctl.reporting import policy
     from camctl.reporting.models import ReportBytes, SyncMode
-    from camctl.reporting.publication import DbPublicationSession
+    from camctl.persistence.repositories.report_publication import DbPublicationSession
     from camctl.persistence.business import BusinessDatabase
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from camctl.host_files.handoff import PublishResult, PublishStage

@@ -26,3 +26,24 @@ def test_failure_preserves_control_identity_and_secondary_diagnostics():
     diagnostic = next(json.loads(note[note.index("{"):]) for note in notes if "{" in note)
     assert diagnostic["errno"] == 5
     assert diagnostic["filename"] == "/state"
+
+
+def test_exception_conversion_transfers_actual_result_or_leaves_it_absent():
+    from camctl.persistence.models import _attach_db_outcome, transfer_db_outcome
+
+    original = OSError("observer failed")
+    secondary = RuntimeError("secondary")
+    value, boundary, control = object(), object(), asyncio.CancelledError("control")
+    for kind in DbOutcomeKind:
+        outcome = DbOutcome(kind, value=value, error=original, boundary=boundary,
+                            stage="commit", control=control, observer_error=original,
+                            handoff_error=secondary, secondary_errors=(secondary,))
+        _attach_db_outcome(original, outcome)
+        converted = RuntimeError("converted")
+        assert transfer_db_outcome(original, converted) is converted
+        assert db_outcome_for(converted) is outcome
+
+    empty = RuntimeError("no outcome")
+    converted = RuntimeError("converted")
+    assert transfer_db_outcome(empty, converted) is converted
+    assert db_outcome_for(converted) is None

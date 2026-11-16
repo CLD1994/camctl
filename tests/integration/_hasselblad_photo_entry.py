@@ -581,7 +581,7 @@ def _install_fault(root: Path, fault: str):
         HostCaptureRepository.verify_operation = verify
     elif fault == "report-before-publish":
         from camctl.persistence.repositories.history import HistoryRepository
-        from camctl.reporting.publication import DbPublicationSession
+        from camctl.persistence.repositories.report_publication import DbPublicationSession
         real = DbPublicationSession.record_intent
 
         def reader():

@@ -26,6 +26,7 @@ from camctl.host_files.handoff import (
 from camctl.host_files.io import DirectorySyncStage
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
+from camctl.persistence.repositories.report_publication import DbPublicationSession
 from camctl.persistence.runtime import (
     DbConfig,
     DbOpenMode,
@@ -37,7 +38,6 @@ from camctl.reporting.models import FrozenReport, ReportBytes, SyncDisposition, 
 from camctl.reporting.policy import ReportingRepository, publish_report, record_recovered_publication, record_report_bytes, record_report_failure, record_report_publish_intent, start_sync
 from camctl.reporting.publication import (
     DeliveryOutcome,
-    DbPublicationSession,
     ReportDirectories,
     decide_republish,
     deliver_report,

@@ -14,14 +14,12 @@ import asyncio
 import hashlib
 import os
 import re
-import sqlite3
-import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Mapping, NamedTuple, Protocol, Sequence
+from typing import Mapping, NamedTuple, Protocol, Sequence
 
-from camctl.contracts.values import ObjectId, new_operation_key
+from camctl.contracts.values import ObjectId
 from camctl.host_files.handoff import (
     HandoffDirectories,
     HandoffIdentity,
@@ -36,8 +34,6 @@ from camctl.host_files.handoff import (
 from camctl.host_files.io import DirectorySyncStage
 from camctl.logging_runtime.diagnostics import record_error
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure
-from camctl.persistence.business import BusinessDatabase
-from camctl.persistence.runtime import StateDatabaseError
 from camctl.reporting import policy
 from camctl.reporting.ack import AckReport
 from camctl.reporting.models import FrozenReport, ReportBytes
@@ -45,7 +41,6 @@ from camctl.reporting.models import FrozenReport, ReportBytes
 __all__ = [
     "DeliveryOutcome",
     "DeliveryResult",
-    "DbPublicationSession",
     "PublicationSession",
     "ReportDirectories",
     "ReportFileDecision",
@@ -262,39 +257,6 @@ class PublicationSession(Protocol):
     async def save_publication(self, report_id: int, file_result: PublishResult) -> DbOutcome: ...
     async def record_failure(self, report_id: int, error: dict) -> DbOutcome: ...
     async def settle_local(self, action_id: int, report_id: int) -> DbOutcome: ...
-
-
-class DbPublicationSession:
-    """每项报告管理操作各自提交完整事务。"""
-    def __init__(self, database: BusinessDatabase, *,
-                 occurred_at: Callable[[], int] | None = None) -> None:
-        self._database = database
-        self._occurred_at = occurred_at if occurred_at is not None else lambda: time.time_ns() // 1000
-
-    async def _write(self, method, *args, **kwargs):
-        key = new_operation_key()
-        occurred_at = self._occurred_at()
-        try:
-            return await self._database.write(
-                lambda owned: method(key, owned, *args, occurred_at=occurred_at, **kwargs), key=key)
-        except sqlite3.Error as error:
-            raise StateDatabaseError(f"报告状态库写入失败: {error}") from error
-
-    async def prepare(self, report_id, contents):
-        return await self._write(policy.record_report_bytes, report_id, contents)
-
-    async def record_intent(self, report_id):
-        return await self._write(policy.record_report_publish_intent, report_id)
-
-    async def save_publication(self, report_id, file_result):
-        return await self._write(policy.publish_report, report_id, file_result)
-
-    async def record_failure(self, report_id, error):
-        return await self._write(policy.record_report_failure, report_id, error)
-
-    async def settle_local(self, action_id, report_id):
-        return await self._write(policy.record_local_report, action_id=action_id,
-            local_report_id=report_id)
 
 
 def _report_staging_directory(staging_root: Path) -> Path:

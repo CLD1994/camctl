@@ -755,7 +755,7 @@ async def test_report_publication_allows_scheduling_and_stop_waits_actual_file_e
     state.delivery.side_effect = publish_report_file
     session = create_autospec(PublicationSession, instance=True, spec_set=True)
     session.prepare.return_value = session.record_intent.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
-    mocker.patch("camctl.reporting.publication.DbPublicationSession", autospec=True, return_value=session)
+    mocker.patch("camctl.persistence.repositories.report_publication.DbPublicationSession", autospec=True, return_value=session)
     mocker.patch("camctl.reporting.publication._list_stale_ready", autospec=True, return_value=((), None))
 
     async def in_process(function, /, *args, **kwargs):
@@ -813,3 +813,50 @@ async def test_report_configuration_error_observed_only_during_settlement_keeps_
     assert caught.value is failure
     assert _exception_details(caught.value, stage="shutdown")[0] == "configuration_error"
     state.failure_log.assert_awaited_once_with(state.context, failure)
+
+
+async def test_publication_state_error_retains_actual_database_result(mocker):
+    from camctl.persistence.business import BusinessDatabase
+    from camctl.persistence.executor import DbExecutor
+    from camctl.persistence.models import db_outcome_for
+    from camctl.persistence.repositories.report_publication import DbPublicationSession
+
+    state = _ReportState(mocker)
+    state.supervisor.generate.side_effect = state.generated
+    state.delivery.side_effect = publish_report_file
+    executor = create_autospec(DbExecutor, instance=True, spec_set=True)
+    original = sqlite3.OperationalError("post-commit observer failed")
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value=object(), observer_error=original)
+    future = asyncio.get_running_loop().create_future()
+    future.set_result(outcome)
+    executor.submit_write.return_value = future
+    session = DbPublicationSession(BusinessDatabase(executor, state.owned.metadata))
+    mocker.patch("camctl.persistence.repositories.report_publication.DbPublicationSession",
+                 autospec=True, return_value=session)
+    record = mocker.patch("camctl.reporting.policy.record_report_failure", autospec=True)
+
+    with pytest.raises(StateDbFailure) as caught:
+        await state.flow(state.context)
+    wrapped = caught.value.__cause__
+    assert isinstance(wrapped, StateDatabaseError)
+    assert wrapped.__cause__ is original
+    assert db_outcome_for(caught.value) is outcome
+    record.assert_not_called()
+    state.connection.close.assert_not_called()
+
+
+async def test_publication_state_error_without_database_result_stays_absent(mocker):
+    from camctl.persistence.models import db_outcome_for
+
+    state = _ReportState(mocker)
+    state.supervisor.generate.side_effect = state.generated
+    original = StateDatabaseError("database write failed")
+    state.delivery.side_effect = original
+    record = mocker.patch("camctl.reporting.policy.record_report_failure", autospec=True)
+
+    with pytest.raises(StateDbFailure) as caught:
+        await state.flow(state.context)
+    assert caught.value.__cause__ is original
+    assert db_outcome_for(caught.value) is None
+    record.assert_not_called()
+    state.connection.close.assert_not_called()

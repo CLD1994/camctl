@@ -75,6 +75,14 @@ def db_outcome_for(error: BaseException) -> DbOutcome | None:
     return value if isinstance(value, DbOutcome) else None
 
 
+def transfer_db_outcome(source: BaseException, target: BaseException) -> BaseException:
+    """异常转换时传递已有的实际结果；没有结果时不推造。"""
+    outcome = db_outcome_for(source)
+    if outcome is not None:
+        _attach_db_outcome(target, outcome)
+    return target
+
+
 def _attach_db_outcome(error: BaseException, outcome: DbOutcome) -> None:
     setattr(error, _DB_OUTCOME_ATTRIBUTE, outcome)
 

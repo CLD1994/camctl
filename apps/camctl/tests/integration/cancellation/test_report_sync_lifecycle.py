@@ -48,7 +48,8 @@ from camctl.reporting.policy import (
     record_local_report,
     finish_canceled_sync_action,
 )
-from camctl.reporting.publication import DbPublicationSession, DeliveryOutcome, deliver_report
+from camctl.persistence.repositories.report_publication import DbPublicationSession
+from camctl.reporting.publication import DeliveryOutcome, deliver_report
 
 from ..acceptance.test_acceptance import Catalog
 from ..support.database import business_database, database_path

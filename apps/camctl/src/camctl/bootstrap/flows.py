@@ -1190,11 +1190,12 @@ def report_flow(
         from camctl.host_files.handoff import HandoffDirectories
         from camctl.logging_runtime.diagnostics import diagnostic_state_for, record_error
         from camctl.persistence.repositories.history import HistoryRepository
+        from camctl.persistence.repositories.report_publication import DbPublicationSession
+        from camctl.persistence.models import transfer_db_outcome
         from camctl.persistence.runtime import DbConfig, DirectoryBindingError, StateDatabaseError
         from camctl.reporting.messages import ErrorKind, JobMessage, new_job_id
         from camctl.reporting.publication import (
             DeliveryOutcome,
-            DbPublicationSession,
             ReportDirectories,
             REPORTS_DIRECTORY,
             StagedReport,
@@ -1352,7 +1353,8 @@ def report_flow(
         except prerequisite_errors:
             raise
         except state_errors as error:
-            raise StateDbFailure(f"报告 {report_id} 文件交接遇到状态库错误: {error}") from error
+            raise transfer_db_outcome(error, StateDbFailure(
+                f"报告 {report_id} 文件交接遇到状态库错误: {error}")) from error
         except Exception as error:
             await _record_failure(business, report_id, now_us, f"报告文件交接失败: {error}")
             raise _RecordedReportFailure(error) from error

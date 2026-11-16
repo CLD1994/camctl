@@ -19,7 +19,8 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, canonical_directory
 from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.models import SyncMode
 from camctl.reporting.policy import ReportingRepository, start_sync
-from camctl.reporting.publication import DbPublicationSession, DeliveryOutcome, deliver_report
+from camctl.persistence.repositories.report_publication import DbPublicationSession
+from camctl.reporting.publication import DeliveryOutcome, deliver_report
 
 from ..acceptance.test_atomicity import _process
 from ..history.test_report_scope import _finish_action, _submit
