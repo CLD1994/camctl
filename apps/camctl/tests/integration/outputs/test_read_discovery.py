@@ -400,6 +400,43 @@ def test_finishing_obtain_does_not_materialize_plan_siblings(
     assert sizes and max(sizes) < 10
 
 
+@pytest.mark.parametrize("batch_size", [1, 3])
+@pytest.mark.asyncio
+async def test_candidates_are_read_in_bounded_pages(two_copies, batch_size):
+    from .test_qualification import _seed_action, _seed_selection_and_item
+    from camctl.outputs.read_discovery import ReadDiscoveryOwner
+
+    owned, early, late = two_copies
+    identity = 1000
+    _seed_action(owned.connection, identity, 1, action_type=4)
+    _seed_selection_and_item(owned.connection, dependency_id=identity, selection_id=identity,
+        item_id=identity, owner_action_id=identity, source_action_id=11, output_id=701)
+    owned.connection.commit()
+    result = OutputsRepository(read_batch_size=batch_size).grant_file(
+        replace(_command(), action_id=identity, item_id=identity), new_operation_key(), owned)
+    assert result.kind is DbOutcomeKind.COMPLETED and result.value.copy_id is not None, result
+    expected_ids = [early.copy_id, late.copy_id, result.value.copy_id]
+    before = tuple(owned.connection.iterdump())
+    async with _discovery_database(_scope(owned.connection).database, batch_size=batch_size) as (database, bounded):
+        owner = ReadDiscoveryOwner(batch_size)
+        await owner.begin_round(database, _NOW)
+        actual_ids = []
+        while True:
+            page = await owner.reads(database, "reads", _NOW)
+            actual_ids.extend(candidate.copy_id for candidate in page.items)
+            assert actual_ids == expected_ids[:len(actual_ids)]
+            assert len(actual_ids) == len(set(actual_ids))
+            assert len(page.items) <= batch_size and owner.cursor_count <= 1
+            if page.exhausted:
+                break
+        connection, = bounded
+        assert actual_ids == expected_ids
+        assert connection.query_plan and max(connection.returned) == batch_size
+        assert owner.cursor_count == 0
+    assert tuple(owned.connection.iterdump()) == before
+
+
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_candidate_capacity_tracks_batch_not_total(two_copies):
     import gc
