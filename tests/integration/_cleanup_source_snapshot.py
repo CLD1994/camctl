@@ -255,7 +255,6 @@ class CompletedOsmoSource:
             assert json.loads(world.clock.read_text()) == self.proof["clock"]
             assert world.sources == self.template.sources
             with world:
-                world.start()
                 yield world
         finally:
             monkeypatch.chdir(self.parent)

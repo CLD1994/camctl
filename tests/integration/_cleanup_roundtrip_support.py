@@ -217,6 +217,7 @@ class World:
         self.frozen = {}
         self.members = {}
         self.host = None
+        self.client_session_active = False
         self.config_extra = ""
         self.config_original = (self.deployment.config_path.read_text()
                                 if prepared is None else prepared.config_original)
@@ -307,7 +308,10 @@ max_query_attempts={max_q}
 
     @contextmanager
     def reuse_client(self, label):
-        """连续导出复用真实客户端；报告交接前恢复独立客户端。"""
+        """连续操作复用真实客户端，并由最外层负责关闭。"""
+        if self.client_session_active:
+            yield
+            return
         receipts = self.root / f"client-receipts-{label}"
         receipts.mkdir()
         original = self.deployment.run_client_driver
@@ -324,6 +328,7 @@ max_query_attempts={max_q}
             return session.call(*args, output=receipts / f"{number:03d}-{output.name}")
 
         self.deployment.run_client_driver = client_driver
+        self.client_session_active = True
         try:
             yield
         except BaseException as error:
@@ -336,6 +341,7 @@ max_query_attempts={max_q}
             session.close()
         finally:
             self.deployment.run_client_driver = original
+            self.client_session_active = False
         for name in ("client-session-node.json", "client-session-python.json",
                      "client-session.stdout.log", "client-session.stderr.log"):
             path = self.root / name
@@ -731,17 +737,19 @@ max_query_attempts={max_q}
         self.host.claim()
         for name, content in ready.items():
             assert (self.deployment.processing / name).read_bytes() == content
-        receipt = self.deployment.import_reports_with_client(self.deployment.processing)
-        client_db = self.root / "client-store/client.db"
-        saved = rows(client_db, "SELECT * FROM reports")
-        for row in saved:
-            assert row["bytes"] == self.frozen[row["file_name"]]
-        coverage, = rows(client_db, "SELECT value FROM records WHERE namespace='state' AND id='coverage'")
-        assert json.loads(coverage["value"]) == receipt["coverage"]
-        assert {json.loads(content)["report_id"] for content in ready.values()} <= set(receipt["saved_report_ids"])
-        snapshot, = rows(client_db, "SELECT value FROM records WHERE namespace='state' AND id='snapshot'")
-        imported = json.loads(snapshot["value"])
-        plan, exported = self.export("ack-and-new-facts", [self.action("ack-and-new-facts", "report_status", {"scope": "full"})])
+        label = f"report-{len(list(self.root.glob('client-receipts-report-*')))}"
+        with self.reuse_client(label):
+            receipt = self.deployment.import_reports_with_client(self.deployment.processing)
+            client_db = self.root / "client-store/client.db"
+            saved = rows(client_db, "SELECT * FROM reports")
+            for row in saved:
+                assert row["bytes"] == self.frozen[row["file_name"]]
+            coverage, = rows(client_db, "SELECT value FROM records WHERE namespace='state' AND id='coverage'")
+            assert json.loads(coverage["value"]) == receipt["coverage"]
+            assert {json.loads(content)["report_id"] for content in ready.values()} <= set(receipt["saved_report_ids"])
+            snapshot, = rows(client_db, "SELECT value FROM records WHERE namespace='state' AND id='snapshot'")
+            imported = json.loads(snapshot["value"])
+            plan, exported = self.export("ack-and-new-facts", [self.action("ack-and-new-facts", "report_status", {"scope": "full"})])
         assert exported["last_report_id"] == receipt["ack_id"]
         self.host.submit(plan)
         wait(lambda: rows(self.db, "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [{"acknowledged_report_id": int(receipt["ack_id"]), "acknowledged_wm": receipt["coverage"]}], "累计 ACK 未吸收")
