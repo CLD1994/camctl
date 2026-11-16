@@ -29,16 +29,20 @@ def test_failure_preserves_control_identity_and_secondary_diagnostics():
 
 
 def test_exception_conversion_transfers_actual_result_or_leaves_it_absent():
-    from camctl.persistence.models import _attach_db_outcome, transfer_db_outcome
+    from camctl.contracts.history_values import HistoryBoundary
+    from camctl.persistence.models import transfer_db_outcome
 
-    original = OSError("observer failed")
+    observer = OSError("observer failed")
     secondary = RuntimeError("secondary")
-    value, boundary, control = object(), object(), asyncio.CancelledError("control")
-    for kind in DbOutcomeKind:
-        outcome = DbOutcome(kind, value=value, error=original, boundary=boundary,
-                            stage="commit", control=control, observer_error=original,
-                            handoff_error=secondary, secondary_errors=(secondary,))
-        _attach_db_outcome(original, outcome)
+    outcomes = (
+        DbOutcome(DbOutcomeKind.COMPLETED, value="saved", boundary=HistoryBoundary(1, 1),
+                  observer_error=observer, secondary_errors=(secondary,)),
+        DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("commit unknown"), stage="commit"),
+        DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OSError("rolled back")),
+        DbOutcome(DbOutcomeKind.NOT_EXECUTED, error=TimeoutError("enqueue timed out")),
+    )
+    for outcome in outcomes:
+        original = db_failure(RuntimeError, "database failure", outcome)
         converted = RuntimeError("converted")
         assert transfer_db_outcome(original, converted) is converted
         assert db_outcome_for(converted) is outcome

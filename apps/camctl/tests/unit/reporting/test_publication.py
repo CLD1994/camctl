@@ -214,16 +214,18 @@ async def test_publication_session_identifies_state_database_write_failure():
 async def test_publication_session_preserves_write_error_and_actual_result(with_outcome):
     import sqlite3
     from unittest.mock import create_autospec
+    from camctl.contracts.history_values import HistoryBoundary
     from camctl.persistence.business import BusinessDatabase
-    from camctl.persistence.models import DbOutcome, DbOutcomeKind, _attach_db_outcome, db_outcome_for
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure, db_outcome_for
     from camctl.persistence.repositories.report_publication import DbPublicationSession
     from camctl.persistence.runtime import StateDatabaseError
 
     database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
-    original = sqlite3.OperationalError("observer failed")
-    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value=object(), observer_error=original)
-    if with_outcome:
-        _attach_db_outcome(original, outcome)
+    observer = sqlite3.OperationalError("observer failed")
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value="saved",
+                        boundary=HistoryBoundary(1, 1), observer_error=observer)
+    original = (db_failure(sqlite3.OperationalError, "write failed", outcome)
+                if with_outcome else observer)
     database.write.side_effect = original
     with pytest.raises(StateDatabaseError) as caught:
         await DbPublicationSession(database).prepare(1, object())
@@ -235,14 +237,16 @@ async def test_publication_session_preserves_write_error_and_actual_result(with_
 async def test_publication_session_propagates_original_cancellation():
     import asyncio
     from unittest.mock import create_autospec
+    from camctl.contracts.history_values import HistoryBoundary
     from camctl.persistence.business import BusinessDatabase
-    from camctl.persistence.models import DbOutcome, DbOutcomeKind, _attach_db_outcome, db_outcome_for
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure, db_outcome_for
     from camctl.persistence.repositories.report_publication import DbPublicationSession
 
     database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
     control = asyncio.CancelledError("cancelled")
-    outcome = DbOutcome(DbOutcomeKind.COMPLETED, control=control)
-    _attach_db_outcome(control, outcome)
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value="saved",
+                        boundary=HistoryBoundary(1, 1), control=control)
+    assert db_failure(RuntimeError, "cancelled", outcome) is control
     database.write.side_effect = control
     with pytest.raises(asyncio.CancelledError) as caught:
         await DbPublicationSession(database).prepare(1, object())
