@@ -63,7 +63,7 @@ def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
 
 def _await_row(state_db: Path, sql: str, params=(), *,
                timeout_s: float = 60.0, process=None) -> list[tuple]:
-    """轮询查询直到出现行；同步点，不使用随机 sleep。"""
+    """每25毫秒检查持久化事实，保留原期限及失败诊断。"""
     deadline = time.monotonic() + timeout_s
     while True:
         rows = _query(state_db, sql, params)
@@ -80,7 +80,9 @@ def _await_row(state_db: Path, sql: str, params=(), *,
             diagnostic_path.write_text(
                 json.dumps(diagnostics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             pytest.fail(f"等待录像启动时 CLI 已退出；诊断见 {diagnostic_path}: {diagnostics}")
-        assert time.monotonic() < deadline, f"等待超时: {sql}"
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, f"等待超时: {sql}"
+        time.sleep(min(0.025, remaining))
 
 
 def _recover_wal(state_db: Path) -> None:
