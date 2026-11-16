@@ -16,11 +16,13 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
 
 from _wsl_host_demo import HostDemo, query_state, to_wsl, wait_for
+from _client_session import ClientSession
 from camctl_fixtures import Deployment, future_schedule, terminate_process_tree
 from test_camctl_c_module_roundtrip import _open_ready_report
 
@@ -62,6 +64,20 @@ def _deployment_with_client(tmp_path: Path) -> tuple[Deployment, Path]:
     (client_store / "device-capabilities.json").write_text(
         described.stdout, encoding="utf-8")
     return deployment, deployment.state_db
+
+
+def _reuse_recovery_client(deployment: Deployment, request, monkeypatch) -> None:
+    """CLI恢复期间保持客户端打开；跨客户端重开由独立闭环验证。"""
+    if sys.platform != "linux":
+        return
+    integration = Path(__file__).resolve().parent
+    session = ClientSession(
+        ["node", "--import", "tsx", str(integration / "client_driver.ts")],
+        cwd=integration.parents[1] / "apps/client", env=os.environ.copy(),
+        root=deployment.root, timeout=120,
+    )
+    request.addfinalizer(session.close)
+    monkeypatch.setattr(deployment, "run_client_driver", session.call)
 
 
 def _matches_request(report: dict, request_id: int, plan_id: int, action_id: int) -> bool:
@@ -255,7 +271,7 @@ def test_resubmitted_request_keeps_single_identity(
 
 
 def test_report_generation_failure_preserves_responsibility(
-        tmp_path: Path) -> None:
+        tmp_path: Path, request, monkeypatch) -> None:
     """普通生成失败：失败责任保留、同步动作不虚构终态、会话按
     report_error 退出；下一会话首轮重试并发布同一报告。
 
@@ -263,6 +279,7 @@ def test_report_generation_failure_preserves_responsibility(
     作，C 主程序的受管通道只有 submit/claim，无法表达空 run。
     """
     deployment, state_db = _deployment_with_client(tmp_path)
+    _reuse_recovery_client(deployment, request, monkeypatch)
     plan_path, _ = deployment.export_plan_with_client(_plan_body("生成失败重试"))
 
     # staging 的报告子目录被普通文件占据：生成子进程无法写出报告文
@@ -319,10 +336,11 @@ def test_report_generation_failure_preserves_responsibility(
 
 
 def test_report_save_failure_retry_keeps_determined_bytes(
-        tmp_path: Path) -> None:
+        tmp_path: Path, request, monkeypatch) -> None:
     """报告保存失败重试：字节已登记的失败报告由下一会话重建发布，
     重建字节与首次确定字节保持一致。"""
     deployment, state_db = _deployment_with_client(tmp_path)
+    _reuse_recovery_client(deployment, request, monkeypatch)
     plan_path, _ = deployment.export_plan_with_client(_plan_body("保存失败重试"))
 
     # ready 位置被普通文件占据：报告字节已生成并登记，交接无法进行。
