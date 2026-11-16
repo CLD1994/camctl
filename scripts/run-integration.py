@@ -251,7 +251,7 @@ def read_progress(directory):
     return json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
 
 
-def test_environment(python, project, control, private, temporary):
+def test_environment(python, project, control, private, temporary, cache):
     environment = {key: value for key, value in os.environ.items()
                    if key not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'PWD',
                                   'PYTHONDONTWRITEBYTECODE', 'PYTHONPYCACHEPREFIX')
@@ -260,7 +260,7 @@ def test_environment(python, project, control, private, temporary):
                        PYTHONNOUSERSITE='1', PYTHONUNBUFFERED='1',
                        PYTHONPYCACHEPREFIX=str(private / 'python-cache'), UV_PYTHON=str(python),
                        UV_PROJECT_ENVIRONMENT=str(private / 'project-env'),
-                       UV_CACHE_DIR=str(private / 'uv-cache'), UV_OFFLINE='1',
+                       UV_CACHE_DIR=str(cache), UV_OFFLINE='1', UV_LINK_MODE='copy',
                        TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
     return environment
 
@@ -289,7 +289,7 @@ def managed_wait_sync(process):
         raise
 
 
-def collect_and_shard(args, tasks, output, seed, python, versions, identity, costs):
+def collect_and_shard(args, tasks, output, seed, python, versions, identity, costs, cache):
     """当前收集清单决定覆盖；历史记录用于自动选择及均衡权重。"""
     result = []
     for task in tasks:
@@ -305,7 +305,7 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity, cos
         temporary = directory / 'tmp'
         temporary.mkdir()
         project = work / 'apps/camctl'
-        environment = test_environment(python, project, output / 'control', directory, temporary)
+        environment = test_environment(python, project, output / 'control', directory, temporary, cache)
         environment['CAMCTL_INTEGRATION_PROGRESS'] = str(artifacts)
         resource_script = project / 'scripts/sync_resources.py'
         if resource_script.exists():
@@ -470,8 +470,6 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
             task_started = time.monotonic()
             save()
             try:
-                if task['scope'] != 'node' and not (private / 'uv-cache').exists():
-                    await run_blocking(copy_tree, cache, private / 'uv-cache')
                 if task['scope'] != 'camctl' and not (private / 'node_modules').exists():
                     if node_modules is None or not node_modules.is_dir():
                         raise ValueError('根与 Node 集成测试需要 --node-modules 指向已按锁文件准备的客户端依赖')
@@ -481,7 +479,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 project.mkdir(parents=True, exist_ok=True)
                 temporary = directory / 'tmp'
                 temporary.mkdir()
-                environment = test_environment(python, project, control, private, temporary)
+                environment = test_environment(python, project, control, private, temporary, cache)
                 environment['CAMCTL_TEST_BUILD_ROOT'] = str(output)
                 environment['CAMCTL_TEST_BUILD_SOURCE'] = str(seed)
                 if task['scope'] == 'root':
@@ -512,7 +510,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 task['command'] = command
                 task['environment'] = {key: environment[key] for key in (
                     'PYTHONPATH', 'PYTHONPYCACHEPREFIX', 'UV_PYTHON', 'UV_PROJECT_ENVIRONMENT',
-                    'UV_CACHE_DIR', 'UV_OFFLINE', 'TMPDIR')}
+                    'UV_CACHE_DIR', 'UV_OFFLINE', 'UV_LINK_MODE', 'TMPDIR')}
                 # 根测试也需要实际同步资源；仅写此任务的源码副本。
                 async def prepare(label, command, cwd):
                     preparation = {'label': label, 'command': command, 'cwd': str(cwd), 'started_utc': utc()}
@@ -650,7 +648,7 @@ def main():
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1], help='待验证的 Git 工作区')
     parser.add_argument('--output', type=Path, help='新建的证据与隔离环境目录（默认 /tmp 下的新目录）')
     parser.add_argument('--node-modules', type=Path, help='已准备的客户端 node_modules（默认源工作区）')
-    parser.add_argument('--uv-cache', type=Path, help='已准备的 uv 离线缓存（默认 uv cache dir）')
+    parser.add_argument('--uv-cache', type=Path, help='供本轮共用的 uv 离线缓存（默认 uv cache dir）')
     parser.add_argument('--camctl-memory-limit', default=DEFAULT_MEMORY_LIMIT,
                         help='每个被测 camctl 及其全部后代共享的内存预算')
     parser.add_argument('--camctl-memory-cgroup-root', type=lambda value: Path(value).absolute(),
@@ -721,7 +719,7 @@ def main():
         shutil.copy2(Path(__file__).with_name('python_test_build.py'), output / 'control')
         shutil.copy2(Path(__file__).with_name('client_test_build.py'), output / 'control')
         shutil.copy2(Path(__file__).with_name('host_demo_build.py'), output / 'control')
-        tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity, history[1])
+        tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity, history[1], cache)
         write_json(output / 'plan.json', tasks)
         if args.plan_only:
             write_json(output / 'summary.json', {'status': 'planned', 'exit_code': 0,

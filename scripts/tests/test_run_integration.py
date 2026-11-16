@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 
 RUNNER = Path(__file__).resolve().parents[1] / 'run-integration.py'
 
@@ -300,7 +301,7 @@ class IntegrationRunnerTest(unittest.TestCase):
                 self._fixture_repository(source, 'test_readonly.py',
                     'import os\nfrom pathlib import Path\n'
                     'def test_readonly(tmp_path):\n'
-                    '    for base in (Path.cwd(), tmp_path, Path(os.environ["UV_CACHE_DIR"])):\n'
+                    '    for base in (Path.cwd(), tmp_path, Path(os.environ["PYTHONPYCACHEPREFIX"])):\n'
                     '        directory = base / "owned-readonly"\n'
                     '        directory.mkdir()\n'
                     '        (directory / "request.json").write_text("owned")\n'
@@ -660,6 +661,61 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertTrue(Path(failed['cwd']).is_dir())
             self.assertFalse(Path(passed['worker_cache']).exists())
             self.assertFalse(Path(passed['cwd']).exists())
+            self.assertTrue(cache.is_dir())
+
+    def test_concurrent_installs_share_uv_cache_and_keep_package_files_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            wheel = root / 'cache_probe-0.1-py3-none-any.whl'
+            contents = {
+                'cache_probe/__init__.py': 'VALUE = "original"\n',
+                'cache_probe-0.1.dist-info/METADATA': 'Metadata-Version: 2.1\nName: cache-probe\nVersion: 0.1\n',
+                'cache_probe-0.1.dist-info/WHEEL': 'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n',
+            }
+            contents['cache_probe-0.1.dist-info/RECORD'] = ''.join(
+                f'{name},,\n' for name in (*contents, 'cache_probe-0.1.dist-info/RECORD'))
+            with zipfile.ZipFile(wheel, 'w') as archive:
+                for name, value in contents.items():
+                    archive.writestr(name, value)
+            barrier = root / 'install-start'
+            barrier.mkdir()
+            content = (
+                'import os, subprocess, sys, time\nfrom pathlib import Path\n'
+                'def test_install(tmp_path):\n'
+                f'    cache = Path({str(root / "cache")!r})\n'
+                '    assert Path(os.environ["UV_CACHE_DIR"]) == cache\n'
+                '    assert os.environ["UV_LINK_MODE"] == "copy"\n'
+                '    assert os.environ["UV_OFFLINE"] == "1"\n'
+                '    environment = tmp_path / "installed"\n'
+                '    subprocess.run(["uv", "venv", "--python", sys.executable, str(environment)], check=True)\n'
+                f'    barrier = Path({str(barrier)!r})\n'
+                '    (barrier / (Path(__file__).stem + ".ready")).touch()\n'
+                '    deadline = time.monotonic() + 20\n'
+                '    while len(list(barrier.glob("*.ready"))) != 2:\n'
+                '        assert time.monotonic() < deadline, "两个安装任务未同时就绪"\n'
+                '        time.sleep(.01)\n'
+                '    python = environment / "bin/python"\n'
+                f'    subprocess.run(["uv", "pip", "install", "--python", str(python), "--no-deps", {str(wheel)!r}], check=True)\n'
+                '    package = Path(subprocess.check_output([str(python), "-c", "import cache_probe; print(cache_probe.__file__)"], text=True).strip())\n'
+                '    assert package.is_relative_to(environment)\n'
+                '    cached = list(cache.rglob("cache_probe/__init__.py"))\n'
+                '    assert cached, "uv未保留真实安装缓存"\n'
+                '    assert all(not package.samefile(path) for path in cached)\n'
+                '    package.write_text(Path(__file__).stem)\n'
+                '    assert all(path.read_text() == \'VALUE = "original"\\n\' for path in cached)\n')
+            self._fixture_repository(source, 'test_first.py', content)
+            (source / 'tests/integration/test_second.py').write_text(content)
+            result, output = self._run_fixture(root, source, '--scope', 'root')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            tasks = json.loads((output / 'summary.json').read_text())['tasks']
+            self.assertEqual(len(tasks), 2)
+            self.assertTrue(all(task['status'] == 'passed' for task in tasks))
+            self.assertEqual(len({task['worker'] for task in tasks}), 2)
+            self.assertTrue(all(task['environment']['UV_CACHE_DIR'] == str(root / 'cache') for task in tasks))
+            self.assertTrue(all(not Path(task['worker_cache']).exists() for task in tasks))
+            cached = list((root / 'cache').rglob('cache_probe/__init__.py'))
+            self.assertTrue(cached)
+            self.assertTrue(all(path.read_text() == 'VALUE = "original"\n' for path in cached))
 
     def test_existing_external_budget_path_keeps_root_targets_in_each_task_source(self):
         for shards in (1, 2):
@@ -878,14 +934,14 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertTrue(Path(task['cwd']).exists())
             self.assertFalse(Path(task['worker_cache']).exists())
 
-    def test_interrupt_waits_for_cache_copy_before_removing_worker(self):
+    def test_interrupt_waits_for_dependency_copy_before_removing_worker(self):
         with tempfile.TemporaryDirectory() as temporary:
             root, source = Path(temporary), Path(temporary) / 'input'
             self._fixture_repository(source, 'test_wait.py', 'def test_wait():\n    assert True\n')
             cache, modules, output, binaries = root / 'cache', root / 'node_modules', root / 'output', root / 'bin'
             for path in (cache, modules, binaries):
                 path.mkdir()
-            (cache / 'item').write_text('cached')
+            (modules / 'item').write_text('dependency')
             wrapper = binaries / 'cp'
             wrapper.write_text('#!/bin/sh\nset -e\ntouch "$COPY_STARTED"\nsleep 2\n/usr/bin/cp "$@"\n'
                                'cmp "$COPY_SOURCE" "$COPY_TARGET"\ntouch "$COPY_FINISHED"\n')
@@ -893,7 +949,7 @@ class IntegrationRunnerTest(unittest.TestCase):
             environment = os.environ.copy()
             environment.update(PATH=str(binaries) + os.pathsep + environment['PATH'],
                                COPY_STARTED=str(root / 'started'), COPY_FINISHED=str(root / 'finished'),
-                               COPY_SOURCE=str(cache / 'item'), COPY_TARGET=str(output / 'workers/0/uv-cache/item'))
+                               COPY_SOURCE=str(modules / 'item'), COPY_TARGET=str(output / 'workers/0/node_modules/item'))
             process = subprocess.Popen([sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
                 '--uv-cache', str(cache), '--node-modules', str(modules), '--output', str(output), '--jobs', '1'],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=environment)
