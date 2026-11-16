@@ -21,6 +21,7 @@ from test_camctl_c_module_roundtrip import _report_with_statuses
 from test_osmo_builtin_timelapse_roundtrip import _action, _records
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 联合链")
 @pytest.mark.parametrize("native", [False, True], ids=["ordinary", "native-timelapse"])
 def test_installed_action6_segmented_default_scope_obtain_and_client_ack(

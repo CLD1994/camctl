@@ -53,6 +53,7 @@ def _token(text: str, path: tuple[str | int, ...]) -> str:
     return value
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("shutter", ("1/1500", "1/3000", "1/4000"))
 def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
     tmp_path: Path, installed_camctl: InstalledCamctl, shutter: str,
@@ -143,6 +144,7 @@ def _upload_fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     return media, target, delivery
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("media_first", (False, True))
 def test_installed_hasselblad_files_upload_preserves_arrival_order(
     tmp_path: Path, installed_camctl: InstalledCamctl, media_first: bool,
@@ -699,6 +701,7 @@ class PhotoWorld:
         }))
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("case", NORMAL_CASES, ids=lambda case: case.name)
 def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_demo, monkeypatch, case):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
@@ -940,6 +943,7 @@ def _fault_pair(world, capture):
     return outputs
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '1/1500'), PhotoCase('raw', 'device', '1/3000')), ids=lambda c:c.name)
 def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, installed_camctl, host_demo, monkeypatch, case):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
@@ -989,6 +993,7 @@ def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, inst
         world.close()
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '1/1500'), PhotoCase('jpeg', 'device', '1/3000')), ids=lambda c:c.name)
 def test_installed_hasselblad_complete_commit_receipt_loss_reuses_request(tmp_path, installed_camctl, host_demo, monkeypatch, case):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
@@ -1071,6 +1076,7 @@ def _no_private_details(action, world):
     assert str(world.root) not in json.dumps(action, default=str)
 
 
+@pytest.mark.acceptance
 def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, installed_camctl, host_demo, monkeypatch):
     case = PhotoCase('jpeg', 'host', '1/4000', focus_override=('MF', 5))
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
@@ -1147,6 +1153,7 @@ def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, insta
         world.close()
 
 
+@pytest.mark.acceptance
 def test_installed_hasselblad_report_rebuild_keeps_frozen_bytes(tmp_path, installed_camctl, host_demo, monkeypatch):
     case = PhotoCase('jpeg', 'device', '1/1500', focus_override=('MF', None))
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)

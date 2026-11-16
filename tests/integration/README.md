@@ -4,7 +4,7 @@
 
 camctl 的测试启动入口使用[内存预算测试](../../docs/camctl/memory-budget-testing.md)中的统一配置。被测 CLI 及其全部后代共享内存与交换空间合计预算，C host、客户端构建及 pytest 在组外；权限或合计限额与峰值接口不足时明确报环境错误。sudo 启动器可创建本次独立委派目录，测试和业务继续使用调用用户身份。进程退出码与预算收据分别核对，业务完整性继续由原测试断言验证；严格无交换能力单独验收。
 
-完整跨组件回归可以使用[隔离并行入口](../../scripts/README.md#隔离并行集成测试)：`--scope root` 从实际源码发现全部根 pytest 模块，`--scope node` 发现全部 Node 集成文件，默认 `--scope all` 同时包含这两层与 camctl 组件目录。没有历史失败的短模块保持一个进程与一次模块／会话准备；历史长模块或含失败的模块按当前真实收集结果分片，各片拥有独立准备，完整 Hasselblad 十二组正常链不被筛掉。`--target` 可选文件或 pytest nodeid，适合定向验证。日常默认只运行功能测试；已标记性能专项仅在 `--test-kind performance` 或 `--test-kind all` 下运行，直接 pytest 也使用同一开关。分类依据与功能九秒目标由[共享测试规则](../../.agents/rules/testing.md#控制集成测试成本)维护。
+完整跨组件回归可以使用[隔离并行入口](../../scripts/README.md#隔离并行集成测试)：`--scope root` 从实际源码发现全部根 pytest 模块，`--scope node` 发现全部 Node 集成文件，默认 `--scope all` 同时包含这两层与 camctl 组件目录。没有历史失败的短模块保持一个进程与一次模块／会话准备；历史长模块或含失败的模块按当前真实收集结果分片，各片拥有独立准备，完整 Hasselblad 十二组正常链不被筛掉。`--target` 可选文件或 pytest nodeid，适合定向验证。日常默认只运行功能测试；性能专项使用 `--test-kind performance`，真实构建并独立安装组件的完整链使用 `--test-kind acceptance`；二者均默认不运行，`--test-kind all` 才选择全部。安装验收不设九秒目标或额外总耗时上限，原业务超时与防挂起保护保持。直接 pytest 也使用相同开关。分类依据与功能九秒目标由[共享测试规则](../../.agents/rules/testing.md#控制集成测试成本)维护。
 
 直接运行本目录的测试时，客户端构建可能改写当前工作区的 `apps/client/dist`，wheel 构建会同步 camctl 包资源，因而不能仅凭 pytest 临时目录不同就并发使用同一源码。并行入口为每个任务准备独立源码、临时根和安装环境，为每个执行槽复制独立 uv 缓存与客户端依赖；同一槽内顺序复用依赖。C 构建使用现有辅助中的随机唯一目录或任务临时目录。依赖、Chromium、媒体工具与部署版 Python 3.11 仍须事先准备，入口不连接真实设备。命令、资源边界、进度和失败回执的完整说明由上述入口文档统一维护。
 
@@ -19,7 +19,7 @@ camctl 的测试启动入口使用[内存预算测试](../../docs/camctl/memory-
 本用例需要 Python 3.11、uv 离线缓存中的锁定依赖与构建工具，以及已按客户端运行说明安装的 Node.js 24 依赖和 Chromium。浏览器目标由用例先构建当前网页，再通过测试专用 `CAMCTL_TEST_CAPABILITIES_FILE` 注入安装版导出；客户端独立组件测试仍使用自己的合成夹具，不依赖 Python。
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_capability_declarations.py -q
+apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance tests/integration/test_device_capability_declarations.py -q
 ```
 
 `report-dependencies.test.mjs` 与 `report-dependency-conditions.test.mjs` 验证公共 Schema、数据库字段登记、规格 SQL 和检查器之间的接缝，包含错误登记反例与具体条件场景。运行入口见[检查脚本](../../scripts/README.md)；通过这些检查不表示真实 CLI 已经接入报告生成。
@@ -41,7 +41,7 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_capabili
 `test_action6_builtin_timelapse_roundtrip.py` 使用独立安装 wheel、真实 C host、CLI、SQLite 和受约束的 ADB 文件替身，验证 Action6 原生延时从原 `SENT` 恢复自然完成期限：冻结业务时钟在第 329 秒仍不发 STOP 或读取，第 330 秒后进入结果核实；设备目标保持 300 秒、启动余量为 0、结果余量为 30 秒。`video_jpeg` 输出登记非空 MP4、可选配对 LRF 和独立 JPEG 原片，并分别取回；按精确 output ID 删除 LRF 后 MP4 仍在，删除 MP4 后 JPEG 仍在。该链无真实相机，不证明实际 STOP 或设备端采集；合成预览／照片字节不证明媒体格式质量。
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_timelapse_roundtrip.py -q
+apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance tests/integration/test_action6_builtin_timelapse_roundtrip.py -q
 ```
 
 ### Action6 分段视频安装版联合链
@@ -53,7 +53,7 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin
 ```bash
 UV_PYTHON="$PWD/apps/camctl/.venv311/bin/python" \
   UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" \
-  apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_segmented_roundtrip.py -q
+  apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance tests/integration/test_action6_builtin_segmented_roundtrip.py -q
 ```
 
 `test_timelapse_time_parameters.py` 使用 Action6 与 OSMO 360 II 的生产候选 Schema，经测试任务工厂、真实 `describe`、Python 精确校验、Chromium 中的客户端共享模块及 Node.js 后端真实导出，遍历同源时间域并核对精确词元、严格关系、型号曝光及输出。最短参数经过受理、未启动取消、报告发布和客户端导入，验证估算信息不进入生效参数或报告；该路径不执行设备命令。生成器在临时资料副本中验证漂移检查和重新生成。此时间域测试不直接调用正式合同；Action6 和 OSMO 360 II 的正式安装版业务链分别由[Action6 原生有限延时安装版联合链](#action6-原生有限延时安装版联合链)和[OSMO 内置合同联合链](#osmo-360-ii-正式内置合同安装版联合链)验证。
@@ -66,7 +66,7 @@ apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parame
 `test_hasselblad_photo_parameters.py` 构建并独立安装当前 wheel，由安装版 `describe` 导出 Hasselblad 能力，再将同一份有限参数用例交给安装版 camctl、Chromium 中的客户端共享校验和 Node.js 后端导出。用例只保留有代表性的 RAW/JPEG、M/A/S/P、白平衡、对焦、短快门和色温边界，以及互斥字段、tint、缺项与 `null` 反例；每项保存原始 `params_text` 和独立预期，不复制完整档位。安装版以一份计划受理全部参数案例，并逐项核对保存的动作；计划只受理，不运行设备工具。
 
 ```bash
-UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_hasselblad_photo_parameters.py -q
+UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project apps/camctl --group test --python 3.11 pytest --test-kind acceptance tests/integration/test_hasselblad_photo_parameters.py -q
 ```
 
 ### 正式源文件清理的安装版联合链
@@ -84,7 +84,7 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 此模块与原 OSMO 模块可以在同一命令中顺序运行。需要部署版 Python 3.11、uv 缓存及构建依赖、客户端 Node.js 依赖、C 构建工具和可用的 ffmpeg／ffprobe；缺少媒体工具会明确跳过，不能据此宣称完整验收。执行命令为：
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest \
+apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance \
   tests/integration/test_device_file_cleanup_roundtrip.py \
   tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
 ```
@@ -109,7 +109,7 @@ ADB／Hasselblad 文件是受合同约束的软件样例；本链不连接真实
 各组先完整应用报告并发送 ACK，再逐份导入媒体，核对同摘要文件仍按独立交付关联；原请求重送必须实际完成后才检查交付身份不变。设备键与产物编号不同的排序反例由组件的 [test_segment_selection_order.py](../../apps/camctl/tests/integration/outputs/test_segment_selection_order.py) 单独验证：跨批读取按已保存范围序号返回，已清理成员保留自己的失败，不选范围外文件。安装端当前按设备键分配产物编号，两项证据分别记录。
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py -q
+apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py -q
 ```
 
 这些场景使用软件字节样例与确定的提交观察门闩，不连接真实相机。ARM、真实文件时长、解码、段间边界和现场异常多录仍按分段计划 P9 独立验收。
@@ -139,7 +139,7 @@ OSMO 原生尾段场景在第一块 64 KiB 进度可靠保存、实际读取仍�
 ADB 提供的 OSV／LRF 是合成字节样例，不证明真实媒体可解码、设备画质、帧率或采集时长；受控时钟边界验证也不等于真实设备计时。本链的执行命令为：
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
+apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
 ```
 
 `client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <凭据路径>` 是测试接缝。存储目录应含真实 `describe` 输出的 `device-capabilities.json`；用例 JSON 显式包含非空字符串 `action_type`、`device_id`、`action_name`，以及 `scheduled_at` 和 `cases`。每项用例有 `name`、保存完整原数字词元的 `params_text` 字符串和独立预期；可选的 `action_name` 为该项导出指定动作名，省略时使用顶层名称。浏览器共享校验与客户端后端共享校验都使用输入中的动作类型和设备标识，真实导出使用对应的动作类型、设备标识和动作名；必需身份字段或显式提供的动作名为空时命令明确报错。凭据按同序记录 `browser_valid`、`shared_valid`、`export_valid`、两处未改写的参数正文，以及成功导出的完整 JSON 正文或明确的 `invalid_plan`。测试命令不接收产品候选能力开关，也不维护设备完整参数枚举。
@@ -166,7 +166,7 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_ti
 CAMCTL_HB_TEST_CLIENT_ROOT=/absolute/private/candidate \
   UV_PYTHON="$PWD/apps/camctl/.venv311/bin/python" \
   UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" \
-  apps/camctl/.venv311/bin/python -m pytest tests/integration/test_hasselblad_photo_roundtrip.py -q
+  apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance tests/integration/test_hasselblad_photo_roundtrip.py -q
 ```
 
 测试驱动的独立入口包括 `browser-photo-export <store> <input.json> <plan> <receipt>`、`browser-plan-export <store> <body.json> <plan> <receipt>` 和 `upload-files <store> <manifest.json> <receipt>`；拍摄世界通过私有 `session` 连接按序调用这些操作及 `application-photo-export`，存储目录固定为该世界的 `client-store`。照片输入含 `device_id/action_type/action_name/case_name/params_text/scheduled_at`，精确参数以正文字符串传递。普通计划入口也操作真实网页并下载文件。上传清单是非空 `[{path,kind:"report"|"media"}]`，图片使用 media；媒体先到不要求已有报告。凭据包含实际 import、媒体、报告覆盖和原始快门正文；原有 import 命令仍是直接报告应用接缝，与上传证据分别解释。

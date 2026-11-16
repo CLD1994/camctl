@@ -536,6 +536,7 @@ def _assert_runtime_paths_external(
     assert package.root in package.python.parents
 
 
+@pytest.mark.acceptance
 def test_installed_osmo_describe_exposes_both_formal_capture_types(osmo_package, tmp_path):
     """源码与独立 wheel 均通过正式内置登记导出两类 OSMO 拍摄能力。"""
     package = osmo_package
@@ -589,6 +590,7 @@ def test_installed_osmo_describe_exposes_both_formal_capture_types(osmo_package,
         "osmo360ii_record", "osmo360ii_timelapse"]
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="安装版 C host 链在 Linux 验证")
 @pytest.mark.parametrize(
     "action_type,include_preview",

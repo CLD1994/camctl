@@ -66,6 +66,7 @@ def _assert_action6_recovery_boundary_empty(
                 and call.get("started_ns", 0) >= recovery_started_ns]
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 联合链")
 def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs(
         tmp_path, host_demo, osmo_package, monkeypatch):

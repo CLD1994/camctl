@@ -133,6 +133,7 @@ def _action(report, name):
     return actions[0]
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="真实内建 ADB 进程与安装版 C host 链在 Linux 验证")
 def test_installed_builtin_action6_capture_obtain_claim_and_ack(
     tmp_path, host_demo, action6_package,

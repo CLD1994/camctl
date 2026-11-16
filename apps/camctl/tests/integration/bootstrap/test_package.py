@@ -4,6 +4,8 @@
 这是集成测试：执行包构建与安装，不连接网络下载 Schema，不访问真实设备。
 """
 
+import pytest
+
 import hashlib
 import json
 import runpy
@@ -56,6 +58,7 @@ def _venv_cli(env_dir: Path) -> Path:
     return env_dir / "bin" / "camctl"
 
 
+@pytest.mark.acceptance
 def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir()

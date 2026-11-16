@@ -23,6 +23,7 @@ from .test_distribution import (
 )
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
 def test_installed_device_photo_reclaims_then_downloads_both_sources_twice(
         installed, tmp_path, capture_format):

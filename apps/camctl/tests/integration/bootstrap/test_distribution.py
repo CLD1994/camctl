@@ -510,6 +510,7 @@ def _photo_driver() -> dict:
     }
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("model", ["dji-action6", "dji-osmo360-ii"])
 def test_installed_and_checkout_cli_have_same_camera_catalog(installed, model):
     config = installed.deploy / f"{model}.toml"
@@ -610,6 +611,7 @@ def _installed_timelapse_capabilities(installed_camera_capabilities, tmp_path, s
     return deployment, capabilities
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("stem", ["action6-record", "action6-timelapse", "osmo360ii-record", "osmo360ii-timelapse"])
 def test_installed_camera_sample_is_accepted_from_actual_describe(
         installed, installed_camera_capabilities, demo_generator, tmp_path, stem):
@@ -676,6 +678,7 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(
     assert json.loads(rows[0][1]) == expected
 
 
+@pytest.mark.acceptance
 def test_installed_osmo_camera_config_is_single_device_default_config(installed):
     """安装资源只绑定 OSMO 设备，使用默认状态库和交接目录。"""
     config_path = installed.deploy / "osmo360ii-config.toml"
@@ -696,6 +699,7 @@ def test_installed_osmo_camera_config_is_single_device_default_config(installed)
     assert device["software_recovery"]["enabled"] is True
 
 
+@pytest.mark.acceptance
 def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, demo_generator, tmp_path):
     generator = demo_generator
     maximum = "9223372036854775807"
@@ -718,6 +722,7 @@ def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, demo_gen
                f"parse_exact_json(Path({str(target)!r}).read_text()))")
 
 
+@pytest.mark.acceptance
 def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, demo_generator, tmp_path):
     """安装物的 Hasselblad 配置与样例经真实 describe 和 submit 组合运行。"""
     resource_names = (
@@ -866,6 +871,7 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, de
         installed_sample.write_bytes(original_sample)
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name == "nt", reason="受管工具替身使用 POSIX 可执行脚本")
 @pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
 def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
@@ -1238,6 +1244,7 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
     assert _assert_hasselblad_capture_trajectory(call_log, capture_format) == calls_after_capture
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("stem,driver_id,device_id", [
     ("osmo360ii-record", "dji-osmo360-ii", "osmo360ii"),
     ("action6-timelapse", "dji-action6", "action6"),
@@ -1263,6 +1270,7 @@ def test_installed_sample_rejects_missing_matching_capability_before_plan(instal
     assert not target.exists()
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("stem", ["action6-timelapse", "osmo360ii-timelapse"])
 def test_installed_generator_rejects_duplicate_matching_parameter_type(
         installed, installed_camera_capabilities, demo_generator, tmp_path, stem):
@@ -1288,6 +1296,7 @@ def test_installed_generator_rejects_duplicate_matching_parameter_type(
     assert not call_log.exists() or not call_log.read_text(encoding="utf-8").strip()
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("stem", ["action6-timelapse", "osmo360ii-timelapse"])
 @pytest.mark.parametrize("case,interval_s,duration_s", [
     ("equal", 300, 300),
@@ -1322,6 +1331,7 @@ def test_installed_generator_rejects_invalid_timelapse_time_before_plan(
     assert not call_log.exists() or not call_log.read_text(encoding="utf-8").strip()
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("stem,args", [("obtain", []), ("obtain", ["--source-action-id", "01"]),
                                       ("report-ack", []), ("report-ack", ["--last-report-id", "0"])])
 def test_installed_sample_requires_valid_source_and_ack_ids(installed, demo_generator, tmp_path, stem, args):
@@ -1333,6 +1343,7 @@ def test_installed_sample_requires_valid_source_and_ack_ids(installed, demo_gene
     assert not target.exists()
 
 
+@pytest.mark.acceptance
 def test_installed_emergency_errors_keep_registered_details(installed: _Installed) -> None:
     """正式安装包保留两类应急错误登记，并拒绝不完整或无效的详情。"""
     result = _probe(installed, """
@@ -1380,6 +1391,7 @@ print("validated")
     assert result == "validated"
 
 
+@pytest.mark.acceptance
 def test_distribution_works_outside_repository(installed: _Installed) -> None:
     """安装后的发行物独立完成 init/describe/submit 与设备替身 run。"""
     # 安装来源：包来自安装环境，不经源码仓库；包资源自包含可读。
@@ -1539,6 +1551,7 @@ def test_distribution_works_outside_repository(installed: _Installed) -> None:
         f"stderr={failed.stderr!r}")
 
 
+@pytest.mark.acceptance
 def test_missing_package_resource_fails_init(installed: _Installed) -> None:
     """包资源缺失时 init 明确失败，不静默创建不完整状态库。"""
     origin = _probe(installed, "import camctl, sys; sys.stdout.write(camctl.__file__)")
@@ -1555,6 +1568,7 @@ def test_missing_package_resource_fails_init(installed: _Installed) -> None:
     assert "sqlite-runtime.json" in failed.stderr, failed.stderr
 
 
+@pytest.mark.acceptance
 def test_noncompliant_sqlite_fails_init(installed: _Installed) -> None:
     """实际链接的 SQLite 不满足统一运行条件时 init 明确拒绝。
 
@@ -1586,6 +1600,7 @@ def test_noncompliant_sqlite_fails_init(installed: _Installed) -> None:
     assert failed.stdout == ""
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != 'posix', reason='部署侧通知描述符继承')
 def test_installed_motor_plan_pipe_and_report_use_only_packaged_resources(installed):
     """在仓库外消费共享 Schema、SQL、登记以及真实 submit/run 报告。"""

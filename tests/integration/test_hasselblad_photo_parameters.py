@@ -303,6 +303,7 @@ def _value_token(document: str, field: str) -> str:
     return match.group(1)
 
 
+@pytest.mark.acceptance
 def test_installed_hasselblad_parameter_validation_agrees_across_consumers(
     tmp_path: Path,
     installed_camctl: InstalledCamctl,

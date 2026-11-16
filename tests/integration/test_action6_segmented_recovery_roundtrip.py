@@ -714,6 +714,7 @@ def _cleanup_inspection_inputs(demo, scenario, source_id, failure):
     return retained
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 恢复链")
 @pytest.mark.parametrize(
     (
@@ -1269,6 +1270,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         demo.stop()
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 恢复链")
 def test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters(
         tmp_path, host_demo, action6_package, monkeypatch, client_deployment,
@@ -1470,6 +1472,7 @@ def _matrix_actions(templates, phase: str, scheduled_at: str) -> list[dict]:
     return actions
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX 测试链")
 def test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions(
     tmp_path, action6_package,

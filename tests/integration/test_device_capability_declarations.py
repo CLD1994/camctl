@@ -150,6 +150,7 @@ def _describe(package, path, **kwargs):
     return text
 
 
+@pytest.mark.acceptance
 def test_installed_declarations_match_checkout_and_protocol_resources(package, tmp_path):
     config = _config(package, tmp_path / "builtin")
     installed = _describe(package, config)
@@ -172,6 +173,7 @@ def test_installed_declarations_match_checkout_and_protocol_resources(package, t
     assert not (tmp_path / "builtin/state.db").exists(), "describe 不应初始化状态库"
 
 
+@pytest.mark.acceptance
 def test_installed_arbitrary_driver_keeps_empty_actions_and_individual_sources(package, tmp_path):
     config = _config(package, tmp_path / "arbitrary", fixtures=True)
     text = _describe(package, config, fixture=True)
@@ -183,6 +185,7 @@ def test_installed_arbitrary_driver_keeps_empty_actions_and_individual_sources(p
     assert devices["future-delete"]["delete_supported"] is True
 
 
+@pytest.mark.acceptance
 def test_installed_source_change_keeps_accepted_execution_definition(package, tmp_path):
     directory = tmp_path / "source-change"
     config = _config(package, directory)
@@ -217,6 +220,7 @@ def test_installed_source_change_keeps_accepted_execution_definition(package, tm
     assert not (package.root / "device-calls").exists()
 
 
+@pytest.mark.acceptance
 def test_installed_document_survives_client_loader_http_and_invalid_reload(package, tmp_path):
     config = _config(package, tmp_path / "client-config", fixtures=True)
     text = _describe(package, config, fixture=True)
@@ -237,6 +241,7 @@ def test_installed_document_survives_client_loader_http_and_invalid_reload(packa
     assert result["empty"] == {"devices": []}
 
 
+@pytest.mark.acceptance
 def test_installed_metadata_reaches_parameter_form_and_device_guide(package, client_build, tmp_path):
     config = _config(package, tmp_path / "browser-config")
     capabilities = tmp_path / "installed-capabilities.json"
@@ -247,6 +252,7 @@ def test_installed_metadata_reaches_parameter_form_and_device_guide(package, cli
                 cwd=CLIENT, env={"CAMCTL_TEST_CAPABILITIES_FILE": str(capabilities)}, timeout=180)
 
 
+@pytest.mark.acceptance
 def test_installed_sources_control_browser_cleanup_across_reload_and_restart(package, client_build, tmp_path):
     directory = tmp_path / "visibility-config"
     config = _config(package, directory, fixtures=True)

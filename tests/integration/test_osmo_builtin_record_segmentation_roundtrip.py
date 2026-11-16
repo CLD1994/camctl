@@ -73,6 +73,7 @@ def _resume_marker(
     return demo, observed, failure
 
 
+@pytest.mark.acceptance
 @pytest.mark.skipif(os.name != "posix", reason="安装版 C host 链在 Linux 验证")
 @pytest.mark.parametrize(
     "scenario,indexes,default_count,status",

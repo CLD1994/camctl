@@ -26,7 +26,7 @@
 /absolute/venv/bin/python scripts/run-integration.py --scope camctl \
   --target apps/camctl/tests/integration/motor \
   --target apps/camctl/tests/integration/logging_runtime --jobs 2
-/absolute/venv/bin/python scripts/run-integration.py \
+/absolute/venv/bin/python scripts/run-integration.py --test-kind acceptance \
   --target 'tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes' \
   --node-modules /absolute/client/node_modules --jobs 1
 ```
@@ -41,7 +41,7 @@
 /absolute/venv/bin/python scripts/run-integration.py --plan-only \
   --jobs 4 --output /tmp/camctl-integration-plan
 
-/absolute/venv/bin/python scripts/run-integration.py --plan-only \
+/absolute/venv/bin/python scripts/run-integration.py --test-kind acceptance --plan-only \
   --scope root --target 'tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip' \
   --force-root-shards --root-shards 4 --jobs 4 --output /tmp/camctl-forced-plan
 ```

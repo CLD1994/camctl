@@ -45,7 +45,7 @@ v2 使用 `memory.max` 配合 `memory.swap.max=0`，以零交换约束使内存�
 
 ## 执行入口
 
-在仓库根使用已准备测试依赖的 Python 3.11。容量专项通过 `--test-kind performance` 显式选择；日常功能测试默认不运行这些负载。普通跨组件功能测试仍遵守原有进程组预算，预算控制工具的功能测试也不因此排除。需要 sudo 委派时使用测试启动器，预算参数由启动器传给原测试命令：
+在仓库根使用已准备测试依赖的 Python 3.11。容量专项通过 `--test-kind performance` 显式选择；日常功能测试默认不运行这些负载。普通跨组件功能及按需安装验收中的 CLI 仍遵守原有进程组预算，预算控制工具的功能测试也不因此排除。需要 sudo 委派时使用测试启动器，预算参数由启动器传给原测试命令：
 
 ```bash
 python scripts/run-memory-budget.py --camctl-memory-limit 2GiB -- \

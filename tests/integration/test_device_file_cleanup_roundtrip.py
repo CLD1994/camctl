@@ -30,6 +30,7 @@ def test_cleanup_hasselblad_tool_rejects_unrecognized_setting(tmp_path):
     assert refused.returncode != 0, "清理替身意外接受了未声明的相机参数"
 
 
+@pytest.mark.acceptance
 def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         started = time.monotonic()
@@ -57,6 +58,7 @@ def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatc
             assert outputs[str(world.sources[source]["id"])]["availability"] == "cleaned"
 
 
+@pytest.mark.acceptance
 def test_cleanup_new_request_for_cleaned_output(tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         world.clean_exact("osv")
@@ -111,6 +113,7 @@ def _interrupt(world, *, fault="before"):
     return {"request": request, "attempt": attempt}, intent
 
 
+@pytest.mark.acceptance
 def test_cleanup_interrupted_delete_absent(tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         original, intent = _interrupt(world, fault="after")
@@ -125,6 +128,7 @@ def test_cleanup_interrupted_delete_absent(tmp_path, cleanup_osmo_source, monkey
         world.assert_terminal_report(original["request"], "SUCCEEDED")
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("partition", ["P1", "P2", "P3"])
 def test_cleanup_query_present_or_unknown(partition, tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
@@ -170,6 +174,7 @@ def test_cleanup_query_present_or_unknown(partition, tmp_path, cleanup_osmo_sour
         world.assert_terminal_report(original["request"], expected, expected_error)
 
 
+@pytest.mark.acceptance
 @pytest.mark.parametrize("phase", ["commit_unknown", "terminal_companions"])
 def test_cleanup_saved_result_and_terminal_companions(phase, tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
@@ -201,6 +206,7 @@ def test_cleanup_saved_result_and_terminal_companions(phase, tmp_path, cleanup_o
         world.assert_terminal_report(request, "SUCCEEDED")
 
 
+@pytest.mark.acceptance
 def test_cleanup_cancel_inflight_delete_recover(tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         world.write_config(max_d=2, max_q=1, timeout="30", terminate_grace="30")
