@@ -6,7 +6,7 @@ from ..capture.test_capture_contract import _NOW
 
 _RESULT_TIME = _NOW + 60_000_000
 
-async def _large_fixture(tmp_path,count):
+async def _large_fixture(tmp_path,count,start_number=0):
     """正式装配只负责准备；读取与计量前完整关闭其线程和文件责任。"""
     from ..support.capture import capture_test_session
     from ..support.result_cases import CaseClock
@@ -26,10 +26,10 @@ async def _large_fixture(tmp_path,count):
             return await session.runtime(
                 owned, driver=driver, evidence=_PAGE_EVIDENCE, results=ResultsDouble({}),
                 stopper=stop, wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
-        return await _prepare_large_fixture(tmp_path, count, runtime_factory, clock)
+        return await _prepare_large_fixture(tmp_path, count, runtime_factory, clock, start_number)
 
 
-async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock):
+async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock,start_number=0):
     """从真实P2端口逐页建跨CAM目录的夹具；准备阶段也只持有128项。"""
     import sqlite3
     from itertools import islice
@@ -64,7 +64,7 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock):
         for offset in range(0,count,128):
             entries=[]
             for number in range(offset,min(offset+128,count)):
-                directory,index=divmod(number,999)
+                directory,index=divmod(start_number+number,999)
                 name=f'/DCIM/CAM_{directory+1:03d}/CAM_20261021090000_{index+1:04d}_D.OSV'
                 entries.append({'identity':name,'locator':{'path':name},'complete':True,
                     'size_bytes':10 if number in (0,count-1) else 0,'kind':'video','format_id':'osv'})
@@ -106,7 +106,7 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock):
             previous_id=selected[-1][0]
         _ok(repo.fix_members(ref,_RESULT_TIME,new_operation_key(),owned))
         facts=CompletionFacts(EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,
-            EvidenceState.CONFIRMED,SegmentKey(1,1),EvidenceState.CONFIRMED,EvidenceState.UNKNOWN,True,False)
+            EvidenceState.CONFIRMED,SegmentKey(start_number//999+1,start_number%999+1),EvidenceState.CONFIRMED,EvidenceState.UNKNOWN,True,False)
         state=SegmentAccumulator(ref,60000,facts.start_key)
         for member in iter_segment_members(ref,owned):state=advance_segment_assessment(state,member)
         result=finish_segment_assessment(state,facts)
@@ -126,7 +126,7 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock):
 
 
 
-async def generate(directory, count):
+async def generate(directory, count, start_number=0):
     from contextlib import closing
     import gzip
     import hashlib
@@ -136,7 +136,7 @@ async def generate(directory, count):
     import time
     started=time.monotonic()
     directory.mkdir(parents=True, exist_ok=False)
-    owned, runtime, repo, ref, history = await _large_fixture(directory, count)
+    owned, runtime, repo, ref, history = await _large_fixture(directory, count, start_number)
     path=history.path
     try:
         boundary=history.current_boundary()
@@ -153,6 +153,8 @@ async def generate(directory, count):
         metadata={'count':count,'action_id':ref.action_id,'scan_id':ref.scan_id,
             'final_page_event_id':ref.final_page_event_id,'version':ref.version,
             'boundary':{'txn_id':boundary.txn_id,'last_event_id':boundary.last_event_id}}
+        if start_number:
+            metadata['start_number']=start_number
         owned.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
     finally:
         owned.connection.close()
@@ -247,7 +249,10 @@ def verify_output(directory, manifest):
             assert {row['id']:row for row in values}==snapshot[table]
             assert {row['id'] for row in values}=={row[0] for row in db.execute(f'SELECT id FROM {table}')}
         indexes=[row['segment_index'] for row in selected['segment_members']]
-        assert indexes==[number % 999 + 1 for number in range(size)]
+        start_number=manifest.get('start_number',0)
+        assert indexes==[number % 999 + 1 for number in range(start_number,start_number+size)]
+        assert [row['directory_number'] for row in selected['segment_members']]==[
+            number // 999 + 1 for number in range(start_number,start_number+size)]
 
 
 if __name__ == '__main__':

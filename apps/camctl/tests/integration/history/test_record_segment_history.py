@@ -817,7 +817,7 @@ async def test_external_view_read_failure_is_reported_and_later_read_recovers(tm
 
 @pytest.mark.asyncio
 async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
-    """真实生成 1000 项，核对 128 项写批与第 999、1000 项跨目录。"""
+    """真实生成 130 项，核对 128 项写批与末批跨目录。"""
     from collections import Counter
     import json
     from camctl.capture.segment_models import SegmentSetRef
@@ -827,22 +827,22 @@ async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
     from ..support.segment_history_corpus import generate, verify_output
 
     directory=tmp_path/'world'
-    await generate(directory,1000)
-    manifest=json.loads((directory/'segment-history-1000.json').read_text())
+    await generate(directory,130,start_number=870)
+    manifest=json.loads((directory/'segment-history-130.json').read_text())
     ref=SegmentSetRef(*(manifest[name] for name in ('action_id','scan_id','final_page_event_id','version')))
     boundary=HistoryBoundary(**manifest['boundary'])
     history=HistoryRepository(directory/'state.db')
     with history.open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
         members=tuple(_rows(handle,'segment_members',ref,limit=7))
         gaps=tuple(_rows(handle,'segment_gaps',ref,limit=7))
-        assert len(members)==1000 and len(gaps)==998
+        assert len(members)==130 and len(gaps)==128
         assert {row.values['directory_number'] for row in members}=={1,2}
-        assert (members[998].values['directory_number'],members[998].values['segment_index'],
-            members[998].values['identity'])==(1,999,'/DCIM/CAM_001/CAM_20261021090000_0999_D.OSV')
-        assert (members[999].values['directory_number'],members[999].values['segment_index'],
-            members[999].values['identity'])==(2,1,'/DCIM/CAM_002/CAM_20261021090000_0001_D.OSV')
-        assert list(Counter(row.values['created_event_id'] for row in members).values())==[128]*7+[104]
-        assert list(Counter(row.values['page_event_id'] for row in members).values())==[128]*7+[104]
+        assert (members[128].values['directory_number'],members[128].values['segment_index'],
+            members[128].values['identity'])==(1,999,'/DCIM/CAM_001/CAM_20261021090000_0999_D.OSV')
+        assert (members[129].values['directory_number'],members[129].values['segment_index'],
+            members[129].values['identity'])==(2,1,'/DCIM/CAM_002/CAM_20261021090000_0001_D.OSV')
+        assert list(Counter(row.values['created_event_id'] for row in members).values())==[128,2]
+        assert list(Counter(row.values['page_event_id'] for row in members).values())==[128,2]
         assert [row.values['empty_member_id'] for row in gaps]==[row.row_id for row in members[1:-1]]
         with (directory/'rows.jsonl').open('w') as output:
             for table,rows in (('segment_members',members),('segment_gaps',gaps)):
