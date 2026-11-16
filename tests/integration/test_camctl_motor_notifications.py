@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from _client_session import ClientSession
 from _wsl_host_demo import query_state
 from camctl_fixtures import Deployment, future_schedule, photo_file, stub_driver_spec
 
@@ -65,6 +66,28 @@ def _init(deployment: Deployment, spec: dict | None = None) -> Path:
     launcher.write_text("#!/bin/sh\n" + body, encoding="utf-8")
     launcher.chmod(0o755)
     return launcher
+
+
+def _reuse_client(deployment: Deployment, request, monkeypatch) -> None:
+    """同一测试世界复用客户端；跨客户端重开的确认由独立报告闭环验证。"""
+    if sys.platform != "linux":
+        return
+    integration = Path(__file__).resolve().parent
+    session = ClientSession(
+        ["node", "--import", "tsx", str(integration / "client_driver.ts")],
+        cwd=_REPO / "apps/client", env=os.environ.copy(),
+        root=deployment.root, timeout=120,
+    )
+    request.addfinalizer(session.close)
+    sequence = 0
+
+    def call(operation: str, *args: str, output: Path) -> dict:
+        nonlocal sequence
+        sequence += 1
+        receipt = output.with_name(f"{output.stem}-{sequence}{output.suffix}")
+        return session.call(operation, *args, output=receipt)
+
+    monkeypatch.setattr(deployment, "run_client_driver", call)
 
 
 def _motor_action(name: str, position: int, scheduled_at: str) -> dict:
@@ -239,10 +262,12 @@ def _claim_import(host: MotorHost, expected: dict[str, str]) -> tuple[dict, dict
     return report, saved
 
 
-def test_client_export_host_callback_report_import_boundaries(tmp_path, motor_host_driver):
+def test_client_export_host_callback_report_import_boundaries(
+        tmp_path, motor_host_driver, request, monkeypatch):
     """客户端导出四个边界位置，经真实 C host 接收并导入报告及累计确认。"""
     deployment = Deployment(tmp_path, devices=False)
     launcher = _init(deployment)
+    _reuse_client(deployment, request, monkeypatch)
     positions = [-2147483648, -1, 0, 2147483647]
     body = _motor_body("边界", positions)
     path, receipt = deployment.export_plan_with_client(body)
@@ -270,10 +295,12 @@ def test_client_export_host_callback_report_import_boundaries(tmp_path, motor_ho
         host.stop()
 
 
-def test_slow_callback_allows_submit_new_run_and_fifo(tmp_path, motor_host_driver):
+def test_slow_callback_allows_submit_new_run_and_fifo(
+        tmp_path, motor_host_driver, request, monkeypatch):
     """回调未返回时发送结果、报告、并行递交和下一真实 run 继续，旧新队列共同 FIFO。"""
     deployment = Deployment(tmp_path, devices=False)
     launcher = _init(deployment)
+    _reuse_client(deployment, request, monkeypatch)
     first = _motor_body("旧会话", [-1, 0, 1])
     path, _ = deployment.export_plan_with_client(first)
     host = MotorHost(deployment, motor_host_driver, launcher, path, hold=True)
@@ -299,11 +326,13 @@ def test_slow_callback_allows_submit_new_run_and_fifo(tmp_path, motor_host_drive
         host.stop()
 
 
-def test_motor_and_camera_share_cli_without_device_result_confusion(tmp_path, motor_host_driver):
+def test_motor_and_camera_share_cli_without_device_result_confusion(
+        tmp_path, motor_host_driver, request, monkeypatch):
     """电机回调阻塞不妨碍相机生产流程，报告保持各自动作的完成含义。"""
     deployment = Deployment(tmp_path)
     spec = stub_driver_spec({"1": [photo_file("motor-camera-shot")]})
     launcher = _init(deployment, spec)
+    _reuse_client(deployment, request, monkeypatch)
     scheduled = future_schedule(-1)
     body = {"name": "电机与相机共存", "actions": [
         _motor_action("电机", -12, scheduled),
