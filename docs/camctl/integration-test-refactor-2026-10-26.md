@@ -538,6 +538,12 @@ PYTHONPATH=scripts python -B -m unittest -v \
 
 同一干净源码另经预算启动器运行 `python scripts/run-integration.py --scope camctl --test-kind acceptance --jobs 1 --python <上述解释器> --target apps/camctl/tests/integration/bootstrap/test_distribution.py::test_missing_package_resource_fails_init --output <本次新目录>`，启动器指定2GiB合计预算并正常回收委派，不作为容量专项验收。该单项通过、退出零；运行器9.016秒，含启动器收场的外层9.642秒，任务7.838秒。节点准备2.200秒、执行0.597秒、收场0.002秒，合计2.799秒；wheel实际构建一次、1.983秒，已经包含于节点准备。没有请求C或网页构建。运行记录确认使用调用方缓存、离线模式与复制安装；成功私有目录及本轮调试材料均已回收，外部工具缓存仍在。静态核对标准安装消费者没有清除 `UV_LINK_MODE` 或直接改写工具缓存。本次没有修改生产代码或业务断言，不追加全量，也不将不同选择和并发下的旧时间算作同负载提速比例。
 
+**S5：客户端依赖共享（2026-11-16）。** 用户已授权继续减少客户端依赖复制。每个执行槽保留真实的私有 `node_modules` 目录，只将普通顶层包、`@scope` 目录和 `.bin` 链接到调用方已锁定的依赖；不链接其他隐藏项。Vite按任务项目位置寻找依赖入口并创建 `.vite`、`.vite-temp`，Vitest项目缓存仍在任务源码中；`XDG_DATA_HOME` 指向任务临时根，隔离Vitest的用户数据写入。候选源码、网页输出、客户端数据库和其他业务文件继续独立；生产配置和源码均不调整。
+
+以当前依赖单次准备130个入口，耗时0.0054秒，全部为符号链接；完成后移除入口目录。此前5.630秒是完整树复制，二者都不是完整业务流程的耗时，也不据此推算全量比例。最小真实进程检查证明两个槽读取同一普通包、带作用域的包和命令入口，同时各自写入不同缓存而不改外部缓存。原依赖复制已移除，中断等待检查转为仍存在的任务源码准备，继续验证阻塞工作结束后再释放执行槽。
+
+以下七个方法经 `PYTHONPATH=scripts python -B -m unittest -v` 执行，每项完整参数均以 `scripts.tests.test_run_integration.IntegrationRunnerTest.` 开头：`test_client_packages_are_shared_and_tool_caches_are_private`、`test_interrupt_waits_for_source_copy_before_removing_worker`、`test_success_releases_readonly_trees_without_changing_external_symlink_target`、`test_failed_task_keeps_readonly_source_unchanged`、`test_hasselblad_uses_built_external_candidate_from_current_source`、`test_hasselblad_observer_does_not_build_standard_artifacts`、`test_root_shards_use_current_collection_including_unmeasured_nodes`。七项通过、退出零，自报17.851秒、外层17.979秒。真实Vite、Vitest及Node消费者补验待执行，不追加全量；依赖源与冻结来源的客户端锁文件已核对相同。
+
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 
 默认范围实际补验中，组件五项通过，墙钟2.007秒、最大单项0.092秒；根范围首次七项通过、八项失败，原因是直接运行未准备已锁定的Node依赖，tsx加载器启动即报缺模块，参数校验尚未执行。核对锁文件相同后，临时只读复用已有依赖，只补八个失败参数：八项通过，墙钟12.987秒、最大单项1.889秒。测试断言、生产代码和共享依赖均未修改，临时依赖链接已移除；默认保留的20项均有对应通过结果，不将两次根运行拼成一次完整通过。全部普通节点的准备、执行和收场合计均低于九秒；没有运行任何安装验收链、性能负载或新全量。相关临时输出已按完成结果清理，选择器工作区已核对接入并释放。

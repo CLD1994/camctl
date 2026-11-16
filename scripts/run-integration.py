@@ -143,10 +143,12 @@ def command_output(command, cwd=None, env=None):
     return subprocess.check_output(command, cwd=cwd, env=env, text=True).strip()
 
 
-def copy_tree(source, destination):
+def prepare_client_dependencies(source, destination):
+    """共用已安装的包，为工具生成的隐藏目录保留私有位置。"""
     destination.mkdir(parents=True, exist_ok=True)
-    # GNU cp 在支持的文件系统上使用写时复制，否则复制文件；绝不使用硬链接。
-    subprocess.run(['cp', '-a', '--reflink=auto', str(source) + '/.', str(destination)], check=True)
+    for entry in source.iterdir():
+        if entry.name == '.bin' or not entry.name.startswith('.'):
+            (destination / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
 
 
 def remove_owned_tree(path):
@@ -261,6 +263,7 @@ def test_environment(python, project, control, private, temporary, cache):
                        PYTHONPYCACHEPREFIX=str(private / 'python-cache'), UV_PYTHON=str(python),
                        UV_PROJECT_ENVIRONMENT=str(private / 'project-env'),
                        UV_CACHE_DIR=str(cache), UV_OFFLINE='1', UV_LINK_MODE='copy',
+                       XDG_DATA_HOME=str(temporary / 'xdg-data'),
                        TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
     return environment
 
@@ -473,7 +476,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 if task['scope'] != 'camctl' and not (private / 'node_modules').exists():
                     if node_modules is None or not node_modules.is_dir():
                         raise ValueError('根与 Node 集成测试需要 --node-modules 指向已按锁文件准备的客户端依赖')
-                    await run_blocking(copy_tree, node_modules, private / 'node_modules')
+                    await run_blocking(prepare_client_dependencies, node_modules, private / 'node_modules')
                 await run_blocking(clone_snapshot, seed, work)
                 project = work / 'apps/camctl'
                 project.mkdir(parents=True, exist_ok=True)
@@ -510,7 +513,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 task['command'] = command
                 task['environment'] = {key: environment[key] for key in (
                     'PYTHONPATH', 'PYTHONPYCACHEPREFIX', 'UV_PYTHON', 'UV_PROJECT_ENVIRONMENT',
-                    'UV_CACHE_DIR', 'UV_OFFLINE', 'UV_LINK_MODE', 'TMPDIR')}
+                    'UV_CACHE_DIR', 'UV_OFFLINE', 'UV_LINK_MODE', 'XDG_DATA_HOME', 'TMPDIR')}
                 # 根测试也需要实际同步资源；仅写此任务的源码副本。
                 async def prepare(label, command, cwd):
                     preparation = {'label': label, 'command': command, 'cwd': str(cwd), 'started_utc': utc()}

@@ -717,6 +717,61 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertTrue(cached)
             self.assertTrue(all(path.read_text() == 'VALUE = "original"\n' for path in cached))
 
+    def test_client_packages_are_shared_and_tool_caches_are_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            modules, cache, output, ready = (root / name for name in ('node_modules', 'cache', 'output', 'ready'))
+            for name in ('fixture-lib', '@fixture/lib', '.bin', '.vite', '.vite-temp'):
+                (modules / name).mkdir(parents=True)
+            for name in ('fixture-lib', '@fixture/lib'):
+                (modules / name / 'index.js').write_text('module.exports = "shared";\n')
+            executable = modules / '.bin/probe'
+            executable.write_text('#!/bin/sh\nprintf "shared\\n"\n')
+            executable.chmod(0o755)
+            for name in ('.vite', '.vite-temp'):
+                (modules / name / 'sentinel').write_text('external')
+            cache.mkdir()
+            ready.mkdir()
+            content = (
+                'import os, subprocess, time\nfrom pathlib import Path\n'
+                'def test_dependencies():\n'
+                '    modules = Path("apps/client/node_modules").resolve()\n'
+                f'    external = Path({str(modules)!r})\n'
+                '    assert modules != external\n'
+                '    for name in ("fixture-lib", "@fixture", ".bin"):\n'
+                '        assert (modules / name).samefile(external / name)\n'
+                '    result = subprocess.check_output(["node", "-e", "console.log(require(\'fixture-lib\') + require(\'@fixture/lib\'))"], cwd="apps/client", text=True)\n'
+                '    assert result.strip() == "sharedshared"\n'
+                '    assert subprocess.check_output([str(modules / ".bin/probe")], text=True).strip() == "shared"\n'
+                '    identity = Path(__file__).stem\n'
+                '    for name in (".vite", ".vite-temp"):\n'
+                '        assert not (modules / name).exists()\n'
+                '        (modules / name).mkdir()\n'
+                '        (modules / name / "sentinel").write_text(identity)\n'
+                '    assert Path(os.environ["XDG_DATA_HOME"]).is_relative_to(Path(os.environ["TMPDIR"]))\n'
+                f'    ready = Path({str(ready)!r})\n'
+                '    (ready / identity).touch()\n'
+                '    deadline = time.monotonic() + 20\n'
+                '    while len(list(ready.iterdir())) != 2:\n'
+                '        assert time.monotonic() < deadline, "两个依赖消费者未同时就绪"\n'
+                '        time.sleep(.01)\n'
+                '    for name in (".vite", ".vite-temp"):\n'
+                '        assert (modules / name / "sentinel").read_text() == identity\n'
+                '        assert (external / name / "sentinel").read_text() == "external"\n')
+            self._fixture_repository(source, 'test_first.py', content)
+            (source / 'tests/integration/test_second.py').write_text(content)
+            result = subprocess.run([sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
+                '--uv-cache', str(cache), '--node-modules', str(modules), '--output', str(output),
+                '--scope', 'root', '--jobs', '2'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            tasks = json.loads((output / 'summary.json').read_text())['tasks']
+            self.assertEqual(len({task['worker'] for task in tasks}), 2)
+            self.assertTrue(all(task['status'] == 'passed' for task in tasks))
+            self.assertTrue(all(not Path(task['worker_cache']).exists() for task in tasks))
+            for name in ('.vite', '.vite-temp'):
+                self.assertEqual((modules / name / 'sentinel').read_text(), 'external')
+            self.assertEqual((modules / 'fixture-lib/index.js').read_text(), 'module.exports = "shared";\n')
+
     def test_existing_external_budget_path_keeps_root_targets_in_each_task_source(self):
         for shards in (1, 2):
             with self.subTest(shards=shards), tempfile.TemporaryDirectory() as temporary:
@@ -934,22 +989,25 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertTrue(Path(task['cwd']).exists())
             self.assertFalse(Path(task['worker_cache']).exists())
 
-    def test_interrupt_waits_for_dependency_copy_before_removing_worker(self):
+    def test_interrupt_waits_for_source_copy_before_removing_worker(self):
         with tempfile.TemporaryDirectory() as temporary:
             root, source = Path(temporary), Path(temporary) / 'input'
             self._fixture_repository(source, 'test_wait.py', 'def test_wait():\n    assert True\n')
             cache, modules, output, binaries = root / 'cache', root / 'node_modules', root / 'output', root / 'bin'
             for path in (cache, modules, binaries):
                 path.mkdir()
-            (modules / 'item').write_text('dependency')
-            wrapper = binaries / 'cp'
-            wrapper.write_text('#!/bin/sh\nset -e\ntouch "$COPY_STARTED"\nsleep 2\n/usr/bin/cp "$@"\n'
-                               'cmp "$COPY_SOURCE" "$COPY_TARGET"\ntouch "$COPY_FINISHED"\n')
+            wrapper = binaries / 'git'
+            wrapper.write_text('#!/bin/sh\nset -e\nfor target do :; done\n'
+                               'if [ "$1" = clone ] && [ "$target" = "$COPY_TARGET" ]; then\n'
+                               '  touch "$COPY_STARTED"\n  sleep 2\n  "$REAL_GIT" "$@"\n'
+                               '  test -d "$COPY_TARGET/.git"\n  touch "$COPY_FINISHED"\n'
+                               'else\n  exec "$REAL_GIT" "$@"\nfi\n')
             wrapper.chmod(0o755)
             environment = os.environ.copy()
             environment.update(PATH=str(binaries) + os.pathsep + environment['PATH'],
                                COPY_STARTED=str(root / 'started'), COPY_FINISHED=str(root / 'finished'),
-                               COPY_SOURCE=str(modules / 'item'), COPY_TARGET=str(output / 'workers/0/node_modules/item'))
+                               REAL_GIT=shutil.which('git'),
+                               COPY_TARGET=str(output / 'tasks/001-root-test_wait/source'))
             process = subprocess.Popen([sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
                 '--uv-cache', str(cache), '--node-modules', str(modules), '--output', str(output), '--jobs', '1'],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=environment)
