@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import io
 import os
+import shutil
 import subprocess
 import sys
 import sqlite3
@@ -84,6 +85,48 @@ def _assert_started(stderr, command):
     assert (records[0]["command_name"], records[0]["stage"], records[0]["event"], records[0]["level"]) == (
         command, "command", "started", "INFO"
     )
+
+
+@pytest.fixture(scope="module")
+def identity_ack_baseline(tmp_path_factory):
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    from camctl.reporting.policy import ReportingRepository
+
+    root = tmp_path_factory.mktemp("identity-ack")
+    home = root / "home"
+    home.mkdir()
+    config = _config(home)
+    assert _run_cli(home, "init", "--config", str(config)).returncode == 0
+    original_file = _plan_file(home, "42")
+    original = json.loads(original_file.read_text(encoding="utf-8"))["actions"][0]
+    assert _run_cli(home, "submit", str(original_file), "--config", str(config)).returncode == 0
+    owned = open_existing(home / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        outcome = ReportingRepository().freeze_report(
+            new_operation_key(), owned, occurred_at=1,
+        )
+        assert outcome.kind.value == "completed", outcome.error
+        report_id = str(outcome.value.report.report_id)
+        to_wm = outcome.value.report.to_wm
+    finally:
+        owned.connection.close()
+
+    # 完整复制关闭后的目录，在原路径恢复，以保留数据库及配置中的路径绑定。
+    baseline = root / "baseline"
+    shutil.copytree(home, baseline)
+    shutil.rmtree(home)
+    return home, baseline, original, report_id, to_wm
+
+
+@pytest.fixture
+def identity_ack_home(identity_ack_baseline):
+    home, baseline, original, report_id, to_wm = identity_ack_baseline
+    shutil.copytree(baseline, home)
+    try:
+        yield home, original, report_id, to_wm
+    finally:
+        shutil.rmtree(home)
 
 
 class TestRealEntrypoints:
@@ -267,27 +310,10 @@ class TestRealEntrypoints:
 
     @pytest.mark.parametrize("mode", ["run", "submit"])
     @pytest.mark.parametrize("scenario", ["bad_identity", "bad_ack", "bad_action", "retry_missing_body", "retry_changed_body"])
-    def test_identity_ack_and_body_are_independent(self, tmp_path, mode, scenario):
-        from camctl.contracts.values import new_operation_key
-        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-        from camctl.reporting.policy import ReportingRepository
-        home = tmp_path / "home"
-        home.mkdir()
-        config = _config(home)
-        assert _run_cli(home, "init", "--config", str(config)).returncode == 0
-        original_file = _plan_file(home, "42")
-        original = json.loads(original_file.read_text(encoding="utf-8"))["actions"][0]
-        assert _run_cli(home, "submit", str(original_file), "--config", str(config)).returncode == 0
-        owned = open_existing(home / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        try:
-            outcome = ReportingRepository().freeze_report(
-                new_operation_key(), owned, occurred_at=1,
-            )
-            assert outcome.kind.value == "completed", outcome.error
-            report_id = str(outcome.value.report.report_id)
-            to_wm = outcome.value.report.to_wm
-        finally:
-            owned.connection.close()
+    def test_identity_ack_and_body_are_independent(self, identity_ack_home, mode, scenario):
+        home, original, report_id, to_wm = identity_ack_home
+        config = home / ".camctl" / "config.toml"
+        original_file = home / "plan-42.json"
 
         body = json.loads(_plan_file(home, "43").read_text(encoding="utf-8"))
         body["last_report_id"] = report_id
