@@ -600,7 +600,40 @@ PYTHONPATH=scripts python -B -m unittest -v \
 
 当前已确认的主要成本为重复CLI代码加载、客户端启动、报告处理及其他会话推进。其他执行区间尚未细分成事务、调度、日志和等待；没有据差值宣称SQL、轮询或单个生产函数已是瓶颈。正常日志未提供完整阶段记录，因此第二层使用实际调用包装，不将缺少日志解释为阶段没执行。测试驱动还静态导入HTTP服务、视频估算和预览初始化模块，而本次没有启动HTTP或浏览器；可继续核对普通导出／导入是否需要提前加载这些依赖，但没有测得可节省量，不据此先改生产实现。全部预算委派正常释放，生产代码、正式测试及配置均未修改；原两项仍按超过九秒保留待优化状态。
 
-**S7：优先处理其余重复准备与忙轮询。** 用户决定暂缓S6两项的进一步压缩，保留其超过九秒的状态与现有通过结果，不继续投入低收益的细分或生产优化。下一批只改测试：①受理入口十个参数实例从同一份真实init、submit及报告冻结结果恢复完整独立基线，保留各自真实run／submit和全部输入分区；数据库及文件在原物理路径恢复，避免改变已保存的路径绑定，不新增快照框架。②取回交付模块等待可靠START事实时，沿原查询和原保护期限做有间隔轮询，避免测试进程持续开库抢占CPU。两项分别验证实际受影响的参数范围或完整文件，登记准备、执行、收场；不追加全量。实现与实测结果待填写。
+**S7：受理准备复用与交付条件轮询（2026-11-17）。** 用户决定暂缓S6两项的进一步压缩，保留其超过九秒的状态与现有通过结果。本批只改测试，分别核对并接入以下两项；没有修改生产代码，也没有追加全量或改造前对照。
+
+受理入口 `apps/camctl/tests/integration/acceptance/test_entrypoints.py` 的十个参数实例，共用一次真实CLI的init、submit及公开报告冻结操作生成的基线。连接和子进程结束后复制完整home，每项在原物理路径恢复独立目录，结束后移除；数据库模式、已提交WAL及配置中的路径绑定随完整目录保留。五种输入与run／submit两种入口、删除输入文件后的持久化核对、诊断、确认位置及没有设备副作用的断言全部保留。没有为小样本另建快照框架。
+
+该范围在 `7fe127e4` 加受理准备补丁上运行，补丁已接入 `97930bc3`。使用Python3.11.17，显式设置本工作区的scripts、camctl源码和测试目录为PYTHONPATH，先执行 `python apps/camctl/scripts/sync_resources.py`，再执行 `python -m pytest apps/camctl/tests/integration/acceptance/test_entrypoints.py::TestRealEntrypoints::test_identity_ack_and_body_are_independent --test-kind functional -p integration_progress -q --durations=0`，并指定独立basetemp和进度输出。十项全部通过、退出零，pytest为41.32秒，外层42.462秒。最初尝试的外部计时程序不存在、退出127，尚未启动pytest；改用shell计时后只有上述一次实际执行。完整阶段耗时如下，单位为秒：
+
+| 输入与入口 | 准备 | 执行 | 收场 | 合计 |
+| --- | ---: | ---: | ---: | ---: |
+| bad_identity-run | 3.7800 | 6.2741 | 0.0022 | **10.0563** |
+| bad_identity-submit | 0.0031 | 1.3029 | 0.0017 | 1.3076 |
+| bad_ack-run | 0.0033 | 5.9650 | 0.0014 | 5.9696 |
+| bad_ack-submit | 0.0029 | 1.3598 | 0.0014 | 1.3640 |
+| bad_action-run | 0.0035 | 5.9167 | 0.0013 | 5.9215 |
+| bad_action-submit | 0.0028 | 1.3880 | 0.0077 | 1.3985 |
+| retry_missing_body-run | 0.0029 | 6.4655 | 0.0030 | 6.4714 |
+| retry_missing_body-submit | 0.0035 | 1.3059 | 0.0052 | 1.3147 |
+| retry_changed_body-run | 0.0031 | 5.8844 | 0.0069 | 5.8945 |
+| retry_changed_body-submit | 0.0044 | 1.4792 | 0.0065 | 1.4900 |
+
+共享基线准备计入首项的3.7800秒准备阶段，该值还包含其余准备和副本恢复，并非共享准备的独立精确计时。首项仍超过九秒，继续登记待优化；其他九项本次均在九秒内。原文件另外六项不使用新夹具，未重复运行。此次直接组件验证没有核验整程序内存预算，不作容量验收结论。
+
+交付文件 `tests/integration/test_camctl_output_roundtrip.py` 原本在等待可靠启动记录时无间隔地反复开库查询。现在查询无结果后等待至多25毫秒，再按原SQL检查；原30秒保护期限、提前退出诊断及外层180秒保护保持。所等记录已经持久化，拍摄业务时钟在确认启动前保持冻结；没有用固定等待代替条件，也没有放宽启动窗口。
+
+交付范围在 `7fe127e4` 加轮询补丁上运行，补丁提交为 `857b0c34`。命令通过既有预算启动器执行 `python scripts/run-integration.py --scope root --jobs 2 --root-shards 2 --force-root-shards --python "$TEST_PY" --node-modules /workspaces/camctl/apps/client/node_modules --output "$RUN_ROOT/run"`，其中TEST_PY为上述Python3.11解释器，RUN_ROOT为本轮独立临时根；五个 `--target` 精确选择下表中的完整节点，默认functional。两份独立源码任务分别运行三项和两项，五项全部通过、退出零；运行器68.062秒，含预算启动器的外层68.834秒。没有请求C、wheel或网页构建。单位为秒：
+
+| 用例 | 准备 | 执行 | 收场 | 合计 |
+| --- | ---: | ---: | ---: | ---: |
+| test_recording_delivery_survives_late_cancel | 0.0015 | 28.5168 | 0.0192 | **28.5375** |
+| test_auto_preview_obtains_registered_preview | 0.0012 | 13.6067 | 0.0169 | **13.6248** |
+| test_three_capture_kinds_partial_obtain | 0.0011 | 18.0926 | 0.0132 | **18.1069** |
+| test_repeated_obtain_of_same_output_yields_independent_deliveries | 0.0021 | 17.0065 | 0.0116 | **17.0203** |
+| test_cross_plan_reference_and_multi_request | 0.0011 | 35.7300 | 0.0290 | **35.7601** |
+
+交付五项仍全部超过九秒，保留为待优化功能用例；本次结果只证明修改后通过及其实际耗时，尚无依据计算这处轮询调整的提速幅度。未受影响的重复预览拒绝与启动前取消两项未运行。准备有部分仍位于测试体内，不能把执行列全部解释为目标业务或SQL耗时。两组修改操作不同文件且互不依赖，接入后沿用各自相关范围的结果，不将其拼称为当前版本一次全量通过。预算委派正常释放；结果核对后已删除两组临时输出，并释放已合入的受理准备工作区，分支和提交保留。
 
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 
