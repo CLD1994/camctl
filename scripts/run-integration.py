@@ -22,6 +22,7 @@ import time
 import camctl_memory
 from camctl_memory import DEFAULT_MEMORY_LIMIT, parse_memory_limit
 from test_kind_plugin import TEST_KINDS, DEFAULT_TEST_KIND
+from round_test_build import BUILD_NAMES, read_build_summaries
 
 CAMCTL = 'apps/camctl/tests/integration'
 ROOT = 'tests/integration'
@@ -446,11 +447,7 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
     shutil.copy2(Path(__file__).with_name('integration_progress.py'), control)
 
     def save():
-        receipt = output / 'host-demo-build.json'
-        summary['host_demo_build'] = (json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists()
-                                      else {'status': 'not_requested', 'build_count': 0})
-        if summary['host_demo_build']['status'] == 'building':
-            summary['host_demo_build']['wall_seconds'] = time.time() - summary['host_demo_build']['started_unix_seconds']
+        summary.update(read_build_summaries(output))
         for task in tasks:
             if task.get('artifacts'):
                 progress = read_progress(Path(task['artifacts']))
@@ -485,6 +482,8 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 temporary = directory / 'tmp'
                 temporary.mkdir()
                 environment = test_environment(python, project, control, private, temporary)
+                environment['CAMCTL_TEST_BUILD_ROOT'] = str(output)
+                environment['CAMCTL_TEST_BUILD_SOURCE'] = str(seed)
                 if task['scope'] == 'root':
                     environment['CAMCTL_HOST_DEMO_BUILD_DIR'] = str(output / 'host-demo-build')
                     environment['CAMCTL_HOST_DEMO_SOURCE'] = str(seed / 'apps/host-demo')
@@ -627,9 +626,10 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 raise result
         for private in (output / 'workers').iterdir():
             remove_owned_tree(private)
-        shared_build = output / 'host-demo-build'
-        if shared_build.exists():
-            remove_owned_tree(shared_build)
+        for name in BUILD_NAMES:
+            shared_build = output / f'{name}-build'
+            if shared_build.exists():
+                remove_owned_tree(shared_build)
         summary['finished_utc'] = utc()
         save()
     return summary['exit_code']
@@ -718,13 +718,14 @@ def main():
                      output / 'control' / 'camctl_memory_plugin.py')
         shutil.copy2(Path(camctl_memory.__file__), output / 'control' / 'camctl_memory.py')
         shutil.copy2(Path(__file__).with_name('test_kind_plugin.py'), output / 'control')
+        shutil.copy2(Path(__file__).with_name('round_test_build.py'), output / 'control')
         shutil.copy2(Path(__file__).with_name('host_demo_build.py'), output / 'control')
         tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity, history[1])
         write_json(output / 'plan.json', tasks)
         if args.plan_only:
             write_json(output / 'summary.json', {'status': 'planned', 'exit_code': 0,
                 'started_utc': started_utc, 'finished_utc': utc(), 'wall_seconds': time.monotonic() - started,
-                'host_demo_build': {'status': 'not_requested', 'build_count': 0},
+                **read_build_summaries(output),
                 'source': {key: value for key, value in identity.items() if key != 'files'},
                 'versions': versions, 'test_kind': args.test_kind, 'tasks': tasks})
             remove_owned_tree(seed)
