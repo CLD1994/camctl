@@ -220,8 +220,8 @@ def test_wait_observes_current_run_result_while_host_stays_alive(tmp_path, host_
     if outcome in {"not_started", "not_started_once"}:
         launcher.unlink()
     host = tmp_path / "host"
-    # 永久故障只需走完一次真实重试；恢复分区保留创建入口的时间。
-    retry_delay = 5000 if outcome.endswith("_once") else 0
+    # 启动失败后需要先观察结果，再创建可执行文件。
+    retry_delay = 5000 if outcome == "not_started_once" else 0
     host.write_text(
         "#!/bin/sh\nexec " + shlex.quote(host_demo)
         + f' --retry-limit 1 --retry-delay-ms {retry_delay} "$@"\n',
