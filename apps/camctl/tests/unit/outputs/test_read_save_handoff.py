@@ -8,7 +8,9 @@ import pytest
 
 from camctl.capture import media_flow
 from camctl.contracts.values import ConsistencyError
-from camctl.operations.attempts import AttemptFinish, RunFinish, RunOutcome
+from camctl.operations.attempts import (
+    AttemptFinish, FinishAttemptResult, FinishDisposition, RunFinish, RunOutcome, RunStatus,
+)
 from camctl.operations.models import (
     AttemptStatus, AttemptTicket, CallOutcome, EffectState, EvidenceValue,
     Settlement, SettlementBasis,
@@ -29,13 +31,18 @@ from camctl.persistence.runtime import OwnedConnection
 pytestmark = pytest.mark.asyncio
 
 
+def saved_read_result():
+    return DbOutcome(DbOutcomeKind.COMPLETED,
+        FinishAttemptResult(FinishDisposition.SAVED, AttemptStatus.SUCCEEDED, RunStatus.SUCCEEDED))
+
+
 @pytest.fixture
 def world(monkeypatch):
     owned = create_autospec(OwnedConnection, instance=True, spec_set=True)
     database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
     operations = create_autospec(OperationRepository, instance=True, spec_set=True)
     outputs = create_autospec(OutputsRepository, instance=True, spec_set=True)
-    operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    operations.finish_attempt.return_value = saved_read_result()
     outputs.release_read_slot.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
     outputs.finish_obtain.return_value = DbOutcome(DbOutcomeKind.COMPLETED, 'saved')
     entered, release = asyncio.Event(), asyncio.Event()
@@ -246,7 +253,7 @@ async def test_stopped_observation_and_main_resume_share_original_preparation(wo
         if len(reads) == 1:
             entered.set()
             await release.wait()
-            return int(canceled), 20
+            return int(canceled), 20, 2
         return None, None
 
     world.database.read.side_effect = read
@@ -302,7 +309,7 @@ async def test_internal_recovery_reuses_original_result_key_after_failure(world,
     with pytest.raises(ConsistencyError):
         await media_flow._save_internal_read_and_settle(world.runtime, pending)
     assert world.operations.finish_attempt.call_count == 1
-    world.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    world.operations.finish_attempt.return_value = saved_read_result()
     await media_flow.resume_prepared_internal_reads(world.database,
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
@@ -326,13 +333,13 @@ async def test_stopped_result_failure_keeps_prepared_phase_and_original_input(wo
         InputStep(InputPhase.SEGMENT_FAILED, copy_id=2,
             read_end=ReadEnd(True, 10, 'stopped'), stop_requested=True),
         _LOCAL_READ_EVIDENCE, 123)
-    world.database.read.side_effect = [(1, 20), (None, None)]
+    world.database.read.side_effect = [(1, 20, 2), (None, None)]
     world.operations.finish_attempt.return_value = DbOutcome(kind)
     world.release.set()
     with pytest.raises(ConsistencyError):
         await media_flow._save_internal_read_and_settle(world.runtime, pending)
     prepared = world.runtime.pending_read_results[(5, 1)]
-    world.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    world.operations.finish_attempt.return_value = saved_read_result()
     await media_flow.resume_prepared_internal_reads(world.database,
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
@@ -564,6 +571,7 @@ async def test_obtain_complete_business_applies_tail_before_original_control(
 async def test_obtain_binding_producer_keeps_gate_application_with_original_business(world, monkeypatch):
     from camctl.outputs import obtain_flow, read_attempts
     from camctl.outputs.read_discovery import ReadCandidate
+    from camctl.outputs.handoff import FailureSaveDisposition, FailureSaveOutcome
     from camctl.contracts.pages import Page
     from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding
     from camctl.operations.attempts import RetryWaitGate
@@ -583,7 +591,8 @@ async def test_obtain_binding_producer_keeps_gate_application_with_original_busi
         return hold_read_result(runtime, pending.finish, business=business)
     monkeypatch.setattr(read_attempts, 'held_binding_read_result', held_binding)
     control = RuntimeError('committed binding result')
-    _attach_db_outcome(control, DbOutcome(DbOutcomeKind.COMPLETED))
+    _attach_db_outcome(control, DbOutcome(DbOutcomeKind.COMPLETED,
+        FailureSaveOutcome(FailureSaveDisposition.SAVED)))
     world.outputs.fail_read_binding.side_effect = [DbOutcome(DbOutcomeKind.UNKNOWN), control]
     world.release.set()
     with pytest.raises(ConsistencyError):
