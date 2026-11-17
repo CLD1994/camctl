@@ -74,7 +74,7 @@ camctl 以较为乐观的 MVP（最小可行产品）为目标，优先打通计
 
 正式发行物是 wheel 包。在仓库内执行 `uv build --project apps/camctl` 构建时，自定义构建钩子从仓库权威来源（`protocol` 的 Schema 与错误清单、`docs/camctl/database` 的结构 SQL 与登记表、`docs/camctl/sqlite-runtime.json`）刷新包内 `_resources` 目录，发行物自带全部权威资源；从 sdist 构建时仓库不可见，构建钩子使用 sdist 内已生成的资源副本，两者不允许出现既无权威来源又无副本的构建。
 
-资源同步还会完整检查固定 Schema，并生成可跨进程复用的检查依据，运行时的匹配与回退规则见[精确 JSON 与配置适配](data-types.md#精确-json-与配置适配)。构建依赖由 `pyproject.toml` 声明；手工执行资源同步也须使用已安装运行依赖的 Python 3.11 环境。完整部署包和 Python 更新包共用 `scripts/build_update.py::build_payload`，将从 `uv.lock` 导出的运行依赖同时作为隔离构建的依赖约束，使构建和安装使用一致的规则检查依赖；目标机消费 wheel 内的生成资源，不需要执行构建。独立从 sdist 构建时沿用其生成资源，运行环境不同则按上述规则重新检查。
+资源同步还会完整检查固定 Schema、公共错误详情及派生报告规则，并生成可跨进程复用的检查依据，运行时的匹配与回退规则见[精确 JSON 与配置适配](data-types.md#精确-json-与配置适配)。构建依赖由 `pyproject.toml` 声明；手工执行资源同步也须使用已安装运行依赖的 Python 3.11 环境。完整部署包和 Python 更新包共用 `scripts/build_update.py::build_payload`，将从 `uv.lock` 导出的运行依赖同时作为隔离构建的依赖约束，使构建和安装使用一致的规则检查依赖；目标机消费 wheel 内的生成资源，不需要执行构建。独立从 sdist 构建时沿用其生成资源，运行环境不同则按上述规则重新检查。
 
 目标主机安装分三步：先准备满足版本要求的 Python 3.11 解释器；再用 `uv export --project apps/camctl --frozen --no-dev --no-emit-project` 从锁文件导出运行时依赖清单（版本与哈希钉定），在部署虚拟环境中安装该清单；最后以 `uv pip install --no-deps` 安装 wheel 本体。发行物只声明三个运行时依赖（concurrent-log-handler、janus、jsonschema），测试依赖属于开发用依赖组，不进入部署环境。
 
