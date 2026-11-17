@@ -211,7 +211,7 @@ async def test_directory_failure_does_not_become_final_empty_page(monkeypatch):
 async def test_metadata_failure_keeps_partial_files_and_error_without_finalizing(monkeypatch):
     second = ROOT + "/DJI_001/new2.MP4"
     driver, _, _ = _driver(monkeypatch, [_raw(_frame(VIDEO, second)), _raw(_metadata(VIDEO)),
-                                       _raw(_metadata(second, stdout=b"", stderr=b"stat failed", status=1))])
+                                       _raw(b"", exit_code=1, stderr=b"stat failed")])
     result = await _list(driver, context=_context())
     page = _page(result)
     assert result.error is not None and page["set_finalized"] is False
