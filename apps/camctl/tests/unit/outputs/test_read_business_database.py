@@ -7,6 +7,9 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts.values import ConsistencyError
+from camctl.operations.attempts import FinishAttemptResult, FinishDisposition, RunStatus
+from camctl.operations.models import AttemptStatus
+from camctl.outputs.slots import SlotDecision, SlotOutcome
 from camctl.outputs.read_attempts import ReadContinuation, save_read_business
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.outputs import (
@@ -122,7 +125,7 @@ async def test_read_intent_applies_granted_ticket_before_cancel_and_reuses_unkno
     if cancel:
         with pytest.raises(asyncio.CancelledError):
             await acquire_read_attempt(runtime, intent)
-        assert runtime.continuing_read_tickets == {2: ReadContinuation(ticket, True)}
+        assert runtime.continuing_read_tickets == {2: ReadContinuation(ticket, True, inspection_cancel_recovery=True)}
         assert runtime.pending_read_business == {}
     else:
         with pytest.raises(ConsistencyError):
@@ -168,7 +171,7 @@ async def test_read_intent_applies_actual_completed_ticket_before_write_error(er
     assert raised.value is error
     assert db_outcome_for(error) is actual
     if kind is DbOutcomeKind.COMPLETED:
-        assert runtime.continuing_read_tickets == {2: ReadContinuation(ticket, True)}
+        assert runtime.continuing_read_tickets == {2: ReadContinuation(ticket, True, inspection_cancel_recovery=True)}
         assert runtime.pending_read_business == {}
     else:
         original = runtime.pending_read_business[(2, "read_intent")]
@@ -204,7 +207,8 @@ async def test_result_save_and_loop_settlement_survive_cancel_as_one_phase():
     def save(request, key, actual):
         assert request is pending.finish and key == pending.key and actual is owned
         caller.cancel()
-        return DbOutcome(DbOutcomeKind.COMPLETED)
+        return DbOutcome(DbOutcomeKind.COMPLETED, FinishAttemptResult(
+            FinishDisposition.SAVED, AttemptStatus.SUCCEEDED, RunStatus.SUCCEEDED))
     operations.finish_attempt.side_effect = save
     facts = {"id": 2, "delivery_status": 1, "source_device_file_id": None}
     with pytest.raises(asyncio.CancelledError):
@@ -233,7 +237,12 @@ async def test_local_source_fact_wait_keeps_unsent_ticket_and_read_end(monkeypat
         Path("/staging"), Path("/ready"), Path("/processing"))).for_attempt(
             AttemptTicket(1, "read", "2", "read/2", 5))
     task = asyncio.create_task(sessions.open_session(7, 0, on_start=lambda: held.pop(2)))
-    await entered.wait()
+    entered_task = asyncio.create_task(entered.wait())
+    done, _ = await asyncio.wait((entered_task, task), return_when=asyncio.FIRST_COMPLETED)
+    if task in done:
+        entered_task.cancel()
+        await task
+        pytest.fail("读取任务在等待来源事实前已经结束")
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -243,7 +252,10 @@ async def test_local_source_fact_wait_keeps_unsent_ticket_and_read_end(monkeypat
 
 @pytest.mark.asyncio
 async def test_local_result_uses_its_adopted_budget_before_holding_actual_result():
+    from pathlib import Path
     from camctl.capture.input_copy import InputPhase, InputStep
+    from camctl.devices.read_session import ReadEnd
+    from camctl.host_files.models import FilePurpose, FileRef
     from camctl.operations.attempts import AttemptConfig, RetryWaitGate
     from camctl.operations.models import AttemptTicket
     from camctl.persistence.repositories.operations import OperationRepository
@@ -251,13 +263,16 @@ async def test_local_result_uses_its_adopted_budget_before_holding_actual_result
     owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     operations = create_autospec(OperationRepository(), spec_set=True)
-    operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED, FinishAttemptResult(
+        FinishDisposition.SAVED, AttemptStatus.SUCCEEDED, RunStatus.SUCCEEDED))
     runtime = SimpleNamespace(database=inline_business_database(owned), operations=operations,
-        pending_read_results={}, pending_read_ends={}, continuing_read_tickets={},
+        pending_read_results={}, pending_read_ends={}, pending_read_business={}, continuing_read_tickets={},
         retry_gate=RetryWaitGate(), occurred_at=lambda: 9)
     ticket = AttemptTicket(1, "read", "2", "read/2", 5)
     await _finish_local_attempt(runtime, {"id": 2, "delivery_status": 1,
-        "source_device_file_id": None}, ticket, InputStep(InputPhase.INPUT_READY), AttemptConfig(3))
+        "source_device_file_id": None}, ticket, InputStep(InputPhase.INPUT_READY, copy_id=2,
+        input_file=FileRef(8, FilePurpose.DELIVERY_COPY, "copy.bin", Path("/staging")),
+        read_end=ReadEnd(True, 10, None), stop_requested=True, content_complete=True), AttemptConfig(3))
     owned.connection.execute.assert_not_called()
     operations.finish_attempt.assert_called_once()
     assert runtime.pending_read_results == {}
@@ -274,9 +289,11 @@ async def test_release_unknown_keeps_original_request_and_key_until_rechecked():
     owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     operations = create_autospec(OperationRepository(), spec_set=True)
-    operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED, FinishAttemptResult(
+        FinishDisposition.SAVED, AttemptStatus.SUCCEEDED, RunStatus.SUCCEEDED))
     outputs = create_autospec(OutputsRepository(), spec_set=True)
-    outputs.release_read_slot.side_effect = [DbOutcome(DbOutcomeKind.UNKNOWN), DbOutcome(DbOutcomeKind.COMPLETED)]
+    outputs.release_read_slot.side_effect = [DbOutcome(DbOutcomeKind.UNKNOWN),
+        DbOutcome(DbOutcomeKind.COMPLETED, SlotDecision(SlotOutcome.RELEASED))]
     runtime = SimpleNamespace(database=inline_business_database(owned), operations=operations, outputs=outputs,
         pending_read_results={}, pending_read_ends={}, continuing_read_tickets={}, pending_read_business={},
         retry_gate=RetryWaitGate(), occurred_at=lambda: 9)
