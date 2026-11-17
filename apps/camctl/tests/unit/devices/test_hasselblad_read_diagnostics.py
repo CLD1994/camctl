@@ -24,17 +24,20 @@ def test_camera_read_error_preserves_steps_and_each_original_cause(settlement):
     grouped = ExceptionGroup('下载收场失败', [source_error, close])
     error = CameraReadError('preparation_and_cleanup_failed', steps,
         causes=(source_error, grouped), settlement=settlement)
-    diagnostic = exception_diagnostic(error)['diagnostic_details']
+    document = exception_diagnostic(error)
+    diagnostic = document['diagnostic_details']
+    causes = document['diagnostic_facts']['causes']
     assert isinstance(error, ReadPreparationError)
     assert error.settlement is settlement
     assert diagnostic['reason'] == 'preparation_and_cleanup_failed'
     assert diagnostic['settlement'] == settlement.value
     assert diagnostic['steps'] == steps
-    assert diagnostic['causes'][0]['errno'] == 5
-    assert diagnostic['causes'][0]['filename'] == {'bytes_hex': b'original-\xff.fff'.hex()}
-    assert diagnostic['causes'][0]['traceback'][-1]['function'] == 'test_camera_read_error_preserves_steps_and_each_original_cause'
-    children = diagnostic['causes'][1]['exceptions']
-    assert children[0]['errno'] == 5
+    assert causes[0]['errno'] == 5
+    assert causes[0]['filename'] == {'bytes_hex': b'original-\xff.fff'.hex()}
+    assert causes[0]['traceback'][-1]['function'] == 'test_camera_read_error_preserves_steps_and_each_original_cause'
+    children = causes[1]['exceptions']
+    assert children[0] == {'$ref': '#/diagnostic_facts/causes/0'}
     assert children[1]['diagnostic_details'] == {'exit_code': 9}
     assert children[1]['cause']['message'] == '子原因'
-    assert json.loads(json.dumps(diagnostic, ensure_ascii=False)) == diagnostic
+    assert json.loads(json.dumps(error.diagnostic_details, ensure_ascii=False)) == diagnostic
+    assert json.loads(json.dumps(document, ensure_ascii=False)) == document

@@ -98,7 +98,7 @@ async def test_read_result_consumer_keeps_exception_and_read_end_on_original_req
     elif error_kind == 'camera':
         camera = details['exception']['diagnostic_details']
         assert camera['steps'] == [{'name': 'download', 'diagnostic': raw}]
-        assert camera['causes'][0]['errno'] == 5
+        assert details['exception']['diagnostic_facts']['causes'][0] == {'$ref': '#/cause'}
     assert details['read_end'] == {'bytes_read': 31, 'error': 'source_error', 'stopped': True}
     assert original.outcome.outcome.error.code == ('local_read_failed' if consumer == 'local' else 'device_error')
     assert original.retry_wait is True and original.run_finish is None
