@@ -108,6 +108,70 @@ async def test_prepared_business_late_success_keeps_original_receipt_without_rei
     assert not world.runtime.pending_read_business
 
 
+@pytest.mark.parametrize('delivery_error', [False, True])
+async def test_completed_old_business_does_not_replace_new_owner(world, delivery_error):
+    from camctl.contracts.values import new_operation_key
+    from camctl.outputs.read_attempts import hold_prepared_read_business
+
+    old = PendingReadBusiness(world.outputs.finish_obtain, FinishObtain(3, 9), new_operation_key())
+    new = PendingReadBusiness(world.outputs.finish_obtain, FinishObtain(4, 10), new_operation_key())
+    world.release.set()
+    error = RuntimeError('delivery failed')
+    if delivery_error:
+        write = world.database.write.side_effect
+        async def write_error(callback, **kwargs):
+            receipt = await write(callback, **kwargs)
+            _attach_db_outcome(error, receipt)
+            raise error
+        world.database.write.side_effect = write_error
+        with pytest.raises(RuntimeError) as first:
+            await save_prepared_read_business(world.runtime, 2, 'finish', old)
+        assert first.value is error
+        world.database.write.side_effect = write
+    else:
+        receipt = await save_prepared_read_business(world.runtime, 2, 'finish', old)
+    hold_prepared_read_business(world.runtime, 2, 'finish', new)
+    if delivery_error:
+        with pytest.raises(RuntimeError) as late:
+            await save_prepared_read_business(world.runtime, 2, 'finish', old, retry=True)
+        assert late.value is error
+    else:
+        assert await save_prepared_read_business(world.runtime, 2, 'finish', old, retry=True) is receipt
+    assert world.runtime.pending_read_business[(2, 'finish')] is new
+    assert world.database.write.await_count == 1
+    await retry_read_business(world.runtime)
+    assert not world.runtime.pending_read_business
+    assert world.outputs.finish_obtain.call_args.args[:2] == (new.request, new.key)
+
+
+async def test_local_application_failure_keeps_original_business_for_explicit_retry(world):
+    from camctl.contracts.values import new_operation_key
+
+    error = RuntimeError('local application failed')
+    applied = []
+    def apply(value):
+        if not applied:
+            applied.append('failed')
+            raise error
+        applied.append(value)
+
+    pending = PendingReadBusiness(world.outputs.finish_obtain, FinishObtain(3, 9),
+        new_operation_key(), apply)
+    world.release.set()
+    with pytest.raises(RuntimeError) as first:
+        await save_prepared_read_business(world.runtime, 2, 'finish', pending)
+    with pytest.raises(RuntimeError) as late:
+        await save_prepared_read_business(world.runtime, 2, 'finish', pending)
+    assert first.value is error and late.value is error
+    assert world.runtime.pending_read_business[(2, 'finish')] is pending
+    assert world.database.write.await_count == 1
+    await retry_read_business(world.runtime)
+    assert applied == ['failed', 'saved'] and not world.runtime.pending_read_business
+    assert world.outputs.finish_obtain.call_count == 2
+    assert all(call.args[:2] == (pending.request, pending.key)
+        for call in world.outputs.finish_obtain.call_args_list)
+
+
 async def test_retry_snapshot_cannot_recreate_already_completed_business(world):
     from camctl.contracts.values import new_operation_key
 

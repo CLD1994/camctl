@@ -488,6 +488,11 @@ async def canceled_complete_read_result(runtime, ticket, evidence):
         runtime.occurred_at(), run_finish=RunFinish(RunOutcome.CANCELED) if row[1] in (1, 2) else None))
 
 
+@dataclass
+class _ReadBusinessState:
+    completed: bool = False
+
+
 @dataclass(frozen=True)
 class PendingReadBusiness:
     """读取结束后的业务事务；未知提交按原申请和键核实。"""
@@ -499,6 +504,7 @@ class PendingReadBusiness:
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     inspection_cancel_recovery: list = field(default_factory=list, compare=False, repr=False)
+    state: _ReadBusinessState = field(default_factory=_ReadBusinessState, compare=False, repr=False)
 
 
 async def retry_read_business(runtime):
@@ -527,7 +533,7 @@ async def _save_pending_read_business(runtime, identity, pending, *, retry=False
     hold_prepared_read_business(runtime, identity[0], identity[1], pending)
     _record_read_business_error(pending)
     # 已完成的控制错误也属于原回执；只有仍未收场的业务责任可以重新核实。
-    if retry and runtime.pending_read_business.get(identity) is pending:
+    if retry and not pending.state.completed and runtime.pending_read_business.get(identity) is pending:
         pending.shared.retry_failed()
 
     def apply_completed(receipt):
@@ -535,6 +541,7 @@ async def _save_pending_read_business(runtime, identity, pending, *, retry=False
             return
         if pending.on_completed is not None:
             pending.on_completed(receipt.value)
+        pending.state.completed = True
         if runtime.pending_read_business.get(identity) is pending:
             del runtime.pending_read_business[identity]
 
@@ -587,6 +594,8 @@ async def save_prepared_read_business(runtime, copy_id, operation, pending, *, r
 
 def hold_prepared_read_business(runtime, copy_id, operation, pending):
     """在交接诊断和释放原结果前持有原业务申请。"""
+    if pending.state.completed:
+        return
     identity = (copy_id, operation)
     held = runtime.pending_read_business.get(identity)
     if held is not None and held is not pending:

@@ -311,8 +311,10 @@ async def test_canceled_control_error_retries_original_candidate(monkeypatch):
 
 
 async def test_business_held_before_diagnostic_control_error(monkeypatch):
+    from camctl.contracts.values import new_operation_key
+
     runtime = SimpleNamespace(pending_read_business={})
-    business = SimpleNamespace(diagnostic=object())
+    business = read_attempts.PendingReadBusiness(lambda *args: None, object(), new_operation_key())
     def fail_diagnostic(pending):
         raise KeyboardInterrupt("diagnostic interruption")
     monkeypatch.setattr(read_attempts, "_record_read_business_error", fail_diagnostic)
