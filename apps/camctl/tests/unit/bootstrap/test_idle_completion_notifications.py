@@ -25,6 +25,7 @@ def _empty_cleanup():
     cursor.fetchall.return_value = []
     connection.execute.return_value = cursor
     metadata = DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing")
+    cursor.fetchone.return_value = (metadata.format_version,)
     owned = OwnedConnection(connection, metadata)
     database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
     database.metadata = metadata

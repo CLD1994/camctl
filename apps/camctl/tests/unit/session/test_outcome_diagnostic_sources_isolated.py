@@ -904,6 +904,7 @@ def worker_terminal_world(terminal_world):
         setattr(deps, name, Dummy())
     deps.capture_baselines = {}
     deps.capture_result_scans = {}
+    deps.withdrawal_session = None
     deps.session_key = "test"
     sys.modules["camctl.bootstrap.recovery_logging"].recovery_diagnostics_logger = lambda *args, **kwargs: None
     failure_log = SimpleNamespace(logs_dir="/unused", ownership=object(), bind_owner=lambda owner: None)
