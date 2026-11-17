@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import (
@@ -153,6 +154,22 @@ def _runtime(
             else None
         )
         cursor.fetchall.return_value = []
+        # 派发前核对原流程、所属动作以及该设备的批次持有者。
+        if statement.startswith("SELECT * FROM operation_runs"):
+            row = {"id": 7, "kind": int(enum_for("operation_runs.kind").CHECK_FILE_EXISTS),
+                   "action_id": 11, "cleanup_item_id": _ITEM_ID}
+            cursor.description = [(name,) for name in row]
+            cursor.fetchone.return_value = tuple(row.values())
+        elif statement.startswith("SELECT * FROM actions"):
+            row = {"id": 11, "type": 5}
+            cursor.description = [(name,) for name in row]
+            cursor.fetchone.return_value = tuple(row.values())
+        elif statement.startswith("SELECT a.device_id FROM cleanup_items"):
+            cursor.fetchone.return_value = ("cam-1",)
+        elif statement.startswith("SELECT format_version FROM database_metadata"):
+            cursor.fetchone.return_value = (9,)
+        elif statement.startswith("SELECT id,action_id FROM device_file_batches"):
+            cursor.fetchall.return_value = [(1, 11)]
         return cursor
 
     connection.execute.side_effect = read_cursor

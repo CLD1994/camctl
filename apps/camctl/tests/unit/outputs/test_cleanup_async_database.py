@@ -260,6 +260,34 @@ async def test_dispatch_rechecks_facts_after_request_preparation(
             cursor.fetchone.return_value = (11,)
         elif "SELECT cancel_requested FROM actions" in statement:
             cursor.fetchone.return_value = (int(canceled),)
+        elif operation == "delete" and statement.startswith("SELECT * FROM operation_runs"):
+            from camctl.contracts.enums import enum_for
+            row = {"id": 7, "kind": int(enum_for("operation_runs.kind").DELETE_FILE),
+                   "action_id": 11, "cleanup_item_id": _ITEM_ID}
+            cursor.description = [(name,) for name in row]
+            cursor.fetchone.return_value = tuple(row.values())
+        elif operation == "delete" and statement.startswith("SELECT * FROM cleanup_items"):
+            row = {"id": _ITEM_ID, "action_id": 11, "output_id": 71,
+                   "requested_output_id": 71, "status": 3}
+            cursor.description = [(name,) for name in row]
+            cursor.fetchone.return_value = tuple(row.values())
+        elif operation == "delete" and statement.startswith("SELECT * FROM outputs"):
+            row = {"id": 71, "device_file_id": 5}
+            cursor.description = [(name,) for name in row]
+            cursor.fetchone.return_value = tuple(row.values())
+        elif operation == "delete" and statement.startswith("SELECT * FROM device_files"):
+            row = {"id": 5, "identity_key": '["cam-1", "camctl-adb", "file-5"]'}
+            cursor.description = [(name,) for name in row]
+            cursor.fetchone.return_value = tuple(row.values())
+        elif operation == "delete" and statement.startswith("SELECT device_file_id, intermediate_file_id FROM outputs"):
+            cursor.fetchone.return_value = (5, None)
+        elif operation == "delete" and statement.startswith("SELECT presence_state FROM device_files"):
+            cursor.fetchone.return_value = (1,)
+        if operation == "delete":
+            if statement.startswith("SELECT id FROM cleanup_items WHERE"):
+                cursor.fetchmany.side_effect = [[(_ITEM_ID,)], []]
+            else:
+                cursor.fetchmany.return_value = []
         return cursor
 
     runtime._test_owned.connection.execute.side_effect = read
@@ -287,6 +315,9 @@ async def test_dispatch_rechecks_facts_after_request_preparation(
         cleanup_flow._delete_once(runtime, _ITEM_ID, 11, 71) if operation == "delete"
         else cleanup_flow._run_query(runtime, ticket, _ITEM_ID))
     await asyncio.wait_for(entered.wait(), 1)
+    if change == "stop":
+        assert await runtime.database.read(
+            lambda owned: cleanup_flow._cleanup_dispatch_allowed(owned.connection, _ITEM_ID, ticket))
     if change == "cancel":
         canceled = True
     elif change == "stop":
@@ -351,7 +382,9 @@ async def test_recovery_reads_original_query_through_database_and_keeps_identity
     runtime.binding_of = AsyncMock(return_value=None)
     runtime.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
     runtime.recovery_max_event_id = 10
-    runtime.recovery_evidence_for = lambda binding, operation: runtime.evidence
+    from camctl.devices.evidence import EvidenceContract
+    runtime.recovery_evidence_for = lambda binding, operation: runtime.evidence.with_contract(
+        EvidenceContract("local_file_recovery", 1, operation, frozenset()))
     monkeypatch.setattr(cleanup_recovery, "running_cleanup_attempt",
         create_autospec(cleanup_results.running_cleanup_attempt, return_value=(_TICKET, 8)))
     monkeypatch.setattr(cleanup_flow, "_cancel_requested",
@@ -367,6 +400,7 @@ async def test_recovery_reads_original_query_through_database_and_keeps_identity
     assert pending.ticket is _TICKET
     assert pending.database_id == database.metadata.instance_id
     assert pending.recovery_max_event_id == 10
+    assert pending.actual.outcome.settlement.evidence.type == "local_file_recovery"
     assert pending.consumer is cleanup_flow.CleanupQueryConsumer.BEFORE_DELETE
     runtime.driver.query_file.assert_not_awaited()
 
