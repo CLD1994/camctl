@@ -121,7 +121,9 @@ def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
             if reason := failure():
                 raise AssertionError(f"{message}: {reason}")
             next_failure_check = now + 0.05
-        assert time.monotonic() < deadline, f"等待超时: {message}"
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, f"等待超时: {message}"
+        time.sleep(min(0.025, remaining))
 
 
 def _write_launcher(wsl_path: str, body: str) -> None:
