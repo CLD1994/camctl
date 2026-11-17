@@ -328,6 +328,9 @@ def test_insufficient_timing_checks_repairs_and_delivers(
     话拷贝原片以真实 ffprobe 确认时长、超过门槛后无重编码修复，修
     复成品登记提升并由默认取回交付。"""
     deployment = Deployment(tmp_path, recording_margin_s="0.5", controlled_clock=True)
+    # 本例无需验证计划发现的轮询间隔；缩短空闲轮询，不改变业务等待。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -413,6 +416,9 @@ def test_excess_recording_repairs_without_probing(
     monkeypatch.setattr(
         "_osmo_builtin_clock.whole_second_utc_us", lambda: initial_utc_us)
     deployment = Deployment(tmp_path, recording_margin_s="0.5", controlled_clock=True)
+    # 本例无需验证计划发现的轮询间隔；缩短空闲轮询，不改变业务等待。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
