@@ -1,5 +1,6 @@
 """内部读取恢复与 UNKNOWN 耗尽从媒体和分段检查入口推进。"""
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,9 @@ from camctl.capture.media import MediaPolicy, MediaTools, SaveDisposition, SaveR
 from camctl.contracts.enums import enum_for
 from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.devices.read_session import ReadEnd
+from camctl.host_files.media import MediaProbe, MediaStream
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.operations.attempts import BeginAttemptResult, BeginDisposition
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.outputs import read_attempts
@@ -107,7 +110,7 @@ def setup(monkeypatch):
     monkeypatch.setattr(segment_inspections, 'read_inspection_for_member',
                         lambda *args, **kwargs: SimpleNamespace(copy=None))
     return SimpleNamespace(flow=flow, facts=facts, copies=copies, owned=owned,
-                           request=request, operations=operations)
+                           request=request, operations=operations, repository=repository)
 
 
 def _save_business(setup, monkeypatch):
@@ -119,7 +122,7 @@ def _save_business(setup, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_verified_segment_recovery_settles_original_before_ready(setup, monkeypatch):
+async def test_verified_segment_waits_when_original_result_is_unconfirmed(setup, monkeypatch):
     setup.copies.copy_state.return_value = _state(round=2, verification_state=3, target_sha256='a' * 64)
     ticket = object()
     end = ReadEnd(stopped=True, bytes_read=10, error=None)
@@ -150,6 +153,64 @@ async def test_verified_segment_recovery_settles_original_before_ready(setup, mo
     assert result.reason == 'read_result_unconfirmed'
     assert trace == ['file_owner', 'recheck', 'local_copy', 'finish_original']
     setup.copies.repository.grant_read_slot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_verified_segment_delivers_original_input_after_read_result_saved(setup, monkeypatch):
+    setup.copies.copy_state.return_value = _state(round=2, verification_state=3, target_sha256='a' * 64)
+    ticket = object()
+    end = ReadEnd(stopped=True, bytes_read=10, error=None)
+    expected_file = FileRef(701, FilePurpose.RECORDING_INPUT, 'recording-inputs/701.mp4', Path('staging'))
+    monkeypatch.setattr(read_attempts, 'unfinished_read_end', lambda *args: (ticket, (ticket, end, 99, None)))
+    monkeypatch.setattr(read_attempts, 'current_local_read_end', AsyncMock(return_value=True))
+    trace = []
+    saved = []
+
+    async def finish(flow, actual, step, **kwargs):
+        assert actual is ticket
+        assert step.phase is InputPhase.INPUT_READY
+        assert step.input_file == expected_file
+        assert step.read_end is end
+        saved.append(step)
+        trace.append('read_result_saved')
+
+    async def owned(flow, copy_id, callback):
+        assert copy_id == 9
+        return await callback(None)
+
+    monkeypatch.setattr(segment_inspections, '_finish_internal_read', finish)
+    monkeypatch.setattr(segment_inspections, 'run_owned_read', owned)
+    import camctl.persistence.repositories.segment_inspections as inspection_repository
+    monkeypatch.setattr(inspection_repository, 'inspection_input_read_succeeded',
+                        lambda connection, inspection: bool(saved))
+    stream = MediaStream(0, 'video', 'h264', 1920, 1080, Decimal('1'), False, frame_count=25)
+    probe = MediaProbe(Decimal('1'), None, (stream,))
+
+    async def probe_segment(input_file, *, count_frames):
+        assert saved and saved[0].input_file is input_file
+        assert input_file == expected_file
+        assert count_frames is True
+        trace.append('probe')
+        return FileTaskResult(FileTaskId('probe'), True, value=probe)
+
+    setup.flow.tools.probe_segment.side_effect = probe_segment
+    def save_result(request, key, owned):
+        assert request.inspection_id == 4
+        assert request.result_json['metric'] == {'metric': 'frames', 'value': 25, 'reason': None}
+        trace.append('inspection_saved')
+        ref = replace(setup.repository.read.return_value, state=request.state, result_json=request.result_json)
+        setup.repository.read.return_value = ref
+        return DbOutcome(DbOutcomeKind.COMPLETED, value=ref)
+
+    setup.repository.save_result.side_effect = save_result
+    result = await segment_inspections.inspect_segment(setup.flow, setup.request)
+    assert result.phase is segment_inspections.SegmentInspectionPhase.COMPLETED
+    assert result.copy_id == 9
+    assert (result.metric.metric, result.metric.value) == (CoverageMetric.FRAMES, 25)
+    assert trace == ['read_result_saved', 'probe', 'inspection_saved']
+    setup.flow.tools.probe_segment.assert_awaited_once_with(expected_file, count_frames=True)
+    setup.copies.repository.grant_read_slot.assert_not_called()
+    setup.flow.sessions.open_session.assert_not_called()
 
 
 @pytest.mark.asyncio
