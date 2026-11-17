@@ -176,14 +176,20 @@ async def test_dispatch_cancellation_prevents_subsequent_start(action, cancel_af
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation,payload,accepted", [("stop_timelapse", "00", True),
-    ("stop_timelapse", "df", True), ("stop_recording", "00", True), ("stop_recording", "df", False)])
+    ("stop_timelapse", "df", True), ("stop_recording", "00", True), ("stop_recording", "df", True),
+    ("stop_recording", "ff", False), ("stop_timelapse", "ff", False)])
 async def test_stop_factory_uses_actual_scoped_command(operation, payload, accepted):
     transport = Transport(stop_payload=payload)
     request = ControlRequest(operation, DeviceBinding("camera", "dji-osmo360-ii"), {},
         AttemptTicket(1, "stop", "7", "stop/7", 9), Decimal("10"))
     result = await _driver(transport).stop(request)
+    code = "02" if operation == "stop_recording" else "01"
+    assert transport.commands == [["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", code, "00"]]
+    assert transport.specs[0].argv[:5] == ("adb", "-s", "serial-1", "shell", "-T")
     assert (result.error is None) is accepted
     assert [item.type for item in result.observations] == (["stop_confirmed"] if accepted else [])
+    if accepted:
+        assert result.observations[0].data["response_payload"] == payload
 
 
 @pytest.mark.parametrize('kind,margin_ms', [('record', 0), ('timelapse', 0)])
