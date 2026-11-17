@@ -14,7 +14,7 @@ from camctl.capture.result_scans import PendingResultScan
 from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.repositories.segment_inspections import InspectionResultSave
+from camctl.persistence.repositories.segment_inspections import InspectionResultSave, SegmentInspectionRef
 from .test_media_save_identity import _request as media_request
 from .test_result_page_saves import _request as page_request
 
@@ -218,17 +218,31 @@ async def test_media_recovery_output_receipt_updates_joining_adapter_file_scope(
 async def test_inspection_recovery_joins_result_save_and_waiter_cancel_keeps_receipt():
     database = _database()
     flow = SimpleNamespace(database=database, pending_segment_inspection_results={})
-    request = InspectionResultSave(3, 4, {"reason": "unknown"}, 5)
+    request = InspectionResultSave(3, 4, {
+        "metric": {"metric": "frames", "value": None, "reason": "unknown"},
+        "probe": None, "tool": {"ran": False, "error": None},
+        "failure": {"code": "read_failed", "reason": "unknown"},
+    }, 5)
+    saved = SegmentInspectionRef(3, 1, 1, 1, 1, request.state, {"metric": "frames", "value": 1},
+                                 {"max_attempts": 1, "timeout_s": 1, "retry_interval_s": 0}, request.result_json)
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def write(callback, **kwargs):
         entered.set()
         await release.wait()
-        return DbOutcome(DbOutcomeKind.COMPLETED)
+        return DbOutcome(DbOutcomeKind.COMPLETED, saved)
 
     database.write.side_effect = write
     first = asyncio.create_task(segment_inspections._save_result(flow, request))
-    await entered.wait()
+    waiter = asyncio.create_task(entered.wait())
+    try:
+        done, _ = await asyncio.wait((first, waiter), timeout=2, return_when=asyncio.FIRST_COMPLETED)
+        if first in done:
+            await first
+            pytest.fail("保存任务在抵达等待点之前结束")
+        assert waiter in done, "保存任务未抵达等待点"
+    finally:
+        waiter.cancel()
     second = await _join(asyncio.create_task(segment_inspections._save_result(flow, request)))
     first.cancel("inspection waiter")
     await asyncio.sleep(0)
