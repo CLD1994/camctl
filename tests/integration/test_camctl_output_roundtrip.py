@@ -88,12 +88,13 @@ def _ready_report(deployment: Deployment) -> dict:
 
 def _run_capture_at_schedule(
         deployment: Deployment, spec: dict, scheduled_at: str,
-        name: str) -> CliResult:
+        name: str, *, plan_path: Path | None = None) -> CliResult:
     """冻结软件准备耗时，实际 START 责任收场后再推进业务钟。"""
     deployment.freeze_at(scheduled_at)
     deadline = time.monotonic() + 180
+    plan_args = () if plan_path is None else (str(plan_path),)
     process = deployment.start_camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", *plan_args, "--config", str(deployment.config_path), driver=spec)
     try:
         _await_row(
             deployment.state_db,
@@ -794,12 +795,9 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path, reuse_client) ->
         ],
     }
     first_path, _ = deployment.export_plan_with_client(first_body)
-    first_submit = deployment.camctl(
-        "submit", str(first_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert first_submit.exit_code == 0, first_submit.stderr
     first_run = _run_capture_at_schedule(
-        deployment, spec, first_body["actions"][0]["scheduled_at"], "首拍")
+        deployment, spec, first_body["actions"][0]["scheduled_at"], "首拍",
+        plan_path=first_path)
     assert first_run.exit_code == 0, first_run.stderr
     first_action = _query(
         state_db, "SELECT id FROM actions WHERE name = '首拍'")[0][0]
