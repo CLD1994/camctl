@@ -19,11 +19,7 @@ CODES = "protocol/workflow-codes.json"
 
 @pytest.fixture
 def isolated(monkeypatch):
-    names = (
-        "protocol/plan.schema.json", "protocol/status-report.schema.json",
-        "protocol/capabilities.schema.json", "protocol/host-notification.schema.json",
-    )
-    documents = {name: json.dumps({"$schema": VERSION}).encode() for name in names}
+    documents = {}
     documents[REPORT] = json.dumps({
         "$schema": VERSION,
         "$defs": {"error": {"type": "object", "required": ["code", "stage", "details"],
@@ -35,6 +31,8 @@ def isolated(monkeypatch):
     }}).encode()
 
     def read(name):
+        if name.endswith(".schema.json") and name not in documents:
+            documents[name] = json.dumps({"$schema": VERSION}).encode()
         try:
             return documents[name]
         except KeyError:
@@ -62,6 +60,7 @@ def isolated(monkeypatch):
         monkeypatch.delitem(sys.modules, qualified)
     schemas = importlib.import_module("camctl.contracts.schemas")
     workflow_errors = importlib.import_module("camctl.contracts.workflow_errors")
+    schemas.schema_registry()
     return SimpleNamespace(documents=documents, schemas=schemas, workflow_errors=workflow_errors)
 
 
