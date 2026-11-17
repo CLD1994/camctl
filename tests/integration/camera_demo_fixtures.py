@@ -335,14 +335,21 @@ def _contract(model, world):
         capture_read_parallel_supported=True)
 
 
-def install_camera_demo(spec):
+def install_camera_demo(spec, *, session_assemblies=True):
     """测试进程在真实 CLI 登记前装配；生产入口没有该模式。"""
     from camctl.devices.drivers.adb_cameras import registration
-    from camctl.bootstrap import lifecycle, capture_assembly, obtain_assembly, cleanup_assembly
     world = CameraWorld(spec)
     contracts = tuple(_contract(model, world) for model in CameraModel)
     registration.builtin_camera_contracts = lambda: contracts
     registration.AdbTransport = lambda: WorldTransport(world)
+    if not session_assemblies:
+        from camctl.bootstrap import clocks
+
+        clocks.SystemClock = lambda: world.clock
+        return
+
+    from camctl.bootstrap import lifecycle, capture_assembly, obtain_assembly, cleanup_assembly
+
     lifecycle.SystemClock = lambda: world.clock
     for module, name, fields in (
         (capture_assembly, "session_capture_assembly", ("wall_us", "monotonic_ns")),
