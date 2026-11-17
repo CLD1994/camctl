@@ -9,6 +9,7 @@ import pytest
 from camctl.capture.handlers import CaptureRuntime, ListingPhase, ListingRound
 from camctl.capture.preparation import RuntimePreparationCache
 from camctl.capture.scope_closure import advance_ended_scope
+from camctl.contracts.enums import enum_for
 from camctl.operations.attempts import AttemptConfig, BeginAttemptResult, BeginDisposition, OperationKind, RunOutcome
 from camctl.devices.evidence import DeviceObservation
 from camctl.operations.models import (
@@ -25,6 +26,7 @@ from support.capture_database import capture_database
 def _world(mocker, *, old_scope=True, error=None, finalized_event_id=None):
     runtime = create_autospec(CaptureRuntime, instance=True)
     old = {"id": 21, "status": 4, "device_id": "camera", "driver_id": "dji-osmo360-ii",
+        "type": int(enum_for("actions.type").CAMERA_RECORD),
         "execution_spec_json": {"video_result_mode": "segmented"}, "error_code": "capture_failed"}
     trigger = {"id": 22, "status": 1, "cancel_requested": 0, "device_id": "camera",
         "scheduled_at": 1_000_000, "max_delay_ms": 3000}

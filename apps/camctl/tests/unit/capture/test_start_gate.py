@@ -16,10 +16,11 @@ from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import (
     ExpireActionRequest, ExpireActionResult, ExpireOutcome, SchedulingRepository,
 )
-from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION, DatabaseMetadata, OwnedConnection
 from camctl.scheduling.rules import LaunchWindow
 from support.capture_database import capture_database
 
@@ -31,6 +32,9 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.pending_read_results = {}
     runtime.pending_read_business = {}
     runtime.pending_read_ends = {}
+    runtime.continuing_read_tickets = {}
+    runtime.pending_segment_inspection_results = {}
+    runtime.pending_media_results = {}
     runtime.pending_baselines = {}
     runtime.pending_result_scans = {}
     runtime.pending_result_closes = {}
@@ -39,6 +43,10 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.pending_start_results = {}
     runtime.pending_segment_writes = {}
     runtime.capture = mocker.create_autospec(CaptureRepository, instance=True)
+    runtime.operations = mocker.create_autospec(OperationRepository, instance=True)
+    runtime.file_executor = None
+    runtime.evidence = None
+    runtime.roots = None
     runtime.prepare_baseline.return_value = BaselinePreparation(PreparationPhase.READY)
     runtime.wall_us = mocker.Mock(return_value=now)
     runtime.monotonic_ns = mocker.Mock(return_value=100_000)
@@ -51,11 +59,14 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
         value=ExpireActionResult(ExpireOutcome.EXPIRED, expiration_reason=2))
     connection = mocker.create_autospec(sqlite3.Connection, instance=True)
     runtime.database = capture_database(OwnedConnection(connection, DatabaseMetadata(
-        'camctl', 'a'*32, 5, '/staging', '/ready', '/processing')))
+        'camctl', 'a'*32, CURRENT_FORMAT_VERSION, '/staging', '/ready', '/processing')))
     cursor = mocker.create_autospec(sqlite3.Cursor, instance=True)
     cursor.fetchone.return_value = None
     cursor.fetchall.return_value = []
-    connection.execute.return_value = cursor
+    metadata_cursor = mocker.create_autospec(sqlite3.Cursor, instance=True)
+    metadata_cursor.fetchone.return_value = (runtime.database.metadata.format_version,)
+    connection.execute.side_effect = lambda sql, *args: (
+        metadata_cursor if sql == "SELECT format_version FROM database_metadata WHERE id=1" else cursor)
     runtime.binding_check = None
     runtime.timelapse_deadlines = {}
     runtime.natural_wait_states = {}
@@ -63,7 +74,7 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.last_attempt.return_value = None
     runtime.grant.return_value = (None, "device_busy")
     runtime.action.return_value = {
-        "id": 2, "device_id": "cam-1", "status": 2, "cancel_requested": 0,
+        "id": 2, "device_id": "cam-1", "status": 2, "cancel_requested": 0, "execution_started": 0,
         "scheduled_at": 100, "max_delay_ms": 1,
         "type": int(enum_for("actions.type")[action_type.upper()]),
         "effective_params_json": {"type": "ordinary", "duration_s": 60},
@@ -195,6 +206,9 @@ async def test_photo_start_preserves_complete_deadline_entry_permit_and_preparat
     permit.bind(runtime.database.metadata.instance_id, ticket)
     runtime.grant.return_value = (ticket, None)
     mocker.patch("camctl.capture.preparation.prepared_by", autospec=True, return_value=prepared)
+    availability = mocker.patch(
+        "camctl.persistence.repositories.preparation.recheck_start_availability",
+        autospec=True, return_value=None)
 
     async def capture(request):
         permit.enter(request.ticket)
@@ -206,6 +220,8 @@ async def test_photo_start_preserves_complete_deadline_entry_permit_and_preparat
     assert (await _control_call(runtime, action, "take_photo", "photo_taken")).phase == "confirmed"
 
     request = runtime.driver.control.call_args.args[0]
+    assert availability.call_args.args[1] == ticket
+    availability.assert_called_once()
     assert request.timeout_s == Decimal(180)
     assert request.prepared_by == prepared and request.start_entry is permit
     assert not permit.active
