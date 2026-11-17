@@ -269,14 +269,14 @@ def _start_recording_and_interrupt(deployment: Deployment,
 
 
 def _wait_business_past(deployment: Deployment, moment: datetime) -> None:
-    """等待原业务 UTC 越过给定时刻，保留真实推进和一秒余量。"""
-    target_us = int((moment + timedelta(seconds=1)).timestamp() * 1_000_000)
+    """等待原业务 UTC 严格越过给定时刻，保留真实推进。"""
+    target_us = int(moment.timestamp() * 1_000_000)
     started_ns = time.monotonic_ns()
     before = read_clock(deployment.clock_state_path)
     system_utc_before_us = time.time_ns() // 1000
     assert before["mode"] == "running", before
     reading = before
-    while reading["utc_us"] < target_us:
+    while reading["utc_us"] <= target_us:
         time.sleep(0.1)
         reading = read_clock(deployment.clock_state_path)
     (deployment.root / "media-clock-wait.json").write_text(
@@ -443,7 +443,7 @@ def test_excess_recording_repairs_without_probing(
     assert datetime.now(timezone.utc) > started_moment + timedelta(
         seconds=_TARGET_DURATION_S + 3.5)
     _wait_business_past(deployment, started_moment + timedelta(
-        seconds=_TARGET_DURATION_S + 2.5))
+        seconds=_TARGET_DURATION_S + 0.5))
 
     reconciled = deployment.camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
