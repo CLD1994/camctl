@@ -36,36 +36,77 @@ class Cursor:
 
 class RecoveryTests(unittest.TestCase):
     def test_legacy_pending_business_retires_then_settles_original_inspection(self):
+        from unittest.mock import AsyncMock, create_autospec, patch
+        from camctl.capture import media_flow, segment_inspections
+        from camctl.capture.input_copy import InputPhase
+        from camctl.outputs import read_attempts
+        from camctl.persistence.business import BusinessDatabase
+        from camctl.persistence.models import DbOutcome, DbOutcomeKind
+        from camctl.persistence.repositories.capture import CaptureResult, FinishDisposition
+
         async def run():
             calls = []
-            business = SimpleNamespace(request=SimpleNamespace(action_id=4), key="original-business-key")
-            ticket = SimpleNamespace(target_id="9")
-            pending = SimpleNamespace(preserved_run_terminal=False, business=business,
-                finish=SimpleNamespace(ticket=ticket, occurred_at=17))
-            async def save_result(flow, value):
-                calls.append(("read_result", value))
+            ticket = SimpleNamespace(target_id="9", run_id=5, attempt_id=6)
+            request = SimpleNamespace(action_id=4)
+            owned = SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(
+                [(8,)] if "SELECT inspection_id" in sql else [(9,)])))
+            database = create_autospec(BusinessDatabase, instance=True)
+            database.read.side_effect = lambda callback, **kwargs: callback(owned)
+            database.write.side_effect = lambda callback, **kwargs: callback(owned)
+
+            def save_business(actual, key, connection):
+                self.assertIs(actual, request)
+                self.assertEqual(key, "original-business-key")
+                self.assertIs(connection, owned)
+                self.assertNotIn((5, 6), flow.pending_read_results)
+                self.assertIs(flow.pending_read_business[(4, "capture_binding_failure")], business)
+                calls.append(("original_business", key))
+                return DbOutcome(DbOutcomeKind.COMPLETED,
+                    value=CaptureResult(2, 2, (), FinishDisposition.RETIRED))
+
+            business = read_attempts.PendingReadBusiness(save_business, request, "original-business-key")
+            pending = read_attempts.PendingReadResult(
+                SimpleNamespace(ticket=ticket, occurred_at=17), "original-read-key", business)
+            flow = SimpleNamespace(database=database, occurred_at=lambda: 20,
+                pending_read_results={(5, 6): pending}, pending_read_business={},
+                continuing_read_tickets={}, pending_media_results={}, file_executor=None)
+
+            async def save_result(actual_flow, value, *, retry=False):
+                self.assertIs(actual_flow, flow)
+                self.assertIs(value, pending)
+                self.assertEqual(value.key, "original-read-key")
+                self.assertTrue(retry)
+                calls.append(("read_result", value.key))
                 return value
-            def hold(flow, action_id, stage, value): calls.append(("hold", value.key))
-            def forget(flow, value): calls.append(("forget", value))
-            async def save_business(flow, action_id, stage, value):
-                calls.append(("original_business", value.key))
-                return SimpleNamespace(value=SimpleNamespace(disposition="retired"))
-            async def read_one(database, sql, params): return (8,)
-            async def settle(flow, copy_id, occurred_at):
+
+            async def settle(actual_flow, copy_id, occurred_at):
+                self.assertIs(actual_flow, flow)
                 calls.append(("inspection", copy_id, occurred_at))
                 return True
-            async def release(flow, copy_id, occurred_at): calls.append(("release", copy_id))
-            namespace = {"save_read_result": save_result, "hold_prepared_read_business": hold,
-                "forget_read_result": forget, "save_prepared_read_business": save_business,
-                "FinishDisposition": SimpleNamespace(RETIRED="retired"), "_read_one": read_one,
-                "settle_inspection_read_failure": settle, "settle_terminal_inspection_read_slot": release}
-            flow = SimpleNamespace(database=object(), occurred_at=lambda: 20)
-            await load("_save_internal_read_result", namespace, MEDIA)(flow, pending)
+
+            async def release(actual_flow, copy_id, occurred_at):
+                self.assertIs(actual_flow, flow)
+                calls.append(("release", copy_id, occurred_at))
+                return True
+
+            with (patch.object(media_flow, "save_read_result", save_result),
+                  patch.object(media_flow, "resume_media_saves", AsyncMock(return_value=False)),
+                  patch.object(media_flow, "_fail_internal_read_input", AsyncMock()),
+                  patch.object(read_attempts, "retry_read_business", AsyncMock()),
+                  patch.object(read_attempts, "retry_read_ends", AsyncMock()),
+                  patch.object(segment_inspections, "settle_inspection_read_failure", settle),
+                  patch.object(segment_inspections, "settle_terminal_inspection_read_slot", release)):
+                result = await media_flow.run_recording_media(flow, 4, 1, 30)
+            self.assertEqual((result.phase, result.copy_id, result.reason),
+                             (InputPhase.WAITING, 9, "run_ended"))
+            self.assertFalse(flow.pending_read_results)
+            self.assertFalse(flow.pending_read_business)
             return calls
-        calls = asyncio.run(run())
-        self.assertEqual([call[0] for call in calls], ["read_result", "hold", "forget", "original_business", "inspection", "release"])
-        self.assertEqual(calls[3], ("original_business", "original-business-key"))
-        self.assertEqual(calls[4], ("inspection", 9, 17))
+
+        self.assertEqual(asyncio.run(run()), [
+            ("read_result", "original-read-key"),
+            ("original_business", "original-business-key"),
+            ("inspection", 9, 17), ("release", 9, 20)])
 
     def test_original_binding_business_key_is_reused_or_retired_for_inspection(self):
         calls = []
