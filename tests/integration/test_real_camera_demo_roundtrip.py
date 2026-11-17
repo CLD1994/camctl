@@ -88,8 +88,7 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
     demo = HostDemo(deployment, host_demo, launcher=write_stub_launcher(deployment))
     try:
         failure = demo.watch_failures(request_id=capture_receipt["request_id"], expected_statuses={"capture": "SUCCEEDED"})
-        demo.start()
-        demo.submit(capture)
+        demo.start(initial_plan=capture)
         started = wait_for(lambda: _started(deployment, "capture"), 60, "原 START/SENT 未可靠保存", failure=failure)
         assert started[3] is not None and started[4] is not None
         if action_type == "camera_timelapse":

@@ -241,7 +241,8 @@ class HostDemo:
         self._reader_stop = threading.Event()
         self._reader = None
 
-    def start(self, *, env: dict[str, str] | None = None, use_default_paths: bool = False) -> None:
+    def start(self, *, env: dict[str, str] | None = None, use_default_paths: bool = False,
+              initial_plan: Path | None = None) -> None:
         self._replies = queue.Queue()
         self._stderr = bytearray()
         self._reader_stop.clear()
@@ -260,6 +261,8 @@ class HostDemo:
                 "--log", to_wsl(self.log_path)]
             if self.deployment.config_path is not None:
                 command.extend(["--config", to_wsl(self.deployment.config_path)])
+        if initial_plan is not None:
+            command.extend(["--initial-plan", to_wsl(initial_plan)])
         if not _NATIVE_POSIX:
             body = 'printf "%s\\n" "$$"; exec ' + shlex.join(command)
             command = ["wsl.exe", "-e", "sh", "-c", body]

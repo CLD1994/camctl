@@ -3,8 +3,8 @@
 在报告同步主链（test_camctl_report_roundtrip）已验证的真实客户端
 导出、C 主程序递交与领取、camctl 执行及客户端导入基础上，把拍摄、
 取回、取消与清理场景全部改为经同一 C 模块递交链执行：计划由客户
-端真实导出，host-demo 的 submit 内部调用经部署装配桥接入设备替身
-的 camctl submit/run，产物与报告由 claim 领取进 processing，客户
+端真实导出，host-demo 初始化或 submit 经部署装配桥接入设备替身
+的 camctl run/submit，产物与报告由 claim 领取进 processing，客户
 端导入后下一份导出自动携带 ACK，经同一递交入口吸收。
 
 覆盖：录像、照片、延时摄影、普通取回与自动取回、清理、取消及同
@@ -200,8 +200,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
         expected_statuses={action["name"]: "SUCCEEDED" for action in body["actions"]},
     )
     try:
-        demo.start()
-        demo.submit(plan_path)
+        demo.start(initial_plan=plan_path)
         deadline = time.monotonic() + 180
         deployment.freeze_at(shoot_at)
         wait_for(lambda: query_state(state_db,
@@ -459,8 +458,7 @@ def test_late_cancel_roundtrip_via_c_module(
         expected_statuses={action["name"]: "SUCCEEDED" for action in body["actions"]},
     )
     try:
-        demo.start()
-        demo.submit(plan_path)
+        demo.start(initial_plan=plan_path)
         deadline = time.monotonic() + 180
         deployment.freeze_at(body["actions"][0]["scheduled_at"])
         wait_for(lambda: query_state(state_db,
