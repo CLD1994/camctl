@@ -282,11 +282,9 @@ class CancelSettlementTests(unittest.TestCase):
                                       'file_id': 23, 'location': 'staging'}})
 
     def test_cancel_guard_rejects_missing_or_wrong_original_copy_identity(self):
-        repo = load_repository()
-        event_error = type('EventError', (Exception,), {})
-        repo.EventValidationError = event_error
-        repo._OBTAIN_TYPE = 4
-        repo._VERIFICATION = SimpleNamespace(MATCHED=3, SOURCE_CHECKSUM_UNAVAILABLE=5)
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.validation import build_business_rules
+        guard = build_business_rules()['delivery']
         event = SimpleNamespace(event_type=23, reason=6,
             rows=[SimpleNamespace(table='deliveries', row_id=19,
                 before=SimpleNamespace(values={'status': 4}),
@@ -298,17 +296,14 @@ class CancelSettlementTests(unittest.TestCase):
                                   'verification_state': 3, 'committed_bytes': 4, 'source_size': 4}},
             'intermediate_files': {23: {'id': 23, 'owner_delivery_id': 19}},
         })
-        handoff = load_handoff()
-        handoff.enum_for = lambda name: repo._VERIFICATION
-        with patch.dict(sys.modules, {'camctl.outputs.handoff': handoff}):
-            with self.assertRaises(event_error):
-                repo._delivery_guard(event, context)
-            event.evidence = {'canceled_publication': {'delivery_id': 19, 'copy_id': 21,
-                                                        'file_id': 24, 'location': 'staging'}}
-            with self.assertRaises(event_error):
-                repo._delivery_guard(event, context)
-            event.evidence['canceled_publication']['file_id'] = 23
-            repo._delivery_guard(event, context)
+        with self.assertRaises(EventValidationError):
+            guard(event, context)
+        event.evidence = {'canceled_publication': {'delivery_id': 19, 'copy_id': 21,
+                                                    'file_id': 24, 'location': 'staging'}}
+        with self.assertRaises(EventValidationError):
+            guard(event, context)
+        event.evidence['canceled_publication']['file_id'] = 23
+        guard(event, context)
 
     def test_replay_rejects_a_different_staging_observation_identity(self):
         repo = load_repository()
@@ -1067,21 +1062,19 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.result.disposition, 'canceled')
 
     def test_unconfirmed_failure_guard_rejects_canceled_owner(self):
-        repo = load_repository()
-        repo.EventValidationError = type('EventError', (Exception,), {})
-        repo.registered_error = lambda code: {'stage': 'publication'}
-        repo.validate_error_details = lambda code, details: None
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.validation import build_business_rules
+        guard = build_business_rules()['delivery']
         row = SimpleNamespace(table='deliveries', row_id=19,
             after=SimpleNamespace(values={'status': 6, 'error_json': {
                 'code': 'delivery_handoff_unconfirmed', 'stage': 'publication', 'details': {'delivery_id': '19'}}}))
         event = SimpleNamespace(event_type=23, reason=5, rows=(row,))
         context = SimpleNamespace(state_rows={'deliveries': {19: {'id': 19, 'action_id': 7}},
                                                'actions': {7: {'id': 7, 'status': 2, 'cancel_requested': 1}}})
-        with self.assertRaises(repo.EventValidationError):
-            repo._delivery_guard(event, context)
-        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2)
+        with self.assertRaises(EventValidationError):
+            guard(event, context)
         context.state_rows['actions'][7]['cancel_requested'] = 0
-        repo._delivery_guard(event, context)
+        guard(event, context)
 
     async def test_missing_copy_result_does_not_claim_failure_when_cancel_wins(self):
         module = load_handoff()

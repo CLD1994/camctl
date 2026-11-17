@@ -386,7 +386,7 @@ async def test_begin_original_key_replay_recovers_basis_before_later_completion(
 
 def _rule_failure(monkeypatch, connection):
     """在公开错误校验协作边界交付真实规则异常。"""
-    from camctl.persistence.repositories import capture as capture_module
+    from camctl.persistence.repositories import capture_guards as capture_module
     with pytest.raises(SchemaRuleError) as invalid:
         create_validator({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "invalid"})
     failure = invalid.value
