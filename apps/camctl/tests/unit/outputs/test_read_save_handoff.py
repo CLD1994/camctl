@@ -31,9 +31,9 @@ from camctl.persistence.runtime import OwnedConnection
 pytestmark = pytest.mark.asyncio
 
 
-def saved_read_result():
+def saved_read_result(attempt_status=AttemptStatus.SUCCEEDED, run_status=RunStatus.SUCCEEDED):
     return DbOutcome(DbOutcomeKind.COMPLETED,
-        FinishAttemptResult(FinishDisposition.SAVED, AttemptStatus.SUCCEEDED, RunStatus.SUCCEEDED))
+        FinishAttemptResult(FinishDisposition.SAVED, attempt_status, run_status))
 
 
 @pytest.fixture
@@ -241,6 +241,7 @@ async def test_stopped_observation_and_main_resume_share_original_preparation(wo
     from camctl.capture.input_copy import InputPhase, InputStep
     from camctl.devices.read_session import ReadEnd
 
+    world.operations.finish_attempt.return_value = saved_read_result(AttemptStatus.UNKNOWN, RunStatus.CANCELED)
     ticket = AttemptTicket(1, 'read', '2', 'read/2', 5)
     step = InputStep(InputPhase.SEGMENT_FAILED, copy_id=2,
         read_end=ReadEnd(True, 10, 'stopped'), stop_requested=True)
@@ -339,7 +340,7 @@ async def test_stopped_result_failure_keeps_prepared_phase_and_original_input(wo
     with pytest.raises(ConsistencyError):
         await media_flow._save_internal_read_and_settle(world.runtime, pending)
     prepared = world.runtime.pending_read_results[(5, 1)]
-    world.operations.finish_attempt.return_value = saved_read_result()
+    world.operations.finish_attempt.return_value = saved_read_result(AttemptStatus.UNKNOWN, RunStatus.CANCELED)
     await media_flow.resume_prepared_internal_reads(world.database,
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
@@ -397,6 +398,7 @@ async def test_exhausted_internal_read_recovers_original_business_stages(world, 
     pending = hold_read_result(world.runtime, AttemptFinish(ticket,
         validate_outcome(ticket, outcome, _LOCAL_READ_EVIDENCE), 123,
         run_finish=RunFinish(RunOutcome.FAILED, ErrorValue('read_attempts_exhausted', 'source_read'))))
+    world.operations.finish_attempt.return_value = saved_read_result(AttemptStatus.FAILED, RunStatus.FAILED)
     world.runtime.occurred_at = lambda: 123
     status = SimpleNamespace(check_decision=3, check_state=1,
         repair_state=1 if failed_stage == 'repair_decision' else 3 if failed_stage == 'repair_result' else 2,
@@ -534,6 +536,8 @@ async def test_obtain_complete_business_applies_tail_before_original_control(
                           else [DbOutcome(initial_kind), control])
     ticket = AttemptTicket(1, 'read', '2', 'read/2', 5)
     failed = stage not in ('release', 'binding')
+    if failed:
+        world.operations.finish_attempt.return_value = saved_read_result(AttemptStatus.FAILED, RunStatus.FAILED)
     outcome = CallOutcome(status=AttemptStatus.FAILED if failed else AttemptStatus.SUCCEEDED,
         effect=EffectState.UNKNOWN,
         error=ErrorValue('device_error', 'read', {'reason': 'device read failed'}) if failed else None,
