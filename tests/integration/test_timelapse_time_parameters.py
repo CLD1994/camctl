@@ -219,9 +219,7 @@ def test_describe_python_browser_and_node_export_agree(tmp_path, model, reuse_cl
         "name": "取消", "type": "cancel_task", "scheduled_at": future_schedule(1),
         "params": {"target": {"request_id": original["request_id"]}},
     }]})
-    submitted_cancel = deployment.camctl("submit", str(cancel), "--config", str(deployment.config_path), driver=driver)
-    assert submitted_cancel.exit_code == 0, submitted_cancel.stderr
-    ran = deployment.camctl("run", "--config", str(deployment.config_path), driver=driver)
+    ran = deployment.camctl("run", str(cancel), "--config", str(deployment.config_path), driver=driver)
     assert ran.exit_code == 0, ran.stderr
     reports = list(deployment.ready.glob("status-report-*.json"))
     assert reports
