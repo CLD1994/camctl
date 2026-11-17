@@ -87,6 +87,9 @@ def test_photo_keeps_completed_outputs(tmp_path: Path) -> None:
     真实导入保存后，递交的 ACK 被受理接口吸收并推进累计确认。
     """
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例关注正式产物保留，缩短计划发现轮询间隔。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -156,9 +159,11 @@ def test_photo_keeps_completed_outputs(tmp_path: Path) -> None:
     ack = deployment.write_plan(
         {"request_id": "41", "last_report_id": report_id})
     absorbed = deployment.camctl(
-        "run", str(ack), "--config", str(deployment.config_path),
+        "submit", str(ack), "--config", str(deployment.config_path),
         driver=spec)
     assert absorbed.exit_code == 0, absorbed.stderr
+    assert absorbed.message() == {
+        "kind": "succeeded", "body": {"needs_run": False}}
     assert _query(
         state_db,
         "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
