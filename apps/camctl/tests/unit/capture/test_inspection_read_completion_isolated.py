@@ -1,28 +1,22 @@
-"""检查原读取收场与来源成功资格；不导入实际包资源或数据库。"""
+"""检查原读取收场、绑定失败及来源成功资格。"""
 
-import ast
-from contextlib import closing
-from pathlib import Path
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 import unittest
-
-from camctl.capture.inspection_rules import (
-    binding_read_error, binding_result_blocked,
-    inspection_read_is_complete, inspection_result_requires_read,
-)
 from unittest.mock import patch
 
-
-ROOT = Path(__file__).parents[3] / "src" / "camctl"
-
-
-def extract(path, name, namespace):
-    tree = ast.parse(path.read_text())
-    node = next(item for item in tree.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and item.name == name)
-    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), node], type_ignores=[])
-    exec(compile(ast.fix_missing_locations(module), str(path), "exec"), namespace)
-    return namespace[name]
+from camctl.capture import action6_recovery, segment_inspections
+from camctl.capture.inspection_rules import inspection_result_requires_read
+from camctl.capture.segment_models import CoverageStatus
+from camctl.contracts.values import ConsistencyError
+from camctl.devices.tasks import CaptureResultPolicy
+from camctl.history.events import load_event_registry
+from camctl.history.validators import EventValidationError
+from camctl.outputs import read_attempts
+from camctl.persistence.repositories import binding_read_cancel, read_end
+from camctl.persistence.repositories import segment_inspections as repository
+from camctl.persistence.repositories import segment_transactions
+from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+from camctl.persistence.repositories.transactions import TransactionScope
 
 
 class Cursor:
@@ -33,27 +27,14 @@ class Cursor:
 
 class ReadCompletionTests(unittest.TestCase):
     def setUp(self):
-        enums = {"operation_runs.kind": SimpleNamespace(READ_FILE=3),
-                 "operation_runs.status": SimpleNamespace(SUCCEEDED=3),
-                 "operation_attempts.status": SimpleNamespace(SUCCEEDED=2),
-                 "file_copies.verification_state": SimpleNamespace(MATCHED=3, SOURCE_CHECKSUM_UNAVAILABLE=5)}
-        self.ns = {"closing": closing, "enum_for": enums.__getitem__,
-                   "inspection_read_is_complete": inspection_read_is_complete}
-        self.check = extract(ROOT / "persistence/repositories/segment_inspections.py", "inspection_input_read_succeeded", self.ns)
         self.rows = [(15, 10, 10, 3, "hash", 7, 6, 3, 1, 0, 2, "{}", 21)]
         self.connection = SimpleNamespace(execute=lambda sql, params: Cursor(self.rows))
         self.inspection = {"id": 8, "action_id": 6, "source_device_file_id": 15}
         self.settled = True
-        owner = self
-        class Reads:
-            def __init__(self, connection): pass
-            def no_unsettled_attempts(self, run_id): return owner.settled
-        self.module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        self.module.RetryWaitReads = Reads
 
     def check_current(self):
-        with patch.dict(sys.modules, {self.module.__name__: self.module}):
-            return self.check(self.connection, self.inspection)
+        with patch.object(RetryWaitReads, "no_unsettled_attempts", return_value=self.settled):
+            return repository.inspection_input_read_succeeded(self.connection, self.inspection)
 
     def test_accepts_only_original_completed_read(self):
         self.assertTrue(self.check_current())
@@ -72,128 +53,99 @@ class ReadCompletionTests(unittest.TestCase):
         self.assertFalse(self.check_current())
 
     def test_read_failure_outcomes_do_not_require_probe_input(self):
-        requires = inspection_result_requires_read
-        self.assertTrue(requires(2, {"tool": {"ran": False}}))
-        self.assertTrue(requires(4, {"tool": {"ran": True}}))
-        self.assertTrue(requires(3, {"failure": {"code": "probe_failed"}}))
-        self.assertFalse(requires(3, {"tool": {"ran": False}, "failure": {"code": "read_failed"}}))
+        self.assertTrue(inspection_result_requires_read(2, {"tool": {"ran": False}}))
+        self.assertTrue(inspection_result_requires_read(4, {"tool": {"ran": True}}))
+        self.assertTrue(inspection_result_requires_read(3, {"failure": {"code": "probe_failed"}}))
+        self.assertFalse(inspection_result_requires_read(3, {"tool": {"ran": False}, "failure": {"code": "read_failed"}}))
 
     def test_local_recovery_only_consumes_finished_inspection(self):
-        module = ModuleType("camctl.capture.segment_inspections")
-        module._step_from_ref = lambda inspection, copy_id: (inspection.state, copy_id)
-        enums = ModuleType("camctl.contracts.enums")
-        enums.enum_for = lambda name: SimpleNamespace(PENDING=1)
-        read = extract(ROOT / "capture/action6_recovery.py", "_saved_inspection_without_media", {})
-        with patch.dict(sys.modules, {module.__name__: module, enums.__name__: enums}):
-            self.assertIsNone(read(SimpleNamespace(inspection=None, copy=None)))
-            self.assertIsNone(read(SimpleNamespace(inspection=SimpleNamespace(state=1), copy=None)))
-            self.assertEqual(read(SimpleNamespace(inspection=SimpleNamespace(state=3), copy=SimpleNamespace(copy_id=9))), (3, 9))
+        with patch.object(segment_inspections, "_step_from_ref", side_effect=lambda inspection, copy_id: (inspection.state, copy_id)):
+            self.assertIsNone(action6_recovery._saved_inspection_without_media(SimpleNamespace(inspection=None, copy=None)))
+            self.assertIsNone(action6_recovery._saved_inspection_without_media(SimpleNamespace(inspection=SimpleNamespace(state=1), copy=None)))
+            self.assertEqual(action6_recovery._saved_inspection_without_media(
+                SimpleNamespace(inspection=SimpleNamespace(state=3), copy=SimpleNamespace(copy_id=9))), (3, 9))
+            with self.assertRaises(ConsistencyError):
+                action6_recovery._saved_inspection_without_media(SimpleNamespace(inspection=SimpleNamespace(state=2), copy=None))
 
     def test_binding_failure_result_verifies_original_copy_and_error(self):
         calls = []
-        binding = ModuleType("camctl.persistence.repositories.binding_read_cancel")
-        binding.load_saved_binding_read_failure = lambda connection, action, copy, error: calls.append((action, copy, error))
-        ns = {"closing": closing, "Mapping": dict, "ConsistencyError": ValueError}
-        ns["binding_read_error"] = binding_read_error
-        check = extract(ROOT / "persistence/repositories/segment_inspections.py", "_binding_read_result", ns)
         rows = [(9,)]
         connection = SimpleNamespace(execute=lambda sql, params: Cursor(rows))
         error = {"code": "device_binding_unavailable", "details": {"reason": "missing"}}
         document = {"failure": {"code": "read_failed", "read_error": error}}
-        with patch.dict(sys.modules, {binding.__name__: binding}):
-            self.assertTrue(check(connection, {"id": 8, "action_id": 6}, document))
+        with patch.object(binding_read_cancel, "load_saved_binding_read_failure", side_effect=lambda connection, action, copy, error: calls.append((action, copy, error))):
+            self.assertTrue(repository._binding_read_result(connection, {"id": 8, "action_id": 6}, document))
             self.assertEqual(calls, [(6, 9, error)])
             rows[:] = []
-            with self.assertRaises(ValueError): check(connection, {"id": 8, "action_id": 6}, document)
-            self.assertFalse(check(connection, {"id": 8, "action_id": 6}, {"failure": {"code": "read_failed"}}))
+            with self.assertRaises(ConsistencyError): repository._binding_read_result(connection, {"id": 8, "action_id": 6}, document)
+            self.assertFalse(repository._binding_read_result(connection, {"id": 8, "action_id": 6}, {"failure": {"code": "read_failed"}}))
 
     def test_canceled_owner_retires_unsubmitted_binding_inspection(self):
-        inspection = {"id": 8, "action_id": 6, "state": 1}
+        inspection = {"id": 8, "action_id": 6, "set_id": 2, "member_id": 3, "source_device_file_id": 15,
+                      "state": 1, "target_json": {}, "budget_json": {}, "result_json": None}
         action = {"id": 6, "status": 2, "cancel_requested": 1}
-        class Plan:
-            def __init__(self, **kwargs): self.__dict__.update(kwargs)
-        namespace = {"saved_transaction_events": lambda connection, key: None,
-            "row_facts": lambda connection, table, identity: inspection if table == "segment_inspections" else action,
-            "_STATE": SimpleNamespace(PENDING=1), "_binding_read_result": lambda *args: True,
-            "binding_result_blocked": binding_result_blocked,
-            "_inspection_ref": lambda row: SimpleNamespace(state=row["state"]),
-            "CommandPlan": Plan, "ConsistencyError": ValueError}
-        command = extract(ROOT / "persistence/repositories/segment_inspections.py", "_SaveInspectionResultCommand", namespace)
-        request = SimpleNamespace(inspection_id=8, state=3, result_json={"failure": "binding"})
-        scope = SimpleNamespace(connection=object(), allocate=lambda n: self.fail("取消后不能产生检查事件"))
-        plan = command(request, "original-operation").plan(scope)
-        self.assertTrue(plan.read_only)
-        self.assertEqual(plan.result.state, 1)
+        plans = []
+        def commit(command, key, owned):
+            plan = command.plan(TransactionScope(owned.connection, 0, 0))
+            plans.append(plan)
+            return SimpleNamespace(kind="completed", result=plan.result)
+        request = repository.InspectionResultSave(8, 3, {"failure": "binding"}, 10)
+        with patch.object(repository, "commit_operation", side_effect=commit), \
+             patch.object(repository, "saved_transaction_events", return_value=None), \
+             patch.object(repository, "row_facts", side_effect=lambda connection, table, identity: inspection if table == "segment_inspections" else action), \
+             patch.object(repository, "_binding_read_result", return_value=True):
+            outcome = repository.SegmentInspectionRepository().save_result(request, "original-operation", SimpleNamespace(connection=object()))
+        self.assertTrue(plans[0].read_only)
+        self.assertEqual(outcome.value.state, 1)
 
     def test_independent_inspection_guard_rechecks_cancel_and_original_read(self):
-        module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        class Reads:
-            connection = object()
-        module.RetryWaitReads = Reads
-        checks = []
-        namespace = {"_EVENT": {"id": 38}, "_RESULT": 2, "_CREATE": 1,
-            "_STATE": SimpleNamespace(PENDING=1), "EventValidationError": ValueError,
-            "binding_read_error": lambda doc: {"code": "device_binding_unavailable"},
-            "_binding_read_result": lambda connection, inspection, doc: checks.append(inspection["id"]),
-            "inspection_result_requires_read": lambda state, doc: False,
-            "binding_result_blocked": binding_result_blocked}
-        guard = extract(ROOT / "persistence/repositories/segment_inspections.py", "_segment_inspection_guard", namespace)
+        guards = {}
+        repository.register_segment_inspection_guard(guards.__setitem__)
+        error = {"code": "device_binding_unavailable", "details": {"reason": "missing"}}
+        document = {"failure": {"code": "read_failed", "read_error": error}}
         row = SimpleNamespace(table="segment_inspections", row_id=8, after=SimpleNamespace(values={
-            "state": 3, "result_event_id": 20, "result_json": {"failure": "binding"}}))
-        event = SimpleNamespace(event_type=38, reason=2, event_id=20, rows=[row])
+            "state": 3, "result_event_id": 20, "result_json": document}))
+        definition = load_event_registry()["events"]["SEGMENT_INSPECTION"]
+        event = SimpleNamespace(event_type=definition["id"], reason=definition["branches"]["RESULT"]["reason"], event_id=20, rows=[row])
         inspection = {"id": 8, "action_id": 6, "state": 1}
         action = {"id": 6, "status": 2, "cancel_requested": 0}
-        context = SimpleNamespace(state_rows={"actions": {6: action}, "segment_inspections": {8: inspection}}, retry_wait_reads=Reads())
-        with patch.dict(sys.modules, {module.__name__: module}):
-            guard(event, context)
-            self.assertEqual(checks, [8])
+        context = SimpleNamespace(state_rows={"actions": {6: action}, "segment_inspections": {8: inspection}},
+                                  retry_wait_reads=RetryWaitReads(object()))
+        with patch.object(repository, "_binding_read_result") as check:
+            guards["segment_inspection"](event, context)
+            check.assert_called_once_with(context.retry_wait_reads.connection, inspection, document)
             action["cancel_requested"] = 1
-            with self.assertRaises(ValueError): guard(event, context)
+            with self.assertRaises(EventValidationError): guards["segment_inspection"](event, context)
             action["cancel_requested"] = 0
             context.retry_wait_reads = None
-            with self.assertRaises(ValueError): guard(event, context)
+            with self.assertRaises(EventValidationError): guards["segment_inspection"](event, context)
 
     def test_cold_end_uses_original_ticket_and_rejects_other_ticket(self):
         saved = [("original", "actual_end", 10, None)]
-        module = ModuleType("camctl.persistence.repositories.read_end")
-        module.load_read_end = lambda copy_id, owned: saved[0]
-        ns = {"running_read_ticket": lambda owned, copy_id: ("original", 4),
-              "ConsistencyError": ValueError}
-        load = extract(ROOT / "outputs/read_attempts.py", "unfinished_read_end", ns)
-        with patch.dict(sys.modules, {module.__name__: module}):
-            self.assertEqual(load(object(), 9), ("original", saved[0]))
+        with patch.object(read_attempts, "running_read_ticket", return_value=("original", 4)) as running, \
+             patch.object(read_end, "load_read_end", side_effect=lambda *args: saved[0]):
+            self.assertEqual(read_attempts.unfinished_read_end(object(), 9), ("original", saved[0]))
             saved[0] = None
-            self.assertEqual(load(object(), 9), ("original", None))
+            self.assertEqual(read_attempts.unfinished_read_end(object(), 9), ("original", None))
             saved[0] = ("other", "actual_end", 10, None)
-            with self.assertRaises(ValueError):
-                load(object(), 9)
-            ns["running_read_ticket"] = lambda owned, copy_id: None
-            self.assertIsNone(load(object(), 9))
+            with self.assertRaises(ConsistencyError): read_attempts.unfinished_read_end(object(), 9)
+            running.return_value = None
+            self.assertIsNone(read_attempts.unfinished_read_end(object(), 9))
 
     def test_source_success_requires_pending_inspection_and_read_to_finish(self):
-        models = ModuleType("camctl.capture.segment_models")
-        models.CoverageStatus = SimpleNamespace(NOT_PERFORMED=object())
-        tasks = ModuleType("camctl.devices.tasks")
-        tasks.CaptureResultPolicy = SimpleNamespace(ACTION6_VIDEO_SEGMENTS_V1=SimpleNamespace(value="action6"))
-        inspections = ModuleType("camctl.persistence.repositories.segment_inspections")
-        rules = ModuleType("camctl.capture.inspection_rules")
-        rules.inspection_result_requires_read = lambda state, result: result["requires_read"]
-        inspections.inspection_input_read_succeeded = lambda connection, inspection: inspection["read_finished"]
-        row = {"state": 1, "result_json": {"requires_read": True}, "read_finished": False}
-        ns = {"closing": closing, "row_facts": lambda db, table, identity: row,
-              "enum_for": lambda name: SimpleNamespace(PENDING=1), "ConsistencyError": ValueError}
-        verify = extract(ROOT / "persistence/repositories/segment_transactions.py", "_verify_action6_inspections_finished", ns)
+        row = {"state": 1, "result_json": {"tool": {"ran": True}}, "read_finished": False}
         db = SimpleNamespace(execute=lambda sql, params: Cursor([(8,)] if params[2] == 0 else []))
-        action = {"id": 6, "execution_spec_json": {"result_policy": "action6"}}
+        action = {"id": 6, "execution_spec_json": {"result_policy": CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value}}
         assessment = SimpleNamespace(coverage_status=object())
-        with patch.dict(sys.modules, {models.__name__: models, tasks.__name__: tasks, inspections.__name__: inspections, rules.__name__: rules}):
-            with self.assertRaises(ValueError): verify(db, action, {"id": 7}, assessment)
+        with patch.object(segment_transactions, "row_facts", return_value=row), \
+             patch.object(repository, "inspection_input_read_succeeded", side_effect=lambda connection, inspection: inspection["read_finished"]):
+            with self.assertRaises(ConsistencyError): segment_transactions._verify_action6_inspections_finished(db, action, {"id": 7}, assessment)
             row["state"] = 2
-            with self.assertRaises(ValueError): verify(db, action, {"id": 7}, assessment)
+            with self.assertRaises(ConsistencyError): segment_transactions._verify_action6_inspections_finished(db, action, {"id": 7}, assessment)
             row["read_finished"] = True
-            verify(db, action, {"id": 7}, assessment)
-            assessment.coverage_status = models.CoverageStatus.NOT_PERFORMED
-            with self.assertRaises(ValueError): verify(db, action, {"id": 7}, assessment)
+            segment_transactions._verify_action6_inspections_finished(db, action, {"id": 7}, assessment)
+            assessment.coverage_status = CoverageStatus.NOT_PERFORMED
+            with self.assertRaises(ConsistencyError): segment_transactions._verify_action6_inspections_finished(db, action, {"id": 7}, assessment)
 
 
 if __name__ == "__main__":
