@@ -159,21 +159,30 @@ def test_generic_snapshot_route_never_copies_current_business_rows(monkeypatch, 
         yield connection
     repository._read_connection.side_effect = read_connection
     target = HistoryBoundary(5, 50)
-    choice = SimpleNamespace(boundary=target if count == 5 else HistoryBoundary(3, 31), position=(31, count))
+    choice = SimpleNamespace(boundary=target if count == 5 else HistoryBoundary(3, 31),
+        position=(50 if count == 5 else 31, count))
     seed = SimpleNamespace(ref=(3, 9), primary_table='outputs', target=target,
-        current=HistoryBoundary(10, 100), rows={('outputs', 9): {'last_event_id': 100}},
+        current=HistoryBoundary(10, 100), rows={},
         floor=(50, 5), head=(100, 10), snapshot=choice)
     repository._object_seed.return_value = seed
     repository._seed_entity_rows.side_effect = AssertionError('选中S不应复制C业务行')
-    repository._snapshot_rows.return_value = {('outputs', 9): {'id': 9, 'once': None}}
-    event = _event([RowChange('outputs', 9, RowImage(True, {'once': None}), RowImage(True, {'once': 7}))])
-    repository._object_event_page.return_value = (event, event)
-    repository._apply_object_event.side_effect = lambda seed, rows, event, *, forward: rows[('outputs', 9)].update(once=7)
+    repository._snapshot_rows.return_value = {('outputs', 9): {'id': 9, 'once': None, 'other': 0}}
+    first = _event([RowChange('outputs', 9, RowImage(True, {'other': 0}), RowImage(True, {'other': 1}))], 41)
+    second = _event([RowChange('outputs', 9, RowImage(True, {'once': None}), RowImage(True, {'once': 7}))], 45)
+    repository._object_event_page.return_value = (first, second)
+    def apply_event(seed, rows, event, *, forward):
+        assert forward
+        change = event.rows[0]
+        assert all(rows[('outputs', 9)][key] == value for key, value in change.before.values.items())
+        rows[('outputs', 9)].update(change.after.values)
+    repository._apply_object_event.side_effect = apply_event
     repository._finish_rows.side_effect = lambda seed, rows: rows
     result = HistoryRepository.restore_entity(repository, 'output', 9, target)
     repository._object_seed.assert_called_once_with(connection, 'output', 9, target,
-        event_batch_size=128, metadata_only=True)
+        event_batch_size=128, metadata_only=True, _bound_instance=True)
+    repository._seed_entity_rows.assert_not_called()
     assert result[('outputs', 9)]['once'] == (None if count == 5 else 7)
+    assert result[('outputs', 9)]['other'] == (0 if count == 5 else 1)
     if count == 5:
         repository._object_event_page.assert_not_called()
     else:

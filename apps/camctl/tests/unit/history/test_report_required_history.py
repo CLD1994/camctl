@@ -14,6 +14,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.history import snapshot_stream
 from camctl.history.bounded import SegmentHistoryHandle
 from camctl.persistence.repositories.history import _ObjectSeed, _SnapshotChoice
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
 
 _REGISTRY_READER = snapshot_stream.load_event_registry
 
@@ -211,25 +212,36 @@ def test_report_candidates_exclude_internal_projection_and_other_or_future_sets(
     connection = create_autospec(sqlite3.Connection, instance=True)
     rows = {
         'actions': {9: {'id': 9}},
-        'segment_sets': {3: {'id': 3, 'published_event_id': None},
-                         4: {'id': 4, 'published_event_id': 80}},
+        'segment_sets': {3: {'id': 3, 'action_id': 9, 'published_event_id': None},
+                         4: {'id': 4, 'action_id': 9, 'published_event_id': 80},
+                         5: {'id': 5, 'action_id': 10, 'published_event_id': 40}},
         'segment_members': {28: {'id': 28, 'set_id': 3},
-                            29: {'id': 29, 'set_id': 4}, 30: {'id': 30, 'set_id': 4}},
+                            29: {'id': 29, 'set_id': 4}, 30: {'id': 30, 'set_id': 4},
+                            31: {'id': 31, 'set_id': 5}},
     }
     def execute(sql, parameters=()):
         cursor = create_autospec(sqlite3.Cursor, instance=True)
         if sql.startswith('SELECT format_version'):
-            cursor.fetchone.return_value = (2,)
+            cursor.fetchone.return_value = (CURRENT_FORMAT_VERSION,)
         elif sql.startswith('SELECT id FROM segment_sets WHERE action_id'):
-            cursor.fetchall.return_value = [(4,)] if H >= 80 else []
+            action_id, boundary = parameters
+            assert (action_id, boundary) == (9, H)
+            cursor.fetchall.return_value = [(identity,) for identity, row in rows['segment_sets'].items()
+                if row['action_id'] == action_id and row['published_event_id'] is not None
+                and row['published_event_id'] <= boundary]
         else:
             table = re.search(r'FROM (actions|segment_sets|segment_members)\b', sql)[1]
+            assert parameters[0] == 9
             identities = list(rows[table])
             if table == 'segment_sets':
-                identities = [identity for identity in identities if identity == handle._published_identity]
-            elif table == 'segment_members':
+                selected = parameters[1]
                 identities = [identity for identity in identities
-                              if rows[table][identity]['set_id'] == handle._published_identity]
+                              if rows[table][identity]['action_id'] == parameters[0] and identity == selected]
+            elif table == 'segment_members':
+                selected = parameters[1]
+                identities = [identity for identity in identities
+                              if rows['segment_sets'][rows[table][identity]['set_id']]['action_id'] == parameters[0]
+                              and rows[table][identity]['set_id'] == selected]
             if sql.startswith('SELECT COUNT'):
                 cursor.fetchone.return_value = len(identities), max(identities, default=None)
             else:
@@ -243,10 +255,10 @@ def test_report_candidates_exclude_internal_projection_and_other_or_future_sets(
     def read_connection():
         yield connection
     repo._read_connection.side_effect = read_connection
-    repo._boundary.return_value = HistoryBoundary(10, 100)
+    repo._boundary_within.return_value = HistoryBoundary(10, 100)
     repo._object_seed.return_value = _seed()
     handle.repository = repo
-    # 归属 SQL 由真实类型约束的分支替身提供，单元不访问包资源。
+    # 归属 SQL 由真实类型约束的分支替身提供；表清单使用固定登记。
     from camctl.history.bounded import _OwnerBranch
     def owner_branches(table, entity):
         branch = create_autospec(_OwnerBranch, instance=True)
@@ -254,9 +266,6 @@ def test_report_candidates_exclude_internal_projection_and_other_or_future_sets(
         return (branch,)
     monkeypatch.setattr(report_action, '_ownership_branches', create_autospec(
         report_action._ownership_branches, side_effect=owner_branches))
-    monkeypatch.setattr(report_action, 'business_tables_for_format', create_autospec(
-        report_action.business_tables_for_format, return_value=tuple(rows) + (
-            'operation_runs', 'operation_attempts', 'result_page_files', 'baseline_read_calls')))
     reads = []
     def table_row(db, table, identity):
         reads.append((table, identity))

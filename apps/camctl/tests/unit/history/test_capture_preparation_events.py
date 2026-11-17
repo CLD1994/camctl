@@ -12,9 +12,11 @@ from camctl.history.validators import EventValidationError, validate_event_struc
 from camctl.contracts.history_values import TransactionRange
 from camctl.history.validators import EventContext
 from camctl.capture.models import activity_capabilities
+from camctl.devices.tasks import CompletionMode, StartReturn
 from camctl.persistence.repositories import capture, scheduling
 from camctl.persistence.repositories.preparation import PreparationReads
 from camctl.persistence.repositories.transactions import event_envelope, row_change, update_change
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
 
 
 def _failure(*, reason="device_failed", before_status=1, error_code=13):
@@ -68,10 +70,15 @@ def _photo_action():
 
 def _database():
     connection = create_autospec(sqlite3.Connection, instance=True)
-    cursor = create_autospec(sqlite3.Cursor, instance=True)
-    cursor.fetchone.return_value = None
-    cursor.__iter__.return_value = iter(())
-    connection.execute.return_value = cursor
+    def execute(sql, parameters=()):
+        cursor = create_autospec(sqlite3.Cursor, instance=True)
+        cursor.fetchone.return_value = ((CURRENT_FORMAT_VERSION,)
+            if sql == "SELECT format_version FROM database_metadata WHERE id=1" else None)
+        cursor.fetchall.return_value = []
+        cursor.fetchmany.return_value = []
+        cursor.__iter__.return_value = iter(())
+        return cursor
+    connection.execute.side_effect = execute
     return connection
 
 
@@ -79,6 +86,13 @@ def test_photo_pending_activity_has_the_original_photo_contract():
     action = _photo_action()
     values = scheduling._new_activity_values(action,
         activity_capabilities("camera_take_photo", action["execution_spec_json"]), None)
+    assert values["action_id"] == action["id"]
+    assert values["state_query_supported"] == 0
+    assert values["stop_supported"] == values["safe_repeat_stop"] == 0
+    assert values["start_return_meaning"] == int(StartReturn.COMPLETED)
+    assert values["completion_mode"] == int(CompletionMode.DEVICE_EVIDENCE)
+    assert values["activity_state"] == values["dispatch_state"] == 1
+    assert values["started_at"] is None and values["capture_json"] is None
     event = event_envelope(101, 7, 13, 1, (row_change("device_activities", 11, values),),
         10_000_000, evidence={"preparation_request": {"action_id": 8,
             "trusted_wall_now": 10_000_000, "occurred_at": 10_000_000, "prepare_lead_s": Decimal("10"),
