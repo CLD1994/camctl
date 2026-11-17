@@ -60,7 +60,8 @@ def identity_case(request, monkeypatch):
     spec.loader.exec_module(module)
     run = {"id": 21, "action_id": 7, "kind": code, "query_purpose": purpose_code,
            "responsibility_key": key, "delivery_id": None, "activity_id": None,
-           "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None,
+           "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None,
+           "availability_check_id": None, "session_key": None,
            "status": 2, "attempts_used": 1, "max_attempts_used": 3,
            "timeout_s_json": None, "retry_interval_s_json": None,
            "retry_wait_required": 0, "error_json": None}
@@ -73,7 +74,8 @@ def identity_case(request, monkeypatch):
         run["copy_id"] = 3
         run["delivery_id"] = 5 if relation == "delivery" else None
         state["file_copies"] = {3: {"id": 3, "delivery_id": run["delivery_id"],
-                                   "processing_id": 5 if relation == "processing" else None}}
+                                   "processing_id": 5 if relation == "processing" else None,
+                                   "inspection_id": None}}
         table = "deliveries" if relation == "delivery" else "recording_processing"
         state[table] = {5: {"id": 5, "action_id": owner_action}}
     elif relation == "cleanup":

@@ -16,6 +16,7 @@ from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind, QueryPurpose,
 )
 from camctl.persistence import row_history
+from camctl.persistence.repositories.file_batch_reads import FileBatchReads
 from camctl.persistence.repositories import transactions as transaction
 from camctl.persistence.repositories.transactions import TransactionError, TransactionScope
 
@@ -44,13 +45,17 @@ def repository(monkeypatch):
     spec = find_spec("camctl.persistence.repositories.operations")
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
+    # 本组关注责任查询；同机批次资格由独立协作者提供允许结果。
+    monkeypatch.setattr(FileBatchReads, "operation_permitted",
+                        create_autospec(FileBatchReads.operation_permitted, return_value=True))
     monkeypatch.setattr(module, "intent_recovery_locked", create_autospec(module.intent_recovery_locked, return_value=False))
     monkeypatch.setattr(module, "_saved_transaction_events", create_autospec(
         module._saved_transaction_events, return_value=None))
-    action = {"id": 1, "device_id": "cam-1"}
+    action = {"id": 1, "type": 2, "device_id": "cam-1"}
     run = {"id": 7, "action_id": 1, "delivery_id": None, "kind": 6,
            "query_purpose": 1, "responsibility_key": "query/preflight/1", "activity_id": None,
-           "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None, "status": 3,
+           "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None,
+           "availability_check_id": None, "session_key": None, "status": 3,
            "attempts_used": 0, "max_attempts_used": 2, "timeout_s_json": Decimal("5"),
            "retry_interval_s_json": Decimal("1"), "retry_wait_required": 0, "error_json": None}
     monkeypatch.setattr(module, "row_facts", create_autospec(module.row_facts,
@@ -142,7 +147,7 @@ def test_scope_intent_uses_original_action_even_after_its_end(repository, databa
     module, _ = repository
     connection, data = database
     data["found"] = None
-    action = {"id": 1, "device_id": "cam-1", "status": action_status}
+    action = {"id": 1, "type": 2, "device_id": "cam-1", "status": action_status}
     activity = {"id": 4, "action_id": 1, "activity_state": 3, "occupancy_state": 1,
         "baseline_state": 3, "output_set_finalized_event_id": None}
     module.row_facts.side_effect = lambda connection, table, identity: (
@@ -165,7 +170,7 @@ def test_scope_intent_uses_original_action_even_after_its_end(repository, databa
 def test_scope_intent_requires_ended_held_fixed_unresolved_activity(repository, database, changes, reason):
     module, _ = repository
     connection, _ = database
-    action = {"id": 1, "device_id": "cam-1", "status": 4}
+    action = {"id": 1, "type": 2, "device_id": "cam-1", "status": 4}
     activity = {"id": 4, "action_id": 1, "activity_state": 3, "occupancy_state": 1,
         "baseline_state": 3, "output_set_finalized_event_id": None, **changes}
     module.row_facts.side_effect = lambda connection, table, identity: (
