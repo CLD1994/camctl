@@ -1,106 +1,23 @@
-"""取消期间发布对账的纯状态分区；生产协作者在导入前隔离。"""
+"""取消期间发布对账、原文件责任与恢复。"""
 
 import importlib.util
-from enum import IntEnum
-from importlib.abc import MetaPathFinder
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-
-class BlockCamctl(MetaPathFinder):
-    """禁止测试期间加载未明确替换的 camctl 模块或包资源。"""
-
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == "camctl" or fullname.startswith("camctl."):
-            raise AssertionError(f"测试没有隔离生产模块: {fullname}")
-        return None
+from camctl.contracts.enums import enum_for
 
 
-def _forbidden_resource(*args, **kwargs):
-    raise AssertionError("单元测试不得读取真实包资源")
-
-
-_blocker = BlockCamctl()
-_resources = ModuleType("camctl.resources")
-_resources.resource_bytes = _forbidden_resource
-_resource_patch = None
-
-
-def setUpModule():
-    global _resource_patch
-    if any(name == "camctl" or name.startswith("camctl.") for name in sys.modules):
-        raise AssertionError("隔离单元测试必须在未加载 camctl 的进程内运行")
-    sys.meta_path.insert(0, _blocker)
-    _resource_patch = patch.dict(sys.modules, {"camctl.resources": _resources})
-    _resource_patch.start()
-
-
-def tearDownModule():
-    _resource_patch.stop()
-    sys.meta_path.remove(_blocker)
-
-
-class Status(IntEnum):
-    PENDING = 1
-    PREPARING = 2
-    PREPARED = 3
-    PUBLISHING = 4
-    PUBLISHED = 5
-    FAILED = 6
-    CANCELED = 7
-    WITHDRAWN = 8
-
-
-class StubMeta(type):
-    def __getattr__(cls, name):
-        return 1
-
-
-class Stub(metaclass=StubMeta):
-    def __init__(self, *args, **kwargs):
-        pass
+Status = enum_for('deliveries.status')
 
 
 def load_handoff():
-    names = ('camctl.contracts.enums', 'camctl.contracts.values',
-        'camctl.contracts.workflow_errors', 'camctl.host_files.handoff',
-        'camctl.host_files.io', 'camctl.host_files.models', 'camctl.host_files.tasks',
-        'camctl.outputs.copy', 'camctl.persistence.models', 'camctl.session.supervision',
-        'camctl.logging_runtime.diagnostics', 'camctl.logging_runtime.events',
-        'camctl.operations.models')
-    modules = {}
-    for name in names:
-        module = ModuleType(name)
-        module.__getattr__ = lambda name: Stub
-        modules[name] = module
-    enums = {
-        'deliveries.status': Status,
-        'deliveries.withdrawal_state': SimpleNamespace(UNKNOWN=6),
-        'file_copies.verification_state': SimpleNamespace(MATCHED=3, SOURCE_CHECKSUM_UNAVAILABLE=5),
-        'actions.type': SimpleNamespace(OBTAIN_ACTION_OUTPUTS=4, CANCEL_TASK=6),
-        'actions.status': SimpleNamespace(RUNNING=2),
-    }
-    modules['camctl.contracts.enums'].enum_for = lambda name: enums.get(name, Status)
-    modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
-    modules['camctl.contracts.values'].ObjectId = lambda value: value
-    modules['camctl.contracts.values'].UtcMicros = lambda value: value
-    modules['camctl.contracts.values'].MAX_OBJECT_ID = 2**63 - 1
-    modules['camctl.contracts.workflow_errors'].registered_error = lambda code: {'stage': 'publication'}
-    modules['camctl.contracts.workflow_errors'].validate_error_details = lambda code, details: None
-    rejection_name = 'camctl.outputs.rejections'
-    rejection_spec = importlib.util.spec_from_file_location(
-        rejection_name, Path(__file__).parents[3] / 'src/camctl/outputs/rejections.py')
-    rejections = importlib.util.module_from_spec(rejection_spec)
-    rejection_spec.loader.exec_module(rejections)
-    modules[rejection_name] = rejections
     name = 'camctl.outputs._isolated_cancel_handoff'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/handoff.py')
     module = importlib.util.module_from_spec(spec)
-    modules[name] = module
-    with patch.dict(sys.modules, modules):
+    with patch.dict(sys.modules, {name: module}):
         spec.loader.exec_module(module)
     return module
 
@@ -158,58 +75,10 @@ class CanceledPublicationTests(unittest.TestCase):
 
 
 def load_repository():
-    names = ('camctl.acceptance.definitions', 'camctl.contracts.enums', 'camctl.logging_runtime.diagnostics',
-        'camctl.history.decoding', 'camctl.contracts.json_values', 'camctl.contracts.history_values',
-        'camctl.contracts.values', 'camctl.devices.bindings', 'camctl.history.reads',
-        'camctl.history.events', 'camctl.history.validators', 'camctl.host_files.models',
-        'camctl.host_files.paths', 'camctl.operations.attempts', 'camctl.operations.models',
-        'camctl.persistence.repositories.operations', 'camctl.outputs.catalog',
-        'camctl.outputs.cleanup_flow', 'camctl.outputs.competition', 'camctl.outputs.read_discovery',
-        'camctl.outputs.copy', 'camctl.outputs.handoff', 'camctl.outputs.work_files',
-        'camctl.outputs.definitions', 'camctl.outputs.obtain_summary', 'camctl.outputs.sources',
-        'camctl.persistence.models', 'camctl.persistence.runtime', 'camctl.persistence.row_history',
-        'camctl.persistence.repositories.transactions', 'camctl.contracts.workflow_errors',
-        'camctl.outputs.qualification', 'camctl.outputs.slots', 'camctl.scheduling.order')
-    modules = {}
-    for name in names:
-        module = ModuleType(name)
-        module.__getattr__ = lambda name: Stub
-        modules[name] = module
-
-    class FakeEnumMeta(type):
-        def __getattr__(cls, name):
-            return 1
-        def __iter__(cls):
-            return iter(())
-        def __getitem__(cls, name):
-            return 1
-
-    class FakeEnum(metaclass=FakeEnumMeta):
-        pass
-
-    modules['camctl.contracts.enums'].enum_for = lambda name: Status if name == 'deliveries.status' else FakeEnum
-    modules['camctl.history.events'].reason_for_branch = lambda *args: 1
-    modules['camctl.contracts.workflow_errors'].action_error_id = lambda *args: 1
-    modules['camctl.contracts.workflow_errors'].item_error_id = lambda *args: 1
-    handoff = load_handoff()
-    for name in ('publishable_copy_error', 'withdrawal_waiter_eligible'):
-        setattr(modules['camctl.outputs.handoff'], name, getattr(handoff, name))
-    modules['camctl.outputs.read_discovery'].DEFAULT_BATCH_SIZE = 32
-    modules['camctl.outputs.read_discovery'].positive_limit = lambda value: value
-    modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
-    modules['camctl.persistence.repositories.transactions'].TransactionError = type('TransactionError', (Exception,), {})
-    modules['camctl.persistence.repositories.transactions'].update_change = lambda table, identity, before, after: (table, identity, before, after)
     name = 'camctl.persistence.repositories._isolated_cancel_outputs'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/persistence/repositories/outputs.py')
     module = importlib.util.module_from_spec(spec)
-    modules[name] = module
-    rules_name = 'camctl.outputs.processing_rules'
-    rules_spec = importlib.util.spec_from_file_location(
-        rules_name, Path(__file__).parents[3] / 'src/camctl/outputs/processing_rules.py')
-    rules = importlib.util.module_from_spec(rules_spec)
-    modules[rules_name] = rules
-    with patch.dict(sys.modules, modules):
-        rules_spec.loader.exec_module(rules)
+    with patch.dict(sys.modules, {name: module}):
         spec.loader.exec_module(module)
     return module
 
@@ -400,7 +269,7 @@ class CancelSettlementTests(unittest.TestCase):
         events, result = command._templates()
         self.assertTrue(result.complete)
         self.assertEqual(result.file_ids, (23,))
-        self.assertTrue(any(row[0:2] == ('deliveries', 19) and row[3]['status'] == 7
+        self.assertTrue(any((row.table, row.row_id) == ('deliveries', 19) and row.after.values['status'] == 7
                             for _, _, rows in events for row in rows))
 
     def test_original_staging_identity_is_part_of_replay_evidence(self):
@@ -486,21 +355,10 @@ class CancelSettlementTests(unittest.TestCase):
 
 
 def load_settlement():
-    names = ('camctl.persistence.models', 'camctl.cancellation.service', 'camctl.cancellation.ports',
-        'camctl.contracts.enums', 'camctl.contracts.values', 'camctl.persistence.business',
-        'camctl.persistence.repositories.capture_facts', 'camctl.persistence.repositories.transactions',
-        'camctl.outputs.withdrawal')
-    modules = {}
-    for name in names:
-        module = ModuleType(name)
-        module.__getattr__ = lambda name: Stub
-        modules[name] = module
-    modules['camctl.contracts.enums'].enum_for = lambda name: Status
     name = 'camctl.cancellation._isolated_settlement'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/cancellation/settlement.py')
     module = importlib.util.module_from_spec(spec)
-    modules[name] = module
-    with patch.dict(sys.modules, modules):
+    with patch.dict(sys.modules, {name: module}):
         spec.loader.exec_module(module)
     return module
 
@@ -637,30 +495,16 @@ class CancelWaiterTests(unittest.IsolatedAsyncioTestCase):
         events, result = command._templates()
         self.assertTrue(result.complete)
         self.assertEqual(result.file_ids, (23,))
-        self.assertTrue(any(row[:2] == ('deliveries', 19) and row[3]['status'] == 7
+        self.assertTrue(any((row.table, row.row_id) == ('deliveries', 19) and row.after.values['status'] == 7
                             for _, _, rows in events for row in rows))
 
 
 def load_withdrawal():
-    names = ('camctl.contracts.enums', 'camctl.contracts.values', 'camctl.host_files.handoff',
-             'camctl.host_files.tasks', 'camctl.outputs.handoff', 'camctl.persistence.business',
-             'camctl.persistence.models', 'camctl.logging_runtime.models',
-             'camctl.persistence.repositories.outputs', 'camctl.persistence.runtime')
-    modules = {}
-    for name in names:
-        module = ModuleType(name)
-        module.__getattr__ = lambda name: Stub
-        modules[name] = module
-    modules['camctl.contracts.enums'].enum_for = lambda name: (
-        Status if name == 'deliveries.status' else SimpleNamespace(UNKNOWN=6))
-    modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
-    modules['camctl.outputs.handoff'].withdrawal_delivery_eligible = load_handoff().withdrawal_delivery_eligible
-    modules['camctl.persistence.runtime'].canonical_directory_binding = str
     name = 'camctl.outputs._isolated_withdrawal'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/withdrawal.py')
     module = importlib.util.module_from_spec(spec)
-    modules[name] = module
-    with patch.dict(sys.modules, modules): spec.loader.exec_module(module)
+    with patch.dict(sys.modules, {name: module}):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -672,10 +516,10 @@ class UnknownWithdrawalTests(unittest.IsolatedAsyncioTestCase):
             def fetchall(self): return rows
             def close(self): pass
         class Database:
-            metadata = SimpleNamespace(instance_id='db', ready_path='ready', processing_path='processing')
+            metadata = SimpleNamespace(instance_id='db', ready_path='/ready', processing_path='/processing')
             async def read(self, callback, **kwargs):
                 return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda *args: Cursor())))
-        session = module.WithdrawalSession(ready='ready', processing='processing',
+        session = module.WithdrawalSession(ready=Path('/ready'), processing=Path('/processing'),
             executor=SimpleNamespace(unfinished_files=lambda: {23}))
         self.assertIs(await session.withdraw_delivery(19, database=Database(), occurred_at=lambda: 1),
                       module.WithdrawalProgress.WAITING_FOR_FILE)
@@ -750,39 +594,12 @@ class CancelReconciliationTests(unittest.IsolatedAsyncioTestCase):
 
 def load_canceled_runtime():
     handoff = load_handoff()
-    names = ('camctl.contracts.enums', 'camctl.contracts.values', 'camctl.host_files.tasks',
-             'camctl.logging_runtime.diagnostics', 'camctl.outputs.handoff', 'camctl.outputs.withdrawal',
-             'camctl.persistence.models', 'camctl.persistence.repositories.outputs',
-             'camctl.outputs.read_discovery', 'camctl.operations.models')
-    modules = {}
-    for name in names:
-        module = ModuleType(name)
-        module.__getattr__ = lambda name: Stub
-        modules[name] = module
-    modules['camctl.outputs.handoff'] = handoff
-    modules['camctl.outputs.read_discovery'].DEFAULT_BATCH_SIZE = 100
-    class Withdrawal(IntEnum):
-        NOT_REQUESTED = 1
-        PENDING = 2
-        UNKNOWN = 6
-    modules['camctl.contracts.enums'].enum_for = lambda name: Status if name == 'deliveries.status' else Withdrawal
-    modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
-    modules['camctl.contracts.values'].new_operation_key = lambda: 'key'
-    modules['camctl.persistence.models'].DbOutcomeKind = SimpleNamespace(COMPLETED='completed')
-    modules['camctl.outputs.withdrawal'].WithdrawalProgress = SimpleNamespace(WAITING_FOR_FILE=object(), STEP_FINISHED=object())
-    modules['camctl.outputs.withdrawal'].build_withdrawal_error = lambda identity, detail, **kwargs: {
-        'code': 'withdrawal_unconfirmed', 'stage': 'publication',
-        'details': {'delivery_id': str(identity), 'error': detail}}
-    modules['camctl.operations.models'].ErrorValue = lambda code, stage, details: SimpleNamespace(code=code, stage=stage, details=details)
-    class Task:
-        def __init__(self, task_id, file_ids, stage, business, body, **kwargs): self.body = body
-    modules['camctl.host_files.tasks'].AsyncFileTask = Task
-    modules['camctl.host_files.tasks'].FileTaskId = lambda value: value
     name = 'camctl.outputs._isolated_canceled_publication'
     spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/canceled_publication.py')
     module = importlib.util.module_from_spec(spec)
-    modules[name] = module
-    with patch.dict(sys.modules, modules): spec.loader.exec_module(module)
+    modules = {name: module, 'camctl.outputs.handoff': handoff}
+    with patch.dict(sys.modules, modules):
+        spec.loader.exec_module(module)
     return module, handoff, modules
 
 
@@ -817,7 +634,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             def save_publication(self, request, key, owned):
                 self.assert_locked()
                 calls.append('save')
-                return SimpleNamespace(kind='completed', value=True)
+                return SimpleNamespace(kind=module.DbOutcomeKind.COMPLETED, value=True)
             def assert_locked(self):
                 if not locked: raise AssertionError('原文件资格未持有')
         class Cursor:
@@ -864,7 +681,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             def advance_withdrawal(self, request, key, owned):
                 self.assert_locked()
                 calls.append(request.choice.value)
-                return SimpleNamespace(kind='completed', value=True)
+                return SimpleNamespace(kind=module.DbOutcomeKind.COMPLETED, value=True)
             def assert_locked(self):
                 if not locked: raise AssertionError('原文件资格未持有')
         class Cursor:
@@ -890,12 +707,13 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_save_retries_original_request_and_operation_key(self):
         module, _, modules = load_canceled_runtime()
         module.db_failure = lambda *args: RuntimeError('unknown')
+        module.new_operation_key = lambda: 'key'
         received = []
         class Database:
             async def write(self, callback, *, key, **kwargs):
                 received.append(key)
                 callback(None)
-                return SimpleNamespace(kind='unknown' if len(received) == 1 else 'completed', value=True)
+                return SimpleNamespace(kind=(module.DbOutcomeKind.UNKNOWN if len(received) == 1 else module.DbOutcomeKind.COMPLETED), value=True)
         requests = []
         class Repository:
             def save_publication(self, request, key, owned): requests.append(request)
@@ -1165,9 +983,9 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 saved_keys.append((request.choice.value, key))
                 if request.choice.value == 'unknown':
                     actual['unknown_calls'] += 1
-                    if actual['unknown_calls'] == 1: return SimpleNamespace(kind='unknown', value=None)
+                    if actual['unknown_calls'] == 1: return SimpleNamespace(kind=module.DbOutcomeKind.UNKNOWN, value=None)
                     actual['withdrawal'] = 6
-                return SimpleNamespace(kind='completed', value=True)
+                return SimpleNamespace(kind=module.DbOutcomeKind.COMPLETED, value=True)
         class Cursor:
             def __init__(self, sql): self.sql = sql
             def fetchall(self):
