@@ -25,7 +25,7 @@ from referencing.exceptions import CannotDetermineSpecification, Unresolvable
 
 from camctl.resources import ResourceError, resource_bytes
 from camctl.contracts.json_values import JsonParseError, is_json_integer, is_multiple, parse_exact_json
-from camctl.contracts.workflow_schema import derive_workflow_report, workflow_detail_rules
+from camctl.contracts.workflow_schema import derive_workflow_report, derive_workflow_detail_rules
 
 __all__ = [
     "SchemaRuleError", "SchemaValidationError", "create_validator", "load_schema",
@@ -114,9 +114,9 @@ def _validation_context() -> dict[str, Any]:
     return {"code": code, "dependencies": dependencies, "python": list(sys.version_info[:2])}
 
 
-def _rule_digest(value: Any) -> str:
+def _digest_rule(value: Any) -> str:
     """为精确 JSON 值生成带类型的稳定摘要。"""
-    def tagged(item):
+    def tag_json_value(item):
         if item is None:
             return ["null"]
         if type(item) is bool:
@@ -128,17 +128,17 @@ def _rule_digest(value: Any) -> str:
         if type(item) is str:
             return ["string", item]
         if type(item) is list:
-            return ["list", [tagged(child) for child in item]]
+            return ["list", [tag_json_value(child) for child in item]]
         if type(item) is dict and all(type(key) is str for key in item):
-            return ["object", [[key, tagged(item[key])] for key in sorted(item)]]
+            return ["object", [[key, tag_json_value(item[key])] for key in sorted(item)]]
         raise TypeError("规则包含非 JSON 值")
 
-    data = json.dumps(tagged(value), ensure_ascii=True, separators=(",", ":"))
+    data = json.dumps(tag_json_value(value), ensure_ascii=True, separators=(",", ":"))
     return sha256(data.encode("utf-8")).hexdigest()
 
 
-def _workflow_digest(report: Any, registry: Any, references: Any) -> str:
-    return _rule_digest([report, registry, workflow_detail_rules(registry), references])
+def _digest_workflow_rules(report: Any, registry: Any, references: Any) -> str:
+    return _digest_rule([report, registry, derive_workflow_detail_rules(registry), references])
 
 
 def build_validation_resource(contents: dict[str, bytes]) -> bytes:
@@ -152,25 +152,25 @@ def build_validation_resource(contents: dict[str, bytes]) -> bytes:
     registry = documents[_WORKFLOW_RESOURCE]
     report = derive_workflow_report(documents["protocol/status-report.schema.json"], registry)
     _check_schema(report)
-    for rule in workflow_detail_rules(registry):
+    for rule in derive_workflow_detail_rules(registry):
         _check_schema(rule)
     result = {"context": _validation_context(), "schemas": {
         name: sha256(contents[name]).hexdigest() for name in _VALIDATION_INPUTS
-    }, "workflow": _workflow_digest(report, registry,
+    }, "workflow": _digest_workflow_rules(report, registry,
                                   {name: documents[name] for name in _SCHEMA_RESOURCES})}
     return (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
 
-def _valid_proof(proof: Any) -> bool:
-    def digest(value):
+def _is_valid_proof(proof: Any) -> bool:
+    def is_digest(value):
         return (type(value) is str and len(value) == 64
                 and all(char in "0123456789abcdef" for char in value))
 
     return (type(proof) is dict and set(proof) == {"context", "schemas", "workflow"}
             and type(proof["schemas"]) is dict
             and set(proof["schemas"]) == set(_VALIDATION_INPUTS)
-            and all(digest(value) for value in proof["schemas"].values())
-            and digest(proof["workflow"]))
+            and all(is_digest(value) for value in proof["schemas"].values())
+            and is_digest(proof["workflow"]))
 
 
 def check_workflow_rules(report: Any, registry: Any) -> None:
@@ -179,17 +179,17 @@ def check_workflow_rules(report: Any, registry: Any) -> None:
                   for name in _SCHEMA_RESOURCES}
     try:
         proof = parse_exact_json(resource_bytes(_VALIDATION_RESOURCE).decode("utf-8"))
-        matched = (_valid_proof(proof) and proof["context"] == _validation_context()
+        matched = (_is_valid_proof(proof) and proof["context"] == _validation_context()
                    and proof["schemas"] == {
                        name: sha256(resource_bytes(name)).hexdigest() for name in _VALIDATION_INPUTS
                    }
-                   and proof["workflow"] == _workflow_digest(report, registry, references))
+                   and proof["workflow"] == _digest_workflow_rules(report, registry, references))
     except (ResourceError, OSError, UnicodeDecodeError, ValueError, KeyError, TypeError,
             metadata.PackageNotFoundError):
         matched = False
     if not matched:
         _check_schema(report)
-        for rule in workflow_detail_rules(registry):
+        for rule in derive_workflow_detail_rules(registry):
             _check_schema(rule)
         for rule in references.values():
             _check_schema(rule)
@@ -198,7 +198,7 @@ def check_workflow_rules(report: Any, registry: Any) -> None:
 def _has_checked_resource(name: str, contents: bytes) -> bool:
     try:
         proof = parse_exact_json(resource_bytes(_VALIDATION_RESOURCE).decode("utf-8"))
-        return (_valid_proof(proof) and proof["context"] == _validation_context()
+        return (_is_valid_proof(proof) and proof["context"] == _validation_context()
                 and proof["schemas"][name] == sha256(contents).hexdigest())
     except (ResourceError, OSError, UnicodeDecodeError, ValueError, KeyError, TypeError,
             metadata.PackageNotFoundError):

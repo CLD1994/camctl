@@ -71,7 +71,7 @@ def sync_package_resources(project_dir: Path, *, check: bool = False, root: Path
     sys.path.insert(0, str(project_dir / "src"))
     try:
         from camctl.contracts.schemas import (
-            _VALIDATION_INPUTS, _VALIDATION_RESOURCE, _valid_proof, build_validation_resource,
+            _VALIDATION_INPUTS, _VALIDATION_RESOURCE, _is_valid_proof, build_validation_resource,
         )
         from camctl.contracts.json_values import parse_exact_json
     finally:
@@ -106,7 +106,7 @@ def sync_package_resources(project_dir: Path, *, check: bool = False, root: Path
                 versions = context["dependencies"]
                 python_version = context["python"]
                 matches = (
-                    _valid_proof(current)
+                    _is_valid_proof(current)
                     and current["schemas"] == expected_validation["schemas"]
                     and current["workflow"] == expected_validation["workflow"]
                     and context["code"] == expected_validation["context"]["code"]

@@ -21,6 +21,6 @@ def derive_workflow_report(report, registry):
     return report
 
 
-def workflow_detail_rules(registry):
+def derive_workflow_detail_rules(registry):
     return [{"$schema": _SCHEMA_VERSION, **spec["details_schema"]}
             for spec in registry["codes"].values()]

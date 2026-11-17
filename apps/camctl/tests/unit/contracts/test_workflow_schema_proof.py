@@ -1,10 +1,16 @@
 """固定错误规则的构建检查与公共 JSON 校验。"""
 
+import importlib
+from importlib import metadata, resources
 import json
+import sys
+from types import SimpleNamespace
 
 import pytest
+from referencing import Registry
 
-from camctl.contracts import schemas, workflow_errors
+import camctl.contracts
+import camctl.resources
 
 VERSION = "https://json-schema.org/draft/2020-12/schema"
 REPORT = "protocol/status-report.schema.json"
@@ -12,8 +18,12 @@ CODES = "protocol/workflow-codes.json"
 
 
 @pytest.fixture
-def package_resources(monkeypatch):
-    documents = {name: json.dumps({"$schema": VERSION}).encode() for name in schemas._SCHEMA_RESOURCES}
+def isolated(monkeypatch):
+    names = (
+        "protocol/plan.schema.json", "protocol/status-report.schema.json",
+        "protocol/capabilities.schema.json", "protocol/host-notification.schema.json",
+    )
+    documents = {name: json.dumps({"$schema": VERSION}).encode() for name in names}
     documents[REPORT] = json.dumps({
         "$schema": VERSION,
         "$defs": {"error": {"type": "object", "required": ["code", "stage", "details"],
@@ -28,32 +38,64 @@ def package_resources(monkeypatch):
         try:
             return documents[name]
         except KeyError:
-            raise schemas.ResourceError(name)
+            raise camctl.resources.ResourceError(name) from None
 
-    for module in (schemas, workflow_errors):
-        monkeypatch.setattr(module, "resource_bytes", read)
-    for cached in (schemas._checked_schema, schemas._registry, schemas._validator,
-                   workflow_errors._registry, workflow_errors._public_json_registry,
-                   workflow_errors._public_json_validator):
-        cached.cache_clear()
-    yield documents
-    for cached in (schemas._checked_schema, schemas._registry, schemas._validator,
-                   workflow_errors._registry, workflow_errors._public_json_registry,
-                   workflow_errors._public_json_validator):
-        cached.cache_clear()
+    class CodeFiles:
+        def joinpath(self, name):
+            return SimpleNamespace(read_bytes=lambda: ("code:" + name).encode())
+
+    originals = {name: importlib.import_module(f"camctl.contracts.{name}")
+                 for name in ("schemas", "workflow_errors")}
+    actual_files = resources.files
+    actual_version = metadata.version
+    monkeypatch.setattr(camctl.resources, "resource_bytes", read)
+    monkeypatch.setattr(resources, "files", lambda package: (
+        CodeFiles() if package == "camctl.contracts" else actual_files(package)))
+    monkeypatch.setattr(metadata, "version", lambda name: (
+        "1.0" if name in ("jsonschema", "referencing", "jsonschema-specifications")
+        else actual_version(name)))
+
+    # 重新导入两个模块，使每例使用独立进程内状态；结束时恢复原模块及包绑定。
+    for name in ("schemas", "workflow_errors"):
+        qualified = f"camctl.contracts.{name}"
+        monkeypatch.setattr(camctl.contracts, name, originals[name])
+        monkeypatch.delitem(sys.modules, qualified)
+    schemas = importlib.import_module("camctl.contracts.schemas")
+    workflow_errors = importlib.import_module("camctl.contracts.workflow_errors")
+    return SimpleNamespace(documents=documents, schemas=schemas, workflow_errors=workflow_errors)
 
 
-def test_matching_build_check_reuses_fixed_rules_and_still_checks_document(package_resources, monkeypatch):
-    package_resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(package_resources.copy())
-    draft = schemas._precise_draft()
-    original = draft.check_schema
+@pytest.fixture
+def package_resources(isolated):
+    return isolated.documents
+
+
+@pytest.fixture
+def schemas(isolated):
+    return isolated.schemas
+
+
+@pytest.fixture
+def workflow_errors(isolated):
+    return isolated.workflow_errors
+
+
+def spy_rule_checks(schemas, monkeypatch):
+    validator_type = type(schemas.create_validator({"$schema": VERSION}, registry=Registry()))
+    original = validator_type.check_schema
     checked = []
 
     def check(schema, *args, **kwargs):
         checked.append(schema)
         return original(schema, *args, **kwargs)
 
-    monkeypatch.setattr(draft, "check_schema", check)
+    monkeypatch.setattr(validator_type, "check_schema", check)
+    return checked
+
+
+def test_matching_build_check_reuses_fixed_rules_and_still_checks_document(package_resources, schemas, workflow_errors, monkeypatch):
+    package_resources["protocol/schema-validation.json"] = schemas.build_validation_resource(package_resources.copy())
+    checked = spy_rule_checks(schemas, monkeypatch)
     workflow_errors.validate_public_json("#/$defs/error", {
         "code": "BAD", "stage": "RUN", "details": {"number": 1},
     })
@@ -65,34 +107,27 @@ def test_matching_build_check_reuses_fixed_rules_and_still_checks_document(packa
 
 
 @pytest.mark.parametrize("change", ["missing", "malformed", "incomplete", "duplicate", "environment", "reference", "registry"])
-def test_unmatched_check_rechecks_all_fixed_rules(package_resources, monkeypatch, change):
-    monkeypatch.setattr(schemas, "_validation_context", lambda: {"version": 1})
+def test_unmatched_check_rechecks_all_fixed_rules(package_resources, schemas, workflow_errors, monkeypatch, change):
     proof = schemas.build_validation_resource(package_resources.copy())
-    package_resources[schemas._VALIDATION_RESOURCE] = proof
+    package_resources["protocol/schema-validation.json"] = proof
     if change == "missing":
-        del package_resources[schemas._VALIDATION_RESOURCE]
+        del package_resources["protocol/schema-validation.json"]
     elif change == "malformed":
-        package_resources[schemas._VALIDATION_RESOURCE] = b"invalid"
+        package_resources["protocol/schema-validation.json"] = b"invalid"
     elif change == "incomplete":
-        package_resources[schemas._VALIDATION_RESOURCE] = b'{}'
+        package_resources["protocol/schema-validation.json"] = b'{}'
     elif change == "duplicate":
-        package_resources[schemas._VALIDATION_RESOURCE] = proof.rstrip()[:-1] + b',"workflow":"duplicate"}'
+        package_resources["protocol/schema-validation.json"] = proof.rstrip()[:-1] + b',"workflow":"duplicate"}'
     elif change == "environment":
-        monkeypatch.setattr(schemas, "_validation_context", lambda: {"version": 2})
+        old_proof = json.loads(proof)
+        old_proof["context"]["python"] = [0, 0]
+        package_resources["protocol/schema-validation.json"] = json.dumps(old_proof).encode()
     elif change == "reference":
         package_resources["protocol/plan.schema.json"] += b" "
     else:
         package_resources[CODES] += b" "
 
-    draft = schemas._precise_draft()
-    original = draft.check_schema
-    checked = []
-
-    def check(schema, *args, **kwargs):
-        checked.append(schema)
-        return original(schema, *args, **kwargs)
-
-    monkeypatch.setattr(draft, "check_schema", check)
+    checked = spy_rule_checks(schemas, monkeypatch)
     workflow_errors.validate_public_json("#/$defs/error", {
         "code": "BAD", "stage": "RUN", "details": {"number": 1},
     })
@@ -100,14 +135,14 @@ def test_unmatched_check_rechecks_all_fixed_rules(package_resources, monkeypatch
     assert any(rule.get("required") == ["number"] for rule in checked)
 
 
-def test_changed_actual_registry_cannot_borrow_resource_check(package_resources):
-    package_resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(package_resources.copy())
+def test_changed_actual_registry_cannot_borrow_resource_check(package_resources, schemas, workflow_errors):
+    package_resources["protocol/schema-validation.json"] = schemas.build_validation_resource(package_resources.copy())
     workflow_errors.registered_error("BAD")["details_schema"]["type"] = "invalid"
     with pytest.raises(schemas.SchemaRuleError):
         workflow_errors.validate_public_json("#/$defs/error", {"code": "BAD", "stage": "RUN", "details": {}})
 
 
-def test_build_rejects_invalid_detail_and_arbitrary_rules_remain_checked(package_resources):
+def test_build_rejects_invalid_detail_and_arbitrary_rules_remain_checked(package_resources, schemas):
     registry = json.loads(package_resources[CODES])
     registry["codes"]["BAD"]["details_schema"]["type"] = "invalid"
     package_resources[CODES] = json.dumps(registry).encode()
@@ -117,10 +152,10 @@ def test_build_rejects_invalid_detail_and_arbitrary_rules_remain_checked(package
         schemas.create_validator({"$schema": VERSION, "type": "invalid"})
 
 
-def test_document_still_enforces_stage_and_exact_integer(package_resources):
+def test_document_still_enforces_stage_and_exact_integer(package_resources, schemas, workflow_errors):
     from decimal import Decimal
 
-    package_resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(package_resources.copy())
+    package_resources["protocol/schema-validation.json"] = schemas.build_validation_resource(package_resources.copy())
     workflow_errors.validate_public_json("#/$defs/error", {
         "code": "BAD", "stage": "RUN", "details": {"number": Decimal("1.0")},
     })
@@ -131,18 +166,10 @@ def test_document_still_enforces_stage_and_exact_integer(package_resources):
             })
 
 
-def test_changed_actual_reference_cannot_borrow_resource_check(package_resources, monkeypatch):
-    package_resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(package_resources.copy())
+def test_changed_actual_reference_cannot_borrow_resource_check(package_resources, schemas, workflow_errors, monkeypatch):
+    package_resources["protocol/schema-validation.json"] = schemas.build_validation_resource(package_resources.copy())
     schemas.schema_registry().contents("plan.schema.json")["type"] = "invalid"
-    draft = schemas._precise_draft()
-    original = draft.check_schema
-    checked = []
-
-    def check(schema, *args, **kwargs):
-        checked.append(schema)
-        return original(schema, *args, **kwargs)
-
-    monkeypatch.setattr(draft, "check_schema", check)
+    checked = spy_rule_checks(schemas, monkeypatch)
     with pytest.raises(schemas.SchemaRuleError):
         workflow_errors.validate_public_json("#/$defs/error", {
             "code": "BAD", "stage": "RUN", "details": {"number": 1},
