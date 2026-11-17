@@ -1,50 +1,29 @@
-"""内部设备源读取的 UNKNOWN 预算耗尽入口；不加载 camctl 运行模块。"""
+"""内部读取恢复与 UNKNOWN 耗尽从媒体和分段检查入口推进。"""
 
-import ast
-import asyncio
+from decimal import Decimal
 from pathlib import Path
-import sys
 from types import SimpleNamespace
-import unittest
+from unittest.mock import AsyncMock, Mock, create_autospec
 
+import pytest
 
-SOURCE = Path(__file__).parents[3] / "src" / "camctl"
-_SAVED = SimpleNamespace(value="saved")
-_GRANTED = object()
-
-
-class _BlockCamctlImports:
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == "camctl" or fullname.startswith("camctl."):
-            raise AssertionError(f"隔离测试禁止导入真实 camctl 模块: {fullname}")
-        return None
-
-
-if any(name == "camctl" or name.startswith("camctl.") for name in sys.modules):
-    raise AssertionError("隔离测试启动前已加载真实 camctl 模块")
-sys.meta_path.insert(0, _BlockCamctlImports())
-
-
-class _StripImports(ast.NodeTransformer):
-    def visit_Import(self, node):
-        return None
-
-    def visit_ImportFrom(self, node):
-        return None
-
-
-def _load_function(path, name, namespace):
-    tree = ast.parse(path.read_text())
-    function = next(node for node in tree.body
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and node.name == name)
-    isolated = _StripImports().visit(function)
-    module = ast.Module(body=[
-        ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-        isolated,
-    ], type_ignores=[])
-    exec(compile(ast.fix_missing_locations(module), str(path), "exec"), namespace)
-    return namespace[name]
+from camctl.capture import media_flow, segment_inspections
+from camctl.capture.input_copy import InputPhase, InputStep
+from camctl.capture.media import MediaPolicy, MediaTools, SaveDisposition, SaveReceipt
+from camctl.contracts.enums import enum_for
+from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
+from camctl.devices.read_session import ReadEnd
+from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+from camctl.operations.attempts import BeginAttemptResult, BeginDisposition
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.outputs import read_attempts
+from camctl.outputs.qualification import FileQualification, OperationConfig, QualificationOutcome
+from camctl.outputs.slots import SlotDecision, SlotOutcome
+from camctl.persistence.business import BusinessDatabase
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.segment_inspections import SegmentInspectionRef, SegmentInspectionRepository
+from unit.capture.test_input_copy import _state
+from unit.capture.test_media_execution import _status
 
 
 class _Cursor:
@@ -54,257 +33,173 @@ class _Cursor:
     def fetchall(self):
         return self.rows
 
+    def close(self):
+        pass
 
-class _Copies:
-    def __init__(self):
-        self.grants = 0
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
-    async def qualify(self, _candidate):
-        return SimpleNamespace(disposition=_SAVED, value=SimpleNamespace(
-            outcome=_GRANTED, copy_id=9))
 
-    async def copy_state(self, copy_id):
+class _ReadFacts:
+    """只返回本用例的已保存读取事实，不访问真实数据库。"""
+
+    def __init__(self, attempt_status, attempts_used=1):
+        self.attempt_status = attempt_status
+        self.attempts_used = attempts_used
+
+    def execute(self, sql, params=()):
+        if 'SELECT status,cancel_requested FROM actions' in sql:
+            return _Cursor([(int(enum_for('actions.status').RUNNING), 0)])
+        if 'SELECT m.file_id,d.original_name' in sql:
+            return _Cursor([(30, 'recording.mp4')])
+        if 'SELECT checksum_support' in sql:
+            return _Cursor([(2,)])
+        if 'SELECT id,status,attempts_used,max_attempts_used,retry_wait_required' in sql:
+            return _Cursor([(4, int(enum_for('operation_runs.status').ACTIVE), self.attempts_used, 1, 0)])
+        if 'SELECT attempts_used,retry_wait_required' in sql:
+            return _Cursor([(self.attempts_used, 0)])
+        if 'SELECT r.status,r.attempts_used,a.id,a.status' in sql:
+            return _Cursor([(int(enum_for('operation_runs.status').ACTIVE), self.attempts_used, 88, self.attempt_status)])
+        if 'SELECT c.id FROM file_copies' in sql:
+            return _Cursor([])
+        raise AssertionError(f'意外的读取: {sql}')
+
+
+@pytest.fixture
+def setup(monkeypatch):
+    facts = _ReadFacts(int(enum_for('operation_attempts.status').UNKNOWN))
+    owned = SimpleNamespace(connection=facts)
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.read.side_effect = lambda callback, **kwargs: callback(owned)
+    repository = create_autospec(SegmentInspectionRepository, instance=True)
+    operations = create_autospec(OperationRepository, instance=True)
+    operations.exhaust_blocked_read.return_value = BeginAttemptResult(BeginDisposition.REJECTED, reason='budget_exhausted')
+    sessions = Mock()
+    sessions.for_attempt.return_value = sessions
+    flow = media_flow.MediaFlow(database, BoundDirectories(Path('staging')), sessions,
+        create_autospec(MediaTools, instance=True), MediaPolicy(Decimal('1')),
+        lambda: 100, False, max_read_attempts=1, read_idle_timeout_s=Decimal('5'),
+        retry_interval_s=Decimal('0'), operations=operations)
+    copies = Mock()
+    copies.qualify = AsyncMock(return_value=SaveReceipt(SaveDisposition.SAVED,
+        FileQualification(QualificationOutcome.GRANTED, 9, 4, None, 701, None)))
+    copies.copy_state = AsyncMock(return_value=_state(round=2))
+    copies.repository.grant_read_slot = Mock(side_effect=AssertionError('不得授予新的读取机会'))
+    monkeypatch.setattr(media_flow.MediaFlow, 'copies', lambda self: copies)
+    monkeypatch.setattr(media_flow, 'load_processing_status', lambda *args: _status(repair_state=2))
+    monkeypatch.setattr(read_attempts, 'unfinished_read_end', lambda *args: None)
+    monkeypatch.setattr(read_attempts, 'retry_read_business', AsyncMock())
+    monkeypatch.setattr(read_attempts, 'retry_read_ends', AsyncMock())
+    monkeypatch.setattr(segment_inspections, 'retry_read_business', AsyncMock())
+    monkeypatch.setattr(segment_inspections, 'retry_read_ends', AsyncMock())
+    monkeypatch.setattr(media_flow, 'resume_media_saves', AsyncMock(return_value=False))
+    monkeypatch.setattr(media_flow, '_fail_internal_read_input', AsyncMock())
+    budget = OperationConfig(1, Decimal('5'), Decimal('0'))
+    request = segment_inspections.SegmentInspectionRequest(
+        21, 8, CoverageTarget(CoverageMetric.FRAMES, 10), budget, 100)
+    ref = SegmentInspectionRef(4, 21, 3, 8, 30, int(enum_for('segment_inspections.state').PENDING),
+        {'metric': 'frames', 'value': 10},
+        {'max_attempts': 1, 'timeout_s': Decimal('5'), 'retry_interval_s': Decimal('0')})
+    repository.create.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED, value=ref)
+    repository.read.return_value = ref
+    database.write.side_effect = lambda callback, **kwargs: callback(owned)
+    monkeypatch.setattr(segment_inspections, 'SegmentInspectionRepository', lambda: repository)
+    monkeypatch.setattr(segment_inspections, 'read_inspection_for_member',
+                        lambda *args, **kwargs: SimpleNamespace(copy=None))
+    return SimpleNamespace(flow=flow, facts=facts, copies=copies, owned=owned,
+                           request=request, operations=operations)
+
+
+def _save_business(setup, monkeypatch):
+    async def save(flow, copy_id, operation, request, save):
         assert copy_id == 9
-        return SimpleNamespace(round=2, verification_state=1, target_sha256=None)
-
-    async def _grant(self, *_args):
-        self.grants += 1
-        raise AssertionError("UNKNOWN 预算耗尽前不应申请相机读取机会")
-
-    @property
-    def repository(self):
-        return SimpleNamespace(grant_read_slot=self._grant)
+        assert operation in ('unknown_read_exhaustion', 'grant_read_slot')
+        return SimpleNamespace(value=save(request, 'stable-operation-key', setup.owned))
+    monkeypatch.setattr(read_attempts, 'save_read_business', save)
 
 
-def _input_types():
-    class Phase:
-        WAITING = "waiting"
-
-    def step(phase, *, copy_id=None, reason=None, **_kwargs):
-        return SimpleNamespace(phase=phase, copy_id=copy_id, reason=reason)
-
-    return Phase, step
-
-
-def _entry_namespace():
-    phase, input_step = _input_types()
-    return {
-        "InputPhase": phase,
-        "InputStep": input_step,
-        "Path": Path,
-        "SaveDisposition": SimpleNamespace(SAVED=_SAVED),
-        "QualificationOutcome": SimpleNamespace(GRANTED=_GRANTED),
-        "OperationConfig": lambda *args: args,
-        "AttemptConfig": lambda *args: args,
-        "_RUN_STATUS": SimpleNamespace(FAILED=4),
-        "FileCandidate": lambda *args: args,
-        "_copy_candidate": lambda *args: args,
-        "_ensure_checksum_support": _async_noop,
-        "_exhaust_unknown_read_before_slot": _budget_exhausted,
-        "_read_all": _async_empty,
-        "_read_one": _async_run_state,
-        "_run_state": _async_segment_run_state,
-        "resume_media_saves": _async_noop,
-        "retry_read_business": _async_noop,
-        "retry_read_ends": _async_noop,
-        "unfinished_read_end": lambda owned, copy_id: None,
-        "load_processing_status": lambda *_args: object(),
-        "_fail_internal_read_input": _async_noop,
-        "replace": lambda flow, **_changes: flow,
-    }
+@pytest.mark.asyncio
+async def test_verified_segment_recovery_settles_original_before_ready(setup, monkeypatch):
+    setup.copies.copy_state.return_value = _state(round=2, verification_state=3, target_sha256='a' * 64)
+    ticket = object()
+    end = ReadEnd(stopped=True, bytes_read=10, error=None)
+    monkeypatch.setattr(read_attempts, 'unfinished_read_end', lambda *args: (ticket, (ticket, end, 99, None)))
+    trace = []
+    async def valid(*args):
+        trace.append('recheck')
+        return True
+    async def obtain(context):
+        assert context.read_end is end
+        trace.append('local_copy')
+        return InputStep(InputPhase.INPUT_READY, copy_id=9,
+            input_file=FileRef(701, FilePurpose.RECORDING_INPUT, 'recording-inputs/701.mp4', Path('staging')))
+    async def finish(flow, actual, step, **kwargs):
+        assert actual is ticket
+        trace.append('finish_original')
+    async def owned(flow, copy_id, callback):
+        trace.append('file_owner')
+        return await callback(None)
+    monkeypatch.setattr(read_attempts, 'current_local_read_end', valid)
+    monkeypatch.setattr(segment_inspections, 'obtain_recording_input', obtain)
+    monkeypatch.setattr(segment_inspections, '_finish_internal_read', finish)
+    monkeypatch.setattr(segment_inspections, 'run_owned_read', owned)
+    import camctl.persistence.repositories.segment_inspections as inspection_repository
+    monkeypatch.setattr(inspection_repository, 'inspection_input_read_succeeded', lambda *args: False)
+    result = await segment_inspections.inspect_segment(setup.flow, setup.request)
+    assert result.phase is segment_inspections.SegmentInspectionPhase.WAITING
+    assert result.reason == 'read_result_unconfirmed'
+    assert trace == ['file_owner', 'recheck', 'local_copy', 'finish_original']
+    setup.copies.repository.grant_read_slot.assert_not_called()
 
 
-async def _async_noop(*_args, **_kwargs):
-    return None
+@pytest.mark.asyncio
+async def test_verified_segment_without_reliable_end_waits(setup, monkeypatch):
+    setup.copies.copy_state.return_value = _state(round=2, verification_state=3, target_sha256='a' * 64)
+    monkeypatch.setattr(read_attempts, 'unfinished_read_end', lambda *args: (object(), None))
+    result = await segment_inspections.inspect_segment(setup.flow, setup.request)
+    assert (result.phase, result.reason) == (segment_inspections.SegmentInspectionPhase.WAITING, 'read_end_unconfirmed')
+    setup.copies.repository.grant_read_slot.assert_not_called()
 
 
-async def _async_empty(*_args, **_kwargs):
-    return []
+@pytest.mark.asyncio
+async def test_media_entry_finishes_exhausted_unknown_before_slot_grant(setup, monkeypatch):
+    _save_business(setup, monkeypatch)
+    result = await media_flow.run_recording_media(setup.flow, 21, 1, 30)
+    assert (result.phase, result.reason, result.copy_id) == (InputPhase.WAITING, 'run_ended', 9)
+    setup.copies.repository.grant_read_slot.assert_not_called()
+    setup.operations.exhaust_blocked_read.assert_called_once()
 
 
-async def _async_run_state(*_args, **_kwargs):
-    return (1, 0)
+@pytest.mark.asyncio
+async def test_segment_entry_finishes_exhausted_unknown_before_slot_grant(setup, monkeypatch):
+    _save_business(setup, monkeypatch)
+    monkeypatch.setattr(segment_inspections, 'settle_inspection_read_failure', AsyncMock(return_value=False))
+    result = await segment_inspections.inspect_segment(setup.flow, setup.request)
+    assert (result.phase, result.reason, result.copy_id) == (segment_inspections.SegmentInspectionPhase.WAITING, 'result_save_unknown', 9)
+    setup.copies.repository.grant_read_slot.assert_not_called()
+    setup.operations.exhaust_blocked_read.assert_called_once()
 
 
-async def _async_segment_run_state(*_args, **_kwargs):
-    return (1, 2, 1, 1, 0)
-
-
-async def _budget_exhausted(*_args, **_kwargs):
-    return SimpleNamespace(reason="budget_exhausted")
-
-
-class UnknownReadExhaustionTests(unittest.TestCase):
-    def test_verified_segment_recovery_settles_original_before_ready(self):
-        namespace = _entry_namespace()
-        trace = []
-        phase = SimpleNamespace(WAITING="waiting", INPUT_READY="ready", SEGMENT_FAILED="failed", RECOPY_PENDING="recopy")
-        namespace["InputPhase"] = phase
-        namespace["InputContext"] = lambda **values: SimpleNamespace(**values)
-        namespace["HeldReadEnd"] = lambda ticket, end, occurred_at, **kwargs: SimpleNamespace(
-            ticket=ticket, end=end, occurred_at=occurred_at, resume=None, **kwargs)
-        ticket, end = object(), object()
-        namespace["unfinished_read_end"] = lambda owned, copy_id: (ticket, (ticket, end, 99, None))
-        async def valid(*args):
-            trace.append("recheck")
-            return True
-        async def obtain(context):
-            self.assertIs(context.read_end, end)
-            trace.append("local_copy")
-            return SimpleNamespace(phase=phase.INPUT_READY, input_file=object(), copy_id=9)
-        async def finish(flow, actual, step, **kwargs):
-            self.assertIs(actual, ticket)
-            trace.append("finish_original")
-        async def owned(flow, copy_id, callback):
-            trace.append("file_owner")
-            return await callback(None)
-        namespace.update(current_local_read_end=valid, obtain_recording_input=obtain,
-                         _finish_internal_read=finish, run_owned_read=owned)
-        obtain_input = _load_function(SOURCE / "capture" / "segment_inspections.py", "_obtain_input", namespace)
-        copies = _Copies()
-        async def ready_state(copy_id):
-            return SimpleNamespace(round=2, verification_state=3, target_sha256="hash")
-        copies.copy_state = ready_state
-        sessions = SimpleNamespace(for_attempt=lambda *args, **kwargs: sessions)
-        flow = SimpleNamespace(max_read_attempts=1, read_idle_timeout_s=5, retry_interval_s=0,
-            occurred_at=lambda: 100, copies=lambda: copies,
-            database=SimpleNamespace(read=lambda callback, **kwargs: _call(callback)),
-            pending_read_ends={}, evidence=object(), sessions=sessions, segment_size=1024,
-            roots=SimpleNamespace(staging=Path("staging")), digest_for=None, digest=None,
-            capture_selection=None, continuing_read_tickets={},
-            retry_gate=SimpleNamespace(cleared=lambda key: None))
-        request = SimpleNamespace(action_id=21, budget=SimpleNamespace(max_attempts=1, timeout_s=5, retry_interval_s=0))
-        result = asyncio.run(obtain_input(flow, request, 4, 30, "recording.mp4"))
-        self.assertEqual(result.phase, "ready")
-        self.assertEqual(trace, ["file_owner", "recheck", "local_copy", "finish_original"])
-        self.assertEqual(copies.grants, 0)
-
-    def test_verified_segment_without_reliable_end_waits(self):
-        namespace = _entry_namespace()
-        namespace["unfinished_read_end"] = lambda owned, copy_id: (object(), None)
-        obtain_input = _load_function(SOURCE / "capture" / "segment_inspections.py", "_obtain_input", namespace)
-        copies = _Copies()
-        async def ready_state(copy_id):
-            return SimpleNamespace(round=2, verification_state=3, target_sha256="hash")
-        copies.copy_state = ready_state
-        flow = SimpleNamespace(max_read_attempts=1, read_idle_timeout_s=5, retry_interval_s=0,
-            occurred_at=lambda: 100, copies=lambda: copies,
-            database=SimpleNamespace(read=lambda callback, **kwargs: _call(callback)))
-        request = SimpleNamespace(action_id=21, budget=SimpleNamespace(max_attempts=1, timeout_s=5, retry_interval_s=0))
-        result = asyncio.run(obtain_input(flow, request, 4, 30, "recording.mp4"))
-        self.assertEqual((result.phase, result.reason), ("waiting", "read_end_unconfirmed"))
-        self.assertEqual(copies.grants, 0)
-
-    def test_media_entry_finishes_exhausted_unknown_before_slot_grant(self):
-        namespace = _entry_namespace()
-        run_recording_media = _load_function(
-            SOURCE / "capture" / "media_flow.py", "run_recording_media", namespace)
-        copies = _Copies()
-        flow = SimpleNamespace(
-            database=SimpleNamespace(read=lambda callback, **_kwargs: _call(callback)),
-            pending_media_results={}, pending_read_results={}, file_executor=None,
-            max_read_attempts=1, read_idle_timeout_s=5, retry_interval_s=0,
-            occurred_at=lambda: 100, digest_for=None, digest=None, segment_size=1024,
-            roots=SimpleNamespace(staging=Path("staging")), sessions=object(),
-            copies=lambda: copies,
-        )
-        result = asyncio.run(run_recording_media(flow, 21, 1, 30))
-        self.assertEqual(result.phase, "waiting")
-        self.assertEqual(result.reason, "run_ended")
-        self.assertEqual(copies.grants, 0)
-
-    def test_segment_entry_finishes_exhausted_unknown_before_slot_grant(self):
-        namespace = _entry_namespace()
-        obtain_input = _load_function(
-            SOURCE / "capture" / "segment_inspections.py", "_obtain_input", namespace)
-        copies = _Copies()
-        flow = SimpleNamespace(
-            max_read_attempts=1, read_idle_timeout_s=5, retry_interval_s=0,
-            occurred_at=lambda: 100, copies=lambda: copies,
-            database=SimpleNamespace(read=lambda callback, **_kwargs: _call(callback)),
-        )
-        request = SimpleNamespace(action_id=21, budget=SimpleNamespace(
-            max_attempts=1, timeout_s=5, retry_interval_s=0))
-        result = asyncio.run(obtain_input(flow, request, 4, 30, "recording.mp4"))
-        self.assertEqual(result.phase, "waiting")
-        self.assertEqual(result.reason, "run_ended")
-        self.assertEqual(copies.grants, 0)
-
-    def test_only_unknown_attempt_at_current_limit_uses_original_attempt_identity(self):
-        class Attempts:
-            READ_FILE = 3
-
-        class Rejected:
-            REJECTED = "rejected"
-
-        class BeginResult:
-            def __init__(self, disposition, ticket=None, reason=None):
-                self.disposition, self.ticket, self.reason = disposition, ticket, reason
-
-        run_status = SimpleNamespace(PENDING=1, ACTIVE=2)
-        attempt_status = SimpleNamespace(UNKNOWN=4)
-        rows = [(2, 1, 88, 4)]
-        calls = []
-
-        class Connection:
-            def execute(self, *_args):
-                return _Cursor(rows)
-
-        class Database:
-            async def read(self, callback, **_kwargs):
-                return callback(SimpleNamespace(connection=Connection()))
-
-        def attempt_intent(*args, **kwargs):
-            return SimpleNamespace(args=args, kwargs=kwargs,
-                target=kwargs.get("target", args[3]))
-
-        def exhaust(intent, attempt_id, key, owned):
-            calls.append((intent, attempt_id, key, owned))
-            return BeginResult(Rejected.REJECTED, reason="budget_exhausted")
-
-        async def save_read_business(_flow, copy_id, operation, request, save):
-            self.assertEqual((copy_id, operation), (9, "unknown_read_exhaustion"))
-            return SimpleNamespace(value=save(request, "stable-operation-key", object()))
-
-        namespace = {
-            "enum_for": lambda name: {
-                "operation_runs.kind": SimpleNamespace(READ_FILE=3),
-                "operation_runs.status": run_status,
-                "operation_attempts.status": attempt_status,
-            }[name],
-            "OperationKind": Attempts,
-            "AttemptIntent": attempt_intent,
-            "AttemptTarget": lambda **kwargs: SimpleNamespace(**kwargs),
-            "BeginAttemptResult": BeginResult,
-            "BeginDisposition": Rejected,
-            "ConsistencyError": ValueError,
-            "new_operation_key": lambda: "not-used",
-            "save_read_business": save_read_business,
-        }
-        exhaust_unknown = _load_function(
-            SOURCE / "capture" / "media_flow.py",
-            "_exhaust_unknown_read_before_slot", namespace)
-        flow = SimpleNamespace(database=Database(),
-            operations=SimpleNamespace(exhaust_blocked_read=exhaust),
-            occurred_at=lambda: 100)
-
-        class Config:
-            max_attempts = 1
-
-        result = asyncio.run(exhaust_unknown(
-            flow, action_id=21, copy_id=9, copy_round=2, config=Config()))
-        self.assertEqual(result.reason, "budget_exhausted")
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][1:3], (88, "stable-operation-key"))
-        self.assertEqual(calls[0][0].target.copy_id, 9)
-
-        calls.clear()
-        rows[:] = [(2, 1, 88, 1)]
-        result = asyncio.run(exhaust_unknown(
-            flow, action_id=21, copy_id=9, copy_round=2, config=Config()))
-        self.assertIsNone(result)
-        self.assertEqual(calls, [])
-
-
-async def _call(callback):
-    return callback(SimpleNamespace())
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,used,limit,exhausted', [
+    ('UNKNOWN', 1, 1, True), ('RUNNING', 1, 1, False), ('UNKNOWN', 1, 2, False),
+])
+async def test_only_unknown_attempt_at_current_limit_uses_original_attempt_identity(setup, monkeypatch, status, used, limit, exhausted):
+    setup.facts.attempt_status = int(enum_for('operation_attempts.status')[status])
+    setup.facts.attempts_used = used
+    setup.flow.max_read_attempts = limit
+    _save_business(setup, monkeypatch)
+    if not exhausted:
+        setup.copies.repository.grant_read_slot.side_effect = None
+        setup.copies.repository.grant_read_slot.return_value = SlotDecision(SlotOutcome.WAIT, reason='device_busy')
+    result = await media_flow.run_recording_media(setup.flow, 21, 1, 30)
+    if exhausted:
+        assert result.reason == 'run_ended'
+        intent, attempt_id, key, owned = setup.operations.exhaust_blocked_read.call_args.args
+        assert (attempt_id, key, owned) == (88, 'stable-operation-key', setup.owned)
+        assert (intent.action_id, intent.target.copy_id, intent.copy_round, intent.config.max_attempts) == (21, 9, 2, 1)
+        setup.copies.repository.grant_read_slot.assert_not_called()
+    else:
+        assert result.phase is InputPhase.WAITING
+        setup.operations.exhaust_blocked_read.assert_not_called()
+        setup.copies.repository.grant_read_slot.assert_called_once()
