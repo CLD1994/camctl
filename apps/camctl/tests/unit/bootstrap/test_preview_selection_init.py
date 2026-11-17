@@ -31,14 +31,15 @@ def test_combined_programmatic_upgrades_are_rejected_before_access(monkeypatch):
     runtime.assert_not_called()
 
 
-@pytest.mark.parametrize("version", [None, True, 1, 6, 7, 9])
+@pytest.mark.parametrize("version", [None, True, 1, 6, 7, 999])
 def test_new_preview_selection_rejects_unsupported_format_with_upgrade_instruction(version):
     with pytest.raises(DatabaseUnsupportedFormatError, match="init --upgrade-preview-selection"):
         require_preview_selection_format(version)
 
 
-def test_new_preview_selection_accepts_v8():
-    require_preview_selection_format(8)
+@pytest.mark.parametrize("version", [8, 9, 10])
+def test_new_preview_selection_accepts_supported_format(version):
+    require_preview_selection_format(version)
 
 
 def test_upgrade_preserves_all_facts_through_the_existing_full_copy(monkeypatch):

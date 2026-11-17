@@ -1,6 +1,5 @@
-"""活动表和打开入口的结构核对不读取真实包资源。"""
+"""活动表和打开入口使用固定枚举定义及受控的结构替身。"""
 
-from enum import IntEnum
 from importlib.util import find_spec, module_from_spec, spec_from_file_location
 import sqlite3
 import sys
@@ -47,8 +46,8 @@ def test_activity_structure_requires_fixed_identity_columns_and_constraint(monke
 
 @pytest.fixture
 def runtime(monkeypatch):
-    versions = IntEnum("Version", {"V2": 2, "V4": 4, "V5": 5, "V6": 6})
-    action_types = IntEnum("ActionType", {"CAMERA_TAKE_PHOTO": 1})
+    versions = enums.enum_for("database_metadata.format_version")
+    action_types = enums.enum_for("actions.type")
     definitions = {"database_metadata.format_version": versions, "actions.type": action_types}
     monkeypatch.setattr(enums, "enum_for", lambda column: definitions[column])
     monkeypatch.setattr(enums, "resource_bytes", lambda name: pytest.fail("禁止读取包资源"))

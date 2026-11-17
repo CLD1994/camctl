@@ -8,9 +8,12 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from camctl.history.events import business_tables_for_format
 from camctl.persistence import capture_preparation_upgrade as upgrade
 from camctl.persistence.output_scope_upgrade import upgrade_output_scope
-from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection, StateDatabaseError
+from camctl.persistence.runtime import (
+    DatabaseMetadata, NON_BUSINESS_TABLE_MINIMUM_FORMAT, OwnedConnection, StateDatabaseError,
+)
 
 
 def _cursor(rows=()):
@@ -50,6 +53,8 @@ class DatabaseRows:
         return cursor
 
     def execute(self, sql):
+        if sql == "SELECT format_version FROM database_metadata WHERE id=1":
+            return self.cursor([(self.tables["database_metadata"][0][1],)])
         if sql.startswith("SELECT name FROM sqlite_master"):
             return self.cursor((name,) for name in sorted(self.tables))
         if sql.startswith("PRAGMA table_xinfo"):
@@ -84,7 +89,7 @@ class DatabaseRows:
         return self.cursor()
 
 
-def _rows(*, target=False, version=3):
+def _rows(*, target=False, version=3, populated=False):
     columns = {
         "database_metadata": (_column(0, "id", primary=1), _column(1, "format_version")),
         "history_events": (_column(0, "id", primary=1), _column(1, "payload"),
@@ -93,7 +98,14 @@ def _rows(*, target=False, version=3):
     tables = {"database_metadata": [(1, version)],
               "history_events": [(index, f"记录-{index}", index * 2) for index in range(1, 261)]}
     if target:
-        tables = {table: [] for table in tables}
+        if not populated:
+            tables = {table: [] for table in tables}
+        added = set(business_tables_for_format(upgrade.CURRENT_FORMAT_VERSION)) - set(
+            business_tables_for_format(version)
+        )
+        added.update(name for name, minimum in NON_BUSINESS_TABLE_MINIMUM_FORMAT.items()
+                     if version < minimum <= upgrade.CURRENT_FORMAT_VERSION)
+        tables.update({name: [] for name in added})
     return DatabaseRows(tables, columns)
 
 
@@ -103,12 +115,14 @@ def _metadata(version=3):
 
 @pytest.mark.parametrize("version", [3, 4, 5])
 def test_copy_keeps_all_rows_and_identities_and_changes_only_metadata_format(version):
-    source, target = _rows(version=version), _rows(target=True)
+    source, target = _rows(version=version), _rows(target=True, version=version)
+    expected_tables = set(target.tables)
     upgrade._copy_tables(source.connection, target.connection)
-    assert target.tables == {
-        "database_metadata": [(1, upgrade.CURRENT_FORMAT_VERSION)],
-        "history_events": source.tables["history_events"],
-    }
+    assert set(target.tables) == expected_tables
+    assert target.tables["database_metadata"] == [(1, upgrade.CURRENT_FORMAT_VERSION)]
+    assert target.tables["history_events"] == source.tables["history_events"]
+    assert all(not rows for name, rows in target.tables.items()
+               if name not in source.tables)
     assert all(len(rows) <= 128 for _, _, rows in target.inserts)
     assert all("derived" not in names for _, names, _ in target.inserts)
     upgrade._verify_contents(source.connection, target.connection, target_format=upgrade.CURRENT_FORMAT_VERSION)
@@ -117,7 +131,7 @@ def test_copy_keeps_all_rows_and_identities_and_changes_only_metadata_format(ver
 
 @pytest.mark.parametrize("changed", ["missing_row", "same_count_changed_history", "generated_value"])
 def test_content_verification_rejects_loss_or_changes(changed):
-    source, target = _rows(), _rows()
+    source, target = _rows(), _rows(target=True, populated=True)
     target.tables["database_metadata"] = [(1, upgrade.CURRENT_FORMAT_VERSION)]
     if changed == "missing_row":
         target.tables["history_events"].pop()

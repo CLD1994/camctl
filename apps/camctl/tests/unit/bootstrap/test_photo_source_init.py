@@ -40,12 +40,12 @@ def test_photo_source_upgrade_uses_the_existing_verified_copy_path(monkeypatch):
         upgrade_name="photo-source", description="照片来源", minimum="V6")
 
 
-@pytest.mark.parametrize("version", [None, True, 1, 6, 9])
+@pytest.mark.parametrize("version", [None, True, 1, 6, 999])
 def test_deferred_photo_is_rejected_by_unsupported_state_formats(version):
     with pytest.raises(DatabaseUnsupportedFormatError, match="upgrade-photo-source"):
         require_deferred_photo_format(version)
 
 
-@pytest.mark.parametrize("version", [7, 8])
+@pytest.mark.parametrize("version", [7, 8, 9, 10])
 def test_deferred_photo_accepts_the_new_state_format(version):
     require_deferred_photo_format(version)
