@@ -8,6 +8,7 @@ import pytest
 from camctl.capture.files import OwnershipFromResultPageSave, file_identity_key
 from camctl.capture.result_inputs import observed_file
 from camctl.capture.result_pages import ResultPageRef
+from camctl.capture.results import FileKind, ProductRule
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.operations.models import AttemptTicket
@@ -54,14 +55,14 @@ def test_scope_ownership_does_not_require_file_metadata(monkeypatch, policy, ide
 
 @pytest.mark.parametrize('responsibility,accepted', [('results/8', True), ('scope/8', False)])
 def test_scope_requires_ownership_for_optional_preview(monkeypatch, responsibility, accepted):
-    action = {'id': 3, 'execution_spec_json': {'product_rules': []}}
+    action = {'id': 3, 'execution_spec_json': {
+        'product_rules': [ProductRule(FileKind.VIDEO, 'osv').as_json()]}}
     ticket = AttemptTicket(1, 'result', '8', responsibility, 5)
     entry = observed_file(dict(identity='/DCIM/a.LRF', locator={'path': '/DCIM/a.LRF'},
         complete=False, size_bytes=None, kind='video', format_id='lrf', paired_identity='/DCIM/a.OSV'))
     facts = {'source_action_id': None, 'ownership_evidence_json': None}
     monkeypatch.setattr(result_pages, 'iter_result_file_facts', create_autospec(
         result_pages.iter_result_file_facts, return_value=iter(((entry, facts),))))
-    monkeypatch.setattr('camctl.capture.results.is_optional_preview', lambda *args: True)
     if accepted:
         result_pages.verify_output_scope_ownership(object(), action, ticket, 10)
     else:

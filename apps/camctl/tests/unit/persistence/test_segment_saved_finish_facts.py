@@ -72,6 +72,7 @@ def test_canonical_empty_finish_uses_only_supplied_facts(monkeypatch):
 def test_finish_plan_does_not_reprove_saved_assessment(monkeypatch):
     from camctl.capture.segment_models import DefaultScopeState
     from camctl.contracts.values import new_operation_key
+    from camctl.devices.tasks import CaptureResultPolicy
     from camctl.persistence.repositories.transactions import TransactionScope, update_change
 
     db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
@@ -79,7 +80,8 @@ def test_finish_plan_does_not_reprove_saved_assessment(monkeypatch):
     request = FinishSegmentRecording(SegmentResultRef(1, 2, 1), 3, 4, 5)
     assessment = SimpleNamespace(default_scope=SimpleNamespace(state=DefaultScopeState.UNKNOWN, member_count=None))
     port(monkeypatch, finish, "_one", return_value=None)
-    port(monkeypatch, finish, "_identity", return_value=({"status": 2, "cancel_requested": 0, "plan_id": 6}, {},
+    port(monkeypatch, finish, "_identity", return_value=({"status": 2, "cancel_requested": 0, "plan_id": 6,
+         "execution_spec_json": {"result_policy": CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value}}, {},
          {"id": 2, "published_event_id": None}, assessment, None))
     port(monkeypatch, finish, "_canceled_result", return_value=False)
     port(monkeypatch, finish, "_candidates", return_value=iter(()))
@@ -399,7 +401,8 @@ def test_result_identity_keeps_no_activity_and_no_results_partition(monkeypatch,
     identity = finish.storage.SegmentIdentity(
         {"id": 2, "activity_id": None, "run_id": None}, {"id": 1}, None, None, None)
     port(monkeypatch, finish.storage, "read_segment_identity", return_value=identity)
-    port(monkeypatch, conclusions, "read_fixed_result_check_conclusion", return_value={})
+    port(monkeypatch, conclusions, "read_fixed_result_check_conclusion", return_value={
+        "reason": int(enum_for("segment_check_conclusions.reason").NO_RESULT_WORK)})
     disposition = port(monkeypatch, segment_dispositions, "saved_result_disposition",
                        return_value=segment_dispositions.RetainedResultDisposition())
     port(monkeypatch, finish, "_one", return_value=(0,))

@@ -11,13 +11,20 @@ from camctl.capture.result_pages import ResultPageRef, SavedResultPage
 from camctl.capture.segment_models import FileCompletionState, OwnershipState
 from camctl.capture.segment_storage import document
 from camctl.contracts.enums import enum_for
-from camctl.contracts.history_values import HistoryBoundary, TransactionRange
+from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.json_encoding import encode_exact_json
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.tasks import CaptureResultPolicy
 from camctl.operations.models import AttemptTicket, CallOutcome
-from camctl.persistence.fact_reads import EventRecord
 from camctl.persistence.repositories import result_file_proofs as files
+from camctl.persistence.repositories.result_pages import ResultPageFileView
+
+
+def page_file_view(saved, last_event_id):
+    return ResultPageFileView(saved.ref, last_event_id, saved.file_ids,
+        tuple((entry.identity, entry.complete, entry.size_bytes, encode_exact_json(entry.locator))
+              for entry in saved.page.entries))
 
 
 @pytest.fixture(params=[
@@ -52,10 +59,9 @@ def input_facts(monkeypatch, request):
         'result_policy':policy.value})
     monkeypatch.setattr(files, 'row_facts', create_autospec(files.row_facts,
         side_effect=lambda connection, table, identity: {'actions':action,'operation_runs':run}[table]))
-    monkeypatch.setattr(files.result_pages, 'read_saved_page', create_autospec(files.result_pages.read_saved_page,
-        return_value=(saved, {'run_id':28, 'activity_id':6, 'attempt_no':1})))
-    monkeypatch.setattr(files, 'read_event', create_autospec(files.read_event,
-        return_value=EventRecord((), None, TransactionRange(590,872,874))))
+    pages = {872: page_file_view(saved, 874)}
+    monkeypatch.setattr(files.result_pages, 'read_page_file_view', create_autospec(
+        files.result_pages.read_page_file_view, side_effect=lambda connection, identity: pages[identity]))
     monkeypatch.setattr(files, 'read_file_at_boundary', create_autospec(files.read_file_at_boundary, return_value=file))
     return SimpleNamespace(db=db,ref=ref,file=file,boundary=HistoryBoundary(600,885),
         action=action, run=run, saved=saved)
@@ -113,9 +119,8 @@ def test_scope_input_preserves_prior_result_file_facts(input_facts, monkeypatch,
     entry = replace(state.saved.page.entries[0], complete=False, size_bytes=None)
     scope_page = replace(state.saved, ref=ref, page=replace(state.saved.page,
         entries=(entry,), set_finalized=True))
-    files.result_pages.read_saved_page.side_effect = lambda connection, identity: (
-            (scope_page, {'run_id': 29}) if identity == 884
-            else (state.saved, {'run_id': 28}))
+    pages = {872: page_file_view(state.saved, 874), 884: page_file_view(scope_page, 884)}
+    files.result_pages.read_page_file_view.side_effect = lambda connection, identity: pages[identity]
     files.row_facts.side_effect = lambda connection, table, identity: state.action if table == 'actions' else (
         scope_run if identity == 29 else original_run)
     if not completed:
