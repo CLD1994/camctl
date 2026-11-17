@@ -284,8 +284,7 @@ class _Compiler:
         for child in resource.subresources():
             self._preflight(child, resolver.in_subresource(child), uri)
 
-    def finite(self, uri, path):
-        resolved = self.registry.resolver().lookup(uri)
+    def finite(self, uri, path, resolved):
         self._preflight(DRAFT202012.create_resource(resolved.contents), resolved.resolver, uri)
         validator = create_reference_validator(uri, registry=self.registry)
         self.finite_checks.append(FiniteCheck(uri, path))
@@ -302,9 +301,10 @@ class _Compiler:
         if key in self.predicates:
             return self.predicates[key]
         try:
-            schema = self.registry.resolver().lookup(uri).contents
+            resolved = self.registry.resolver().lookup(uri)
         except Unresolvable as error:
             raise StreamValidationError(f'本地 Schema 不可解释: {uri}') from error
+        schema = resolved.contents
         self._check_dialect(schema, uri)
         self.visiting.add(key)
         try:
@@ -316,7 +316,7 @@ class _Compiler:
             structured = any(spec.kind is FieldKind.ARRAY or len(spec.path) > len(path)
                              for spec in relevant)
             if not structured or isinstance(schema, bool):
-                predicate = self.finite(uri, path)
+                predicate = self.finite(uri, path, resolved)
             else:
                 unknown = set(schema) - self._STRUCTURAL - self._ANNOTATIONS
                 if unknown:

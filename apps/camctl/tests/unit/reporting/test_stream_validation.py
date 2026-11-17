@@ -361,6 +361,27 @@ def test_local_reference_respects_nested_resource_id_and_sibling_count():
         bad.close_node()
 
 
+def test_finite_references_respect_each_nested_resource_id():
+    schema = {'properties': {
+        'items': {'type': 'array'},
+        'left': {'$id': 'left/group.json', '$ref': 'value.json'},
+        'right': {'$id': 'right/group.json', '$ref': 'value.json'},
+    }}
+    shared = registry(schema).with_resources([
+        ('https://camctl.invalid/left/value.json', DRAFT202012.create_resource({'type': 'integer'})),
+        ('https://camctl.invalid/right/value.json', DRAFT202012.create_resource({'type': 'string'})),
+    ])
+    plan = derive_stream_plan(URI, ProjectionDescriptor('/test', (DeferredField(('items',)),)), registry=shared)
+    good = plan.begin(binding(plan), {'left': 1, 'right': 'one'})
+    good.omit(('items',))
+    good.close_node()
+    for values in ({'left': 'one', 'right': 'one'}, {'left': 1, 'right': 1}):
+        bad = plan.begin(binding(plan), values)
+        bad.omit(('items',))
+        with pytest.raises(StreamValidationError):
+            bad.close_node()
+
+
 def test_child_receipt_cannot_bypass_expected_projection_completion():
     child = ProjectionDescriptor('/item', (), (CompletionRequirement('segment', ()),))
     plan = plan_for({'properties': {'items': {'type': 'array', 'items': {'type': 'object'}}}}, (DeferredField(('items',), item=child),))
