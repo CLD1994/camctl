@@ -126,6 +126,28 @@ def test_preparation_candidate_query_includes_an_earlier_photo(photo_reserve):
     assert plan.result.reason == "not_first_candidate" and not plan.events
 
 
+def test_hasselblad_preparation_waits_for_an_earlier_photo(photo_reserve):
+    from camctl.capture.selection import CaptureSelectionInput
+    from camctl.persistence.repositories import capture_selection
+
+    action, scope = photo_reserve
+    identity = _identity(action)
+    capture_selection.selected_pending_capture.return_value = capture_selection.CaptureCandidate(
+        6, 19_000_000, 3, 0, 3000, None)
+    request = scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_001, Decimal("10"), identity)
+
+    plan = scheduling.ReservePreparationCommand(request, new_operation_key()).plan(scope)
+
+    assert plan.result.outcome is scheduling.ReservePreparationOutcome.REJECTED
+    assert plan.result.reason == "not_first_candidate"
+    assert plan.read_only and not plan.events
+    capture_selection.selected_pending_capture.assert_called_once_with(
+        scope.connection,
+        CaptureSelectionInput("cam", "hasselblad_cfv100c", identity, Decimal("10"), 10_000_000),
+        scope.max_event_id,
+    )
+
+
 @pytest.mark.parametrize("changed_request", [False, True])
 def test_photo_original_reservation_is_verified_after_terminal(photo_reserve, mocker, changed_request):
     action, scope = photo_reserve
