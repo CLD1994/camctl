@@ -1,11 +1,16 @@
-"""取消交付的原完整读取恢复；不导入实际包、资源或数据库。"""
+"""取消交付的原完整读取恢复与发布资格。"""
 
 import ast
 import asyncio
-from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
+
+from camctl.contracts.enums import enum_for
+from camctl.history.validators import EventValidationError
+from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+from camctl.persistence.repositories.validation import build_business_rules
 
 
 SOURCE = Path(__file__).parents[3] / "src/camctl/outputs/obtain_flow.py"
@@ -102,36 +107,35 @@ class CanceledRecoveryTests(unittest.TestCase):
         self.assertEqual(asyncio.run(run(15, True, "camera"))[0], [])
 
     def test_publish_requires_original_succeeded_read_and_settled_attempts(self):
-        source = SOURCE.parents[1] / "persistence/repositories/outputs.py"
-        tree = ast.parse(source.read_text())
-        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "delivery_read_succeeded")
-        module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), StripImports().visit(node)], type_ignores=[])
-        settled = [True]
-        class Reads:
-            def __init__(self, connection): pass
-            def no_unsettled_attempts(self, run_id): return settled[0]
-        namespace = {"closing": closing, "_RUN_KIND": SimpleNamespace(READ_FILE=3),
-            "_RUN_STATUS": SimpleNamespace(SUCCEEDED=3), "_ATTEMPT_STATUS": SimpleNamespace(SUCCEEDED=2),
-            "RetryWaitReads": Reads}
-        exec(compile(ast.fix_missing_locations(module), str(source), "exec"), namespace)
+        guard = build_business_rules()["delivery"]
         rows = [(7, 3, 1, 0, 2, "{}", 22)]
         class Cursor:
             def fetchall(self): return rows
             def close(self): pass
         connection = SimpleNamespace(execute=lambda sql, params: Cursor())
-        check = namespace["delivery_read_succeeded"]
-        self.assertTrue(check(connection, 5))
-        original = rows[0]
-        for index, value in ((1, 2), (2, 0), (3, 1), (4, 1), (5, None), (6, None)):
-            changed = list(original)
-            changed[index] = value
-            rows[:] = [tuple(changed)]
-            self.assertFalse(check(connection, 5))
-        rows[:] = [original]
-        settled[0] = False
-        self.assertFalse(check(connection, 5))
-        rows[:] = [original, original]
-        self.assertFalse(check(connection, 5))
+        event_id = 30
+        row = SimpleNamespace(table="deliveries", row_id=5,
+            after=SimpleNamespace(values={"status": int(enum_for("deliveries.status").PUBLISHING),
+                                          "publication_intent_event_id": event_id}))
+        event = SimpleNamespace(event_type=23, reason=3, event_id=event_id, rows=(row,))
+        context = SimpleNamespace(retry_wait_reads=RetryWaitReads(connection), state_rows={
+            "file_copies": {9: {"delivery_id": 5, "verification_state": 3,
+                                 "source_size": 10, "committed_bytes": 10}}})
+        with patch.object(RetryWaitReads, "no_unsettled_attempts", return_value=True) as settled:
+            guard(event, context)
+            original = rows[0]
+            for index, value in ((1, 2), (2, 0), (3, 1), (4, 1), (5, None), (6, None)):
+                with self.subTest(index=index):
+                    changed = list(original)
+                    changed[index] = value
+                    rows[:] = [tuple(changed)]
+                    with self.assertRaises(EventValidationError): guard(event, context)
+            rows[:] = [original]
+            settled.return_value = False
+            with self.assertRaises(EventValidationError): guard(event, context)
+            settled.return_value = True
+            rows[:] = [original, original]
+            with self.assertRaises(EventValidationError): guard(event, context)
 
     def test_canceled_discovery_delegates_device_and_host_recovery_without_requiring_end(self):
         async def run(source, assembly):

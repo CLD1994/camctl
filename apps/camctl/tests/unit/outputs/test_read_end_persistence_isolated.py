@@ -1,45 +1,32 @@
 """读取结束事务只使用进程内事实替身。"""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import ast
 import asyncio
-from dataclasses import dataclass
-from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from camctl.outputs.copy import read_end_completed, validate_read_end_facts
-from camctl.operations.ownership_rules import binding_read_finish_matches
-from camctl.operations.validation import ResultErrorIssue, run_finish_error_issue
+from camctl.devices.read_session import ReadEnd as End
+from camctl.operations.models import AttemptTicket
+from camctl.persistence.repositories import read_end, outputs
+from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+from camctl.history.validators import EventValidationError
+from camctl.persistence.repositories.validation import build_business_rules
 
 
 SOURCE = Path(__file__).parents[3] / "src/camctl/persistence/repositories/read_end.py"
 ATTEMPTS_SOURCE = SOURCE.parents[2] / "outputs/read_attempts.py"
-OUTPUTS_SOURCE = SOURCE.parent / "outputs.py"
 HANDLERS_SOURCE = SOURCE.parents[2] / "capture/handlers.py"
 INSPECTIONS_SOURCE = SOURCE.parents[2] / "capture/segment_inspections.py"
 RUNTIME_SOURCE = SOURCE.parent.parent / "runtime.py"
 COPY_SOURCE = SOURCE.parents[2] / "outputs/copy.py"
-OPERATIONS_SOURCE = SOURCE.parent / "operations.py"
 
 
-@dataclass(frozen=True)
-class Ticket:
-    attempt_id: int = 1
-    operation: str = "read"
-    target_id: str = "9"
-    responsibility_key: str = "read/9"
-    run_id: int = 7
-
-
-@dataclass(frozen=True)
-class End:
-    stopped: bool
-    bytes_read: int
-    error: str | None
+def Ticket(attempt_id=1):
+    return AttemptTicket(attempt_id, "read", "9", "read/9", 7)
 
 
 class Cursor:
@@ -73,50 +60,20 @@ class Connection:
 
 @contextmanager
 def isolated():
-    modules = {}
-    def stub(name, **members):
-        item = ModuleType(name)
-        item.__dict__.update(members)
-        modules[name] = item
-        return item
-    enums = {"operation_runs.kind": SimpleNamespace(READ_FILE=3),
-             "operation_attempts.status": SimpleNamespace(RUNNING=1),
-             "device_files.checksum_support": SimpleNamespace(UNSUPPORTED=3)}
-    stub("camctl.contracts.enums", enum_for=lambda name: enums[name])
-    stub("camctl.contracts.json_values", json_equal=lambda a, b: a == b, parse_exact_json=lambda value: value)
-    stub("camctl.contracts.values", ConsistencyError=ValueError, ObjectId=int, OperationKey=str, UtcMicros=int)
-    stub("camctl.outputs.copy", read_end_completed=read_end_completed,
-         validate_read_end_facts=validate_read_end_facts)
-    stub("camctl.devices.read_session", ReadEnd=End)
-    stub("camctl.operations.models", AttemptTicket=Ticket)
-    stub("camctl.history.events", reason_for_branch=lambda *args: 9)
-    stub("camctl.history.validators", EventValidationError=ValueError)
-    class Plan:
-        def __init__(self, *args, **kwargs):
-            self.args = args
-            self.__dict__.update(kwargs)
-    def update(table, identity, before, after):
-        return SimpleNamespace(table=table, row_id=identity,
-            before=SimpleNamespace(values=before), after=SimpleNamespace(values=after))
-    stub("camctl.persistence.repositories.transactions", CommandPlan=Plan, commit_operation=None,
-         event_envelope=lambda event_id, txn, kind, reason, rows, now, evidence:
-            SimpleNamespace(event_id=event_id, rows=rows, evidence=evidence),
-         row_facts=lambda connection, table, identity: connection.rows.get((table, identity)),
-         saved_transaction_events=lambda connection, key: None, update_change=update)
-    stub("camctl.persistence.repositories.outputs", _copy_round_chain_proven=lambda *args: True,
-         _copy_action_id=lambda *args: 6, _verify_source_identity=lambda *args: None,
-         _copy_owner_of=lambda connection, copy, state, owners: owners.update({("file_copies", 9): ("delivery", 2)}))
-    class RetryReads:
-        def __init__(self, connection): pass
-        def _require_index(self, name): pass
-    stub("camctl.persistence.repositories.retry_wait_reads", RetryWaitReads=RetryReads)
-    name = "camctl.persistence.repositories._read_end_isolated"
-    spec = spec_from_file_location(name, SOURCE)
-    module = module_from_spec(spec)
-    modules[name] = module
-    with patch.dict(sys.modules, modules):
-        spec.loader.exec_module(module)
-        yield module
+    # 只隔离仓储的事实读取端口；生产类型、事件和正式规则保持原身份。
+    def row_facts(connection, table, identity):
+        return connection.rows.get((table, identity))
+    def owner(connection, copy, state, owners):
+        owners[("file_copies", 9)] = ("delivery", 2)
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(read_end, "row_facts", side_effect=row_facts))
+        stack.enter_context(patch.object(read_end, "saved_transaction_events", return_value=None))
+        stack.enter_context(patch.object(outputs, "_copy_round_chain_proven", return_value=True))
+        stack.enter_context(patch.object(outputs, "_copy_action_id", return_value=6))
+        stack.enter_context(patch.object(outputs, "_verify_source_identity", return_value=None))
+        stack.enter_context(patch.object(outputs, "_copy_owner_of", side_effect=owner))
+        stack.enter_context(patch.object(RetryWaitReads, "_require_index", return_value=None))
+        yield read_end
 
 
 class ReadEndTests(unittest.TestCase):
@@ -127,22 +84,22 @@ class ReadEndTests(unittest.TestCase):
         with isolated() as module:
             request = self.request(module)
             scope = SimpleNamespace(connection=Connection(), allocate=lambda count: SimpleNamespace(first_event_id=30, txn_id=2))
-            plan = module.SaveReadEndCommand(request, "key").plan(scope)
-            event = plan.args[0][0]
+            plan = module.SaveReadEndCommand(request, "a" * 32).plan(scope)
+            event = plan.events[0]
             self.assertEqual(event.evidence["read_end"]["end"]["bytes_read"], 0)
             self.assertEqual(event.rows[0].after.values, {"read_end_event_id": 30, "slot_device_id": None})
 
     def test_missing_device_digest_keeps_slot(self):
         with isolated() as module:
             scope = SimpleNamespace(connection=Connection(source_hash=None), allocate=lambda count: SimpleNamespace(first_event_id=30, txn_id=2))
-            event = module.SaveReadEndCommand(self.request(module), "key").plan(scope).args[0][0]
+            event = module.SaveReadEndCommand(self.request(module), "a" * 32).plan(scope).events[0]
             self.assertEqual(event.rows[0].after.values, {"read_end_event_id": 30})
 
     def test_incomplete_progress_and_other_unsettled_call_are_rejected(self):
         with isolated() as module:
             for connection in (Connection(progress=9), Connection(unsettled=True)):
                 scope = SimpleNamespace(connection=connection, allocate=lambda count: SimpleNamespace(first_event_id=30, txn_id=2))
-                with self.assertRaises(ValueError): module.SaveReadEndCommand(self.request(module), "key").plan(scope)
+                with self.assertRaises(ValueError): module.SaveReadEndCommand(self.request(module), "a" * 32).plan(scope)
 
     def test_error_or_invalid_actual_end_is_rejected(self):
         with isolated() as module:
@@ -157,7 +114,7 @@ class ReadEndTests(unittest.TestCase):
                 scope = SimpleNamespace(connection=connection,
                     allocate=lambda count: SimpleNamespace(first_event_id=30, txn_id=2))
                 with self.assertRaises(ValueError):
-                    module.SaveReadEndCommand(self.request(module), "key").plan(scope)
+                    module.SaveReadEndCommand(self.request(module), "a" * 32).plan(scope)
 
     def test_guard_rejects_boolean_round_or_extra_evidence(self):
         with isolated() as module:
@@ -174,31 +131,35 @@ class ReadEndTests(unittest.TestCase):
             connection = Connection(source_hash=None)
             copy = connection.rows[("file_copies", 9)]
             row = SimpleNamespace(table="file_copies", row_id=9,
-                before=SimpleNamespace(values={"read_end_event_id": None, "slot_device_id": "camera"}),
-                after=SimpleNamespace(values={"read_end_event_id": 30, "slot_device_id": None}))
+                before=SimpleNamespace(values={"read_end_event_id": None}),
+                after=SimpleNamespace(values={"read_end_event_id": 30}))
             event = SimpleNamespace(event_id=30, rows=(row,), evidence={"read_end": self.request(module).document()})
             context = SimpleNamespace(state_rows={"file_copies": {9: copy}}, read_end_reads=module.ReadEndReads(connection))
-            with self.assertRaises(ValueError):
-                module.read_end_guard(event, context)
+            guard = build_business_rules()["read_end"]
+            guard(event, context)
+            row.before.values["slot_device_id"] = "camera"
+            row.after.values["slot_device_id"] = None
+            with self.assertRaises(EventValidationError):
+                guard(event, context)
 
     def test_original_key_replay_uses_saved_event_after_current_round_changes(self):
         with isolated() as module:
             request = self.request(module)
-            event = {"type": 22, "reason": 9, "occurred_at": 5, "event_id": 30,
+            event = {"type": 22, "reason": module.reason_for_branch("COPY_CHANGED", "READ_END"), "occurred_at": 5, "event_id": 30,
                      "body": {"evidence": {"read_end": request.document()}, "rows": [{
                          "id": 9, "table": "file_copies",
                          "before": {"values": {"read_end_event_id": None}},
                          "after": {"values": {"read_end_event_id": 30}}}]}}
-            module.saved_transaction_events = lambda connection, key: [event]
+            module.saved_transaction_events.return_value = [event]
             connection = Connection()
             connection.rows[("file_copies", 9)]["round"] = 2
             scope = SimpleNamespace(connection=connection)
-            plan = module.SaveReadEndCommand(request, "key").plan(scope)
+            plan = module.SaveReadEndCommand(request, "a" * 32).plan(scope)
             self.assertTrue(plan.read_only)
-            self.assertEqual(plan.args[3], 30)
+            self.assertEqual(plan.result, 30)
             different = self.request(module, End(True, 1, None))
             with self.assertRaises(ValueError):
-                module.SaveReadEndCommand(different, "key").plan(scope)
+                module.SaveReadEndCommand(different, "a" * 32).plan(scope)
 
 
 class ReadEndRequestTests(unittest.IsolatedAsyncioTestCase):
@@ -268,9 +229,8 @@ class ReadEndRequestTests(unittest.IsolatedAsyncioTestCase):
 
 class ZeroLengthRoundTests(unittest.TestCase):
     def test_zero_progress_omitted_in_recopy_history_is_proven_only_for_empty_source(self):
-        tree = ast.parse(OUTPUTS_SOURCE.read_text())
-        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
-                        and node.name == "_copy_round_chain_proven")
+        from camctl.persistence.repositories import outputs_guards
+        chain = outputs._copy_round_chain_proven
         before = {"round": 1, "recopies_used": 0, "reset_state": 1,
                   "verification_state": 4, "target_sha256": "old"}
         after = {"round": 2, "recopies_used": 1, "reset_state": 2,
@@ -281,17 +241,24 @@ class ZeroLengthRoundTests(unittest.TestCase):
         event = SimpleNamespace(event_type=22, reason=4, rows=(row,))
         class Events(Cursor):
             def __iter__(self): return iter(self.rows)
-        connection = SimpleNamespace(execute=lambda *args: Events([event]))
-        namespace = {"closing": __import__("contextlib").closing,
-                     "decode_event_row": lambda value: value,
-                     "_COPY_CHANGED_EVENT": 22, "_RECOPY_REASON": 4,
-                     "_RESET_STATE": SimpleNamespace(READY=1, RESET_PENDING=2),
-                     "_VERIFICATION": SimpleNamespace(MISMATCHED=4, NOT_PERFORMED=1)}
-        exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])),
-                     str(OUTPUTS_SOURCE), "exec"), namespace)
-        chain = namespace["_copy_round_chain_proven"]
-        self.assertTrue(chain(connection, 9, 1, 2, 4, 30, 0))
-        self.assertFalse(chain(connection, 9, 1, 2, 4, 30, 10))
+        class HistoryConnection(Connection):
+            def execute(self, sql, parameters):
+                if "FROM history_events" in sql:
+                    return Events([event])
+                return super().execute(sql, parameters)
+        with isolated() as module, patch.object(outputs, "_copy_round_chain_proven", chain), \
+                patch.object(outputs_guards, "decode_event_row", side_effect=lambda value: value):
+            for size, accepted in ((0, True), (10, False)):
+                with self.subTest(size=size):
+                    connection = HistoryConnection(progress=size)
+                    copy = connection.rows[("file_copies", 9)]
+                    copy.update(round=2, source_size=size)
+                    request = module.SaveReadEnd(Ticket(), 2, 15, None, 20, size, End(True, 0, None), 5)
+                    if accepted:
+                        module.ReadEndReads(connection).verify(copy, request.document(), 30)
+                    else:
+                        with self.assertRaises(ValueError):
+                            module.ReadEndReads(connection).verify(copy, request.document(), 30)
 
     def test_database_open_rejects_missing_or_wrong_reference_structure(self):
         tree = ast.parse(RUNTIME_SOURCE.read_text())
@@ -313,14 +280,7 @@ class ZeroLengthRoundTests(unittest.TestCase):
             with self.assertRaises(ValueError): check(connection)
 
     def test_recopy_guard_requires_current_end_to_be_cleared(self):
-        tree = ast.parse(OUTPUTS_SOURCE.read_text())
-        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
-                        and node.name == "_copy_guard")
-        namespace = {"EventValidationError": ValueError, "_COPY_CHANGED_EVENT": 22,
-            "_COPY_SOURCE_FALLBACK_REASON": 8, "_RESET_REASON": 1, "_SEGMENT_REASON": 2,
-            "_VERIFY_REASON": 3, "_RECOPY_REASON": 4, "_PHOTO_READ_START_REASON": object()}
-        exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])),
-                     str(OUTPUTS_SOURCE), "exec"), namespace)
+        guard = build_business_rules()["copy"]
         before = {"round": 1, "recopies_used": 0, "read_end_event_id": 30}
         after = {"round": 2, "recopies_used": 1, "read_end_event_id": None, "target_sha256": None}
         row = SimpleNamespace(table="file_copies", row_id=9,
@@ -328,11 +288,11 @@ class ZeroLengthRoundTests(unittest.TestCase):
         event = SimpleNamespace(event_type=22, reason=4, rows=(row,))
         context = SimpleNamespace(state_rows={"file_copies": {9: {
             "source_size": 0, "committed_bytes": 0, "read_end_event_id": 30}}})
-        namespace["_copy_guard"](event, context)
+        guard(event, context)
         after["read_end_event_id"] = 31
-        with self.assertRaises(ValueError): namespace["_copy_guard"](event, context)
+        with self.assertRaises(EventValidationError): guard(event, context)
         del after["read_end_event_id"]
-        with self.assertRaises(ValueError): namespace["_copy_guard"](event, context)
+        with self.assertRaises(EventValidationError): guard(event, context)
 
 
 class InternalColdResumeTests(unittest.IsolatedAsyncioTestCase):
@@ -464,18 +424,11 @@ class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
 
 class MissingConfigGuardTests(unittest.TestCase):
     def test_binding_result_guard_requires_saved_mismatch_and_end(self):
-        tree = ast.parse(OPERATIONS_SOURCE.read_text())
-        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
-                        and node.name == "_operation_finish_guard")
-        class Reads:
-            def __init__(self):
-                self.connection = object()
-                self.events = (SimpleNamespace(event_type=12, occurred_at=5, rows=(SimpleNamespace(
-                    row_id=12, after=SimpleNamespace(values={"status": 2})),)),)
-        preparation = ModuleType("camctl.persistence.repositories.preparation")
-        preparation.PreparationReads = Reads
-        end = ModuleType("camctl.persistence.repositories.read_end")
-        end.load_read_end = lambda *args: object()
+        guard = build_business_rules()["operation_finish"]
+        from camctl.persistence.repositories.preparation import PreparationReads
+        reads = PreparationReads(object())
+        reads.events = (SimpleNamespace(event_type=12, occurred_at=5, rows=(SimpleNamespace(
+            row_id=12, after=SimpleNamespace(values={"status": 2})),)),)
         error = {"code": "device_binding_unavailable", "details": {"reason": "missing"}}
         copy = {"id": 9, "source_sha256": "source", "target_sha256": "target", "verification_state": 4}
         action = {"cancel_requested": 0}
@@ -485,30 +438,17 @@ class MissingConfigGuardTests(unittest.TestCase):
                               after=SimpleNamespace(values={"status": 4}))
         event = SimpleNamespace(rows=(row,), event_type=10, reason=3, occurred_at=5,
             evidence={"binding_read_finish": {"error": error, "cancel_event": None, "current_identity": None}})
-        context = SimpleNamespace(preparation_reads=Reads(), state_rows={"operation_attempts": {12: {"run_id": 7}}})
+        context = SimpleNamespace(preparation_reads=reads, state_rows={"operation_attempts": {12: {"run_id": 7}},
+            "operation_runs": {7: run}})
         def facts(connection, table, identity): return action if table == "actions" else copy
-        def fail(message): raise ValueError(message)
-        namespace = {"__name__": "camctl.persistence.repositories._isolated_guard",
-            "__package__": "camctl.persistence.repositories", "_row_after_facts": lambda *args: run,
-            "binding_read_finish_matches": binding_read_finish_matches,
-            "ResultErrorIssue": ResultErrorIssue, "run_finish_error_issue": run_finish_error_issue,
-            "_fail": fail, "row_facts": facts, "SimpleNamespace": SimpleNamespace,
-            "Mapping": dict, "json_equal": lambda a, b: a == b,
-            "enum_for": lambda name: SimpleNamespace(MISMATCHED=4),
-            "_ATTEMPT_RESULT_EVENT": 12, "_OPERATION_CONFIGURED_EVENT": 10,
-            "_ATTEMPT_STATUS": SimpleNamespace(SUCCEEDED=2),
-            "_RUN_KIND": SimpleNamespace(READ_FILE=3, CHECK_DEVICE_AVAILABILITY=12, PREPARE_CAPTURE=10),
-            "_RUN_STATUS": SimpleNamespace(CANCELED=5, FAILED=4, UNCONFIRMED=6, SUCCEEDED=3, PENDING=1)}
-        exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])),
-                     str(OPERATIONS_SOURCE), "exec"), namespace)
-        guard = namespace["_operation_finish_guard"]
-        with patch.dict(sys.modules, {preparation.__name__: preparation, end.__name__: end}):
+        with patch.object(read_end, "load_read_end", return_value=object()) as load_end, \
+                patch("camctl.persistence.repositories.operations_guards.row_facts", side_effect=facts):
             guard(event, context)
             copy["target_sha256"] = "source"
-            with self.assertRaises(ValueError): guard(event, context)
+            with self.assertRaises(EventValidationError): guard(event, context)
             copy["target_sha256"] = "target"
-            end.load_read_end = lambda *args: None
-            with self.assertRaises(ValueError): guard(event, context)
+            load_end.return_value = None
+            with self.assertRaises(EventValidationError): guard(event, context)
 
 
 if __name__ == "__main__":
