@@ -522,12 +522,8 @@ def test_future_action_waits_and_past_window_expires(
             "policy": {"max_delay_ms": 5000},
         }],
     })
-    expired = deployment.camctl(
-        "submit", str(past_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert expired.exit_code == 0, expired.stderr
     settling = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(past_path), "--config", str(deployment.config_path), driver=spec)
     assert settling.exit_code == 0, settling.stderr
 
     assert _query(
