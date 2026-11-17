@@ -22,6 +22,9 @@ def resources(monkeypatch):
         for name in schemas._SCHEMA_RESOURCES
     }
 
+    documents[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"$defs":{"error":{}}}').encode()
+    documents[schemas._WORKFLOW_RESOURCE] = b'{"codes":{"TEST":{"stage":"RUN","details_schema":{}}}}'
+
     def read(name: str) -> bytes:
         if name not in documents:
             raise schemas.ResourceError(name)
@@ -234,7 +237,7 @@ def test_instance_data_does_not_declare_resource_version(resources, entry, keywo
 
 def test_generated_check_is_used_only_for_matching_content(resources, monkeypatch) -> None:
     monkeypatch.setattr(schemas, "_validation_context", lambda: {"test": "context"})
-    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"type":"integer"}').encode()
+    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"type":"integer","$defs":{"error":{}}}').encode()
     resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(resources.copy())
     original_check = schemas._check_schema
     calls = []
@@ -287,7 +290,7 @@ def test_generated_check_rejects_invalid_rule(resources, monkeypatch) -> None:
 
 def test_loaded_schema_is_independent_when_generated_check_matches(resources, monkeypatch) -> None:
     monkeypatch.setattr(schemas, "_validation_context", lambda: {"test": "context"})
-    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"properties":{"a":{"type":"integer"}}}').encode()
+    resources[REPORT_SCHEMA] = ('{' + _SCHEMA_HEADER + '"properties":{"a":{"type":"integer"}},"$defs":{"error":{}}}').encode()
     resources[schemas._VALIDATION_RESOURCE] = schemas.build_validation_resource(resources.copy())
     first = schemas.load_schema(REPORT_SCHEMA)
     first["properties"]["a"]["type"] = "string"

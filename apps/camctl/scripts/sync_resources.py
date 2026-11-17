@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
 from pathlib import Path
@@ -72,8 +71,9 @@ def sync_package_resources(project_dir: Path, *, check: bool = False, root: Path
     sys.path.insert(0, str(project_dir / "src"))
     try:
         from camctl.contracts.schemas import (
-            _SCHEMA_RESOURCES, _VALIDATION_RESOURCE, build_validation_resource,
+            _VALIDATION_INPUTS, _VALIDATION_RESOURCE, _valid_proof, build_validation_resource,
         )
+        from camctl.contracts.json_values import parse_exact_json
     finally:
         sys.path.pop(0)
     expected = set(RESOURCE_SOURCES) | {_VALIDATION_RESOURCE}
@@ -93,20 +93,22 @@ def sync_package_resources(project_dir: Path, *, check: bool = False, root: Path
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
 
-    if all((repo_root / RESOURCE_SOURCES[name]).is_file() for name in _SCHEMA_RESOURCES):
+    if all((repo_root / RESOURCE_SOURCES[name]).is_file() for name in _VALIDATION_INPUTS):
         contents = {name: (repo_root / RESOURCE_SOURCES[name]).read_bytes()
-                    for name in _SCHEMA_RESOURCES}
+                    for name in _VALIDATION_INPUTS}
         generated = build_validation_resource(contents)
         target = target_root / _VALIDATION_RESOURCE
         if check:
             try:
-                current = json.loads(target.read_bytes())
-                expected_validation = json.loads(generated)
+                current = parse_exact_json(target.read_text(encoding="utf-8"))
+                expected_validation = parse_exact_json(generated.decode("utf-8"))
                 context = current["context"]
                 versions = context["dependencies"]
                 python_version = context["python"]
                 matches = (
-                    current["schemas"] == expected_validation["schemas"]
+                    _valid_proof(current)
+                    and current["schemas"] == expected_validation["schemas"]
+                    and current["workflow"] == expected_validation["workflow"]
                     and context["code"] == expected_validation["context"]["code"]
                     and isinstance(versions, dict)
                     and versions.keys() == expected_validation["context"]["dependencies"].keys()

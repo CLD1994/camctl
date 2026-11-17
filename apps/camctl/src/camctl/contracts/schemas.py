@@ -25,6 +25,7 @@ from referencing.exceptions import CannotDetermineSpecification, Unresolvable
 
 from camctl.resources import ResourceError, resource_bytes
 from camctl.contracts.json_values import JsonParseError, is_json_integer, is_multiple, parse_exact_json
+from camctl.contracts.workflow_schema import derive_workflow_report, workflow_detail_rules
 
 __all__ = [
     "SchemaRuleError", "SchemaValidationError", "create_validator", "load_schema",
@@ -41,6 +42,8 @@ _SCHEMA_RESOURCES = (
 
 
 _VALIDATION_RESOURCE = "protocol/schema-validation.json"
+_WORKFLOW_RESOURCE = "protocol/workflow-codes.json"
+_VALIDATION_INPUTS = (*_SCHEMA_RESOURCES, _WORKFLOW_RESOURCE)
 
 
 class SchemaValidationError(ValueError):
@@ -105,28 +108,97 @@ def _validation_context() -> dict[str, Any]:
     """绑定检查所用代码和依赖，变更后不复用旧结果。"""
     package = resources.files("camctl.contracts")
     code = {name: sha256(package.joinpath(name).read_bytes()).hexdigest()
-            for name in ("schemas.py", "json_values.py")}
+            for name in ("schemas.py", "json_values.py", "workflow_schema.py", "workflow_errors.py")}
     dependencies = {name: metadata.version(name) for name in
                     ("jsonschema", "referencing", "jsonschema-specifications")}
     return {"code": code, "dependencies": dependencies, "python": list(sys.version_info[:2])}
 
 
+def _rule_digest(value: Any) -> str:
+    """为精确 JSON 值生成带类型的稳定摘要。"""
+    def tagged(item):
+        if item is None:
+            return ["null"]
+        if type(item) is bool:
+            return ["bool", item]
+        if type(item) is int:
+            return ["int", str(item)]
+        if isinstance(item, Decimal):
+            return ["decimal", str(item)]
+        if type(item) is str:
+            return ["string", item]
+        if type(item) is list:
+            return ["list", [tagged(child) for child in item]]
+        if type(item) is dict and all(type(key) is str for key in item):
+            return ["object", [[key, tagged(item[key])] for key in sorted(item)]]
+        raise TypeError("规则包含非 JSON 值")
+
+    data = json.dumps(tagged(value), ensure_ascii=True, separators=(",", ":"))
+    return sha256(data.encode("utf-8")).hexdigest()
+
+
+def _workflow_digest(report: Any, registry: Any, references: Any) -> str:
+    return _rule_digest([report, registry, workflow_detail_rules(registry), references])
+
+
 def build_validation_resource(contents: dict[str, bytes]) -> bytes:
     """完整检查登记规则，并生成供同一检查环境复用的资源。"""
-    if set(contents) != set(_SCHEMA_RESOURCES):
-        raise SchemaRuleError("生成校验资源时公共 Schema 不完整")
-    for data in contents.values():
-        _check_schema(parse_exact_json(data.decode("utf-8")))
+    if set(contents) != set(_VALIDATION_INPUTS):
+        raise SchemaRuleError("生成校验资源时公共 Schema 或错误登记不完整")
+    documents = {name: parse_exact_json(data.decode("utf-8"))
+                 for name, data in contents.items()}
+    for name in _SCHEMA_RESOURCES:
+        _check_schema(documents[name])
+    registry = documents[_WORKFLOW_RESOURCE]
+    report = derive_workflow_report(documents["protocol/status-report.schema.json"], registry)
+    _check_schema(report)
+    for rule in workflow_detail_rules(registry):
+        _check_schema(rule)
     result = {"context": _validation_context(), "schemas": {
-        name: sha256(contents[name]).hexdigest() for name in _SCHEMA_RESOURCES
-    }}
+        name: sha256(contents[name]).hexdigest() for name in _VALIDATION_INPUTS
+    }, "workflow": _workflow_digest(report, registry,
+                                  {name: documents[name] for name in _SCHEMA_RESOURCES})}
     return (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _valid_proof(proof: Any) -> bool:
+    def digest(value):
+        return (type(value) is str and len(value) == 64
+                and all(char in "0123456789abcdef" for char in value))
+
+    return (type(proof) is dict and set(proof) == {"context", "schemas", "workflow"}
+            and type(proof["schemas"]) is dict
+            and set(proof["schemas"]) == set(_VALIDATION_INPUTS)
+            and all(digest(value) for value in proof["schemas"].values())
+            and digest(proof["workflow"]))
+
+
+def check_workflow_rules(report: Any, registry: Any) -> None:
+    """只对实际派生报告和错误登记复用构建检查，否则完整检查。"""
+    references = {name: schema_registry().contents(name.rsplit("/", 1)[1])
+                  for name in _SCHEMA_RESOURCES}
+    try:
+        proof = parse_exact_json(resource_bytes(_VALIDATION_RESOURCE).decode("utf-8"))
+        matched = (_valid_proof(proof) and proof["context"] == _validation_context()
+                   and proof["schemas"] == {
+                       name: sha256(resource_bytes(name)).hexdigest() for name in _VALIDATION_INPUTS
+                   }
+                   and proof["workflow"] == _workflow_digest(report, registry, references))
+    except (ResourceError, OSError, UnicodeDecodeError, ValueError, KeyError, TypeError,
+            metadata.PackageNotFoundError):
+        matched = False
+    if not matched:
+        _check_schema(report)
+        for rule in workflow_detail_rules(registry):
+            _check_schema(rule)
+        for rule in references.values():
+            _check_schema(rule)
 
 
 def _has_checked_resource(name: str, contents: bytes) -> bool:
     try:
-        proof = json.loads(resource_bytes(_VALIDATION_RESOURCE))
-        return (proof["context"] == _validation_context()
+        proof = parse_exact_json(resource_bytes(_VALIDATION_RESOURCE).decode("utf-8"))
+        return (_valid_proof(proof) and proof["context"] == _validation_context()
                 and proof["schemas"][name] == sha256(contents).hexdigest())
     except (ResourceError, OSError, UnicodeDecodeError, ValueError, KeyError, TypeError,
             metadata.PackageNotFoundError):

@@ -12,8 +12,9 @@ from typing import Any, Mapping
 from camctl.resources import ResourceError, resource_bytes
 from camctl.contracts.json_values import JsonParseError, parse_exact_json
 from camctl.contracts.schemas import (
-    SchemaRuleError, create_validator, load_schema, schema_registry, validation_errors,
+    SchemaRuleError, check_workflow_rules, create_validator, load_schema, schema_registry, validation_errors,
 )
+from camctl.contracts.workflow_schema import derive_workflow_report
 from referencing.jsonschema import DRAFT202012
 
 
@@ -128,28 +129,12 @@ def validate_public_error(value: Mapping[str, Any]) -> None:
 @lru_cache(maxsize=1)
 def _public_json_registry():
     """将登记含义加入本地错误 Schema，沿原引用验证嵌套错误。"""
-    report = load_schema("protocol/status-report.schema.json")
-    rules = report["$defs"]["error"].setdefault("allOf", [])
-    for code, spec in _registry()["codes"].items():
-        pointer = code.replace("~", "~0").replace("/", "~1")
-        rules.append({
-            "if": {"properties": {"code": {"const": code}}, "required": ["code"]},
-            "then": {"properties": {
-                "stage": {"const": spec["stage"]},
-                "details": {"$ref": f"workflow-codes.json#/codes/{pointer}/details_schema"},
-            }},
-        })
+    report = derive_workflow_report(load_schema("protocol/status-report.schema.json"), _registry())
     registry = schema_registry().with_resources([
         ("status-report.schema.json", DRAFT202012.create_resource(report)),
         ("workflow-codes.json", DRAFT202012.create_resource(_registry())),
     ])
-    # 派生规则也遵守公共 Schema 方言；实例错误不参与此检查。
-    create_validator(report, registry=registry)
-    for spec in _registry()["codes"].values():
-        create_validator({
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            **spec["details_schema"],
-        }, registry=registry)
+    check_workflow_rules(report, _registry())
     return registry
 
 
