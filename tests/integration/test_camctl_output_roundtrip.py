@@ -88,7 +88,8 @@ def _ready_report(deployment: Deployment) -> dict:
 
 def _run_capture_at_schedule(
         deployment: Deployment, spec: dict, scheduled_at: str,
-        name: str, *, plan_path: Path | None = None) -> CliResult:
+        name: str, *, plan_path: Path | None = None,
+        advance_after_start_s: int = 0) -> CliResult:
     """冻结软件准备耗时，实际 START 责任收场后再推进业务钟。"""
     deployment.freeze_at(scheduled_at)
     deadline = time.monotonic() + 180
@@ -102,6 +103,8 @@ def _run_capture_at_schedule(
             " JOIN actions a ON a.id = r.action_id"
             " WHERE a.name = ? AND r.responsibility_key = 'start/' || a.id"
             " AND r.status IN (3, 4)", (name,), process=process)
+        if advance_after_start_s:
+            deployment.freeze_at(deployment.schedule(advance_after_start_s))
         deployment.resume_clock()
         stdout, stderr = process.communicate(
             timeout=max(0, deadline - time.monotonic()))
@@ -128,7 +131,7 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -
 
     spec = stub_driver_spec(
         {"1": [video_file("clip-1")]},
-        device_files={"clip-1": _CLIP_CONTENT})
+        device_files={"clip-1": _CLIP_CONTENT}, record_duration_s=1.0)
     reuse_client(deployment)
     deployment.install_client_capabilities(spec)
 
@@ -165,9 +168,11 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -
     assert submitted.exit_code == 0, submitted.stderr
     assert submitted.message() == {"kind": "succeeded", "body": {"needs_run": True}}
 
+    # START 责任收场后推进完整一秒录像目标；取回仍在下一秒排期。
     # 一个 run 会话完成录像、产物核实、取回拷贝与交付发布。
     run = _run_capture_at_schedule(
-        deployment, spec, body["actions"][0]["scheduled_at"], "拍录")
+        deployment, spec, body["actions"][0]["scheduled_at"], "拍录",
+        advance_after_start_s=1)
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db
@@ -231,11 +236,23 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -
     saved = deployment.import_reports_with_client(deployment.ready)
     assert saved["saved_report_ids"] == [report_id]
     assert saved["ack_id"] == report_id
+    client = deployment.run_client_driver(
+        "initialize", str(deployment.root / "client-store"),
+        output=deployment.root / "client-after-import.json")
+    client_state = client["state"]
+    client_cancel = [
+        action
+        for plan in client_state["snapshot"]["plans"]
+        for action in plan["actions"]
+        if action["name"] == "取消"
+    ]
+    assert [action["status"] for action in client_cancel] == ["succeeded"]
+    assert client_state["coverage"] == report["to_wm"]
 
     ack = deployment.write_plan(
         {"request_id": original_request, "last_report_id": report_id})
     absorbed = deployment.camctl(
-        "run", str(ack), "--config", str(deployment.config_path),
+        "submit", str(ack), "--config", str(deployment.config_path),
         driver=spec)
     assert absorbed.exit_code == 0, absorbed.stderr
     assert _query(
