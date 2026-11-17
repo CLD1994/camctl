@@ -1,3 +1,4 @@
+import type { ValidateFunction } from "ajv";
 import registry from "../../../../protocol/errors/workflow-codes.json";
 import { createProtocolValidator } from "./protocol-validation";
 import { isObject } from "./validation";
@@ -14,10 +15,8 @@ const codes = [
   "default_segment_scope_unconfirmed",
 ] as const;
 type SegmentCode = (typeof codes)[number];
-const ajv = createProtocolValidator();
-const checks = new Map(
-  codes.map((code) => [code, ajv.compile(registry.codes[code].details_schema)]),
-);
+let validator: ReturnType<typeof createProtocolValidator> | undefined;
+const checks = new Map<SegmentCode, ValidateFunction>();
 
 export interface SegmentKey {
   directory_number: number;
@@ -170,7 +169,10 @@ function segmentCode(value: unknown): value is SegmentCode {
 export function segmentIssue(error: unknown): SegmentIssue | undefined {
   if (!isObject(error) || !segmentCode(error.code)) return undefined;
   const code = error.code;
-  const check = checks.get(code)!;
+  const ajv = (validator ??= createProtocolValidator());
+  const check =
+    checks.get(code) ?? ajv.compile(registry.codes[code].details_schema);
+  checks.set(code, check);
   requireFact(
     error.stage === registry.codes[code].stage,
     `${code} 阶段与登记不一致`,

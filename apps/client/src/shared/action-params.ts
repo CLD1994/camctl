@@ -2,6 +2,7 @@ import type { CameraActionType } from "./actions";
 import type { ValidateFunction } from "ajv";
 import type { ActionType, Issue } from "./types";
 import planSchema from "../../../../protocol/schemas/plan.schema.json";
+import notificationSchema from "../../../../protocol/schemas/host-notification.schema.json";
 import { createProtocolValidator } from "./protocol-validation";
 import { isCanonicalId, isUint, isObject } from "./validation";
 
@@ -112,39 +113,42 @@ const paramDefs = {
 } as const;
 
 /** 读取参数对象的声明字段并集；组合合法性由完整 Schema 判断。 */
-function declaredFields(schema: unknown, seen = new Set<string>()): string[] {
+function declaredFields(
+  schema: unknown,
+  root: { $defs: object } = planSchema,
+  seen = new Set<string>(),
+): string[] {
   if (!isObject(schema)) return [];
   const keys = isObject(schema.properties)
     ? Object.keys(schema.properties)
     : [];
-  if (
-    typeof schema.$ref === "string" &&
-    schema.$ref.startsWith("#/$defs/") &&
-    !seen.has(schema.$ref)
-  ) {
-    const name = schema.$ref.slice("#/$defs/".length);
-    keys.push(
-      ...declaredFields(
-        (planSchema.$defs as Record<string, unknown>)[name],
-        new Set([...seen, schema.$ref]),
-      ),
-    );
+  if (typeof schema.$ref === "string") {
+    const ref = schema.$ref;
+    const external = "host-notification.schema.json#/$defs/";
+    const local = "#/$defs/";
+    const target = ref.startsWith(external) ? notificationSchema : root;
+    const prefix = ref.startsWith(external) ? external : local;
+    const identity = `${target === planSchema ? "plan" : "host-notification"}:${ref.slice(prefix.length)}`;
+    if (ref.startsWith(prefix) && !seen.has(identity)) {
+      const name = ref.slice(prefix.length);
+      const definition = (target.$defs as Record<string, unknown>)[name];
+      if (!definition) throw new Error(`公共参数定义未登记：${name}`);
+      keys.push(
+        ...declaredFields(definition, target, new Set([...seen, identity])),
+      );
+    }
   }
   for (const keyword of ["oneOf", "anyOf", "allOf"])
     if (Array.isArray(schema[keyword]))
       for (const branch of schema[keyword])
-        keys.push(...declaredFields(branch, seen));
+        keys.push(...declaredFields(branch, root, seen));
   return [...new Set(keys)];
 }
-const parameterSchemas = createProtocolValidator();
 export const builtinFields = Object.fromEntries(
   Object.entries(paramDefs).map(([type, def]) => {
-    // 公共注册器负责跨文档引用；这里只读取解析后的当前参数字段。
-    const parameters = parameterSchemas.getSchema(
-      `plan.schema.json#/$defs/${def}`,
-    );
+    const parameters = (planSchema.$defs as Record<string, unknown>)[def];
     if (!parameters) throw new Error(`公共参数定义未登记：${def}`);
-    return [type, declaredFields(parameters.schema)];
+    return [type, declaredFields(parameters)];
   }),
 ) as unknown as Record<
   Exclude<ActionType, CameraActionType>,

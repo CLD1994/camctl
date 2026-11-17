@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   builtinFields,
   sources,
@@ -89,4 +89,49 @@ it("清理允许来源但拒绝未知字段及精确范围混用", () => {
     expect(
       validateBuiltinParams("delete_action_outputs", params, true),
     ).not.toEqual([]);
+});
+
+it("读取五种内置字段时不准备协议校验器", async () => {
+  vi.resetModules();
+  const protocol = await import("../../src/shared/protocol-validation");
+  const create = vi.spyOn(protocol, "createProtocolValidator");
+  try {
+    const { builtinFields: fields } =
+      await import("../../src/shared/action-params");
+    expect(create).not.toHaveBeenCalled();
+    expect(fields).toEqual({
+      motor_control: ["position"],
+      obtain_action_outputs: [
+        "source",
+        "filter",
+        "purpose",
+        "exclude_output_ids",
+        "output_ids",
+      ],
+      delete_action_outputs: ["output_ids", "source"],
+      cancel_task: ["target"],
+      report_status: ["scope", "after_report_id"],
+    });
+  } finally {
+    create.mockRestore();
+  }
+});
+
+it("取消与报告字段仍按公共组合校验", () => {
+  expect(
+    validateBuiltinParams("cancel_task", { target: { request_id: "1" } }, true),
+  ).toEqual([]);
+  expect(
+    validateBuiltinParams("cancel_task", { target: {} }, true),
+  ).toMatchObject([{ code: "invalid_params" }]);
+  expect(
+    validateBuiltinParams(
+      "report_status",
+      { scope: "since", after_report_id: "1" },
+      true,
+    ),
+  ).toEqual([]);
+  expect(
+    validateBuiltinParams("report_status", { scope: "since" }, true),
+  ).toMatchObject([{ code: "invalid_params" }]);
 });
