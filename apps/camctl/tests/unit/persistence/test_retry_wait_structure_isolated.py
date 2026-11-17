@@ -100,24 +100,17 @@ class RetryStructureTests(unittest.TestCase):
             structure.verify_retry_wait_structure(Connection(INDEXES))
 
     def test_open_structure_translates_index_failure(self):
-        source = ast.parse((SOURCE / "persistence" / "runtime.py").read_text())
-        function = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_verify_structure")
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), function], type_ignores=[])
-        events = ModuleType("camctl.history.events")
-        events.business_tables_for_format = lambda version: ()
-        events.load_event_registry = lambda: {"tables": {}}
-        structure = ModuleType("camctl.persistence.retry_wait_structure")
-        def reject(connection): raise ValueError("missing index")
-        structure.verify_retry_wait_structure = reject
-        class Invalid(Exception): pass
-        namespace = {"sqlite3": sqlite3, "expected_table_names": lambda: set(),
-                     "_verify_format_constraints": lambda connection, version: None,
-                     "_verify_read_end_structure": lambda connection: None, "DatabaseInvalidError": Invalid}
-        exec(compile(ast.fix_missing_locations(isolated), "runtime", "exec"), namespace)
+        from camctl.persistence import runtime, retry_wait_structure
+
         connection = SimpleNamespace(execute=lambda query: iter(()))
-        with patch.dict(sys.modules, {events.__name__: events, structure.__name__: structure}):
-            with self.assertRaisesRegex(Invalid, "missing index"):
-                namespace["_verify_structure"](connection, 6)
+        with patch.object(runtime, "expected_table_names", return_value=set()), \
+             patch.object(runtime, "_verify_format_constraints"), \
+             patch.object(runtime, "_verify_read_end_structure"), \
+             patch.object(retry_wait_structure, "verify_retry_wait_structure",
+                          side_effect=ValueError("missing index")):
+            with self.assertRaisesRegex(runtime.DatabaseInvalidError, "missing index") as raised:
+                runtime._verify_structure(connection, 6)
+        self.assertIsInstance(raised.exception.__cause__, ValueError)
 
     def test_open_existing_closes_connection_when_index_check_fails(self):
         source = ast.parse((SOURCE / "persistence" / "runtime.py").read_text())
