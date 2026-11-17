@@ -17,6 +17,7 @@ from camctl.logging_runtime.diagnostics import (
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord
+from camctl.devices.drivers.hasselblad.driver import CameraReadError
 from camctl.operations.models import AttemptStatus, AttemptTicket, CallOutcome, ErrorValue
 from camctl.operations.tool_diagnostics import ToolCallOutput, ToolDiagnostics, ToolStream, ToolStreamState
 from camctl.session.service import run_session
@@ -25,6 +26,94 @@ from ..session.support import session_context
 from ..support.database import create_test_database
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_camera_read_cleanup_errors_share_references_in_file_log(tmp_path):
+    info = b"serial : other\n"
+    calls = (ToolCallOutput(1, "info", ToolStream(ToolStreamState.COMPLETE, info),
+                            ToolStream(ToolStreamState.COMPLETE, b"detail\xff")),)
+    steps = [{"name": "info", "observed_serial": "other"}]
+    original = CameraReadError("serial_mismatch", steps,
+        expected_identity={"serial": "expected", "product_id": 10}, tool_calls=calls)
+    try:
+        raise original
+    except CameraReadError as original_error:
+        try:
+            raise OSError(str(original_error))
+        except OSError as cleanup_error:
+            failures = ExceptionGroup("读取与清理均失败", [original_error, cleanup_error])
+            try:
+                raise CameraReadError("preparation_and_cleanup_failed", steps,
+                    causes=(original_error, cleanup_error),
+                    expected_identity={"serial": "expected", "product_id": 10}) from failures
+            except CameraReadError as combined:
+                error = combined
+
+    file_channel = FileChannel(tmp_path / "camctl.log", max_bytes=1 << 20, file_count=1)
+    channel = LogChannel(capacity=3, low_watermark=1, high_watermark=2,
+        level=LogLevel.DEBUG, writer=lambda record: file_channel.write_record(record).completion)
+    runtime = LogRuntime(channel=channel, file_closer=file_channel.close)
+    fallback = []
+    channel.start()
+    try:
+        with error_diagnostics_context(channel, fallback.append):
+            async with diagnostic_scope():
+                record_error(error, stage="read")
+            await flush_diagnostics()
+    finally:
+        await close_logging(runtime)
+
+    records = [json.loads(line) for line in (tmp_path / "camctl.log").read_text().splitlines()]
+    assert len(records) == 1 and not fallback
+    document = records[0]
+
+    def resolve(node):
+        visited = set()
+        while isinstance(node, dict) and set(node) == {"$ref"}:
+            reference = node["$ref"]
+            assert reference.startswith("#/")
+            assert reference not in visited
+            visited.add(reference)
+            node = document
+            for part in reference[2:].split("/"):
+                part = part.replace("~1", "/").replace("~0", "~")
+                node = node[int(part)] if isinstance(node, list) else node[part]
+        return node
+
+    expanded_types = []
+
+    def check_references(node):
+        if isinstance(node, dict):
+            if set(node) == {"$ref"}:
+                resolve(node)
+            else:
+                if "traceback" in node and "type" in node:
+                    expanded_types.append(node["type"])
+                for value in node.values():
+                    check_references(value)
+        elif isinstance(node, list):
+            for value in node:
+                check_references(value)
+
+    check_references(document)
+    combined = document["error"]
+    first, cleanup = (resolve(node) for node in combined["diagnostic_facts"]["causes"])
+    group = resolve(combined["cause"])
+    assert [resolve(node) for node in group["exceptions"]] == [first, cleanup]
+    assert resolve(combined["context"]) in (first, cleanup)
+    assert first["type"].endswith(".CameraReadError")
+    assert first["diagnostic_details"]["reason"] == "serial_mismatch"
+    assert first["diagnostic_details"]["steps"] == steps
+    assert first["diagnostic_details"]["expected_identity"] == {"serial": "expected", "product_id": 10}
+    assert first["diagnostic_details"]["tool_diagnostics"]["calls"][0]["stdout"]["hex"] == info.hex()
+    assert bytes.fromhex(first["diagnostic_details"]["tool_diagnostics"]["calls"][0]["stderr"]["hex"]) == b"detail\xff"
+    assert cleanup["type"] == "builtins.OSError"
+    assert cleanup["message"] == first["message"]
+    assert expanded_types.count(first["type"]) == 2
+    assert expanded_types.count("builtins.OSError") == 1
+    assert combined["diagnostic_details"]["reason"] == "preparation_and_cleanup_failed"
+    assert combined["diagnostic_details"]["settlement"] == "settled"
+    assert json.dumps(document).count(info.hex()) == 1
 
 
 class GatedFileWriter:

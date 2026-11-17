@@ -592,6 +592,7 @@ def test_real_hasselblad_and_copy_error_producers_keep_resolvable_graphs():
                 ValueError.__init__(self, message)
         namespace = {'ReadPreparationError': ReadPreparationError, 'DiagnosticError': m.DiagnosticError,
                      'ReadPreparationSettlement': Settlement, 'exception_diagnostic': m.exception_diagnostic,
+                     'attach_diagnostic_facts': m.test_error_diagnostics.attach_diagnostic_facts,
                      'deepcopy': deepcopy}
         for source, class_name in zip(m.test_producer_sources, ('CameraReadError', 'CopySegmentError')):
             tree = ast.parse(source)
@@ -603,10 +604,11 @@ def test_real_hasselblad_and_copy_error_producers_keep_resolvable_graphs():
         result = SimpleNamespace(error=None, processed_end=4, synced=False, write_extent_known=True,
                                  failure=original, source_end=None, source_close_error=original)
         copy = namespace['CopySegmentError']('copy', 'failed', result=result)
-        for error, path in ((hb, ('causes', 0)), (copy, ('segment_result', 'failure')),
-                            (copy, ('segment_result', 'source_close_error'))):
+        for error, field, path in ((hb, 'diagnostic_facts', ('causes', 0)),
+                                   (copy, 'diagnostic_details', ('segment_result', 'failure')),
+                                   (copy, 'diagnostic_details', ('segment_result', 'source_close_error'))):
             _, doc = document(m, lambda: m.record_error(error, stage='test'))
-            details = doc['error']['diagnostic_details']
+            details = doc['error'][field]
             graph = details[path[0]][path[1]]
             assert graph['cause']['message'] == 'specific child'
             assert resolve(doc, graph['context']) == graph['cause']

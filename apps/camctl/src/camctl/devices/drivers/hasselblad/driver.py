@@ -282,9 +282,10 @@ class CameraReadError(ReadPreparationError, DiagnosticError):
         self.diagnostic_details = {
             "reason": reason,
             "steps": [deepcopy(step) for step in self.steps],
-            "causes": [exception_diagnostic(cause) for cause in self.causes],
             "settlement": settlement.value,
         }
+        if self.causes:
+            attach_diagnostic_facts(self, {"causes": self.causes})
         if expected_identity is not None:
             self.diagnostic_details["expected_identity"] = dict(expected_identity)
         if tool_calls is not None:
