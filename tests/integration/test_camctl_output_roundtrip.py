@@ -548,18 +548,23 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path, reuse_client) -> Non
     """三种拍摄与部分取回组合：照片、录像与延时同计划顺序执行，
     照片与延时产物被取回交付，录像产物保持登记不建交付。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 目标是产物与部分取回结果，不检查默认计划轮询间隔。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
     # 动作主键按提交顺序：拍照 1、拍录 2、延时 3；列举按主键回询。
+    timelapse_duration_s = 3
     spec = stub_driver_spec(
         {"1": [photo_file("combo-shot")],
          "2": [video_file("combo-clip")],
          "3": [video_file("combo-seq")]},
         device_files={"combo-shot": _COMBO_PHOTO_CONTENT,
                       "combo-clip": _COMBO_CLIP_CONTENT,
-                      "combo-seq": _COMBO_SEQ_CONTENT})
+                      "combo-seq": _COMBO_SEQ_CONTENT},
+        timelapse_duration_s=timelapse_duration_s)
     reuse_client(deployment)
     deployment.install_client_capabilities(spec)
 
@@ -632,6 +637,8 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path, reuse_client) -> Non
             "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
             " WHERE a.name='延时' AND r.responsibility_key='start/' || a.id"
             " AND r.status IN (3,4)", process=process)
+        # 本例核对三类产物和部分取回；实际START收场后推进完整延时目标。
+        deployment.freeze_at(deployment.schedule(timelapse_duration_s))
         deployment.resume_clock()
         stdout, stderr = process.communicate(timeout=max(0, deadline - time.monotonic()))
         run = CliResult(process.returncode, stdout, stderr)
