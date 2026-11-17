@@ -12,8 +12,10 @@ def build_business_rules(overrides=None):
     """不读取其他装配的登记状态；规则名称以事件登记为准。"""
     from camctl.history import validators
     from camctl.persistence.repositories import (
-        acceptance, cancellation, capture, file_batches, motor, operations,
-        outputs, scheduling, segments, timelapse,
+        acceptance_guards as acceptance, cancellation_guards as cancellation,
+        capture_guards as capture, file_batches_guards as file_batches,
+        motor_guards as motor, operations_guards as operations, outputs_guards as outputs,
+        scheduling_guards as scheduling, segments_guards as segments, timelapse_guards as timelapse,
     )
     from camctl.reporting import policy
     from camctl.session import clock

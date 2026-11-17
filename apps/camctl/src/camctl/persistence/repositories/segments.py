@@ -894,14 +894,10 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
                         raise ConsistencyError('正式默认关联必须与来源终态、实际 original 共同发布')
 
 
-def register_segment_guards(register):
-    def guard(event,context):
-        try:
-            if context.current_reads is None:raise ConsistencyError('分段守卫缺少原事务有限读端口')
-            context.current_reads.verify_segment_event(event,context)
-        except (ValueError,KeyError,TypeError) as error:
-            raise EventValidationError(str(error)) from error
-    register('segments',guard)
+from .segments_guards import (
+    register_segment_guards,
+)
+
 
 
 class _Command:

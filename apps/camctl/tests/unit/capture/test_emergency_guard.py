@@ -18,7 +18,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.schemas import SchemaRuleError
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventContext, EventValidationError
-from camctl.persistence.repositories import capture as capture_repository
+from camctl.persistence.repositories import capture_guards as capture_repository
 from camctl.persistence.repositories.capture import _emergency_guard
 
 _SESSION = "a" * 32
