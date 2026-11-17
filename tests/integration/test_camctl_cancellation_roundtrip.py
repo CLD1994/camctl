@@ -68,11 +68,11 @@ def test_cleanup_unknown_preserves_original_request_result(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
+    reuse_client(deployment)
     deployment.install_client_capabilities(
         stub_driver_spec(
             {"1": [photo_file("shot-1")]},
             device_files={"shot-1": _PHOTO_CONTENT}))
-    reuse_client(deployment)
     # 客户端真实导出：拍摄与范围清理同计划，清理按名称引用来源。
     shoot_at = deployment.schedule(1)
     body = {
@@ -103,14 +103,10 @@ def test_cleanup_unknown_preserves_original_request_result(
         device_files={"shot-1": _PHOTO_CONTENT},
         delete_error={"code": "device_error", "stage": "delete",
                       "details": {"message": "设备删除失败"}})
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=failing)
-    assert submitted.exit_code == 0, submitted.stderr
     deployment.freeze_at(shoot_at)
     deadline = time.monotonic() + 180
     process = deployment.start_camctl(
-        "run", "--config", str(deployment.config_path), driver=failing)
+        "run", str(plan_path), "--config", str(deployment.config_path), driver=failing)
     try:
         def failed_before_start():
             if process.poll() is not None:
