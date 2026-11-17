@@ -1,4 +1,4 @@
-"""隔离数据库和包资源，核对读取意图的动作资格。"""
+"""隔离业务数据库，核对读取意图的动作资格。"""
 
 import ast
 import asyncio
@@ -9,13 +9,13 @@ import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
+from contextlib import ExitStack
+
+from camctl.history.validators import EventValidationError
+from camctl.persistence.repositories.validation import build_business_rules
 
 sys.dont_write_bytecode = True
 SOURCE = Path(__file__).parents[3] / "src" / "camctl" / "persistence" / "repositories" / "operations.py"
-
-
-class GuardError(Exception):
-    pass
 
 
 class EligibleReadReached(Exception):
@@ -50,6 +50,8 @@ def batch_connection(source):
         def execute(self, sql, args=()):
             if "SELECT a.device_id FROM file_copies" in sql:
                 return Cursor([("camera",)] if source == "device" else [])
+            if "SELECT 1 FROM file_copies c JOIN operation_runs" in sql:
+                return Cursor([])
             if "SELECT format_version" in sql:
                 return Cursor([(9,)])
             if "FROM device_file_batches" in sql:
@@ -139,63 +141,43 @@ class ReadPlanTests(unittest.TestCase):
 class ReadGuardTests(unittest.TestCase):
     def check(self, owner_id, run_action_id, status, canceled, source, parent_table,
               *, hasselblad=False, preparation_held=False, capture_held=False):
-        preparation = ModuleType("camctl.persistence.repositories.preparation")
-        class PreparationReads:
-            connection = None
-            def device_start_in_flight(self, slot): return False
-            def availability_in_flight(self, slot, identity): return False
-            def capture_holds_device(self, slot): return capture_held
-        preparation.PreparationReads = PreparationReads
-        definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
-        definitions.DRIVER_ID = "hasselblad"
-        alias = ModuleType("camctl.persistence.repositories.physical_alias")
-        alias.source_physical_alias_conflict = lambda *args: False
-        alias.source_physical_identity = lambda *args: "identity"
-        selection = ModuleType("camctl.persistence.repositories.capture_selection")
-        selection.CaptureSelectionInput = SimpleNamespace(from_document=lambda value: value)
-        selection.read_capture_priority = lambda *args, **kwargs: None
-        scheduling = ModuleType("camctl.scheduling.resources")
-        scheduling.current_preparation_holder = lambda *args: object() if preparation_held else None
-        def fail(message): raise GuardError(message)
+        from camctl.persistence.repositories.preparation import PreparationReads
+        from camctl.persistence.repositories import physical_alias, capture_selection
+        from camctl.scheduling import resources as scheduling
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         copy = {"id": 9, "delivery_id": None, "processing_id": None, "inspection_id": None,
                 "slot_device_id": "camera" if source == "device" else None,
-                "source_device_file_id": 15 if source == "device" else None}
+                "source_device_file_id": 15 if source == "device" else None,
+                "source_intermediate_file_id": 19 if source == "host" else None, "round": 1}
         copy[{"deliveries": "delivery_id", "recording_processing": "processing_id",
               "segment_inspections": "inspection_id"}[parent_table]] = 8
         action = {"id": owner_id, "status": status, "cancel_requested": canceled}
         state = {"file_copies": {9: copy}, parent_table: {8: {"action_id": owner_id}},
-                 "actions": {owner_id: action, 16: {"driver_id": "hasselblad" if hasselblad else "other"}},
-                 "device_files": {15: {"observer_action_id": 16, "source_action_id": 16}}}
+                 "actions": {owner_id: action, 16: {"device_id": "camera", "driver_id": DRIVER_ID if hasselblad else "other"}},
+                 "device_files": {15: {"observer_action_id": 16, "source_action_id": 16}},
+                 "intermediate_files": {19: {}}}
         attempt = SimpleNamespace(table="operation_attempts", before=SimpleNamespace(exists=False),
             after=SimpleNamespace(values={"run_id": 11, "intent_event_id": 20, "result_event_id": None, "result_json": None,
                 "error_json": None, "status": 1, "effect_state": 1, "attempt_no": 1, "copy_round": 1}))
-        run_row = SimpleNamespace(table="operation_runs", row_id=11, before=SimpleNamespace(exists=False))
+        run_row = SimpleNamespace(table="operation_runs", row_id=11, before=SimpleNamespace(exists=False),
+            after=SimpleNamespace(values={"id": 11, "kind": 3, "copy_id": 9,
+                                          "action_id": run_action_id, "attempts_used": 1}))
         event = SimpleNamespace(event_id=20, rows=(attempt, run_row), evidence={}, occurred_at=10)
-        context = SimpleNamespace(state_rows=state, preparation_reads=PreparationReads(), obtain_check_reads=None,
+        context = SimpleNamespace(state_rows=state, preparation_reads=PreparationReads(None), obtain_check_reads=None,
                                   transaction=SimpleNamespace(first_event_id=20))
-        def current_facts(context, table, identity):
-            try:
-                return context.state_rows[table][identity]
-            except KeyError as error:
-                raise GuardError("原事实缺失") from error
-        namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
-            "_ATTEMPT_STATUS": SimpleNamespace(RUNNING=1), "_EFFECT_STATE": SimpleNamespace(UNKNOWN=1),
-            "_RUN_KIND": SimpleNamespace(READ_FILE=3, RESOLVE_OUTPUT_SCOPE=11, CHECK_CAPTURE_RESULTS=7,
-                                         PREPARE_CAPTURE=10, START=1, CHECK_DEVICE_AVAILABILITY=12),
-            "_row_after_facts": lambda context, row: {"id": 11, "kind": 3, "copy_id": 9,
-                                                       "action_id": run_action_id, "attempts_used": 1},
-            "_fixed_reference": lambda state, table, identity: state[table][identity],
-            "_guard_facts": current_facts,
-            "_read_attempt_has_slot": lambda state, copy_id, round: True,
-            "_fail": fail, "ConsistencyError": ValueError, "TransactionError": ValueError,
-            "EventValidationError": GuardError}
-        guard = extract("_attempt_intent_guard", namespace)
+        guard = build_business_rules()["attempt_intent"]
         from camctl.persistence.repositories.file_batch_reads import FileBatchReads
         context.file_batch_reads = FileBatchReads(batch_connection(source))
         action["type"] = 4 if parent_table == "deliveries" else 2
-        with patch.dict(sys.modules, {preparation.__name__: preparation,
-                                      definitions.__name__: definitions, alias.__name__: alias,
-                                      scheduling.__name__: scheduling, selection.__name__: selection}):
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(PreparationReads, "device_start_in_flight", return_value=False))
+            stack.enter_context(patch.object(PreparationReads, "availability_in_flight", return_value=False))
+            stack.enter_context(patch.object(PreparationReads, "capture_holds_device", return_value=capture_held))
+            stack.enter_context(patch.object(physical_alias, "source_physical_alias_conflict", return_value=False))
+            stack.enter_context(patch.object(physical_alias, "source_physical_identity", return_value="identity"))
+            stack.enter_context(patch.object(capture_selection.CaptureSelectionInput, "from_document", return_value=None))
+            stack.enter_context(patch.object(capture_selection, "read_capture_priority", return_value=None))
+            stack.enter_context(patch.object(scheduling, "current_preparation_holder", return_value=object() if preparation_held else None))
             guard(event, context)
 
     def test_device_and_host_eligible_owners_remain_accepted(self):
@@ -206,11 +188,11 @@ class ReadGuardTests(unittest.TestCase):
     def test_cancellation_is_rejected_for_device_and_host(self):
         for source in ("device", "host"):
             with self.subTest(source=source):
-                with self.assertRaises(GuardError):
+                with self.assertRaises(EventValidationError):
                     self.check(7, 7, 2, 1, source, "deliveries")
 
     def test_internal_read_uses_processing_owner(self):
-        with self.assertRaises(GuardError):
+        with self.assertRaises(EventValidationError):
             self.check(7, 7, 3, 0, "device", "recording_processing")
 
     def test_active_internal_processing_and_inspection_are_accepted(self):
@@ -219,12 +201,12 @@ class ReadGuardTests(unittest.TestCase):
                 self.check(7, 7, 2, 0, "device", parent)
 
     def test_trigger_action_cannot_replace_the_copy_owner(self):
-        with self.assertRaises(GuardError):
+        with self.assertRaises(EventValidationError):
             self.check(8, 7, 2, 0, "host", "deliveries")
 
     def test_hasselblad_read_does_not_pass_capture_or_preparation(self):
         for reason in ("preparation_held", "capture_held"):
-            with self.subTest(reason=reason), self.assertRaises(GuardError):
+            with self.subTest(reason=reason), self.assertRaises(EventValidationError):
                 self.check(7, 7, 2, 0, "device", "deliveries", hasselblad=True, **{reason: True})
         self.check(7, 7, 2, 0, "device", "deliveries", hasselblad=True)
 
