@@ -2,7 +2,7 @@
 import asyncio
 import sqlite3
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, create_autospec
 
 import pytest
 
@@ -11,7 +11,7 @@ from camctl.outputs import segment_query
 from camctl.outputs.segment_query import PendingSegmentQuery
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION, DatabaseMetadata, OwnedConnection
 from support.business_database import inline_business_database
 
 pytestmark = pytest.mark.asyncio
@@ -19,10 +19,43 @@ KEY = OperationKey("a" * 32)
 
 
 def runtime_for():
-    owned = OwnedConnection(Mock(spec=sqlite3.Connection),
-        DatabaseMetadata("camctl", "a" * 32, 3, "/staging", "/ready", "/processing"))
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    metadata = DatabaseMetadata("camctl", "a" * 32, CURRENT_FORMAT_VERSION,
+        "/staging", "/ready", "/processing")
+
+    def execute(sql, parameters=()):
+        cursor = create_autospec(sqlite3.Cursor, instance=True)
+        if sql == "SELECT format_version FROM database_metadata WHERE id=1":
+            cursor.fetchone.return_value = (metadata.format_version,)
+        elif sql.startswith("SELECT id,action_id FROM device_file_batches"):
+            assert parameters == ("camera",)
+            cursor.fetchall.return_value = [(1, 7)]
+        else:
+            raise AssertionError(sql)
+        return cursor
+
+    connection.execute.side_effect = execute
+    owned = OwnedConnection(connection, metadata)
     return SimpleNamespace(database=inline_business_database(owned),
         operations=Mock(spec=OperationRepository))
+
+
+async def wait_for_start(task, started, release):
+    waiter = asyncio.create_task(started.wait())
+    try:
+        done, _ = await asyncio.wait((task, waiter), timeout=5,
+                                     return_when=asyncio.FIRST_COMPLETED)
+        if waiter not in done:
+            if task in done:
+                await task
+                raise AssertionError("任务在到达等待点之前已经结束")
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise AssertionError("任务未到达等待点")
+    finally:
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
 
 
 async def test_cancel_during_result_save_applies_actual_receipt_before_raising(monkeypatch):
@@ -34,14 +67,14 @@ async def test_cancel_during_result_save_applies_actual_receipt_before_raising(m
     started, release = asyncio.Event(), asyncio.Event()
     original_write = runtime.database.write
 
-    async def pause(callback, *, key, description):
+    async def pause(callback, *, key, description="业务写入"):
         started.set()
         await release.wait()
         return await original_write(callback, key=key, description=description)
 
     monkeypatch.setattr(runtime.database, "write", pause)
     task = asyncio.create_task(segment_query._save_result(runtime, pending))
-    await started.wait()
+    await wait_for_start(task, started, release)
     task.cancel()
     release.set()
     with pytest.raises(asyncio.CancelledError):
@@ -73,7 +106,7 @@ async def test_target_owner_and_latest_are_read_in_one_callback(monkeypatch):
     reads = 0
     original_read = runtime.database.read
 
-    async def read(callback, *, description):
+    async def read(callback, *, description="业务读取"):
         nonlocal reads
         reads += 1
         def guarded(owned):
@@ -126,7 +159,7 @@ async def test_original_unsent_intent_resumes_without_cold_recovery(monkeypatch,
     started, release = asyncio.Event(), asyncio.Event()
     original_write = runtime.database.write
 
-    async def pause(callback, *, key, description):
+    async def pause(callback, *, key, description="业务写入"):
         started.set()
         await release.wait()
         return await original_write(callback, key=key, description=description)
@@ -134,7 +167,7 @@ async def test_original_unsent_intent_resumes_without_cold_recovery(monkeypatch,
     monkeypatch.setattr(runtime.database, "write", pause)
     if initial_result == "canceled":
         task = asyncio.create_task(segment_query._begin(runtime, pending))
-        await started.wait()
+        await wait_for_start(task, started, release)
         task.cancel()
         release.set()
         with pytest.raises(asyncio.CancelledError):
@@ -190,6 +223,8 @@ def dispatch_runtime(monkeypatch, *, registered=False, ticket_known=False):
         BeginDisposition, OperationKind,
     )
     from camctl.operations.models import AttemptTicket
+    from camctl.outputs.batches import BatchOutcome
+    from camctl.persistence.repositories.file_batches import FileBatchRepository
 
     runtime = runtime_for()
     config = AttemptConfig(2, timeout_s=1, retry_interval_s=1)
@@ -221,7 +256,7 @@ def dispatch_runtime(monkeypatch, *, registered=False, ticket_known=False):
 
     original_read = runtime.database.read
 
-    async def read(callback, *, description):
+    async def read(callback, *, description="业务读取"):
         def guarded(owned):
             state["callback"] = True
             try:
@@ -238,7 +273,10 @@ def dispatch_runtime(monkeypatch, *, registered=False, ticket_known=False):
     runtime.operations.begin_attempt.side_effect = begin
     runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
     runtime.binding_check = None
+    runtime.pending_file_batches = {}
     runtime.occurred_at = lambda: 1200
+    monkeypatch.setattr(FileBatchRepository, "acquire", create_autospec(
+        FileBatchRepository.acquire, return_value=DbOutcome(DbOutcomeKind.COMPLETED, BatchOutcome.HELD)))
     driver = create_autospec(FileQueryDriver, instance=True, spec_set=True)
     driver.query_file.side_effect = AssertionError("已失去资格的 QUERY 不得进入设备")
     runtime.devices = {"camera": SimpleNamespace(query_config=config,
@@ -275,7 +313,7 @@ async def test_begin_wait_rechecks_current_qualification_and_ends_original_unsen
     started, release = asyncio.Event(), asyncio.Event()
     original_write = runtime.database.write
 
-    async def pause(callback, *, key, description):
+    async def pause(callback, *, key, description="业务写入"):
         receipt = await original_write(callback, key=key, description=description)
         if description == "QUERY v2原意图保存":
             started.set()
@@ -284,7 +322,7 @@ async def test_begin_wait_rechecks_current_qualification_and_ends_original_unsen
 
     monkeypatch.setattr(runtime.database, "write", pause)
     task = asyncio.create_task(segment_query._advance_one(runtime, pending))
-    await started.wait()
+    await wait_for_start(task, started, release)
     end_qualification(state, reason)
     release.set()
     assert await task is True
@@ -312,13 +350,22 @@ async def test_known_unsent_ticket_is_settled_when_next_round_already_sees_cance
 
 
 async def test_unknown_prevented_query_result_keeps_original_request_and_key(monkeypatch):
+    from camctl.contracts.enums import enum_for
+
     runtime, pending, state, ticket, driver = dispatch_runtime(
         monkeypatch, registered=True, ticket_known=True)
     state["canceled"] = 1
-    runtime.operations.finish_attempt.side_effect = [
-        DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("lost result receipt")),
-        DbOutcome(DbOutcomeKind.COMPLETED),
-    ]
+    def finish(request, key, owned):
+        if runtime.operations.finish_attempt.call_count == 1:
+            return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("lost result receipt"))
+        last = list(state["last"])
+        last[1] = int(enum_for("operation_runs.status").CANCELED)
+        last[6] = int(enum_for("operation_attempts.status").FAILED)
+        last[7] = 101
+        state["last"] = tuple(last)
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+
+    runtime.operations.finish_attempt.side_effect = finish
     with pytest.raises(ConsistencyError):
         await segment_query._advance_one(runtime, pending)
     original, result_key = pending.finish, pending.finish_key
@@ -355,11 +402,12 @@ async def test_different_latest_ticket_after_begin_keeps_original_pending_and_re
     runtime, pending, state, ticket, driver = dispatch_runtime(monkeypatch)
     original_write = runtime.database.write
 
-    async def changed(callback, *, key, description):
+    async def changed(callback, *, key, description="业务写入"):
         receipt = await original_write(callback, key=key, description=description)
-        last = list(state["last"])
-        last[0 if identity == "run" else 5] += 1
-        state["last"] = tuple(last)
+        if description == "QUERY v2原意图保存":
+            last = list(state["last"])
+            last[0 if identity == "run" else 5] += 1
+            state["last"] = tuple(last)
         return receipt
 
     monkeypatch.setattr(runtime.database, "write", changed)
