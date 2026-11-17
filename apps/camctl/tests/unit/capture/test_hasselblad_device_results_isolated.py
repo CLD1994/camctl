@@ -1,24 +1,18 @@
-"""DEVICE 结果编排使用原来源事实与有限尝试，导入时隔离 I/O 协作者。"""
-import importlib.util
-import sys
-from enum import Enum
+"""DEVICE 结果编排保留原来源事实，文件协作者由局部替身隔离。"""
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
+
+from camctl.capture import handlers, host_photo
+from camctl.capture.handlers import ListingPhase
+from camctl.contracts.enums import enum_for
+from camctl.operations.attempts import RunOutcome
 
 
 @pytest.fixture
 def api(monkeypatch):
-    class Status(Enum):
-        IN_FLIGHT = "in_flight"
-        RETRY_WAIT = "retry_wait"
-        LISTED = "listed"
-        EXHAUSTED = "exhausted"
-        CLOSED = "closed"
-    class RunOutcome(Enum):
-        SUCCEEDED = "succeeded"
-        FAILED = "failed"
+    Status = ListingPhase
     calls = []
     async def finish(runtime, listing, **kwargs): calls.append(("finish", kwargs))
     async def conclude(runtime, action_id): calls.append(("conclude", action_id))
@@ -33,51 +27,16 @@ def api(monkeypatch):
     handler = {"ListingPhase": Status, "_close_check_unconfirmed": close, "_conclude_activity": conclude,
         "_finish_listing_result": finish, "_listing_round_input": listing, "_original_ticket": original,
         "_register_listing": register}
-    class Failure:
-        def __init__(self, code, details): self.code, self.details = code, details
-    enum = SimpleNamespace(CAMERA_TAKE_PHOTO=1, RUNNING=2, SUCCEEDED=3, FAILED=4, CANCELED=6, EXPIRED=7,
-        START=1, CONFIRMED=1)
-    modules = {
-        "camctl.capture.handlers": handler,
-        "camctl.capture.media": {"RecordingFailure": Failure},
-        "camctl.operations.attempts": {"RunOutcome": RunOutcome},
-        "camctl.contracts.enums": {"enum_for": lambda name: enum},
-        "camctl.contracts.json_values": {"parse_exact_json": lambda value: value},
-        "camctl.contracts.values": {"ConsistencyError": ValueError, "new_operation_key": lambda: "test-key"},
-        "camctl.host_files.capture_sources": {"CapturedArtifact": object, "archive_capture_file": None},
-        "camctl.host_files.models": {"FileRef": object, "FilePurpose": object},
-        "camctl.host_files.photo_formats": {"CAPTURE_FORMATS": {}},
-        "camctl.capture.photo_format": {"saved_photo_format": lambda action: None},
-        "camctl.operations.models": {"AttemptTicket": object, "EffectState": object},
-        "camctl.operations.owned_calls": {"owned_tool_call": lambda function: function},
-        "camctl.operations.result_format": {"read_result_document": lambda *args: None},
-        "camctl.persistence.business": {"settle_required": None},
-        "camctl.persistence.models": {"db_failure": lambda *args: ValueError(), "DbOutcomeKind": object,
-            "StateDatabaseError": type("StateDatabaseError", (Exception,), {}), "db_outcome_for": lambda error: None},
-        "camctl.persistence.repositories.capture": {"FinishCapture": object},
-        "camctl.persistence.repositories.host_capture": {"HostPhotoComplete": object, "PrepareHostPhoto": object},
-        "camctl.persistence.repositories.scheduling": {"ExpireActionRequest": object},
-        "camctl.persistence.repositories.transactions": {"row_facts": lambda *args: None},
-        "camctl.outputs.catalog": {"FileReference": object, "OutputCatalogFacts": object,
-            "OutputDraft": object, "OutputKind": object},
-    }
-    for name, attributes in modules.items():
-        stub = ModuleType(name)
-        stub.__dict__.update(attributes)
-        monkeypatch.setitem(sys.modules, name, stub)
-    source = Path(__file__).parents[3] / "src/camctl/capture/host_photo.py"
-    name = "camctl.capture._isolated_host_photo_results"
-    spec = importlib.util.spec_from_file_location(name, source)
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
+    for name, value in handler.items():
+        monkeypatch.setattr(handlers, name, value)
+    module = host_photo
     async def source_drafts(runtime, action_id, ticket):
         if runtime.listing.phase in (Status.LISTED, Status.CLOSED):
             assert runtime.registered, "原可靠照片页必须先登记才能形成产物"
         return runtime.drafts
     async def activity(runtime, action_id): return 7
-    module._device_source_drafts = source_drafts
-    module._activity_id = activity
+    monkeypatch.setattr(module, "_device_source_drafts", source_drafts)
+    monkeypatch.setattr(module, "_activity_id", activity)
     return module, Status, RunOutcome, calls
 
 
@@ -93,7 +52,8 @@ def runtime_for(listing, drafts):
             self.listing, self.drafts, self.resumed = listing, drafts, False
             self.registered = False
         async def resume_capture_completions(self, action_id): self.resumed = True
-        async def action(self, action_id): return {"status": 2}
+        async def action(self, action_id):
+            return {"status": int(enum_for("actions.status").RUNNING)}
     return Runtime()
 
 
@@ -180,38 +140,35 @@ def test_role_cache_archives_selected_source_and_persists_actual_outcome(api, mo
         size_bytes, sha256 = 100, "a" * 64
         @classmethod
         def from_json(cls, raw): return cls()
-    module.CapturedArtifact = Artifact
-    module.new_operation_key = lambda: "test-key"
-    module._file_ref = lambda prepared, root: prepared
+    monkeypatch.setattr(module, "CapturedArtifact", Artifact)
+    monkeypatch.setattr(module, "new_operation_key", lambda: "test-key")
+    monkeypatch.setattr(module, "_file_ref", lambda prepared, root: prepared)
     async def prepare(runtime, action_id):
         return SimpleNamespace(original=SimpleNamespace(file_id=2, purpose="original"), preview=None)
     async def save(runtime, action_id, role, request=None): calls.append(("save", role, request))
-    module._prepare_files, module._save_photo_cache = prepare, save
-    module._owned_repository = lambda runtime, action_id: (object(), SimpleNamespace(staging=Path("/staging")))
-    module.row_facts = lambda *args: {"size_bytes": None, "sha256": None, "last_error_json": None}
-    cache = ModuleType("camctl.history.photo_cache_request")
-    cache.PhotoCacheComplete = lambda *args: args
-    sources = sys.modules["camctl.host_files.capture_sources"]
-    sources.CaptureFileError, sources.archive_photo_cache = ArchiveError, archive
-    downloads = ModuleType("camctl.host_files.downloads")
+    monkeypatch.setattr(module, "_prepare_files", prepare)
+    monkeypatch.setattr(module, "_save_photo_cache", save)
+    monkeypatch.setattr(module, "_owned_repository",
+        lambda runtime, action_id: (object(), SimpleNamespace(staging=Path("/staging"))))
+    monkeypatch.setattr(module, "row_facts",
+        lambda *args: {"size_bytes": None, "sha256": None, "last_error_json": None})
+    monkeypatch.setattr(module, "saved_photo_format", lambda action: None)
+    from camctl.host_files import capture_sources as sources, downloads
+    from camctl.logging_runtime import diagnostics
+    from camctl.operations import error_diagnostics
+    monkeypatch.setattr(sources, "CaptureFileError", ArchiveError)
+    monkeypatch.setattr(sources, "archive_photo_cache", archive)
     class Owner:
         files_closed = True
         close_errors = ()
         def __init__(self, *args): pass
         def claim(self): return True
         def release(self): calls.append(("release",))
-    downloads.ResultDownloadWorkspace = Owner
-    tasks = ModuleType("camctl.host_files.tasks")
-    tasks.AsyncFileTask = lambda *args: SimpleNamespace(body=args[-1])
-    tasks.FileTaskId = lambda value: value
-    tasks.FileTaskError = type("FileTaskError", (ValueError,), {})
-    diagnostics = ModuleType("camctl.logging_runtime.diagnostics")
-    diagnostics.record_error = lambda *args, **kwargs: calls.append(("diagnostic",))
-    errors = ModuleType("camctl.operations.error_diagnostics")
-    errors.exception_diagnostic = lambda error: {"message": str(error)}
-    errors.attach_diagnostic_facts = lambda error, facts: None
-    for stub in (cache, downloads, tasks, diagnostics, errors):
-        monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    monkeypatch.setattr(downloads, "ResultDownloadWorkspace", Owner)
+    monkeypatch.setattr(diagnostics, "record_error",
+        lambda *args, **kwargs: calls.append(("diagnostic",)))
+    monkeypatch.setattr(error_diagnostics, "exception_diagnostic",
+        lambda error: {"message": str(error)})
     class Database:
         async def read(self, function, **kwargs): return function(SimpleNamespace(connection=object()))
     class Executor:
@@ -229,5 +186,5 @@ def test_role_cache_archives_selected_source_and_persists_actual_outcome(api, mo
     immediate(module.archive_device_photo_cache(Runtime(), 1, saved, 3))
     assert calls[0] == ("archive", "camera")
     result = next(item for item in calls if item[0] == "save")
-    assert result[1] == "original" and result[2][-1] == ({"message": "archive failed"} if fails else None)
+    assert result[1] == "original" and result[2].archive_error == ({"message": "archive failed"} if fails else None)
     assert (any(item[0] == "diagnostic" for item in calls)) is fails

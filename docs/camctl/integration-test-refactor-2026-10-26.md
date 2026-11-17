@@ -1250,11 +1250,15 @@ S14—S16的收集、诊断及验证材料均已核对后清理，预算委派�
 
 **S47：单元失败修复（2026-11-17，实施中）。** 以`9db6617f`为起点，修复用户指出的未处理单元失败。S46的13失败与中断范围74失败、2错误只作为定位线索，当前身份和原因以本次复现核对；不依赖缺失的历史堆栈。
 
-- [ ] 操作身份与读取：核对test_attempt_identity、test_attempt_reads的完整准备事实，保留身份、归属、重复与错误传播的有效反例，修正与当前契约失配的输入或替身。
-- [ ] 格式升级与初始化：核对test_capture_preparation_upgrade、test_output_scope_format、test_device_activity_structure_isolated，以及bootstrap的capture_preparation_init、output_scope_init、photo_source_init、preview_selection_init；固定定义从权威来源加载，保留合法与非法版本、升级转发和失败语义。
-- [ ] 会话与清理替身：核对test_idle_completion_notifications及test_outcome_diagnostic_sources_isolated，补足实际协作者契约并保留空闲不忙循环、原错误优先级和资源收场断言。
+- [x] 操作身份与读取：核对test_attempt_identity、test_attempt_reads的完整准备事实，保留身份、归属、重复与错误传播的有效反例，修正与当前契约失配的输入或替身。
+- [x] 格式升级与初始化：核对test_capture_preparation_upgrade、test_output_scope_format、test_device_activity_structure_isolated，以及bootstrap的capture_preparation_init、output_scope_init、photo_source_init、preview_selection_init；固定定义从权威来源加载，保留合法与非法版本、升级转发和失败语义。
+- [x] 会话与清理替身：核对test_idle_completion_notifications及test_outcome_diagnostic_sources_isolated，补足实际协作者契约并保留空闲不忙循环、原错误优先级和资源收场断言。
 - [ ] 按责任组核对并合入，运行各受影响完整单元范围，再执行一次camctl单元全集检查此前中断或未覆盖的遗漏；新增失败先归因。发现生产问题另行说明，不擅自修改生产逻辑。
 - [ ] 记录最终通过、跳过、失败及未执行边界，更新相关经验，完成阶段提交并释放已合入工作区；不重复未受影响的集成回归。
+
+已合入三组修正，11个原目标文件分别复验共447项通过，包含新增的六个合法格式参数实例。首次camctl单元全集在收集阶段因test_unknown_read_exhaustion要求进程未曾加载camctl而中断，17.658秒、退出2，尚未执行测试主体。第二轮保留收集错误继续执行，在内部读取的槽位保存用例长期等待后中断：1755项通过、20项失败、10项错误、21个子测试通过，墙钟253.894秒、退出2；该结果只覆盖已完成部分。新增失败集中在九个capture文件，先按读取结果与取消、分段检查、导入隔离及扫描和照片准备分别修复，再恢复统一验证。
+
+目录扫描准备改为使用实际CaptureRuntime的默认状态集合；照片结果正常导入生产模块，仅在每个用例期间替换所需协作者，不再复制整组模块和固定枚举。两份完整文件43项通过，墙钟5.177秒、退出零，原取消时序、可靠保存后关闭及照片原结果保留断言继续成立。其余三组修正已交付，等待核对和合入。生产代码未改，全集仍未完成。
 
 安装验收选择的验证使用Python3.11.17，命令为 `python -m unittest -v scripts.tests.test_test_kind` 加运行器的类别分片、空范围、Node排除及真实收集错误四项指定测试：共六项通过，退出零，墙钟32.745秒；补充验收空分片准备后，只补两项受影响检查，退出零、14.936秒，重叠不重复累计。八次真实收集分别对组件bootstrap三个文件和根十个文件执行 functional、performance、acceptance、all，确认20项功能、105项验收、0项性能构成全部125项；性能空范围退出五，只表示未选中。
 

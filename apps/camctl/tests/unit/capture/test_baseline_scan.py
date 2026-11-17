@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 
 from camctl.capture.baseline import PendingBaseline, PreparationPhase, prepare_baseline
 from camctl.capture.baseline_models import BaselineChunkResult, BaselineRef, BaselineState
+from camctl.capture.handlers import CaptureRuntime
 from camctl.contracts.pages import Page
 from camctl.contracts.enums import enum_for
 from camctl.devices.bindings import DeviceBinding
@@ -22,6 +23,7 @@ from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.file_identity import FileIdentity
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.operations.attempts import AttemptConfig
 
 
 BINDING = DeviceBinding("cam-1", "dji-action6")
@@ -59,11 +61,18 @@ def _world(mocker, *, scanning=True):
     activity = {"id": 1, "action_id": 2, "ownership_mode": 2, "dispatch_state": 1,
                 "occupancy_state": 1, "output_scope_json": {"directories": list(ROOTS)}}
     mocker.patch("camctl.capture.baseline.row_facts", side_effect=lambda db, table, identity: action if table == "actions" else activity)
-    runtime = SimpleNamespace(owned=object(), capture=repository, pending_baselines={},
-                              baseline_directory=directory, baseline_timeout_s=Decimal("2"), wall_us=lambda: NOW)
-    runtime.owned = OwnedConnection(create_autospec(__import__("sqlite3").Connection, instance=True),
+    owned = OwnedConnection(create_autospec(__import__("sqlite3").Connection, instance=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
-    runtime.database = capture_database(runtime.owned)
+    owned.connection.execute.return_value.fetchall.return_value = []
+    runtime = CaptureRuntime(
+        database=capture_database(owned), scheduling=None, operations=None,
+        capture=repository, timelapse=None, driver=None, results=None, evidence=None,
+        wall_us=lambda: NOW, monotonic_ns=lambda: 0, window_of=lambda _: None,
+        wait_config=lambda _: None, baseline_directory=directory,
+        check_config=AttemptConfig(max_attempts=3, timeout_s=Decimal("2"),
+                                   retry_interval_s=Decimal("3")),
+    )
+    runtime.owned = owned
     return runtime, directory, scan, state
 
 
@@ -153,6 +162,7 @@ def _segmented_world(mocker, *, scanning=True):
     runtime, directory, scan, state = _world(mocker, scanning=scanning)
     db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
     db.execute.return_value.fetchone.return_value = None
+    db.execute.return_value.fetchall.return_value = []
     runtime.owned = OwnedConnection(db, runtime.owned.metadata)
     runtime.database = capture_database(runtime.owned)
     rows = mocker.patch("camctl.persistence.repositories.transactions.row_facts")
