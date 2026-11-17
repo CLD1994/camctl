@@ -64,6 +64,9 @@ def test_cleanup_unknown_preserves_original_request_result(
     """删除效果未知耗尽预算后清理失败；拍摄结果与产物保持，随后
     另一精确清理成功也不改写旧请求的失败事实。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例不验证计划发现的默认轮询间隔。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -215,9 +218,11 @@ def test_cleanup_unknown_preserves_original_request_result(
         {"request_id": str(receipt["request_id"]),
          "last_report_id": second_id})
     absorbed = deployment.camctl(
-        "run", str(ack), "--config", str(deployment.config_path),
+        "submit", str(ack), "--config", str(deployment.config_path),
         driver=succeeding)
     assert absorbed.exit_code == 0, absorbed.stderr
+    assert absorbed.message() == {
+        "kind": "succeeded", "body": {"needs_run": False}}
     assert _query(
         state_db,
         "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
