@@ -13,7 +13,6 @@ from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from camctl.acceptance.input import InputDiagnostic, InputStage, ParsedInput
-from camctl.acceptance.links import PlanIdentities, prepare_plan
 from camctl.acceptance.storage_rules import (
     AcceptanceStorageRuleError, validate_admitted_action, validate_initial_plan_status,
     validate_fixed_source, validate_admitted_source_owners, validate_admitted_source_owner_type,
@@ -418,6 +417,8 @@ class ProcessInputCommand:
         return self._finalize(scope, templates, result)
 
     def _register(self, scope, occurred_at: int, ack: _AckEvaluation, request_id: int, decision) -> CommandPlan:
+        from camctl.acceptance.links import PlanIdentities, prepare_plan
+
         connection = scope.connection
         plan_id = self._next_id(connection, "plans")
         action_id_base = self._next_id(connection, "actions")
