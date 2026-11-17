@@ -62,31 +62,57 @@ def test_path_validation_rejects_processing_overlap_before_effects():
     stat_file.assert_not_called()
 
 
+def file_entry(*, sha256='a' * 64, hardlink='database'):
+    return {'kind': 'file', 'mode': 0o600, 'uid': 10, 'gid': 20, 'mtime_ns': 100,
+            'xattrs': {}, 'size': 7, 'sha256': sha256, 'hardlink': hardlink}
+
+
+def empty_backup(path):
+    assert path == Path('/backup')
+    return iter(())
+
+
 def test_backup_requires_copy_and_source_to_match_before_return():
     paths = {'database': Path('/db'), 'wal': Path('/db-wal')}
-    expected = {'database': {'kind': 'file'}, 'wal': None}
-    with patch.object(snapshot, 'inventory', side_effect=[expected, expected, expected]), \
-            patch.object(Path, 'mkdir'), patch.object(snapshot, '_sync_directory'), \
+    expected = {'database': file_entry(), 'wal': None}
+    with patch.object(snapshot, 'inventory', side_effect=[expected, expected, expected]) as inventory, \
+            patch.object(Path, 'iterdir', empty_backup), patch.object(Path, 'mkdir'), patch.object(snapshot, '_sync_directory'), \
             patch.object(snapshot, '_copy_object') as copy:
         assert snapshot.backup(paths, Path('/backup')) == expected
     copy.assert_called_once()
     assert copy.call_args.args[:2] == (Path('/db'), Path('/backup/database'))
+    assert inventory.call_args_list == [
+        ((paths,), {}),
+        (({'database': Path('/backup/database'), 'wal': Path('/backup/wal')},), {'sync': True}),
+        ((paths,), {}),
+    ]
 
 
 def test_backup_rejects_source_change_after_copy():
     paths = {'database': Path('/db')}
-    original = {'database': {'kind': 'file', 'sha256': 'old'}}
-    changed = {'database': {'kind': 'file', 'sha256': 'new'}}
+    original = {'database': file_entry(sha256='a' * 64)}
+    changed = {'database': file_entry(sha256='b' * 64)}
     with patch.object(snapshot, 'inventory', side_effect=[original, original, changed]), \
-            patch.object(Path, 'mkdir'), patch.object(snapshot, '_sync_directory'), \
+            patch.object(Path, 'iterdir', empty_backup), patch.object(Path, 'mkdir'), patch.object(snapshot, '_sync_directory'), \
             patch.object(snapshot, '_copy_object'):
         with pytest.raises(ValueError):
             snapshot.backup(paths, Path('/backup'))
 
 
+def test_backup_into_rejects_existing_contents_before_copy():
+    paths = {'database': Path('/db')}
+    original = {'database': file_entry()}
+    with patch.object(snapshot, 'inventory', return_value=original), \
+            patch.object(Path, 'iterdir', return_value=iter([Path('/backup/old')])), \
+            patch.object(snapshot, '_copy_object') as copy:
+        with pytest.raises(ValueError, match='快照目标必须为空'):
+            snapshot.backup_into(paths, Path('/backup'))
+    copy.assert_not_called()
+
+
 def test_restore_prepares_copy_before_replacing_original():
     paths = {'database': Path('/db')}
-    expected = {'database': {'kind': 'file', 'sha256': 'old'}}
+    expected = {'database': file_entry()}
     namespaces = {'database': {'path': '/namespace', 'dev': 4, 'ino': 8, 'uid': 10, 'gid': 20,
                                'missing_parents': []}}
     ns_info = info(stat.S_IFDIR | 0o700, 8)
@@ -108,7 +134,7 @@ def test_restore_prepares_copy_before_replacing_original():
 
 
 def test_restore_never_replaces_when_backup_does_not_match():
-    expected = {'database': {'kind': 'file', 'sha256': 'old'}}
+    expected = {'database': file_entry()}
     with patch.object(snapshot, 'inventory', return_value={'database': None}), \
             patch.object(snapshot.os, 'replace') as replace:
         with pytest.raises(ValueError):
