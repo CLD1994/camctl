@@ -178,17 +178,13 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path, start_owned_ca
     shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
         timelapse_plan("0", shoot_at))
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
 
     # 第一个 run 会话推进到启动责任收场（等待阶段）后被进程级终
     # 止（真实重启，不是会话正常退出）；终止不落在启动调用在途的
     # 窗口内，避免把未保存的调用结果留给恢复语义之外的状态。
     deployment.freeze_at(shoot_at)
     first = start_owned_camctl(deployment,
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(plan_path), "--config", str(deployment.config_path), driver=spec)
     state_db = deployment.state_db
     _await_row(
         state_db,
@@ -289,14 +285,10 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned
     shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
         timelapse_plan("0", shoot_at))
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
 
     deployment.freeze_at(shoot_at)
     first = start_owned_camctl(deployment,
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(plan_path), "--config", str(deployment.config_path), driver=spec)
     state_db = deployment.state_db
     start_deadline = time.monotonic() + 30
     _await_row(
@@ -589,15 +581,10 @@ def test_report_failure_preserves_device_work_and_redelivers(
             "policy": {"max_delay_ms": 5000},
         }],
     })
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
-
     deployment.freeze_at(shoot_at)
     deadline = time.monotonic() + 180
     process = start_owned_camctl(deployment,
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(plan_path), "--config", str(deployment.config_path), driver=spec)
     failing = _resume_after_capture_start(
         deployment, process, "shoot", deadline=deadline)
     assert failing.exit_code != 0, failing.stderr
@@ -641,15 +628,11 @@ def test_late_result_preserves_terminal_decision(tmp_path: Path, start_owned_cam
     shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
         timelapse_plan("0", shoot_at))
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=empty_spec)
-    assert submitted.exit_code == 0, submitted.stderr
 
     deployment.freeze_at(shoot_at)
     deadline = time.monotonic() + 180
     process = start_owned_camctl(deployment,
-        "run", "--config", str(deployment.config_path), driver=empty_spec)
+        "run", str(plan_path), "--config", str(deployment.config_path), driver=empty_spec)
     first = _resume_after_capture_start(
         deployment, process, "timelapse", deadline=deadline)
     assert first.exit_code == 0, first.stderr
