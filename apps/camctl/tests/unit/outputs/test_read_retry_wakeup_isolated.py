@@ -1,9 +1,8 @@
-"""只装载被测源码，隔离 camctl 包资源与实际协作者。"""
+"""读取重试等待、预算与设备选择的单元测试。"""
 
 import asyncio
-import ast
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from contextlib import asynccontextmanager, ExitStack
+from dataclasses import replace
 from decimal import Decimal
 import importlib.util
 from pathlib import Path
@@ -11,6 +10,12 @@ import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
+
+from camctl.devices.bindings import BindingResult, BindingStatus
+from camctl.operations.attempts import RetryWaitGate
+from camctl.outputs import obtain_flow, read_discovery
+from camctl.outputs.read_discovery import ReadCandidate, ReadDiscoveryScope
+from camctl.persistence.repositories.file_batch_reads import FileBatchReads
 
 
 sys.dont_write_bytecode = True
@@ -25,25 +30,33 @@ def load_source(name, path):
     return module
 
 
-def load_function(path, name, collaborators):
-    source = ast.parse(path.read_text())
-    function = next(node for node in source.body
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name)
-    isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                function], type_ignores=[])
-    namespace = dict(collaborators)
-    namespace.setdefault("_ATTEMPT_STATUS", SimpleNamespace(RUNNING=1, SUCCEEDED=2, UNKNOWN=4))
-    if name == "_advance_reads":
-        namespace["_complete_read_wait"] = load_function(path, "_complete_read_wait", {})
-    exec(compile(ast.fix_missing_locations(isolated), str(path), "exec"), namespace)
-    function = namespace[name]
-    if name == "_advance_reads":
-        async def advance(runtime, *args):
-            if not hasattr(runtime, "availability"):
-                runtime.availability = None
+def make_candidate(*, copy_id, held, device_id="camera", driver_id="driver", source_file_id=8,
+                   attempts_used=0, retry_wait_required=0):
+    return ReadCandidate(copy_id, 2, 10, 3, 0, device_id, driver_id, source_file_id,
+                         held, attempts_used, retry_wait_required)
+
+
+def load_function(path, name, collaborators, *, batch_granted=True, legacy_held=False):
+    """通过生产模块调用被测函数，替换数据库与调度协作者。"""
+    assert path == SOURCE / "outputs" / "obtain_flow.py"
+    function = getattr(obtain_flow, name)
+
+    async def call(runtime, *args):
+        with ExitStack() as stack:
+            for key, value in collaborators.items():
+                stack.enter_context(patch.object(obtain_flow, key, value))
+            if name == "_advance_reads":
+                if not hasattr(runtime, "availability"):
+                    runtime.availability = None
+                if not hasattr(runtime, "occurred_at"):
+                    runtime.occurred_at = lambda: 20
+                if not hasattr(runtime, "pending_file_batches"):
+                    runtime.pending_file_batches = {}
+                # 替身分别表达旧版持槽续接和本次批次申请的结果。
+                stack.enter_context(patch.object(FileBatchReads, "legacy_read_held", return_value=legacy_held))
+                stack.enter_context(patch("camctl.outputs.batches.acquire_file_batch", return_value=batch_granted))
             return await function(runtime, *args)
-        return advance
-    return function
+    return call
 
 
 class RetryWakeupTests(unittest.TestCase):
@@ -60,33 +73,24 @@ class RetryWakeupTests(unittest.TestCase):
         self.assertIsNone(wakeup.next_at(12, 0))
 
     def test_discovery_returns_attempt_count_in_candidate_page(self):
-        source = SOURCE / "outputs" / "read_discovery.py"
         class Cursor:
             def fetchall(self): return [(7, 2, 10, 3, 0, "camera", "driver", 8, 0, 1, 1, 42)]
             def close(self): pass
         class Connection:
+            in_transaction = True
             query = None
             def execute(self, query, parameters):
                 self.query = query
                 return Cursor()
         connection = Connection()
-        scope = SimpleNamespace(database="db", kind="reads", device_id=None)
-        discover = load_function(source, "read_candidates", {
-            "positive_limit": lambda limit: None, "check_cursor": lambda scope, cursor: None,
-            "database_identity": lambda connection: "db", "validate_read_basis": lambda *args: None,
-            "_READ_COPY_ELIGIBLE": "eligible", "_READ_FROM": " FROM file_copies fc",
-            "closing": __import__("contextlib").closing,
-            "ReadCandidate": lambda *row: SimpleNamespace(attempts_used=row[-3], retry_wait_required=row[-2],
-                read_end_event_id=row[-1], key=(0, 0, 0, 0, 0)),
-            "Page": lambda items, position: SimpleNamespace(items=items),
-        })
-        page = discover(connection, scope, limit=100)
+        scope = ReadDiscoveryScope("db", "reads", 10, 0)
+        with patch.object(read_discovery, "database_identity", return_value="db"), \
+             patch.object(read_discovery, "validate_read_basis"):
+            page = read_discovery.read_candidates(connection, scope, limit=100)
         self.assertIn("r.attempts_used", connection.query)
         self.assertIn("r.retry_wait_required", connection.query)
         self.assertIn("fc.read_end_event_id", connection.query)
-        self.assertEqual(page.items[0].attempts_used, 1)
-        self.assertEqual(page.items[0].retry_wait_required, 1)
-        self.assertEqual(page.items[0].read_end_event_id, 42)
+        self.assertEqual(page.items[0], ReadCandidate(7, 2, 10, 3, 0, "camera", "driver", 8, False, 1, 1, 42))
 
 
 class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
@@ -129,7 +133,7 @@ class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
 class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
     async def test_slotless_recovered_unknown_exhausts_without_device_work(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=0)
+        candidate = make_candidate(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=0)
         assembly = SimpleNamespace(max_read_attempts=1, retry_interval_s=5, capture_read_parallel=False)
         async def discover(*args): return SimpleNamespace(items=(candidate,))
         async def read_one(*args): return (11, 12, 1, 0, 4, "{}", 101)
@@ -165,10 +169,10 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actions, [("exhaust_read", 12), ("clear", "read/7"), ("delivery", 7)])
 
     async def test_exhausted_unknown_does_not_enter_check_or_new_read(self):
-        candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera", attempts_used=2, retry_wait_required=1)
+        candidate = make_candidate(held=True, copy_id=7, device_id="camera", attempts_used=2, retry_wait_required=1)
         assembly = SimpleNamespace(max_read_attempts=2, retry_interval_s=5, capture_read_parallel=False)
-        async def discover(*args): return SimpleNamespace(items=(candidate,))
-        async def read_one(*args): return (11, 12, 2, candidate.retry_wait_required, 4, "{}", 101)
+        async def discover(*args): return SimpleNamespace(items=(current_candidate,))
+        async def read_one(*args): return (11, 12, 2, current_candidate.retry_wait_required, 4, "{}", 101)
         async def save(*args, **kwargs): return SimpleNamespace(value=SimpleNamespace(reason="qualification_changed"))
         async def forbidden(*args): self.fail("未知结果耗尽时不能启动检查、读取或结束交付")
         def plan(connection, now, **kwargs):
@@ -190,15 +194,13 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         })
         with patch.dict(sys.modules, {reads.__name__: reads, availability.__name__: availability}):
             for waiting in (0, 1):
-                candidate.retry_wait_required = waiting
+                current_candidate = replace(candidate, retry_wait_required=waiting)
                 with self.subTest(waiting=waiting):
                     await advance(runtime, 10)
 
     async def test_binding_failure_excludes_candidate_from_wait_and_work_plan(self):
-        candidate = SimpleNamespace(held=True, copy_id=7, source_file_id=15, device_id="camera",
+        candidate = make_candidate(held=True, copy_id=7, source_file_id=15, device_id="camera",
                                     driver_id="driver", attempts_used=1, retry_wait_required=1)
-        statuses = SimpleNamespace(MATCHED="matched", DEVICE_MISSING="missing", DRIVER_MISMATCH="driver",
-            PHYSICAL_IDENTITY_MISMATCH="identity", PHYSICAL_IDENTITY_CONFLICT="conflict")
         async def discover(*args): return SimpleNamespace(items=(candidate,))
         async def held(*args): return None
         async def recover(*args): return False
@@ -211,16 +213,15 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
             async def read(self, operation): return operation(SimpleNamespace(connection=None))
         runtime = SimpleNamespace(discovery=SimpleNamespace(reads=discover), database=Database(),
             devices={"camera": SimpleNamespace(capture_read_parallel=False)},
-            binding_check=lambda binding: SimpleNamespace(status=statuses.DEVICE_MISSING),
+            binding_check=lambda binding: BindingResult(BindingStatus.DEVICE_MISSING, binding, None),
             outputs=SimpleNamespace(fail_read_binding=None), pending_read_ends={})
         read_attempts = ModuleType("camctl.outputs.read_attempts")
-        read_attempts.PendingReadBusiness = lambda *args: object()
+        read_attempts.PendingReadBusiness = lambda *args, **kwargs: object()
         read_attempts.held_binding_read_result = held
         handoff = ModuleType("camctl.outputs.handoff")
         handoff.FailureSaveDisposition = SimpleNamespace(RETIRED="retired")
         advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
-            "BindingStatus": statuses, "DeviceBinding": lambda *args: args,
-            "FailReadBinding": lambda *args: args, "new_operation_key": lambda: "key",
+            "new_operation_key": lambda: "key",
             "recover_unavailable_read": recover, "read_one": unexpected, "plan_device_work": plan,
         })
         with patch.dict(sys.modules, {read_attempts.__name__: read_attempts, handoff.__name__: handoff}):
@@ -228,24 +229,26 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(planned, [])
 
     async def test_completed_wait_candidates_with_budget_do_not_issue_retry_queries(self):
-        candidates = tuple(SimpleNamespace(held=False, copy_id=i, device_id="camera", attempts_used=1,
+        candidates = tuple(make_candidate(held=False, copy_id=i, device_id="camera", attempts_used=1,
                                            retry_wait_required=0) for i in range(1, 101))
         assembly = SimpleNamespace(capture_read_parallel=False, max_read_attempts=3)
         async def reads(database, kind, now): return SimpleNamespace(items=candidates)
         async def read_one(*args): self.fail("间隔已完成且预算有余时不能逐项查询重试")
         class Database:
-            count = 0
             async def read(self, operation):
-                self.count += 1
                 return operation(SimpleNamespace(connection=None))
         database = Database()
         runtime = SimpleNamespace(discovery=SimpleNamespace(reads=reads), database=database,
             pending_read_results={}, devices={"camera": assembly}, binding_check=None)
+        planned = []
+        def plan(*args, **kwargs):
+            planned.extend(kwargs["candidates"])
+            return ()
         advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
-            "read_one": read_one, "plan_device_work": lambda *args, **kwargs: (),
+            "read_one": read_one, "plan_device_work": plan,
         })
         await advance(runtime, 10)
-        self.assertEqual(database.count, 1)
+        self.assertEqual(tuple(planned), candidates)
 
     async def test_advance_read_returns_false_when_delivery_is_terminal(self):
         class Database:
@@ -256,28 +259,30 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(await advance(SimpleNamespace(database=Database()), object(), 7, 10), False)
 
     async def test_first_read_candidates_do_not_issue_individual_retry_queries(self):
-        candidates = tuple(SimpleNamespace(held=False, copy_id=i, device_id="camera", attempts_used=0)
+        candidates = tuple(make_candidate(held=False, copy_id=i, device_id="camera", attempts_used=0)
                            for i in range(1, 101))
         assembly = SimpleNamespace(capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=candidates)
         async def read_one(*args): self.fail("首次读取不能逐项查询重试")
         class Database:
-            count = 0
             async def read(self, operation):
-                self.count += 1
                 return operation(SimpleNamespace(connection=None))
         database = Database()
         runtime = SimpleNamespace(discovery=SimpleNamespace(reads=reads), database=database,
             pending_read_results={}, devices={"camera": assembly}, binding_check=None)
+        planned = []
+        def plan(*args, **kwargs):
+            planned.extend(kwargs["candidates"])
+            return ()
         advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
-            "read_one": read_one, "plan_device_work": lambda *args, **kwargs: (),
+            "read_one": read_one, "plan_device_work": plan,
         })
         await advance(runtime, 10)
-        self.assertEqual(database.count, 1)
+        self.assertEqual(tuple(planned), candidates)
 
     async def test_selected_ready_read_keeps_wait_for_intent_transaction(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
+        candidate = make_candidate(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -309,7 +314,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_selected_read_that_loses_opportunity_completes_wait(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
+        candidate = make_candidate(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -342,7 +347,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_fallback_starts_wait_before_capture_selection(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
+        candidate = make_candidate(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -363,7 +368,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
             return (work,)
         advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
             "read_one": read_one, "_read_wait_remaining": remaining, "plan_device_work": plan,
-        })
+        }, batch_granted=False)
         read_attempts = ModuleType("camctl.outputs.read_attempts")
         read_attempts.save_read_business = None
         retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
@@ -374,7 +379,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_unproven_candidate_does_not_start_wait(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
+        candidate = make_candidate(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -391,7 +396,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
             "read_one": read_one, "_read_wait_remaining": remaining,
             "plan_device_work": lambda *args, **kwargs: (work,),
-        })
+        }, batch_granted=False)
         retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
         retry_reads.RetryWaitReads = Reads
         with patch.dict(sys.modules, {retry_reads.__name__: retry_reads}):
@@ -399,26 +404,17 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actions, [])
 
     async def test_restarted_fallback_wait_starts_a_new_monotonic_interval(self):
-        source_path = SOURCE / "operations" / "attempts.py"
-        tree = ast.parse(source_path.read_text())
-        selected = [node for node in tree.body
-                    if isinstance(node, (ast.FunctionDef, ast.ClassDef))
-                    and node.name in ("retry_wait_remaining_s", "RetryWaitGate")]
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                    *selected], type_ignores=[])
-        namespace = {"dataclass": dataclass, "field": field, "Decimal": Decimal, "__name__": __name__}
-        exec(compile(ast.fix_missing_locations(isolated), str(source_path), "exec"), namespace)
-        gate = namespace["RetryWaitGate"]()
+        gate = RetryWaitGate()
         args = {"attempts_used": 1, "retry_wait_required": True, "max_attempts_used": 3, "interval_s": Decimal("5")}
         self.assertEqual(gate.remaining("read/7", now_ns=100_000_000_000, **args), Decimal("5"))
         self.assertIsNone(gate.remaining("read/7", now_ns=105_000_000_000, **args))
-        restarted = namespace["RetryWaitGate"]()
+        restarted = RetryWaitGate()
         self.assertEqual(restarted.remaining("read/7", now_ns=1_000_000_000, **args), Decimal("5"))
         self.assertIsNone(restarted.remaining("read/7", now_ns=1_000_000_000, **{**args, "retry_wait_required": False}))
 
     async def test_slotless_fallback_completes_wait_while_capture_blocks(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
+        candidate = make_candidate(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -440,7 +436,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
             "read_one": read_one, "_read_wait_remaining": remaining,
             "plan_device_work": lambda *args, **kwargs: (work,),
-        })
+        }, batch_granted=False)
         read_attempts = ModuleType("camctl.outputs.read_attempts")
         read_attempts.save_read_business = save
         retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
@@ -451,7 +447,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_fallback_exhausts_after_wait_was_cleared(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=0)
+        candidate = make_candidate(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=0)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=1, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 0, 3, "{}", 101)
@@ -484,7 +480,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actions, [("exhaust_read", 12), ("clear", "read/7"), ("delivery", 7)])
 
     async def test_running_original_read_is_not_exhausted(self):
-        candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera")
+        candidate = make_candidate(held=True, copy_id=7, device_id="camera", attempts_used=2)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=2, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 2, 0, 1, None, None)
@@ -496,12 +492,12 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
                                capture_read_parallel=False, grant_reads=(), resume_reads=())
         advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
             "read_one": read_one, "plan_device_work": lambda *args, **kwargs: (work,),
-        })
+        }, legacy_held=True)
         await advance(runtime, 10)
 
     async def test_elapsed_blocked_read_saves_wait_completion(self):
         actions = []
-        candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera")
+        candidate = make_candidate(held=True, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -529,7 +525,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_exhausted_blocked_read_finishes_without_new_attempt(self):
         actions = []
-        candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera")
+        candidate = make_candidate(held=True, copy_id=7, device_id="camera", attempts_used=2, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=2, capture_read_parallel=False)
 
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
@@ -563,7 +559,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_qualification_does_not_finish_delivery(self):
         actions = []
-        candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera")
+        candidate = make_candidate(held=True, copy_id=7, device_id="camera", attempts_used=2, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=2, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 2, 1, 3, "{}", 101)
@@ -595,16 +591,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         async def read_one(database, query, parameters):
             return (1, 1, 3)
 
-        source_path = SOURCE / "operations" / "attempts.py"
-        tree = ast.parse(source_path.read_text())
-        selected = [node for node in tree.body
-                    if isinstance(node, (ast.FunctionDef, ast.ClassDef))
-                    and node.name in ("retry_wait_remaining_s", "RetryWaitGate")]
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                    *selected], type_ignores=[])
-        namespace = {"dataclass": dataclass, "field": field, "Decimal": Decimal, "__name__": __name__}
-        exec(compile(ast.fix_missing_locations(isolated), str(source_path), "exec"), namespace)
-        gate = namespace["RetryWaitGate"]()
+        gate = RetryWaitGate()
         gate.established("read/7", 1_000_000_000)
         runtime = SimpleNamespace(database=None, retry_gate=gate, monotonic_ns=lambda: 6_000_000_000,
                                   on_read_retry_deadline=lambda target, now: scheduled.append((target, now)))
@@ -631,7 +618,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_capture_block_observes_retry_without_dispatch(self):
         calls = []
-        candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera")
+        candidate = make_candidate(held=True, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3,
                                    capture_read_parallel=False)
 
@@ -661,7 +648,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
             "_read_wait_remaining": remaining, "_advance_read": dispatch,
             "read_one": read_one,
             "plan_device_work": lambda *args, **kwargs: (work,),
-        })
+        }, batch_granted=False)
         read_attempts = ModuleType("camctl.outputs.read_attempts")
         read_attempts.save_read_business = None
         with patch.dict(sys.modules, {read_attempts.__name__: read_attempts}):
