@@ -787,6 +787,7 @@ async def test_unsettled_baseline_save_precedes_late_window_expiration(mocker, p
 async def test_running_cancellation_preserves_original_baseline_error_until_release(mocker):
     from camctl.capture import baseline, preparation
     from camctl.capture.baseline import PendingBaseline
+    from camctl.capture.recovery import RecoveryBoundary
     from camctl.devices.bindings import DeviceBinding
     from camctl.operations.models import ErrorValue
     from camctl.persistence.repositories.capture import (
@@ -795,6 +796,29 @@ async def test_running_cancellation_preserves_original_baseline_error_until_rele
     from camctl.persistence.repositories.capture_facts import StartFacts
 
     runtime, action, _ = _world(mocker)
+    runtime.pending_start_results = {}
+    runtime.pending_read_results = {}
+    runtime.pending_read_business = {}
+    runtime.pending_read_ends = {}
+    runtime.continuing_read_tickets = {}
+    runtime.pending_segment_inspection_results = {}
+    runtime.file_executor = None
+    runtime.roots = None
+    runtime.recovery_boundary = RecoveryBoundary.UNCONFIRMED
+    runtime.recovery_evidence_for = None
+    runtime.last_recovery_diagnostic = None
+    runtime.on_recovery_diagnostic = None
+    original_execute = runtime.owned.connection.execute.side_effect
+
+    def execute(sql, parameters=()):
+        if sql.startswith(("SELECT c.id,ob.device_id,ob.driver_id",
+                           "SELECT c.id,c.target_file_id,c.slot_device_id,r.id")):
+            cursor = create_autospec(sqlite3.Cursor, instance=True)
+            cursor.fetchall.return_value = []
+            return cursor
+        return original_execute(sql, parameters)
+
+    runtime.owned.connection.execute.side_effect = execute
     action.update(status=2, execution_started=1, cancel_requested=1)
     error = ErrorValue("directory_read_failed", "device")
     pending = PendingBaseline(7, DeviceBinding("cam-1", "driver-1"), ("/DCIM",), error=error)
@@ -812,9 +836,12 @@ async def test_running_cancellation_preserves_original_baseline_error_until_rele
 
     def finish(request):
         assert isinstance(request, FinishCanceledCapture) and not request.preparation_resolved
+        assert runtime.pending_baselines[1] is pending and pending.error is error
+        assert activity["occupancy_state"] == 1
         action["status"] = 6
 
     def release(request, key, owned):
+        assert action["status"] == 6 and runtime.pending_baselines[1] is pending
         assert request.preparation_error is error
         activity["occupancy_state"] = 2
         return DbOutcome(DbOutcomeKind.COMPLETED, ActivityReleaseResult(ReleaseOutcome.RELEASED))
