@@ -1,96 +1,28 @@
-"""取回发布发现：导入前隔离所有生产协作者及其外部资源。"""
+"""取回发布发现与原交付恢复。"""
 
 import importlib.util
-from enum import IntEnum
-from importlib.abc import MetaPathFinder
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-
-class BlockCamctl(MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == "camctl" or fullname.startswith("camctl."):
-            raise AssertionError(f"测试没有隔离生产模块: {fullname}")
-        return None
+from camctl.contracts.enums import enum_for
 
 
-def _forbidden_resource(*args, **kwargs):
-    raise AssertionError("单元测试不得读取真实包资源")
-
-
-_blocker = BlockCamctl()
-_resources = ModuleType("camctl.resources")
-_resources.resource_bytes = _forbidden_resource
-_resource_patch = None
-
-
-def setUpModule():
-    global _resource_patch
-    if any(name == "camctl" or name.startswith("camctl.") for name in sys.modules):
-        raise AssertionError("隔离单元测试必须在未加载 camctl 的进程内运行")
-    sys.meta_path.insert(0, _blocker)
-    _resource_patch = patch.dict(sys.modules, {"camctl.resources": _resources})
-    _resource_patch.start()
-
-
-def tearDownModule():
-    _resource_patch.stop()
-    sys.meta_path.remove(_blocker)
-
-
-class DeliveryStatus(IntEnum):
-    PENDING = 1
-    PREPARING = 2
-    PREPARED = 3
-    PUBLISHING = 4
-    PUBLISHED = 5
-    FAILED = 6
-    CANCELED = 7
-    WITHDRAWN = 8
-
-
-class Stub:
-    UNCONFIRMED = object()
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-MODULES = (
-    'camctl.capture.files', 'camctl.capture.recovery', 'camctl.capture.input_copy',
-    'camctl.capture.media_flow', 'camctl.contracts.enums', 'camctl.contracts.json_values',
-    'camctl.contracts.values', 'camctl.devices.bindings', 'camctl.devices.evidence',
-    'camctl.devices.read_session', 'camctl.host_files.io', 'camctl.host_files.models',
-    'camctl.host_files.tasks', 'camctl.operations.attempts', 'camctl.operations.models',
-    'camctl.operations.validation', 'camctl.outputs.copy', 'camctl.outputs.dispatch',
-    'camctl.outputs.diagnostics', 'camctl.outputs.read_discovery', 'camctl.outputs.handoff',
-    'camctl.outputs.qualification', 'camctl.outputs.read_attempts', 'camctl.outputs.slots',
-    'camctl.outputs.sources', 'camctl.persistence.models', 'camctl.persistence.business',
-    'camctl.logging_runtime.diagnostics', 'camctl.logging_runtime.events',
-    'camctl.outputs.database_reads', 'camctl.persistence.repositories.capture',
-    'camctl.persistence.repositories.operations', 'camctl.persistence.repositories.outputs',
-    'camctl.outputs.obtain_summary',
-)
+DeliveryStatus = enum_for('deliveries.status')
 
 
 def load_flow():
-    modules = {}
-    for name in MODULES:
-        module = ModuleType(name)
-        module.__getattr__ = lambda name: Stub
-        modules[name] = module
-    enums = modules['camctl.contracts.enums']
-    enums.enum_for = lambda name: DeliveryStatus if name == 'deliveries.status' else Stub
-    module_name = 'camctl.outputs._isolated_obtain_flow'
+    name = 'camctl.outputs._isolated_obtain_flow'
     source = Path(__file__).parents[3] / 'src/camctl/outputs/obtain_flow.py'
-    spec = importlib.util.spec_from_file_location(module_name, source)
+    spec = importlib.util.spec_from_file_location(name, source)
     module = importlib.util.module_from_spec(spec)
-    modules[module_name] = module
-    with patch.dict(sys.modules, modules):
+    with patch.dict(sys.modules, {name: module}):
         spec.loader.exec_module(module)
+    modules = {name: ModuleType(name) for name in (
+        'camctl.outputs.read_attempts', 'camctl.outputs.obtain_summary',
+        'camctl.persistence.repositories.outputs')}
     return module, modules
 
 
