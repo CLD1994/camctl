@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from camctl import resources
+from camctl.capture import host_photo
 
 
 def test_abandoned_disposition_belongs_to_target_fixing():
@@ -225,11 +226,6 @@ async def test_cancel_origin_refresh_clears_only_finished_origins(entries):
 async def test_photo_revisits_original_unentered_ticket(entries, monkeypatch, expired):
     module, ticket_type = entries
     monkeypatch.setitem(sys.modules, "camctl.devices.start_entry", module)
-    path = Path(__file__).parents[3] / "src/camctl/capture/host_photo.py"
-    tree = ast.parse(path.read_text())
-    method = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "advance_host_photo")
-    method.decorator_list = []
-    program = ast.Module(body=[method], type_ignores=[])
     ticket = ticket_type()
     ticket.operation, ticket.responsibility_key = "control", "start/1"
     saved = SimpleNamespace(result_json=None, status=1, ticket=ticket)
@@ -247,20 +243,21 @@ async def test_photo_revisits_original_unentered_ticket(entries, monkeypatch, ex
     monkeypatch.setitem(sys.modules, handlers.__name__, handlers)
     monkeypatch.setitem(sys.modules, windows.__name__, windows)
     saved_start = AsyncMock(return_value=saved)
-    namespace = {"_ACTION_STATUS": SimpleNamespace(SUCCEEDED=3, FAILED=4, CANCELED=6, EXPIRED=5),
-        "_ATTEMPT": SimpleNamespace(RUNNING=1), "_owned_repository": lambda *args: (None, None),
-        "_saved_start": saved_start, "_prepare_files": AsyncMock(return_value=object())}
-    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
-    runtime = SimpleNamespace(action=AsyncMock(return_value={"status": 2, "cancel_requested": 0}),
+    monkeypatch.setattr(host_photo, "_owned_repository", lambda *args: (None, None))
+    monkeypatch.setattr(host_photo, "_saved_start", saved_start)
+    monkeypatch.setattr(host_photo, "_prepare_files", AsyncMock(return_value=object()))
+    action = {"status": 2, "cancel_requested": 0, "type": 1,
+              "execution_spec_json": {"output_storage": "host"}}
+    runtime = SimpleNamespace(action=AsyncMock(return_value=action),
         start_entries=SimpleNamespace(get=lambda *args: permit),
         database=SimpleNamespace(metadata=SimpleNamespace(instance_id="db")),
         window_of=lambda action: object(), wall_us=lambda: 100, recover_attempt=AsyncMock())
 
-    await namespace["advance_host_photo"](runtime, 1)
+    await host_photo.advance_host_photo(runtime, 1)
 
     if expired:
         control.assert_not_awaited()
-        handlers._expire_unentered_photo.assert_awaited_once_with(runtime, {"status": 2, "cancel_requested": 0}, ticket, permit)
+        handlers._expire_unentered_photo.assert_awaited_once_with(runtime, action, ticket, permit)
     else:
         control.assert_awaited_once()
     runtime.recover_attempt.assert_not_awaited()

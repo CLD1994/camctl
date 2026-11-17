@@ -107,15 +107,23 @@ class _Cursor:
     def fetchone(self):
         return self.rows[0] if self.rows else None
 
+    def fetchall(self):
+        return self.rows
+
 
 class _PagedConnection:
-    def __init__(self, rows):
+    def __init__(self, rows, batch_holder=None):
         self.rows = rows
+        self.batch_holder = batch_holder
         self.cursors = []
         self.calls = []
 
-    def execute(self, sql, args):
+    def execute(self, sql, args=()):
         self.calls.append((sql, args))
+        if "SELECT format_version FROM database_metadata" in sql:
+            return _Cursor([(9,)])
+        if "FROM device_file_batches" in sql:
+            return _Cursor([] if self.batch_holder is None else [(1, self.batch_holder)])
         if "LEFT JOIN device_activities d ON d.action_id=a.id" in sql:
             cursor = _Cursor([])
             self.cursors.append(cursor)
@@ -451,7 +459,7 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     alias = ModuleType("camctl.persistence.repositories.physical_alias")
     alias.physical_alias_conflict = lambda *args: False
     monkeypatch.setitem(sys.modules, alias.__name__, alias)
-    connection = _PagedConnection([])
+    connection = _PagedConnection([], batch_holder=12)
     _, check, count = creation_module._qualify(connection, request, 99)
     assert (check["action_id"], check["trigger_copy_id"], check["device_id"], count) == (12, 8, "hb0", 1)
     retry_reads.read_attempt_budget_available = lambda *args: None
@@ -492,9 +500,8 @@ def test_capture_check_respects_settled_read_reservation(creation_module, monkey
     request = creation_module.CreateAvailabilityCheck(12, identity, now, Decimal("1"), now)
     action = {"id": 12, "type": 1, "status": 1, "execution_started": 0, "cancel_requested": 0,
               "scheduled_at": 10, "max_delay_ms": 10, "device_id": "hb0", "driver_id": "hasselblad_cfv100c",
-              "plan_id": 1, "input_index": 0}
+              "plan_id": 1, "input_index": 0, "execution_spec_json": {"output_storage": "host"}}
     monkeypatch.setattr(creation_module, "row_facts", lambda connection, table, row_id: action)
-    monkeypatch.setattr(creation_module, "is_hasselblad_photo", lambda action: True)
     monkeypatch.setattr(creation_module, "_one", lambda *args: None)
     monkeypatch.setattr(creation_module, "iter_creation_targets", lambda *args, **kwargs: iter(((25,),)))
     preparation = ModuleType("camctl.devices.capture_preparation")
@@ -526,9 +533,9 @@ def test_selected_photo_uses_original_held_read_qualification(creation_module, m
 
     action = {"id": 12, "type": 1, "status": 1, "execution_started": 0, "cancel_requested": 0,
               "scheduled_at": 10, "max_delay_ms": 10, "device_id": "hb0",
-              "driver_id": "hasselblad_cfv100c", "plan_id": 1, "input_index": 0}
+              "driver_id": "hasselblad_cfv100c", "plan_id": 1, "input_index": 0,
+              "execution_spec_json": {"output_storage": "host"}}
     monkeypatch.setattr(creation_module, "row_facts", lambda connection, table, row_id: action)
-    monkeypatch.setattr(creation_module, "is_hasselblad_photo", lambda action: True)
     monkeypatch.setattr(creation_module, "_one", lambda *args: None)
     monkeypatch.setattr(creation_module, "iter_creation_targets", lambda *args, **kwargs: iter(((25,),)))
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_create", creation_module)
@@ -832,7 +839,7 @@ def isolated_result_guard(target_rules, monkeypatch):
     from camctl.contracts import enums
     enum_values = {
         "operation_runs.kind": SimpleNamespace(START=1, STOP=2, STOP_RESIDUAL=8,
-            CHECK_DEVICE_AVAILABILITY=12, PREPARE_CAPTURE=10, READ_FILE=3),
+            CHECK_DEVICE_AVAILABILITY=12, PREPARE_CAPTURE=10, READ_FILE=3, EMERGENCY_STOP=9),
         "operation_runs.status": SimpleNamespace(SUCCEEDED=3, FAILED=4, UNCONFIRMED=6),
         "operation_runs.query_purpose": SimpleNamespace(),
         "operation_attempts.status": SimpleNamespace(RUNNING=1, SUCCEEDED=2, FAILED=3, UNKNOWN=4),
@@ -903,6 +910,20 @@ def test_generic_finish_guard_accepts_the_validated_prior_result(
     isolated_result_guard._operation_finish_guard(SimpleNamespace(rows=(row,), evidence={}), context)
 
 
+def _batch_reads():
+    from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+    class Connection:
+        def execute(self, sql, args=()):
+            if "SELECT format_version" in sql:
+                return _Cursor([(9,)])
+            if "FROM device_file_batches" in sql:
+                return _Cursor([(1, 10)])
+            if "SELECT a.device_id FROM file_copies" in sql:
+                return _Cursor([("camera",)])
+            raise AssertionError(sql)
+    return FileBatchReads(Connection())
+
+
 @pytest.mark.parametrize("kind", ["START", "READ_FILE"])
 def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_result_guard, monkeypatch, kind):
     module = isolated_result_guard
@@ -927,7 +948,8 @@ def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_r
     outputs._slot_owner_action = lambda context, copy: context.state_rows["actions"][10]
     monkeypatch.setitem(sys.modules, outputs.__name__, outputs)
     run_kind = 1 if kind == "START" else 3
-    run = {"kind": run_kind, "action_id": 10, "activity_id": 20, "copy_id": 30, "attempts_used": 0}
+    run = {"kind": run_kind, "action_id": 10, "activity_id": 20,
+           "copy_id": 30 if kind == "READ_FILE" else None, "attempts_used": 0}
     attempt = {"run_id": 3, "attempt_no": 1, "intent_event_id": 7, "status": 1, "effect_state": 1,
                "result_event_id": None, "result_json": None, "error_json": None,
                "copy_round": None if kind == "START" else 1}
@@ -938,12 +960,12 @@ def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_r
                               after=SimpleNamespace(values={"attempts_used": 1}))
     event = SimpleNamespace(event_id=7, rows=(row_attempt, row_run), evidence={})
     state = {"operation_runs": {3: run}, "device_activities": {20: {"id": 20}},
-             "actions": {10: {"id": 10, "device_id": "camera", "driver_id": "driver-a"},
+             "actions": {10: {"id": 10, "type": 1, "device_id": "camera", "driver_id": "driver-a"},
                          11: {"id": 11, "device_id": "camera", "driver_id": "driver-a"}},
              "file_copies": {30: {"id": 30, "source_device_file_id": 40,
                                    "source_intermediate_file_id": None, "slot_device_id": "camera", "round": 1}},
              "device_files": {40: {"observer_action_id": 11, "source_action_id": 11}}}
-    context = SimpleNamespace(state_rows=state, preparation_reads=Reads())
+    context = SimpleNamespace(state_rows=state, preparation_reads=Reads(), file_batch_reads=_batch_reads())
     with pytest.raises(module.EventValidationError, match="设备检查"):
         module._attempt_intent_guard(event, context)
 
@@ -986,12 +1008,12 @@ def test_read_intent_guard_rejects_selected_capture(isolated_result_guard, monke
     event = SimpleNamespace(event_id=7, occurred_at=10, rows=(attempt_row, run_row),
                             evidence={"capture_selection": {}})
     state = {"operation_runs": {3: run},
-             "actions": {10: {"id": 10},
+             "actions": {10: {"id": 10, "type": 1},
                          11: {"id": 11, "device_id": "camera", "driver_id": definitions.DRIVER_ID}},
              "file_copies": {30: {"id": 30, "source_device_file_id": 40,
                                   "source_intermediate_file_id": None, "slot_device_id": "camera", "round": 1}},
              "device_files": {40: {"observer_action_id": 11, "source_action_id": 11}}}
-    context = SimpleNamespace(state_rows=state, preparation_reads=Reads(),
+    context = SimpleNamespace(state_rows=state, preparation_reads=Reads(), file_batch_reads=_batch_reads(),
                               transaction=SimpleNamespace(first_event_id=7))
     with pytest.raises(module.EventValidationError, match="已选中的拍摄"):
         module._attempt_intent_guard(event, context)

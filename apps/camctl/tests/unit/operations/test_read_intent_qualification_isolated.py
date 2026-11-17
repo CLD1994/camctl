@@ -3,7 +3,6 @@
 import ast
 import asyncio
 from dataclasses import dataclass, replace
-from enum import IntEnum
 from functools import lru_cache
 from pathlib import Path
 import sys
@@ -13,7 +12,6 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 SOURCE = Path(__file__).parents[3] / "src" / "camctl" / "persistence" / "repositories" / "operations.py"
-OUTPUTS = SOURCE.with_name("outputs.py")
 
 
 class GuardError(Exception):
@@ -39,33 +37,25 @@ def extract(name, namespace, source=SOURCE):
     return namespace[name]
 
 
-def output_stubs():
-    outputs = ModuleType("camctl.persistence.repositories.outputs")
-    class ActionStatus(IntEnum):
-        PENDING = 1
-        RUNNING = 2
-        SUCCEEDED = 3
-        FAILED = 4
-        CANCELED = 5
-        EXPIRED = 6
-    namespace = {"ConsistencyError": ValueError, "EventValidationError": ValueError,
-        "is_json_integer": lambda value: type(value) is int, "_ACTION_STATUS": ActionStatus,
-        "_guard_facts": lambda context, table, identity: {"id": identity, **context.state_rows.get(table, {}).get(identity, {})}}
-    outputs._read_owner_eligible = extract("_read_owner_eligible", namespace, OUTPUTS)
-    outputs._slot_owner_action = extract("_slot_owner_action", namespace, OUTPUTS)
-    return outputs
-
-
-def batch_stubs():
-    """本组以已取得合法批次为前提，分别验证原动作和尝试归属。"""
-    module = ModuleType("camctl.persistence.repositories.file_batch_reads")
-    class Reads:
-        def __init__(self, connection=None):
-            self.connection = connection
-        def operation_permitted(self, action, run):
-            return True
-    module.FileBatchReads = Reads
-    return module
+def batch_connection(source):
+    """为设备副本提供由原动作持有的批次；主机副本没有设备。"""
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+        def fetchall(self):
+            return self.rows
+    class Connection:
+        def execute(self, sql, args=()):
+            if "SELECT a.device_id FROM file_copies" in sql:
+                return Cursor([("camera",)] if source == "device" else [])
+            if "SELECT format_version" in sql:
+                return Cursor([(9,)])
+            if "FROM device_file_batches" in sql:
+                return Cursor([(1, 7)])
+            raise AssertionError(sql)
+    return Connection()
 
 
 class ReadPlanTests(unittest.TestCase):
@@ -80,7 +70,6 @@ class ReadPlanTests(unittest.TestCase):
         self.assertEqual(command.plan(SimpleNamespace(connection=None)), ("original", [{"saved": True}]))
 
     def plan(self, action, parent_table, source):
-        outputs = output_stubs()
         class AttemptIntent:
             kind = "READ_FILE"
             action_id = 7
@@ -104,7 +93,7 @@ class ReadPlanTests(unittest.TestCase):
             "_saved_transaction_events": lambda connection, key: None, "responsibility_key": lambda intent: "read/9",
             "_load_row": lambda connection, table, identity: action if table == "actions" else run,
             "_load_flow_context": load_context, "intent_recovery_locked": lambda connection, intent: False,
-            "_verify_obtain_config": lambda *args: None, "_intent_identity": lambda intent: {},
+            "_verify_obtain_config": lambda *args: None, "_intent_identity": lambda intent: {"kind": 3, "copy_id": 9},
             "_find_responsibility": lambda connection, intent: 11, "CommandPlan": Plan,
             "_load_read_attempt_context": lambda *args: (_ for _ in ()).throw(EligibleReadReached()),
             "BeginAttemptResult": lambda disposition, reason: SimpleNamespace(disposition=disposition, reason=reason),
@@ -115,10 +104,9 @@ class ReadPlanTests(unittest.TestCase):
             self.assertEqual(current["action_id"], intent.action_id)
             self.assertEqual(command._state[parent_table][8]["action_id"], intent.action_id)
         command._verify_existing_run = verify_existing
-        scope = SimpleNamespace(connection=None, allocate=lambda count: self.fail("不合格动作不能分配事件"))
-        batches = batch_stubs()
-        with patch.dict(sys.modules, {outputs.__name__: outputs, batches.__name__: batches}):
-            result = command.plan(scope)
+        action["type"] = 4 if parent_table == "deliveries" else 2
+        scope = SimpleNamespace(connection=batch_connection(source), allocate=lambda count: self.fail("不合格动作不能分配事件"))
+        result = command.plan(scope)
         return result, run
 
     def test_cancel_after_device_grant_does_not_consume_attempt(self):
@@ -151,7 +139,6 @@ class ReadPlanTests(unittest.TestCase):
 class ReadGuardTests(unittest.TestCase):
     def check(self, owner_id, run_action_id, status, canceled, source, parent_table,
               *, hasselblad=False, preparation_held=False, capture_held=False):
-        outputs = output_stubs()
         preparation = ModuleType("camctl.persistence.repositories.preparation")
         class PreparationReads:
             connection = None
@@ -203,10 +190,10 @@ class ReadGuardTests(unittest.TestCase):
             "_fail": fail, "ConsistencyError": ValueError, "TransactionError": ValueError,
             "EventValidationError": GuardError}
         guard = extract("_attempt_intent_guard", namespace)
-        batches = batch_stubs()
-        context.file_batch_reads = batches.FileBatchReads()
-        with patch.dict(sys.modules, {outputs.__name__: outputs, preparation.__name__: preparation,
-                                      batches.__name__: batches,
+        from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+        context.file_batch_reads = FileBatchReads(batch_connection(source))
+        action["type"] = 4 if parent_table == "deliveries" else 2
+        with patch.dict(sys.modules, {preparation.__name__: preparation,
                                       definitions.__name__: definitions, alias.__name__: alias,
                                       scheduling.__name__: scheduling, selection.__name__: selection}):
             guard(event, context)

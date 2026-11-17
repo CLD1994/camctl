@@ -2,12 +2,15 @@
 
 from dataclasses import replace
 from decimal import Decimal
+import sqlite3
+from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import TransactionRange
 from camctl.history.validators import EventContext, EventValidationError
+from camctl.persistence.repositories.file_batch_reads import FileBatchReads
 from camctl.persistence.repositories.operations import _attempt_intent_guard, _query_configuration_guard
 from camctl.persistence.repositories.transactions import event_envelope, row_change
 
@@ -21,11 +24,16 @@ def _intent(**activity_changes):
         result_event_id=None, result_json=None, error_json=None, copy_round=None)
     event = event_envelope(21, 8, 11, 1,
         (row_change("operation_attempts", 5, attempt), row_change("operation_runs", 3, run)), 10)
-    state = {"actions": {7: dict(id=7, type=2, status=4)},
+    state = {"actions": {7: dict(id=7, type=2, status=4, device_id="cam")},
         "device_activities": {11: dict(id=11, action_id=7, activity_state=3,
             occupancy_state=1, baseline_state=3, output_set_finalized_event_id=None,
             **activity_changes)}}
-    return event, EventContext(TransactionRange(8, 21, 21), {}, state)
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    cursor.fetchone.return_value = (9,)
+    cursor.fetchall.return_value = []
+    connection.execute.return_value = cursor
+    return event, EventContext(TransactionRange(8, 21, 21), {}, state, file_batch_reads=FileBatchReads(connection))
 
 
 def test_scope_intent_preserves_original_terminal_action():
