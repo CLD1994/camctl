@@ -1341,8 +1341,15 @@ def test_installed_emergency_errors_keep_registered_details(installed: _Installe
 import sys
 from pathlib import Path
 from camctl.contracts import workflow_errors
+from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.schemas import build_validation_resource
+from camctl.resources import resource_bytes
 
 assert Path(workflow_errors.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+proof_bytes = resource_bytes("protocol/schema-validation.json")
+proof = parse_exact_json(proof_bytes.decode("utf-8"))
+inputs = {name: resource_bytes(name) for name in proof["schemas"]}
+assert build_validation_resource(inputs) == proof_bytes, "构建与安装环境的固定规则检查不匹配"
 for code, reason in (
     ("emergency_not_attempted", "会话退出前已无时间发起停止尝试"),
     ("emergency_stop_unconfirmed", "停止请求的响应未知，仍无法确认目标活动已停止"),
@@ -1365,18 +1372,21 @@ for code, reason in (
         },
     }
     workflow_errors.validate_public_error(error)
+    workflow_errors.validate_public_json("#/$defs/error", error)
     for invalid_details in (
         {"activity_id": "9223372036854775807"},
         {"activity_id": "0", "reason": "目标活动编号无效"},
     ):
-        try:
-            workflow_errors.validate_public_error({
-                "code": code, "stage": "emergency", "details": invalid_details,
-            })
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"{code} 接受了无效详情: {invalid_details!r}")
+        for validate in (
+            workflow_errors.validate_public_error,
+            lambda value: workflow_errors.validate_public_json("#/$defs/error", value),
+        ):
+            try:
+                validate({"code": code, "stage": "emergency", "details": invalid_details})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"{code} 接受了无效详情: {invalid_details!r}")
 print("validated")
 """)
     assert result == "validated"
