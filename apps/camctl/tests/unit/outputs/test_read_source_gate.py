@@ -10,11 +10,34 @@ from camctl.capture.media_flow import DriverReadSessions
 from camctl.devices.ports import ReadDriver
 from camctl.devices.read_session import SourceFile
 from camctl.host_files.tasks import FileTaskExecutor
-from camctl.operations.models import AttemptTicket
+from camctl.operations.models import AttemptStatus, AttemptTicket
+from camctl.operations.attempts import FinishAttemptResult, FinishDisposition, RunStatus
 from camctl.outputs.read_attempts import run_owned_read
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from camctl.session.supervision import Supervisor
 from support.business_database import inline_business_database
+
+
+def allow_eligible_source(monkeypatch):
+    """固定设备绑定与可用资格；源打开及停止仍走真实入口。"""
+    from camctl.outputs import read_discovery
+    from camctl.persistence.repositories import transactions
+    from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+    from camctl.persistence.repositories.preparation import PreparationReads
+
+    def facts(connection, table, identity):
+        if table == "device_files":
+            return {"observer_action_id": 7, "source_action_id": 7}
+        if table == "actions":
+            return {"id": 7, "device_id": "camera", "driver_id": "driver"}
+        if table == "operation_runs":
+            return {"action_id": 7}
+        raise AssertionError(table)
+
+    monkeypatch.setattr(transactions, "row_facts", facts)
+    monkeypatch.setattr(FileBatchReads, "operation_permitted", lambda self, action, run: True)
+    monkeypatch.setattr(PreparationReads, "availability_in_flight", lambda self, device, identity: False)
+    monkeypatch.setattr(read_discovery, "read_copy_dispatch_eligible", lambda connection, copy_id: True)
 
 
 @pytest.mark.asyncio
@@ -42,11 +65,19 @@ async def test_owned_read_stop_during_source_facts_keeps_unsent_ticket(monkeypat
     monkeypatch.setattr(database, "read", read)
     monkeypatch.setattr("camctl.capture.media_flow.load_confirmed_source",
         lambda owned, identity: SourceFile("source", {}, 12))
-    # 当前业务事实由真实callback读取；源等待只控制执行时刻。
+    # 当前业务事实由真实 callback 读取；源等待只控制执行时刻。
+    allow_eligible_source(monkeypatch)
     def execute(query, parameters=()):
-        cursor.fetchone.return_value = ((2, 0, 1, 1, 1, None,
-            None if host_source else 9, 9 if host_source else None, None if host_source else "camera")
-            if "SELECT a.status" in query else (("original.bin",) if "SELECT relative_path" in query else (7, None)))
+        if "SELECT a.status" in query:
+            cursor.fetchone.return_value = (2, 0, 2, 1, 1, None,
+                None if host_source else 9, 9 if host_source else None,
+                None if host_source else "camera", 42, 1, 1, 3, 17, None)
+        elif "SELECT relative_path" in query:
+            cursor.fetchone.return_value = ("original.bin", 12)
+        elif query.startswith("SELECT c.id, c.round"):
+            cursor.fetchone.return_value = (2, 1, 1, None, 9, 10, 1, 7, 11, None)
+        else:
+            cursor.fetchone.return_value = (7, None)
         return cursor
     owned.connection.execute.side_effect = execute
     from camctl.host_files.io import LocalSourceReader
@@ -63,7 +94,7 @@ async def test_owned_read_stop_during_source_facts_keeps_unsent_ticket(monkeypat
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.outputs.obtain_flow import _LOCAL_READ_EVIDENCE, _finish_read_attempt
     operations = create_autospec(OperationRepository(), instance=True, spec_set=True)
-    operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED, FinishAttemptResult(FinishDisposition.SAVED, AttemptStatus.FAILED, RunStatus.ACTIVE))
     runtime = SimpleNamespace(database=database, file_executor=FileTaskExecutor(supervisor),
         operations=operations, pending_read_results={}, pending_read_ends={},
         continuing_read_tickets={2: ReadContinuation(ticket, True)}, retry_gate=RetryWaitGate(),
@@ -105,7 +136,7 @@ async def test_owned_read_stop_during_source_facts_keeps_unsent_ticket(monkeypat
     assert runtime.pending_read_results == {}
     assert runtime.continuing_read_tickets == {}
     operations.finish_attempt.assert_called_once()
-    from camctl.operations.models import SettlementBasis, AttemptStatus, EffectState
+    from camctl.operations.models import SettlementBasis, EffectState
     finish = operations.finish_attempt.call_args.args[0]
     assert finish.outcome.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
     assert finish.outcome.outcome.status is AttemptStatus.FAILED
@@ -190,7 +221,7 @@ async def test_source_callback_returns_latest_qualification_and_runs_start_only_
     owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
-    cursor.fetchone.return_value = (2, 0, 2, 1, 1, None, 9, None, "camera")
+    cursor.fetchone.return_value = (2, 0, 2, 1, 1, None, 9, None, "camera", 42, 1, 1, 3, 17, None)
     owned.connection.execute.return_value = cursor
     database = inline_business_database(owned)
     original_read = database.read
@@ -204,6 +235,7 @@ async def test_source_callback_returns_latest_qualification_and_runs_start_only_
     monkeypatch.setattr(database, "read", read)
     monkeypatch.setattr("camctl.capture.media_flow.load_confirmed_source",
         lambda owned, identity: SourceFile("source", {}, 12))
+    allow_eligible_source(monkeypatch)
     driver = create_autospec(ReadDriver, instance=True, spec_set=True)
     source_session = object()
     driver.open_read.return_value = source_session
@@ -213,7 +245,7 @@ async def test_source_callback_returns_latest_qualification_and_runs_start_only_
     task = asyncio.create_task(DriverReadSessions(database, driver, ticket).open_session(9, 0,
         on_start=lambda: calls.append("start")))
     await waiting.wait()
-    cursor.fetchone.return_value = (2, int(canceled), 2, 1, 1, None, 9, None, "camera")
+    cursor.fetchone.return_value = (2, int(canceled), 2, 1, 1, None, 9, None, "camera", 42, 1, 1, 3, 17, None)
     release.set()
     result = await task
     assert reads == ["媒体读取源事实"]
@@ -295,7 +327,9 @@ async def test_prevented_result_save_preserves_original_key_until_reliable_appli
     runtime.database = inline_business_database(owned)
     runtime.operations = create_autospec(OperationRepository(), instance=True, spec_set=True)
     runtime.monotonic_ns = lambda: 10
-    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind(kind))
+    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind(kind),
+        FinishAttemptResult(FinishDisposition.SAVED, AttemptStatus.FAILED, RunStatus.ACTIVE) if kind == "completed" else None,
+        error=None if kind == "completed" else RuntimeError("原保存未可靠完成"))
     pending = prevented_read_result(runtime, ticket, ReadDispatchPrevented("read_stopped_before_dispatch"), _LOCAL_READ_EVIDENCE)
     facts = {"id": 2, "delivery_status": 1, "source_device_file_id": 9}
     if kind != "completed":
@@ -303,7 +337,8 @@ async def test_prevented_result_save_preserves_original_key_until_reliable_appli
             await _save_read_result_and_settle(runtime, pending, facts)
         assert runtime.pending_read_results[(5, 1)] is pending
         assert runtime.continuing_read_tickets[2].never_dispatched
-        runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+        runtime.operations.finish_attempt.return_value = DbOutcome(
+            DbOutcomeKind.COMPLETED, FinishAttemptResult(FinishDisposition.SAVED, AttemptStatus.FAILED, RunStatus.ACTIVE))
     await _save_read_result_and_settle(runtime, pending, facts, retry=True)
     assert runtime.pending_read_results == {} and runtime.continuing_read_tickets == {}
     assert all(call.args[:2] == (pending.finish, pending.key) for call in runtime.operations.finish_attempt.call_args_list)
@@ -319,7 +354,7 @@ async def test_stopped_partial_observation_keeps_original_key_across_continuatio
     owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
-    cursor.fetchone.return_value = (0, 12)
+    cursor.fetchone.return_value = (0, 12, 2)
     owned.connection.execute.return_value = cursor
     runtime = SimpleNamespace(database=inline_business_database(owned), continuing_read_tickets={},
         pending_read_results={}, pending_read_ends={}, occurred_at=lambda: 91)
@@ -336,8 +371,8 @@ async def test_stopped_partial_observation_keeps_original_key_across_continuatio
 @pytest.mark.asyncio
 async def test_old_local_ticket_without_recovery_contract_retains_explicit_responsibility():
     from camctl.capture.recovery import RecoveryBoundary, RecoveryBlockedReason
+    from camctl.devices.evidence import EvidenceRegistry
     from camctl.outputs.read_attempts import ReadDispatchPrevented, prepare_prevented_read_result
-    from camctl.outputs.obtain_flow import _LOCAL_READ_EVIDENCE
     ticket = AttemptTicket(1, "read", "2", "read/2", 5)
     owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
@@ -349,7 +384,7 @@ async def test_old_local_ticket_without_recovery_contract_retains_explicit_respo
         recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, recovery_max_event_id=20,
         last_recovery_diagnostic=None, on_recovery_diagnostic=None)
     assert await prepare_prevented_read_result(runtime, ticket,
-        ReadDispatchPrevented("canceled_before_dispatch", True), _LOCAL_READ_EVIDENCE) is None
+        ReadDispatchPrevented("canceled_before_dispatch", True), EvidenceRegistry(())) is None
     assert runtime.pending_read_results == {} and runtime.continuing_read_tickets == {}
     assert runtime.last_recovery_diagnostic.reason is RecoveryBlockedReason.EVIDENCE_UNAVAILABLE
 
@@ -367,7 +402,9 @@ async def test_terminal_attempt_stops_source_without_writing_new_result(monkeypa
     owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
-    cursor.fetchone.return_value = (2, int(canceled), 3, 1, 2, "saved", 9, None, "camera")
+    saved_result = ('{"format_version":1,"settlement":{"basis":"observed",'
+                    '"evidence":{"type":"read_returned","version":1,"data":{}}},"observations":[]}')
+    cursor.fetchone.return_value = (2, int(canceled), 3, 1, 2, saved_result, 9, None, "camera", 42, 1, 1, 3, 17, 18)
     owned.connection.execute.return_value = cursor
     database = inline_business_database(owned)
     monkeypatch.setattr("camctl.capture.media_flow.load_confirmed_source",
