@@ -100,6 +100,9 @@ def world(monkeypatch):
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.file_batches", api)
     monkeypatch.setattr("camctl.contracts.values.new_operation_key", lambda: _KEY)
     monkeypatch.setattr(api, "FileBatchReads", Facts)
+    from camctl.persistence.repositories import file_batches_guards
+    monkeypatch.setattr(file_batches_guards, "FileBatchReads", Facts)
+    monkeypatch.setattr(file_batches_guards, "row_facts", lambda *_: dict(state.record))
     api.register_file_batch_guards(lambda name, guard: state.guards.update({name: guard}))
     state.repo, state.scope, state.reads = api.FileBatchRepository(), scope, Facts(connection)
     state.request, state.kinds = BatchRequest(1, "camera", 10), Kind

@@ -3,11 +3,14 @@
 import pytest
 
 from camctl.persistence.repositories.validation import build_business_rules, default_business_storage
+from camctl.persistence.repositories.scheduling_guards import register_window_guard
 
 
 def test_formal_rules_are_defined_and_default_storage_is_stable():
     rules = build_business_rules()
-    assert rules["window"].__module__ == "camctl.persistence.repositories.scheduling"
+    registered = {}
+    register_window_guard(registered.__setitem__)
+    assert rules["window"] is registered["window"]
     assert default_business_storage() is default_business_storage()
 
 

@@ -9,6 +9,7 @@ import pytest
 
 from camctl import resources
 from camctl.contracts import enums
+from camctl.persistence.repositories import operations_guards
 
 
 @pytest.fixture
@@ -783,75 +784,15 @@ def test_terminal_check_does_not_accept_unrelated_result_as_settlement(finish_re
 
 
 @pytest.fixture
-def isolated_result_guard(target_rules, monkeypatch):
-    from enum import Enum
-    recovery = ModuleType("camctl.capture.software_recovery")
-    recovery.intent_recovery_locked = lambda *args: False
-    monkeypatch.setitem(sys.modules, recovery.__name__, recovery)
-    validators = ModuleType("camctl.history.validators")
-    validators.EventValidationError = type("EventValidationError", (ValueError,), {})
-    monkeypatch.setitem(sys.modules, validators.__name__, validators)
-    attempts = ModuleType("camctl.operations.attempts")
-    class Kind(Enum):
-        START = "start"
-        STOP = "stop"
-        CHECK_CAPTURE_RESULTS = "results"
-        PREPARE_CAPTURE = "prepare"
-        RESOLVE_OUTPUT_SCOPE = "scope"
-    class Purpose(Enum):
-        START_CONFIRMATION = "start"
-        STOP_CONFIRMATION = "stop"
-        RESIDUAL_STOP_CONFIRMATION = "residual"
-    attempts.OperationKind, attempts.QueryPurpose = Kind, Purpose
-    def unused_rule(*args, **kwargs):
-        raise AssertionError("该结果分支不应调用其他业务规则")
-    attempts.retry_wait_violation = unused_rule
-    attempts.may_resolve_output_scope = unused_rule
-    attempts.may_prepare_capture_attempt = unused_rule
-    for name in ("AttemptFinish", "ReadResumeDecision", "ReadResumeDisposition", "ReadResumeRequest",
-                 "AttemptIntent", "AttemptTarget", "BeginAttemptResult", "BeginDisposition", "FinishAttemptResult",
-                 "FinishDisposition", "RunFinish", "RunOutcome", "RunStatus", "StaleRunFinish", "StaleRunFinishResult", "responsibility_key",
-                 "seconds_from_json", "ticket_target_id", "ticket_target_for_identity", "operation_responsibility_key"):
-        setattr(attempts, name, object())
-    monkeypatch.setitem(sys.modules, attempts.__name__, attempts)
-    results = ModuleType("camctl.operations.result_format")
-    results.result_document = results.read_result_document = results.error_document = object()
-    monkeypatch.setitem(sys.modules, results.__name__, results)
-    persistence = ModuleType("camctl.persistence.models")
-    persistence.DbOutcome = persistence.DbOutcomeKind = object
-    monkeypatch.setitem(sys.modules, persistence.__name__, persistence)
-    runtime = ModuleType("camctl.persistence.runtime")
-    runtime.OwnedConnection = object
-    monkeypatch.setitem(sys.modules, runtime.__name__, runtime)
-    history = ModuleType("camctl.persistence.row_history")
-    history.read_row_values_at_boundary = object()
-    monkeypatch.setitem(sys.modules, history.__name__, history)
-    scheduling = ModuleType("camctl.scheduling.resources")
-    for name in ("baseline_start_reason", "capture_scope_blocked", "device_read_in_flight", "device_start_in_flight"):
-        setattr(scheduling, name, object())
-    monkeypatch.setitem(sys.modules, scheduling.__name__, scheduling)
-    transaction = ModuleType("camctl.persistence.repositories.transactions")
-    for name in ("CommandPlan", "commit_operation", "event_envelope", "next_row_id", "row_change", "row_facts",
-                 "saved_transaction_events", "SavedEvent", "update_change"):
-        setattr(transaction, name, object())
-    transaction.TransactionError = ValueError
-    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
-    from camctl.contracts import enums
-    enum_values = {
-        "operation_runs.kind": SimpleNamespace(START=1, STOP=2, STOP_RESIDUAL=8,
-            CHECK_DEVICE_AVAILABILITY=12, PREPARE_CAPTURE=10, READ_FILE=3, EMERGENCY_STOP=9),
-        "operation_runs.status": SimpleNamespace(SUCCEEDED=3, FAILED=4, UNCONFIRMED=6),
-        "operation_runs.query_purpose": SimpleNamespace(),
-        "operation_attempts.status": SimpleNamespace(RUNNING=1, SUCCEEDED=2, FAILED=3, UNKNOWN=4),
-        "operation_attempts.effect_state": SimpleNamespace(NO_EFFECT=2, CONFIRMED=3),
-    }
-    monkeypatch.setattr(enums, "enum_for", lambda column: enum_values[column])
-    source = find_spec("camctl.persistence.repositories.operations")
-    spec = spec_from_file_location("camctl.persistence.repositories._isolated_operations_result", source.origin)
-    module = module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, module)
-    spec.loader.exec_module(module)
-    return module
+def isolated_result_guard():
+    registered = {}
+    operations_guards.register_operation_guards(registered.__setitem__)
+    return SimpleNamespace(
+        _attempt_intent_guard=registered["attempt_intent"],
+        _attempt_result_guard=registered["attempt_result"],
+        _operation_finish_guard=registered["operation_finish"],
+        EventValidationError=operations_guards.EventValidationError,
+    )
 
 
 @pytest.mark.parametrize("status", [3, 4])
@@ -927,12 +868,7 @@ def _batch_reads():
 @pytest.mark.parametrize("kind", ["START", "READ_FILE"])
 def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_result_guard, monkeypatch, kind):
     module = isolated_result_guard
-    module._RUN_KIND.RESOLVE_OUTPUT_SCOPE = 11
-    module._RUN_KIND.CHECK_CAPTURE_RESULTS = 7
-    module._RUN_KIND.READ_FILE = 3
-    module._ATTEMPT_STATUS.RUNNING = 1
-    module._EFFECT_STATE.UNKNOWN = 1
-    module.baseline_start_reason = lambda *args: None
+    monkeypatch.setattr(operations_guards, "baseline_start_reason", lambda *args: None)
     preparation = ModuleType("camctl.persistence.repositories.preparation")
     class Reads:
         def device_read_in_flight(self, device_id):
@@ -972,11 +908,6 @@ def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_r
 
 def test_read_intent_guard_rejects_selected_capture(isolated_result_guard, monkeypatch):
     module = isolated_result_guard
-    module._RUN_KIND.RESOLVE_OUTPUT_SCOPE = 11
-    module._RUN_KIND.CHECK_CAPTURE_RESULTS = 7
-    module._RUN_KIND.READ_FILE = 3
-    module._ATTEMPT_STATUS.RUNNING = 1
-    module._EFFECT_STATE.UNKNOWN = 1
     preparation = ModuleType("camctl.persistence.repositories.preparation")
     class Reads:
         connection = object()
