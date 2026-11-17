@@ -25,7 +25,8 @@ def _main(argv: list[str]) -> int:
         from _osmo_builtin_clock_entry import _install_clock_ports
 
         _install_clock_ports(ControlledClock(
-            Path(clock_path), Path(os.environ["CAMCTL_TEST_CLOCK_LOG"])))
+            Path(clock_path), Path(os.environ["CAMCTL_TEST_CLOCK_LOG"])),
+            session_assemblies=not argv or argv[0] not in ("init", "describe", "submit"))
     spec_path = os.environ.get("CAMCTL_TEST_DRIVER_SPEC")
     if spec_path:
         spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))

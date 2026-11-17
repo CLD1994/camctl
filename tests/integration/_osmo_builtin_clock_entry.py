@@ -21,10 +21,10 @@ def _append_record(path: Path, record: dict) -> None:
         os.close(descriptor)
 
 
-def _install_clock_ports(controlled_time) -> None:
+def _install_clock_ports(controlled_time, *, session_assemblies: bool = True) -> None:
     """替换安装进程各自捕获的时钟模块引用，不改全局标准库。"""
-    from camctl.bootstrap import clocks, lifecycle
-    from camctl.bootstrap import capture_assembly, cleanup_assembly, obtain_assembly
+    from camctl.bootstrap import clocks
+
     class ControlledSystemClock:
         def utc_micros(self) -> int:
             return controlled_time.time_ns() // 1_000
@@ -34,6 +34,12 @@ def _install_clock_ports(controlled_time) -> None:
 
     clocks.time = controlled_time
     clocks.SystemClock = ControlledSystemClock
+    if not session_assemblies:
+        return
+
+    from camctl.bootstrap import lifecycle
+    from camctl.bootstrap import capture_assembly, cleanup_assembly, obtain_assembly
+
     lifecycle.SystemClock = ControlledSystemClock
     capture_assembly.time = controlled_time
     obtain_assembly.time = controlled_time
