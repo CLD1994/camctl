@@ -17,7 +17,9 @@ from __future__ import annotations
 import json
 import io
 import os
+import re
 import time
+from decimal import Decimal
 from pathlib import Path
 
 from _wsl_host_demo import (
@@ -28,7 +30,6 @@ from _wsl_host_demo import (
 )
 from camctl_fixtures import (
     Deployment,
-    future_schedule,
     photo_file,
     preview_file,
     stub_driver_spec,
@@ -117,10 +118,13 @@ def _init_with_capabilities(deployment: Deployment, spec: dict) -> None:
 
 
 def test_capture_obtain_cleanup_roundtrip_via_c_module(
-        tmp_path: Path, host_demo: str, reuse_client) -> None:
+        tmp_path: Path, host_demo: str, reuse_client, monkeypatch) -> None:
     """三种拍摄、普通取回与清理经 C 模块递交链：客户端导出计划、
     主程序递交并驱动执行、产物与报告领取进 processing、客户端导入
     并在下一份导出的 ACK 经同一递交入口吸收。"""
+    monkeypatch.setenv("CAMCTL_TEST_TRACE_CALLS", "1")
+    monkeypatch.setenv("WSLENV", ":".join(filter(None, (
+        os.environ.get("WSLENV"), "CAMCTL_TEST_TRACE_CALLS"))))
     deployment = Deployment(tmp_path, controlled_clock=True)
     spec = stub_driver_spec(
         {"1": [photo_file("cm-shot")],
@@ -272,31 +276,64 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
             "取照片": "succeeded", "取延时": "succeeded",
             "清理": "succeeded"}
 
-        # 客户端导入 processing 内报告；下一份导出自动携带 ACK，经
-        # 主程序递交后被受理接口吸收。
+        # 客户端导入报告，再下载同一原请求并携带当前 ACK。
         saved = deployment.import_reports_with_client(deployment.processing)
         assert saved["saved_report_ids"] == [report["report_id"]]
-        sync_body = {
-            "name": "c-module-ack",
-            "actions": [
-                {
-                    "name": "sync",
-                    "type": "report_status",
-                    "scheduled_at": deployment.schedule(1),
-                    "params": {"scope": "full"},
-                }
-            ],
-        }
-        sync_path, sync_receipt = deployment.export_plan_with_client(sync_body)
-        assert sync_receipt["has_ack"] is True
-        assert sync_receipt["last_report_id"] == report["report_id"]
-        failure = demo.watch_failures(request_id=sync_receipt["request_id"], expected_statuses={"sync": "SUCCEEDED"})
-        demo.submit(sync_path)
+        ack_path = deployment.root / "capture-with-ack.json"
+        ack_receipt = deployment.run_client_driver(
+            "download-request", str(deployment.root / "client-store"),
+            str(receipt["request_id"]), str(ack_path),
+            output=deployment.root / "client-download.json")
+        assert ack_receipt == {
+            "request_id": receipt["request_id"], "has_ack": True,
+            "last_report_id": report["report_id"]}
+        original = json.loads(plan_path.read_text(encoding="utf-8"),
+                              parse_float=Decimal)
+        redownloaded = json.loads(ack_path.read_text(encoding="utf-8"),
+                                  parse_float=Decimal)
+        assert original["request_id"] == receipt["request_id"]
+        assert redownloaded.pop("last_report_id") == report["report_id"]
+        original.pop("last_report_id", None)
+        assert redownloaded == original
+        wait_for(lambda: any(
+            " command=run " in line and " result=success " in line
+            and " needs_run=0 " in line for line in demo.module_log().splitlines()),
+            timeout_s=180, message="原执行会话未完成回收", failure=failure)
+        counts = query_state(state_db,
+            "SELECT (SELECT count(*) FROM plans),(SELECT count(*) FROM deliveries)")
+        assert counts == [(1, 2)]
+        attempts = query_state(state_db,
+            "SELECT r.id, r.kind, p.id, p.status, p.result_event_id"
+            " FROM operation_runs r JOIN operation_attempts p ON p.run_id=r.id"
+            " ORDER BY r.id, p.id")
+        assert attempts
+        read_calls = (deployment.gates / "stub-calls.log").read_text(encoding="utf-8")
+        assert read_calls
+        log_start = len(demo.module_log())
+        demo.submit(ack_path)
+        submitted = re.search(
+            r"^call=\d+ command=submit pid=\d+ result=success "
+            r"[^\n]* needs_run=([01]) ",
+            demo.module_log()[log_start:], re.MULTILINE)
+        assert submitted, demo.module_log()[log_start:]
+        if submitted.group(1) == "1":
+            wait_for(lambda: any(
+                " command=run " in line and " result=success " in line
+                and " needs_run=0 " in line
+                for line in demo.module_log()[log_start:].splitlines()),
+                timeout_s=180, message="重送后的执行会话未完成回收", failure=failure)
         wait_for(lambda: query_state(
             state_db,
             "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
         ) == [(int(report["report_id"]), report["to_wm"])] or None,
             timeout_s=180, message="ACK 未被吸收", failure=failure)
+        assert query_state(state_db,
+            "SELECT (SELECT count(*) FROM plans),(SELECT count(*) FROM deliveries)") == counts
+        assert query_state(state_db,
+            "SELECT r.id, r.kind, p.id, p.status, p.result_event_id"
+            " FROM operation_runs r JOIN operation_attempts p ON p.run_id=r.id"
+            " ORDER BY r.id, p.id") == attempts
+        assert (deployment.gates / "stub-calls.log").read_text(encoding="utf-8") == read_calls
     finally:
         demo.stop()
 
@@ -500,7 +537,7 @@ def test_late_cancel_roundtrip_via_c_module(
                 {
                     "name": "取消",
                     "type": "cancel_task",
-                    "scheduled_at": future_schedule(1),
+                    "scheduled_at": deployment.schedule(1),
                     "params": {"target": {"request_id": original_request}},
                 },
             ],
