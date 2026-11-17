@@ -187,13 +187,29 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
         assert "/new-2/" in json.loads(outputs[1][1])["path"]
         saved = deployment.import_reports_with_client(deployment.processing)
         assert report["report_id"] in saved["saved_report_ids"]
-        ack, receipt = deployment.export_plan_with_client(_body("camera-demo-ack", [
-            {"name": "ack", "type": "report_status", "scheduled_at": schedule(clock), "params": {"scope": "full"}}]))
-        assert receipt["last_report_id"] == report["report_id"]
-        failure = demo.watch_failures(request_id=receipt["request_id"], expected_statuses={"ack": "SUCCEEDED"})
+        ack = deployment.root / "obtain-with-ack.json"
+        ack_receipt = deployment.run_client_driver(
+            "download-request", str(deployment.root / "client-store"), str(receipt["request_id"]),
+            str(ack), output=deployment.root / "client-download.json")
+        assert ack_receipt == {"request_id": receipt["request_id"], "has_ack": True,
+                               "last_report_id": report["report_id"]}
+        original = parse_exact_json(obtain.read_text(encoding="utf-8"))
+        redownloaded = parse_exact_json(ack.read_text(encoding="utf-8"))
+        assert redownloaded.pop("last_report_id") == report["report_id"]
+        original.pop("last_report_id")
+        assert redownloaded == original
+        counts = query_state(deployment.state_db,
+            "SELECT (SELECT count(*) FROM plans),(SELECT count(*) FROM deliveries)")
+        assert counts == [(2, 1)]
+        camera_calls = (deployment.gates / "camera-calls.jsonl").read_text()
+        failure = demo.watch_failures(request_id=receipt["request_id"],
+                                      expected_statuses={"obtain": "SUCCEEDED", "next-record": "SUCCEEDED"})
         demo.submit(ack)
         wait_for(lambda: query_state(deployment.state_db,
             "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [(int(report["report_id"]), report["to_wm"])], 60, "取回报告 ACK 未吸收", failure=failure)
+        assert query_state(deployment.state_db,
+            "SELECT (SELECT count(*) FROM plans),(SELECT count(*) FROM deliveries)") == counts
+        assert (deployment.gates / "camera-calls.jsonl").read_text() == camera_calls
         calls = [json.loads(line) for line in (deployment.gates / "camera-calls.jsonl").read_text().splitlines()]
         assert sum(call["kind"] == "start" for call in calls) == 2
         assert sum(call["kind"] == "start" and str(call["target"]) == str(action_id)

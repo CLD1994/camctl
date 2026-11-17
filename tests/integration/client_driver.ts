@@ -2,6 +2,7 @@
 //
 //   client_driver.ts initialize <客户端存储目录> <输出凭据路径>
 //   client_driver.ts export <客户端存储目录> <计划正文JSON路径> <输出计划路径> <输出凭据路径>
+//   client_driver.ts download-request <客户端存储目录> <请求身份> <输出计划路径> <输出凭据路径>
 //   client_driver.ts import <报告目录> <客户端存储目录> <输出凭据路径>
 //   client_driver.ts import-media <客户端存储目录> <已领取文件路径> <输出凭据路径>
 //   client_driver.ts estimate <客户端存储目录> <动作JSON路径> <输出凭据路径>
@@ -117,6 +118,31 @@ function exportPlan(
     }),
     "utf-8",
   );
+  if (!existing) app.store.close();
+}
+
+function downloadRequest(
+  storeDir: string, requestId: string, planPath: string, receiptPath: string,
+  existing?: ApplicationStore,
+) {
+  const app = existing?.app ?? openApp(storeDir);
+  try {
+    const body = app.downloadRequest(requestId);
+    if (String(body.request_id) !== requestId) throw new Error("下载请求身份不符");
+    writeFileSync(planPath, stringifyJson(body), "utf-8");
+    writeFileSync(receiptPath, JSON.stringify({
+      request_id: body.request_id,
+      has_ack: Object.hasOwn(body, "last_report_id"),
+      last_report_id: body.last_report_id ?? null,
+    }), "utf-8");
+  } catch (error) {
+    if (!existing) {
+      try { app.store.close(); } catch (closing) {
+        throw new AggregateError([error, closing], "请求下载与收场均失败");
+      }
+    }
+    throw error;
+  }
   if (!existing) app.store.close();
 }
 
@@ -1322,6 +1348,9 @@ const clientCommands: Record<string, ClientCommand> = {
   export: { argumentCount: 4, storeIndex: 0, shared: true,
     run: async ([store, body, plan, receipt], owner) =>
       exportPlan(store, body, plan, receipt, owner ? await owner.application() : undefined) },
+  "download-request": { argumentCount: 4, storeIndex: 0, shared: true,
+    run: async ([store, requestId, plan, receipt], owner) =>
+      downloadRequest(store, requestId, plan, receipt, owner ? await owner.application() : undefined) },
   import: { argumentCount: 3, storeIndex: 1, shared: true,
     run: async ([reports, store, receipt], owner) =>
       importReports(reports, store, receipt, owner ? await owner.application() : undefined) },
@@ -1383,7 +1412,7 @@ void main().catch((error) => {
 
 function badUsage(): never {
   console.error(
-    "用法: client_driver.ts session <存储目录> <127.0.0.1> <端口> <会话身份> <计时路径> | initialize <存储目录> <凭据路径> | export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径> | capability-state <存储目录> <凭据路径> | browser-photo-export <存储目录> <输入路径> <计划路径> <凭据路径> | browser-plan-export <存储目录> <正文路径> <计划路径> <凭据路径> | upload-files <存储目录> <清单路径> <凭据路径>",
+    "用法: client_driver.ts session <存储目录> <127.0.0.1> <端口> <会话身份> <计时路径> | initialize <存储目录> <凭据路径> | export <存储目录> <正文路径> <计划路径> <凭据路径> | download-request <存储目录> <请求身份> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径> | capability-state <存储目录> <凭据路径> | browser-photo-export <存储目录> <输入路径> <计划路径> <凭据路径> | browser-plan-export <存储目录> <正文路径> <计划路径> <凭据路径> | upload-files <存储目录> <清单路径> <凭据路径>",
   );
   process.exit(2);
 }
