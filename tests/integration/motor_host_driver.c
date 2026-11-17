@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* 参数：camctl config ready processing log initial-or-- [hold]。
+/* 参数：camctl config ready processing log initial-or-- [hold] [retry-delay-20]。
  * stdout每行只记录初始化、回调开始/返回或本地submit结果。
  * stdin：release、submit <绝对路径>、claim、exit。hold只延迟回调返回。 */
 static pthread_mutex_t gate_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -27,11 +27,21 @@ static void motor(int position) {
   fflush(stdout);
 }
 int main(int argc, char **argv) {
-  if (argc != 7 && argc != 8)
+  if (argc < 7 || argc > 9)
     return 2;
   setvbuf(stdout, NULL, _IOLBF, 0);
-  held = argc == 8 && !strcmp(argv[7], "hold");
   camctl_host_config c = CAMCTL_HOST_CONFIG_INIT;
+  bool short_retry = false;
+  for (int i = 7; i < argc; ++i) {
+    if (!strcmp(argv[i], "hold") && !held)
+      held = true;
+    else if (!strcmp(argv[i], "retry-delay-20") && !short_retry)
+      short_retry = true;
+    else
+      return 2;
+  }
+  if (short_retry)
+    c.retry_delay_ms = 20;
   c.camctl_path = argv[1];
   c.config_path = argv[2];
   c.ready_path = argv[3];

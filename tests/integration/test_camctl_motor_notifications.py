@@ -97,7 +97,7 @@ def _motor_body(name: str, positions: list[int]) -> dict:
 class MotorHost:
     """真实 C 驱动的观察会话；以事实条件等待，不按固定延时推进。"""
     def __init__(self, deployment: Deployment, binary: Path, launcher: Path,
-                 initial: Path, *, hold: bool = False) -> None:
+                 initial: Path, *, hold: bool = False, short_retry: bool = False) -> None:
         self.deployment = deployment
         self.log = deployment.root / "motor-host.log"
         self.events: list[dict] = []
@@ -108,6 +108,8 @@ class MotorHost:
                    str(initial)]
         if hold:
             command.append("hold")
+        if short_retry:
+            command.append("retry-delay-20")
         environment = {**os.environ, "CAMCTL_TEST_TRACE_CALLS": "1"}
         self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, bufsize=0, env=environment)
@@ -338,14 +340,15 @@ def test_motor_and_camera_share_cli_without_device_result_confusion(
 
 @pytest.mark.parametrize("phase,writes", [("after_intent", 0), ("after_write", 1)])
 def test_host_restarts_interrupted_cli_without_repeating_notification(
-        tmp_path, motor_host_driver, phase, writes):
+        tmp_path, motor_host_driver, reuse_client, phase, writes):
     """真实 host 回收异常 CLI 并自动重启，保存的意图阻止再次发出同一通知。"""
     deployment = Deployment(tmp_path, devices=False)
     launcher = _init(deployment)
+    reuse_client(deployment)
     _fault_launcher(deployment, launcher, phase)
     body = _motor_body("异常恢复", [-2147483648])
     path, _ = deployment.export_plan_with_client(body)
-    host = MotorHost(deployment, motor_host_driver, launcher, path)
+    host = MotorHost(deployment, motor_host_driver, launcher, path, short_retry=True)
     try:
         host.wait(lambda: host.log.exists() and "result=abnormal" in host.log.read_text(),
                   "异常 CLI 未被真实 host 回收")
