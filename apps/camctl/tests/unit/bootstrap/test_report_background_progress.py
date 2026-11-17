@@ -38,6 +38,7 @@ from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerGeneration,
 from camctl.session.service import (SessionContext, SessionPaths, StateDbFailure,
                                     _drive_flows, _exception_details, run_session)
 from camctl.session.clock import ClockBecameUntrusted, ClockCheckInput
+from camctl.scheduling.notifications import WorkNotifier
 from camctl.session.work import WorkFacts, classify_work, WorkDecisionKind
 from camctl.persistence.repositories.session import CloseDecision, SessionRepository
 
@@ -73,6 +74,129 @@ async def test_checked_report_yields_before_probe_and_can_discover_next_change(n
     should_advance = True
     await flow(3)
     assert calls == [1, 3] and probes == [1, 3]
+
+
+@pytest.mark.parametrize("wait_first", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+async def test_report_completion_notifies_without_consuming_result(mocker, wait_first, failure):
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = StateDbFailure("report state failed")
+    diagnostics = mocker.patch("camctl.session.service._trigger_failure_log", new_callable=AsyncMock)
+
+    async def maintain(context):
+        entered.set()
+        await release.wait()
+        if failure:
+            raise original
+
+    wake = WorkNotifier()
+    context = SimpleNamespace(wake=wake)
+    flow = background_flow.ReportBackgroundFlow(maintain)
+    await flow(context)
+    await asyncio.wait_for(entered.wait(), 1)
+    token = wake.snapshot()
+    waiting = asyncio.create_task(wake.wait_changed(token)) if wait_first else None
+    if waiting is not None:
+        await asyncio.sleep(0)
+    try:
+        release.set()
+        if waiting is None:
+            # 等到任务完成及通知回调执行，再按先前取得的版本等待。
+            await asyncio.shield(flow.unconsumed_task)
+            await asyncio.sleep(0)
+            assert wake.snapshot().version > token.version
+            waiting = asyncio.create_task(wake.wait_changed(token))
+        changed = await asyncio.wait_for(waiting, 0.2)
+        assert changed.version > token.version
+        assert flow.required_settlements() == 1
+        if failure:
+            with pytest.raises(StateDbFailure) as caught:
+                await flow.settle()
+            assert caught.value is original
+            diagnostics.assert_awaited_once()
+        else:
+            await flow.settle()
+            diagnostics.assert_not_awaited()
+        assert flow.required_settlements() == 0
+    finally:
+        release.set()
+        if waiting is not None and not waiting.done():
+            waiting.cancel()
+            await asyncio.gather(waiting, return_exceptions=True)
+        try:
+            await flow.settle()
+        except StateDbFailure:
+            pass
+
+
+async def test_stopping_report_does_not_send_completion_notification():
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def maintain(context):
+        entered.set()
+        await release.wait()
+
+    wake = WorkNotifier()
+    flow = background_flow.ReportBackgroundFlow(maintain)
+    await flow(SimpleNamespace(wake=wake))
+    await asyncio.wait_for(entered.wait(), 1)
+    token = wake.snapshot()
+    flow.stop_new_work()
+    await flow.settle()
+    await asyncio.sleep(0)
+    assert wake.snapshot().version == token.version
+    assert flow.required_settlements() == 0
+
+
+async def test_stopping_after_report_delivery_does_not_notify_for_handoff():
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def maintain(context):
+        entered.set()
+        await release.wait()
+
+    wake = WorkNotifier()
+    context = SimpleNamespace(wake=wake)
+    flow = background_flow.ReportBackgroundFlow(maintain)
+    await flow(context)
+    await asyncio.wait_for(entered.wait(), 1)
+    release.set()
+    await asyncio.shield(flow.unconsumed_task)
+    await asyncio.sleep(0)
+    flow.check_completed()
+    token = wake.snapshot()
+    flow.stop_new_work()
+    await flow(context)
+    assert wake.snapshot().version == token.version
+    assert flow.required_settlements() == 0
+
+
+async def test_report_with_no_new_trigger_does_not_keep_notifying():
+    calls = []
+    pending = True
+
+    async def maintain(context):
+        nonlocal pending
+        calls.append("maintained")
+        pending = False
+
+    async def should_advance(context):
+        return pending
+
+    maintain.should_advance = should_advance
+    wake = WorkNotifier()
+    context = SimpleNamespace(wake=wake)
+    flow = background_flow.ReportBackgroundFlow(maintain)
+    await flow(context)
+    await flow.settle()
+    await asyncio.sleep(0)
+    token = wake.snapshot()
+    for _ in range(5):
+        await flow(context)
+        await asyncio.sleep(0)
+    assert calls == ["maintained"]
+    assert wake.snapshot().version == token.version
+    assert flow.required_settlements() == 0
 
 
 async def test_production_assembly_does_not_await_report_before_scheduling(mocker):

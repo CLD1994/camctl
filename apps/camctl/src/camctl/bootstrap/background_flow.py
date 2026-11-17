@@ -101,18 +101,19 @@ class BackgroundFlow:
         if self._stopping:
             return
         self._task = asyncio.create_task(self._run(context))
-        def wake_after_deadline_wait(task):
-            if self._deadline_waiting_for_completion and not self._stopping:
-                self._deadline_waiting_for_completion = False
-                notifier = getattr(context, "wake", None)
-                if notifier is not None:
-                    from camctl.scheduling.notifications import WakeReason
-                    notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
-        self._task.add_done_callback(wake_after_deadline_wait)
+        self._task.add_done_callback(lambda task: self._task_completed(context, task))
         # 只让执行体开始；实际等待及连接生命周期由原流程拥有。
         await asyncio.sleep(0)
         if self._task.done():
             self._consume()
+
+    def _task_completed(self, context, task):
+        if self._deadline_waiting_for_completion and not self._stopping:
+            self._deadline_waiting_for_completion = False
+            notifier = getattr(context, "wake", None)
+            if notifier is not None:
+                from camctl.scheduling.notifications import WakeReason
+                notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
 
     def check_completed(self):
         if self._task is not None and self._task.done():
@@ -192,6 +193,18 @@ class ReportBackgroundFlow(BackgroundFlow):
         """停止期间当前文件阶段的实际结果，不授权继续发布。"""
         return self._file_step_result
 
+    @staticmethod
+    def _notify_session(context):
+        notifier = getattr(context, "wake", None)
+        if notifier is not None:
+            from camctl.scheduling.notifications import WakeReason
+            notifier.mark_changed(WakeReason.ACTIVITY_FINISHED)
+
+    def _task_completed(self, context, task):
+        if not self._stopping:
+            self._deadline_waiting_for_completion = False
+            self._notify_session(context)
+
     def _notice_fatal(self, error):
         self._fatal_error = error
 
@@ -214,6 +227,9 @@ class ReportBackgroundFlow(BackgroundFlow):
 
     async def __call__(self, context):
         if self._take_completion_handoff():
+            # 本轮仍先核对工作事实；存在新责任时直接进入下一轮。
+            if not self._stopping:
+                self._notify_session(context)
             return
         if self._task is None and not self._stopping:
             probe = getattr(self._maintenance_flow, "should_advance", None)

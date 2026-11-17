@@ -4,11 +4,12 @@ import asyncio
 
 import pytest
 
-from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork, ReportBackgroundFlow
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.session import CloseDecision
 from camctl.session.service import run_session
 from camctl.session.work import WorkFacts, classify_work
+from camctl.scheduling.notifications import WorkNotifier
 
 from .test_business_database_session import world
 
@@ -206,3 +207,68 @@ async def test_completed_failure_is_delivered_before_other_owner_can_start():
     assert result.reason == "state_db_error"
     assert str(failure) in result.details["error"]
     assert calls == []
+
+
+@pytest.mark.parametrize("new_work", [False, True])
+async def test_report_completion_rechecks_facts_before_following_report_without_poll_delay(new_work):
+    context, _database, owned, _repository, _session, _admission = world()
+    owned.connection.execute.return_value.fetchone.return_value = None
+    context.poll_interval_s = 30
+    first_entered, release, second_entered = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    waiting = asyncio.Event()
+    events = []
+    pending = True
+
+    class ObservedNotifier(WorkNotifier):
+        async def wait_changed(self, observed, deadline=None):
+            waiting.set()
+            return await super().wait_changed(observed, deadline)
+
+    async def maintain(_context):
+        nonlocal pending
+        events.append("report")
+        if len([event for event in events if event == "report"]) == 1:
+            first_entered.set()
+            await release.wait()
+            events.append("first done")
+            pending = new_work
+        else:
+            second_entered.set()
+            pending = False
+
+    async def should_advance(_context):
+        return pending
+
+    maintain.should_advance = should_advance
+    owner = ReportBackgroundFlow(maintain)
+    context.wake = ObservedNotifier()
+    context.flows = {"report": owner}
+    context.local_work = CombinedLocalWork((owner,))
+
+    def facts(_connection):
+        events.append("facts")
+        return WorkFacts(0, 0, pending, False, False, False, False, False)
+
+    context.facts_query = facts
+    task = asyncio.create_task(run_session(context, None))
+    try:
+        await asyncio.wait_for(first_entered.wait(), 1)
+        await asyncio.wait_for(waiting.wait(), 1)
+        release.set()
+        if new_work:
+            await asyncio.wait_for(second_entered.wait(), 0.5)
+        result = await asyncio.wait_for(task, 1)
+        assert result.succeeded
+        first_done = events.index("first done")
+        if new_work:
+            second = events.index("report", first_done)
+            assert "facts" in events[first_done + 1:second]
+        else:
+            assert not second_entered.is_set()
+        assert events.count("report") == (2 if new_work else 1)
+        assert context.local_work.required_settlements() == 0
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
