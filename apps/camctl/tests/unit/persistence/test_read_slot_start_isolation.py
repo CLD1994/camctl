@@ -1,122 +1,26 @@
 """读取机会与同设备 START 互斥的隔离测试。"""
 
-from enum import IntEnum
-from importlib.util import find_spec, module_from_spec, spec_from_file_location
+from decimal import Decimal
 import sqlite3
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
 
-from camctl import resources
-from camctl.capture.recovery_types import RecoveryPhase
-from camctl.contracts import enums
+from camctl.capture.selection import CaptureSelectionInput
+from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+from camctl.history.validators import EventValidationError
+from camctl.persistence.repositories import capture_selection, outputs, physical_alias, preparation
 from camctl.persistence.repositories.file_batch_reads import FileBatchReads
-
-
-class _ActionType(IntEnum):
-    OBTAIN_ACTION_OUTPUTS = 1
-    CAMERA_TAKE_PHOTO = 2
-    CAMERA_RECORD = 3
-    CAMERA_TIMELAPSE = 4
-
-
-class _ActionStatus(IntEnum):
-    RUNNING = 1
-    SUCCEEDED = 2
-    FAILED = 3
-    EXPIRED = 4
-    CANCELED = 5
-
-
-class _RunKind(IntEnum):
-    START = 1
-    READ_FILE = 2
-    PREPARE_CAPTURE = 3
-    CHECK_DEVICE_AVAILABILITY = 4
-
-
-class _RunStatus(IntEnum):
-    ACTIVE = 1
-    SUCCEEDED = 2
-    FAILED = 3
-    CANCELED = 4
-    UNCONFIRMED = 5
-    EXPIRED = 6
-
-
-class _AttemptStatus(IntEnum):
-    RUNNING = 1
-
-
-class _ProcessingState(IntEnum):
-    PENDING = 1
-    RUNNING = 2
-
-
-class _VerificationState(IntEnum):
-    NOT_PERFORMED = 0
-    MATCHED = 1
-    MISMATCHED = 2
-    SOURCE_CHECKSUM_UNAVAILABLE = 3
-    FAILED = 4
-
-
-class _InspectionState(IntEnum):
-    PENDING = 1
-
-
-class _RestrictionState(IntEnum):
-    ACTIVE = 1
-    IRREVERSIBLE = 2
-
-
-class _FormatVersion(IntEnum):
-    V2 = 2
-    V4 = 4
-    V5 = 5
-    V6 = 6
-    V7 = 7
-    V8 = 8
-    V9 = 9
-
-
-class _FilePurpose(IntEnum):
-    DELIVERY_COPY = 1
-    RECORDING_INPUT = 2
-
-
-class _DeliveryStatus(IntEnum):
-    PUBLISHED = 1
-    FAILED = 2
-    CANCELED = 3
-    WITHDRAWN = 4
-
-
-_ENUMS = {
-    "actions.type": _ActionType,
-    "actions.status": _ActionStatus,
-    "operation_runs.kind": _RunKind,
-    "operation_runs.status": _RunStatus,
-    "operation_attempts.status": _AttemptStatus,
-    "recording_processing.check_state": _ProcessingState,
-    "recording_processing.repair_state": _ProcessingState,
-    "recording_processing.discard_state": _ProcessingState,
-    "file_copies.verification_state": _VerificationState,
-    "segment_inspections.state": _InspectionState,
-    "cleanup_items.restriction_state": _RestrictionState,
-    "database_metadata.format_version": _FormatVersion,
-    "deliveries.status": _DeliveryStatus,
-    "intermediate_files.purpose": _FilePurpose,
-}
+from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+from camctl.scheduling import resources as scheduling_resources
 
 
 class _GuardContext:
     def __init__(self, state_rows, preparation_reads=None):
         self.state_rows = state_rows
         self.preparation_reads = preparation_reads
-        self.retry_wait_reads = _SettledReads()
+        self.retry_wait_reads = RetryWaitReads(None)
         self.file_batch_reads = FileBatchReads(None)
         self.validated_events = ()
 
@@ -125,158 +29,25 @@ class _GuardContext:
         return {}
 
 
-class _SettledReads:
-    def no_unsettled_attempts(self, run_id, validated):
-        assert (run_id, validated) == (31, ())
-        return True
-
-
 def _cursor(row=None, rows=()):
     cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
     cursor.fetchone.return_value = row
     cursor.fetchall.return_value = list(rows)
+    cursor.fetchmany.return_value = list(rows)
+    cursor.__iter__.return_value = iter(rows)
     return cursor
 
 
 @pytest.fixture
 def production(monkeypatch):
-    def forbidden_resource(name):
-        raise AssertionError(f"单元测试不得读取包资源: {name}")
-
-    monkeypatch.setattr(resources, "resource_bytes", forbidden_resource)
-    monkeypatch.setattr(enums, "resource_bytes", forbidden_resource)
-    # 本组验证 START 与单文件机会的互斥，前提为动作已持有合法批次。
-    monkeypatch.setattr(FileBatchReads, "permits", lambda self, action_id, device_id,
-        require_owned=False: action_id == 21 and device_id == "camera-a")
-    monkeypatch.setattr(enums, "enum_for", lambda column: _ENUMS.get(column, SimpleNamespace()))
-    monkeypatch.setattr(enums, "load_registry", lambda: {
-        "enums": {}, "json_enums": {},
-        "history_objects": {"runtime_state": {"id": 1}},
-    })
-
-    from camctl.contracts import workflow_errors
-    from camctl.history import events
-    import camctl.history as history_package
-    import camctl.host_files as host_files_package
-    import camctl.outputs as outputs_package
-    import camctl.persistence.repositories as repositories_package
-
-    class EventValidationError(ValueError):
-        pass
-
-    validators = ModuleType("camctl.history.validators")
-    validators.EventContext = type("EventContext", (), {})
-    validators.EventValidationError = EventValidationError
-    validators.ValidatedEvent = type("ValidatedEvent", (), {})
-    validators.validate_event_structure = lambda *_: None
-    recovery_types = ModuleType("camctl.capture.recovery_types")
-    recovery_types.RecoveryPhase = RecoveryPhase
-    monkeypatch.setitem(sys.modules, recovery_types.__name__, recovery_types)
-
-    class UnusedPaths(ModuleType):
-        PathRuleError = type("PathRuleError", (ValueError,), {})
-
-        def __getattr__(self, name):
-            def fail(*_args, **_kwargs):
-                pytest.fail(f"不应调用路径协作者 {name}")
-            return fail
-
-    paths = UnusedPaths("camctl.host_files.paths")
-
-    models = ModuleType("camctl.host_files.models")
-    models.FilePurpose = _FilePurpose
-    for name in ("BoundDirectories", "FileObservation", "FileObservationKind", "FileRef", "HostPath"):
-        setattr(models, name, type(name, (), {}))
-
-    operations = ModuleType("camctl.persistence.repositories.operations")
-    for name in ("BeginAttemptCommand", "FinishAttemptCommand", "_FinishStaleRunsCommand"):
-        setattr(operations, name, type(name, (), {}))
-    retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retry_reads.RetryWaitReads = _SettledReads
-
-    obtain_summary = ModuleType("camctl.outputs.obtain_summary")
-    for name in (
-        "ObtainFacts", "ObtainAggregate", "ObtainItemStage", "ObtainPhase",
-        "ObtainSourceFacts",
-    ):
-        setattr(obtain_summary, name, type(name, (), {}))
-
-    def unused_summary(*_args, **_kwargs):
-        raise AssertionError("slot 测试不应调用取回汇总")
-
-    obtain_summary.decide_obtain_finish = unused_summary
-    obtain_summary.obtain_item_stage = unused_summary
-
-    existing_modules = set(sys.modules)
-    replaced = {
-        (history_package, "validators"): getattr(history_package, "validators", None),
-        (host_files_package, "models"): getattr(host_files_package, "models", None),
-        (host_files_package, "paths"): getattr(host_files_package, "paths", None),
-        (outputs_package, "obtain_summary"): getattr(outputs_package, "obtain_summary", None),
-        (repositories_package, "operations"): getattr(repositories_package, "operations", None),
-    }
-    monkeypatch.setitem(sys.modules, "camctl.history.validators", validators)
-    monkeypatch.setitem(sys.modules, "camctl.host_files.models", models)
-    monkeypatch.setitem(sys.modules, "camctl.host_files.paths", paths)
-    monkeypatch.setitem(sys.modules, "camctl.outputs.obtain_summary", obtain_summary)
-    monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.operations", operations)
-    monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
-
-    monkeypatch.setattr(events, "resource_bytes", forbidden_resource)
-    monkeypatch.setattr(events, "load_event_registry", lambda: {
-        "format_version": 1, "events": {},
-        "tables": {"file_copies": {
-            "immutable": [], "mutable": ["slot_device_id"], "write_once": [],
-        }},
-    })
-    monkeypatch.setattr(events, "reason_for_branch", lambda *_: 1)
-    monkeypatch.setattr(workflow_errors, "resource_bytes", forbidden_resource)
-    monkeypatch.setattr(workflow_errors, "action_error_id", lambda *_: 1)
-    monkeypatch.setattr(workflow_errors, "item_error_id", lambda *_: 1)
-    monkeypatch.setattr(workflow_errors, "registered_error", lambda *_: {})
-    monkeypatch.setattr(workflow_errors, "registered_error_spec", lambda *_: ("test", {}))
-    monkeypatch.setattr(workflow_errors, "validate_error_details", lambda *_: None)
-
-    from camctl.scheduling import resources as scheduling_resources
-    monkeypatch.setattr(
-        scheduling_resources,
-        "enum_for",
-        lambda column: _ENUMS.get(column, SimpleNamespace()),
-    )
-    source = find_spec("camctl")
-    assert source is not None and source.origin is not None
-    module_name = "camctl.persistence.repositories._isolated_read_slot_tests"
-    spec = spec_from_file_location(
-        module_name,
-        source.origin.replace("__init__.py", "persistence/repositories/outputs.py"),
-    )
-    assert spec is not None and spec.loader is not None
-    outputs = module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, module_name, outputs)
-    try:
-        spec.loader.exec_module(outputs)
-        preparation = __import__(
-            "camctl.persistence.repositories.preparation", fromlist=["PreparationReads"]
-        )
-        yield SimpleNamespace(
-            outputs=outputs,
-            scheduling=scheduling_resources,
-            preparation=preparation,
-            validation_error=EventValidationError,
-        )
-    finally:
-        for (package, name), previous in replaced.items():
-            if previous is None:
-                vars(package).pop(name, None)
-            else:
-                setattr(package, name, previous)
-        for name in tuple(sys.modules):
-            if name.startswith("camctl.") and name not in existing_modules:
-                module = sys.modules.pop(name)
-                parent_name, _, child_name = name.rpartition(".")
-                parent = sys.modules.get(parent_name)
-                if parent is not None and vars(parent).get(child_name) is module:
-                    vars(parent).pop(child_name)
+    # 测试已有对应动作持有的同机批次；机会与启动资格仍由真实守卫判断。
+    monkeypatch.setattr(FileBatchReads, "permits", create_autospec(FileBatchReads.permits,
+        side_effect=lambda self, action_id, device_id, require_owned=False:
+            action_id == 21 and device_id == "camera-a" and require_owned))
+    monkeypatch.setattr(RetryWaitReads, "no_unsettled_attempts",
+        create_autospec(RetryWaitReads.no_unsettled_attempts, return_value=True))
+    return SimpleNamespace(outputs=outputs, scheduling=scheduling_resources,
+                           preparation=preparation, validation_error=EventValidationError)
 
 
 def _read_command(outputs, *, slot=None):
@@ -313,8 +84,9 @@ def test_new_camera_slot_waits_for_in_flight_start_without_event(monkeypatch, pr
 
     copy["source_device_file_id"] = 41
     command = _read_command(outputs)
-    command._state.update({"device_files": {41: {"observer_action_id": 22}},
-                           "actions": {22: {"driver_id": "driver-a"}}})
+    command._state.update({"device_files": {41: {"id": 41, "observer_action_id": 22, "source_action_id": 23}},
+                           "actions": {22: {"id": 22, "device_id": "camera-a", "driver_id": "driver-a"},
+                                       23: {"id": 23, "device_id": "camera-a", "driver_id": "driver-a"}}})
     plan = command._grant(scope, copy, "camera-a", run, action)
 
     assert plan.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "device_busy")
@@ -336,6 +108,26 @@ def test_existing_slot_stays_held_while_start_is_in_flight(monkeypatch, producti
     connection.execute.assert_not_called()
 
 
+def test_canceled_owner_cannot_receive_a_new_slot(monkeypatch, production):
+    outputs = production.outputs
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    connection.execute.return_value = _cursor(None)
+    monkeypatch.setattr(outputs._SlotChangeCommand, "_device_holder", lambda *_: None)
+    scope, copy, run, action = _grant_inputs(outputs, connection)
+    action["cancel_requested"] = 1
+
+    result = _read_command(outputs)._grant(scope, copy, "camera-a", run, action)
+
+    assert result.result.outcome is outputs.SlotOutcome.FINISHED
+    assert result.events == ()
+    connection.execute.assert_not_called()
+    reads = production.preparation.PreparationReads(connection)
+    context = _guard_context(outputs, reads=reads)
+    context.state_rows["actions"][21]["cancel_requested"] = 1
+    with pytest.raises(production.validation_error, match="未取消"):
+        outputs._read_slot_guard(_slot_event(outputs, None, "camera-a"), context)
+
+
 def test_new_camera_slot_waits_for_in_flight_check(monkeypatch, production):
     outputs = production.outputs
     connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
@@ -346,8 +138,9 @@ def test_new_camera_slot_waits_for_in_flight_check(monkeypatch, production):
     scope, copy, run, action = _grant_inputs(outputs, connection)
     copy["source_device_file_id"] = 41
     command = _read_command(outputs)
-    command._state.update({"device_files": {41: {"observer_action_id": 22}},
-                           "actions": {22: {"driver_id": "driver-a"}}})
+    command._state.update({"device_files": {41: {"id": 41, "observer_action_id": 22, "source_action_id": 23}},
+                           "actions": {22: {"id": 22, "device_id": "camera-a", "driver_id": "driver-a"},
+                                       23: {"id": 23, "device_id": "camera-a", "driver_id": "driver-a"}}})
     plan = command._grant(scope, copy, "camera-a", run, action)
     assert plan.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "device_busy")
     assert plan.read_only and plan.events == ()
@@ -360,35 +153,36 @@ def test_new_hasselblad_slot_waits_for_selected_capture(monkeypatch, production)
     scope, copy, run, action = _grant_inputs(outputs, connection)
     scope.max_event_id = 99
     command = _read_command(outputs)
-    command._request = SimpleNamespace(copy_id=11, occurred_at=1, capture_selection=object())
-    command._state.update({"device_files": {41: {"observer_action_id": 22, "source_action_id": 22}},
-                           "actions": {22: {"driver_id": "hasselblad_cfv100c"}}})
-    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
-    definitions.DRIVER_ID = "hasselblad_cfv100c"
-    alias = ModuleType("camctl.persistence.repositories.physical_alias")
-    alias.source_physical_alias_conflict = lambda *args: False
-    alias.source_physical_identity = lambda *args: "identity"
-    selection = ModuleType("camctl.persistence.repositories.capture_selection")
-    selection.read_capture_priority = lambda *args, **kwargs: SimpleNamespace(action_id=7)
-    for dependency in (definitions, alias, selection):
-        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    identity = CameraIdentity("CAMERA-1", 10)
+    selection = CaptureSelectionInput("camera-a", "hasselblad_cfv100c", identity, Decimal("1"), 1)
+    command._request = outputs.SlotRequest(copy_id=11, occurred_at=1, capture_selection=selection)
+    command._state.update({"device_files": {41: {"id": 41, "observer_action_id": 22, "source_action_id": 22}},
+                           "actions": {22: {"id": 22, "device_id": "camera-a", "driver_id": "hasselblad_cfv100c"}}})
+    monkeypatch.setattr(physical_alias, "source_physical_alias_conflict",
+                        create_autospec(physical_alias.source_physical_alias_conflict, return_value=False))
+    monkeypatch.setattr(physical_alias, "source_physical_identity",
+                        create_autospec(physical_alias.source_physical_identity, return_value=identity))
+    monkeypatch.setattr(capture_selection, "read_capture_priority",
+                        create_autospec(capture_selection.read_capture_priority,
+                            return_value=capture_selection.CaptureCandidate(7, 0, 2, 0, 3000, None)))
     result = command._grant(scope, copy, "camera-a", run, action)
     assert result.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "capture_priority")
     assert result.events == ()
+    capture_selection.read_capture_priority.assert_called_once_with(
+        connection, selection, 99, device_id="camera-a", identity=identity, occurred_at=1)
 
 
 def test_slot_guard_rejects_selected_capture(monkeypatch, production):
     outputs = production.outputs
-    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
-    definitions.DRIVER_ID = "hasselblad_cfv100c"
-    alias = ModuleType("camctl.persistence.repositories.physical_alias")
-    alias.source_physical_alias_conflict = lambda *args: False
-    alias.source_physical_identity = lambda *args: "identity"
-    selection = ModuleType("camctl.persistence.repositories.capture_selection")
-    selection.CaptureSelectionInput = SimpleNamespace(from_document=lambda value: value)
-    selection.read_capture_priority = lambda *args, **kwargs: SimpleNamespace(action_id=7)
-    for dependency in (definitions, alias, selection):
-        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    identity = CameraIdentity("CAMERA-1", 10)
+    selection = CaptureSelectionInput("camera-a", "hasselblad_cfv100c", identity, Decimal("1"), 1)
+    monkeypatch.setattr(physical_alias, "source_physical_alias_conflict",
+                        create_autospec(physical_alias.source_physical_alias_conflict, return_value=False))
+    monkeypatch.setattr(physical_alias, "source_physical_identity",
+                        create_autospec(physical_alias.source_physical_identity, return_value=identity))
+    monkeypatch.setattr(capture_selection, "read_capture_priority",
+                        create_autospec(capture_selection.read_capture_priority,
+                            return_value=capture_selection.CaptureCandidate(7, 0, 2, 0, 3000, None)))
     reads = production.preparation.PreparationReads(object())
     monkeypatch.setattr(reads, "device_start_in_flight", lambda *_: False)
     context = _guard_context(outputs, reads=reads)
@@ -396,9 +190,11 @@ def test_slot_guard_rejects_selected_capture(monkeypatch, production):
     context.state_rows["actions"][23]["driver_id"] = "hasselblad_cfv100c"
     context.transaction = SimpleNamespace(first_event_id=100)
     event = _slot_event(outputs, None, "camera-a")
-    event.evidence = {"capture_selection": {}}
+    event.evidence = {"capture_selection": selection.document()}
     with pytest.raises(production.validation_error, match="已选中的拍摄"):
         outputs._read_slot_guard(event, context)
+    capture_selection.read_capture_priority.assert_called_once_with(
+        reads.connection, selection, 99, device_id="camera-a", identity=identity, occurred_at=1)
 
 
 def _slot_event(outputs, before, after):
@@ -448,7 +244,7 @@ def test_slot_guard_reads_start_state_and_rejects_only_in_flight_start(productio
         event = _slot_event(outputs, None, "camera-a")
 
         if rejected:
-            with pytest.raises(production.validation_error):
+            with pytest.raises(production.validation_error, match="启动收场"):
                 outputs._read_slot_guard(event, context)
         else:
             outputs._read_slot_guard(event, context)
@@ -463,7 +259,7 @@ def test_slot_guard_independently_rejects_in_flight_check(production, monkeypatc
     connection.execute.return_value = _cursor(None)
     monkeypatch.setattr(production.preparation.PreparationReads, "availability_in_flight", lambda *args: True)
     reads = production.preparation.PreparationReads(connection)
-    with pytest.raises(production.validation_error):
+    with pytest.raises(production.validation_error, match="设备检查"):
         production.outputs._read_slot_guard(_slot_event(production.outputs, None, "camera-a"),
                                             _guard_context(production.outputs, reads=reads))
 

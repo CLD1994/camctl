@@ -15,6 +15,7 @@ from camctl.contracts.workflow_errors import validate_error_details
 from camctl.history.changes import event_report_targets
 from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
 
 
 def _identity(action):
@@ -31,8 +32,10 @@ def reserve(mocker):
     connection = create_autospec(sqlite3.Connection, instance=True)
     def execute(sql, parameters=()):
         cursor = create_autospec(sqlite3.Cursor, instance=True)
-        cursor.fetchone.return_value = None
+        cursor.fetchone.return_value = ((CURRENT_FORMAT_VERSION,)
+            if sql == "SELECT format_version FROM database_metadata WHERE id=1" else None)
         cursor.fetchall.return_value = []
+        cursor.fetchmany.return_value = []
         cursor.__iter__.return_value = iter([])
         return cursor
     connection.execute.side_effect = execute
@@ -47,10 +50,14 @@ def reserve(mocker):
 
 @pytest.fixture
 def photo_reserve(reserve, mocker):
+    from camctl.persistence.repositories import capture_selection
+
     action, scope = reserve
     action.update(type=1, driver_id="hasselblad_cfv100c",
         execution_spec_json={"output_storage": "host", "start_call_timeout_s": Decimal("60")})
     mocker.patch.object(scheduling, "activity_capabilities", side_effect=activity_capabilities)
+    mocker.patch.object(capture_selection, "selected_pending_capture", autospec=True,
+        return_value=capture_selection.CaptureCandidate(7, 20_000_000, 3, 0, 3000, None))
     return action, scope
 
 
@@ -103,7 +110,8 @@ def test_photo_reservation_cannot_pass_an_original_start(photo_reserve):
 
 
 def test_preparation_candidate_query_includes_an_earlier_photo(photo_reserve):
-    _, scope = photo_reserve
+    action, scope = photo_reserve
+    action["driver_id"] = "driver"
     original_execute = scope.connection.execute.side_effect
     def execute(sql, parameters=()):
         cursor = original_execute(sql, parameters)

@@ -1,79 +1,67 @@
-"""拍摄准备独立守卫使用隔离事实判断读取机会。"""
+"""拍摄准备守卫按原读取机会与已收场事实判断资格。"""
 
-import ast
-from contextlib import closing
 from decimal import Decimal
-from pathlib import Path
-import sys
-from types import ModuleType, SimpleNamespace
-import unittest
-from unittest.mock import patch
+import sqlite3
+from types import SimpleNamespace
+from unittest.mock import create_autospec
+
+import pytest
+
+from camctl.contracts.values import ConsistencyError
+from camctl.devices.tasks import CompletionMode, StartReturn
+from camctl.outputs import read_discovery
+from camctl.persistence.repositories import retry_wait_reads
+from camctl.persistence.repositories.preparation import PreparationReads
+from camctl.persistence.runtime import CURRENT_FORMAT_VERSION
 
 
-SOURCE = Path(__file__).parents[3] / "src" / "camctl" / "persistence" / "repositories" / "preparation.py"
+@pytest.mark.parametrize("now,blocked,held,permitted", [
+    (10, False, True, True),
+    (9, False, True, False),
+    (10, True, True, False),
+    (9, False, False, True),
+], ids=["到时且原读取已收场", "提前准备不能越过原机会", "原读取未收场", "无原机会时允许提前准备"])
+def test_capture_preparation_respects_original_read_reservation(monkeypatch, now, blocked, held, permitted):
+    connection = create_autospec(sqlite3.Connection, instance=True)
 
+    def execute(sql, parameters=()):
+        cursor = create_autospec(sqlite3.Cursor, instance=True)
+        cursor.fetchone.return_value = ((CURRENT_FORMAT_VERSION,)
+            if sql == "SELECT format_version FROM database_metadata WHERE id=1" else None)
+        cursor.fetchall.return_value = []
+        cursor.fetchmany.return_value = []
+        cursor.__iter__.return_value = iter(())
+        return cursor
 
-class CaptureReservationGuardTests(unittest.TestCase):
-    def verify(self, *, now=10, blocked=False, held=True):
-        tree = ast.parse(SOURCE.read_text())
-        cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "PreparationReads")
-        method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "verify_create")
-        isolated = ast.Module(body=[method], type_ignores=[])
-        namespace = {"__name__": "isolated.preparation", "__package__": "camctl.persistence.repositories",
-                     "CAPTURE_ACTION_TYPES": (1, 2, 3), "photo_start_recorded": lambda *args: False,
-                     "decode_member": lambda *args: SimpleNamespace(name="CAMERA_TAKE_PHOTO")}
-        exec(compile(ast.fix_missing_locations(isolated), str(SOURCE), "exec"), namespace)
-        values = {name: None for name in ("state_query_supported", "stop_supported", "safe_repeat_stop",
-                  "start_return_meaning", "completion_mode", "ownership_mode", "output_scope_json")}
-        class Cursor:
-            def fetchone(self): return None
-            def __iter__(self): return iter(())
-            def close(self): pass
-        class Connection:
-            def execute(self, *args): return Cursor()
-        action = {"id": 1, "status": 1, "execution_started": 0, "cancel_requested": 0,
-                  "type": 1, "scheduled_at": 10, "max_delay_ms": 10, "driver_id": "driver",
-                  "device_id": "camera", "plan_id": 2, "input_index": 0, "execution_spec_json": {}}
-        request = {"action_id": 1, "occurred_at": 10, "trusted_wall_now": now,
-                   "prepare_lead_s": Decimal(1), "expected_identity": None}
-        event = SimpleNamespace(evidence={"preparation_request": request}, occurred_at=10)
-        row = SimpleNamespace(after=SimpleNamespace(values={"action_id": 1, "expected_identity_json": None,
-                                                            "resource_key": None, **values}))
-        context = SimpleNamespace(state_rows={"actions": {1: action}})
-        reader = SimpleNamespace(connection=Connection(), availability_in_flight=lambda *args: False)
-        definitions = ModuleType("camctl.contracts.values")
-        definitions.ConsistencyError = ValueError
-        json_values = ModuleType("camctl.contracts.json_values")
-        json_values.json_equal = lambda first, second: first == second
-        capture_models = ModuleType("camctl.capture.models")
-        capture_models.activity_capabilities = lambda *args: SimpleNamespace(**values)
-        scheduling = ModuleType("camctl.persistence.repositories.scheduling")
-        scheduling.ReservePreparationRequest = lambda **args: SimpleNamespace(**args)
-        scheduling._fixed_identity = lambda *args: (None, None)
-        history = ModuleType("camctl.history.validators")
-        history.parse_preparation_request = lambda raw: raw
-        retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        retries.read_reservation_blocks_control = lambda *args: blocked
-        discovery = ModuleType("camctl.outputs.read_discovery")
-        discovery.device_holder = lambda *args: 7 if held else None
-        driver = ModuleType("camctl.devices.drivers.hasselblad.definitions")
-        driver.DRIVER_ID = "hasselblad_cfv100c"
-        modules = (definitions, json_values, capture_models, scheduling, history, retries, discovery, driver)
-        with patch.dict(sys.modules, {module.__name__: module for module in modules}):
-            return namespace["verify_create"](reader, event, context, row)
-
-    def test_due_capture_can_use_settled_reserved_device(self):
-        self.assertIsNone(self.verify())
-
-    def test_early_capture_cannot_preempt_reservation(self):
-        with self.assertRaises(ValueError): self.verify(now=9)
-
-    def test_unsettled_read_blocks_due_capture(self):
-        with self.assertRaises(ValueError): self.verify(blocked=True)
-
-    def test_early_capture_without_reservation_still_qualifies(self):
-        self.assertIsNone(self.verify(now=9, held=False))
-
-
-if __name__ == "__main__":
-    unittest.main()
+    connection.execute.side_effect = execute
+    reservation = create_autospec(retry_wait_reads.read_reservation_blocks_control, return_value=blocked)
+    holder = create_autospec(read_discovery.device_holder, return_value=7 if held else None)
+    monkeypatch.setattr(retry_wait_reads, "read_reservation_blocks_control", reservation)
+    monkeypatch.setattr(read_discovery, "device_holder", holder)
+    action = {"id": 1, "status": 1, "execution_started": 0, "cancel_requested": 0,
+              "type": 1, "scheduled_at": 10, "max_delay_ms": 10, "driver_id": "driver",
+              "device_id": "camera", "plan_id": 2, "input_index": 0,
+              "execution_spec_json": {"output_storage": "host", "start_call_timeout_s": Decimal("60")}}
+    request = {"action_id": 1, "occurred_at": 10, "trusted_wall_now": now,
+               "prepare_lead_s": Decimal(1), "expected_identity": None}
+    event = SimpleNamespace(evidence={"preparation_request": request}, occurred_at=10)
+    row = SimpleNamespace(after=SimpleNamespace(values={
+        "action_id": 1, "expected_identity_json": None, "resource_key": None,
+        "state_query_supported": 0, "stop_supported": 0, "safe_repeat_stop": 0,
+        "start_return_meaning": int(StartReturn.COMPLETED),
+        "completion_mode": int(CompletionMode.DEVICE_EVIDENCE),
+        "ownership_mode": 1, "output_scope_json": {},
+    }))
+    context = SimpleNamespace(state_rows={"actions": {1: action}})
+    reader = PreparationReads(connection)
+    if permitted:
+        reader.verify_create(event, context, row)
+    else:
+        reason = "原读取调用" if blocked else "原读取机会"
+        with pytest.raises(ConsistencyError, match=reason):
+            reader.verify_create(event, context, row)
+    reservation.assert_called_once_with(connection, "camera")
+    if now < action["scheduled_at"] and not blocked:
+        holder.assert_called_once_with(connection, "camera")
+    else:
+        holder.assert_not_called()
