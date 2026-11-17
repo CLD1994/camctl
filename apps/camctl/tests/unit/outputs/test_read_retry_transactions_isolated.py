@@ -1,8 +1,9 @@
-"""读取重试事实与流程分支，不加载实际包资源或数据库。"""
+"""读取重试事实与流程分支，使用固定定义与内存协作者。"""
 
-import importlib.util
+import importlib
+from contextlib import contextmanager, ExitStack
 import ast
-from enum import Enum, IntEnum
+from enum import Enum
 import json
 from pathlib import Path
 import sys
@@ -10,7 +11,13 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from camctl.history.events import load_event_registry, reason_for_branch
 from camctl.operations.validation import ResultErrorIssue, run_finish_error_issue
+from camctl.persistence.repositories import retry_wait_reads
+from camctl.persistence.repositories.validation import build_business_rules
+
+# 完整装配在测试替换协作者之前导入，避免伪对象进入正式规则模块。
+build_business_rules()
 
 sys.dont_write_bytecode = True
 SOURCE = Path(__file__).parents[3] / "src" / "camctl"
@@ -64,50 +71,32 @@ def event(reason):
 
 
 def load_reads():
-    class DeliveryStatus(IntEnum):
-        PENDING = 1
-        PREPARING = 2
-        PREPARED = 3
-        PUBLISHING = 4
-        PUBLISHED = 5
-        FAILED = 6
-        CANCELED = 7
-        WITHDRAWN = 8
-
-    enums = ModuleType("camctl.contracts.enums")
-    enums.enum_for = lambda name: {
-        "operation_attempts.status": SimpleNamespace(RUNNING=1, FAILED=3, UNKNOWN=4),
-        "operation_runs.kind": SimpleNamespace(READ_FILE=3),
-        "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
-        "deliveries.status": DeliveryStatus,
-        "device_files.completion_state": SimpleNamespace(COMPLETE=3),
-    }[name]
-    json_values = ModuleType("camctl.contracts.json_values")
-    json_values.parse_exact_json = json.loads
-    values = ModuleType("camctl.contracts.values")
-    values.ConsistencyError = type("ConsistencyError", (Exception,), {})
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.read_copy_dispatch_eligible = lambda connection, copy_id: True
     discovery.device_holder = lambda connection, device_id: 9
     outputs = ModuleType("camctl.persistence.repositories.outputs")
     outputs._read_owner_eligible = lambda action: action["status"] == 2 and action["cancel_requested"] == 0
     outputs._read_is_due = lambda action, now: action["scheduled_at"] <= now
-    events = ModuleType("camctl.history.events")
-    events.reason_for_branch = lambda event_name, branch_name: {"REQUIRE": 1, "COMPLETE": 2, "ABANDON": 3}[branch_name]
     operations = ModuleType("camctl.persistence.repositories.operations")
-    operations._RETRY_WAIT_EVENT = 6
     structure = ModuleType("camctl.persistence.retry_wait_structure")
     def verify_index(connection, name):
         if connection.execute("SELECT sql FROM sqlite_master", (name,)).fetchone() is None:
             raise ValueError(name)
     structure.verify_retry_wait_index = verify_index
-    modules = {module.__name__: module for module in (enums, json_values, values, discovery, outputs, events, operations, structure)}
-    spec = importlib.util.spec_from_file_location("camctl.persistence.repositories._isolated_retry_reads",
-                                                  SOURCE / "persistence" / "repositories" / "retry_wait_reads.py")
-    module = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, modules):
-        spec.loader.exec_module(module)
-    return module, modules
+    modules = {module.__name__: module for module in (discovery, outputs, operations, structure)}
+    return retry_wait_reads, modules
+
+
+@contextmanager
+def patch_collaborators(modules):
+    """仅在调用期间替换已导入协作者的相应接口，退出后恢复。"""
+    targets = [(importlib.import_module(name), substitute) for name, substitute in modules.items()]
+    with ExitStack() as stack:
+        for target, substitute in targets:
+            for name, value in vars(substitute).items():
+                if not name.startswith("__"):
+                    stack.enter_context(patch.object(target, name, value))
+        yield
 
 
 class RetryReadFactsTests(unittest.TestCase):
@@ -127,7 +116,7 @@ class RetryReadFactsTests(unittest.TestCase):
             ("device_files", 15): {"observer_action_id": 2, "source_action_id": 3, "completion_state": 3}}
         operations._load_row = lambda connection, table, identity: rows.get((table, identity))
         reads = module.RetryWaitReads(None)
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             self.assertTrue(reads.unknown_exhaustion_eligible(7, 20))
             action = rows[("actions", 1)]
             action["cancel_requested"] = 1
@@ -168,7 +157,7 @@ class RetryReadFactsTests(unittest.TestCase):
             observations=(), call_info=None, diagnostics=None)
         result.read_result_document = lambda *args: outcome
         modules.update({m.__name__: m for m in (models, transaction, result)})
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             reads = module.RetryWaitReads(Connection(last=(12, 4, "{}", 101)))
             self.assertEqual(reads.recovered_unknown(7, 1)[0], 12)
             outcome.error.code = "device_error"
@@ -195,7 +184,7 @@ class RetryReadFactsTests(unittest.TestCase):
                 if "SELECT id,status,attempts_used,retry_wait_required FROM operation_runs" in query:
                     return Cursor([] if self.run is None else [self.run])
                 return super().execute(query, parameters)
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             check = module.held_read_ready_for_availability
             self.assertTrue(check(HeldConnection(owner=owner, event=event(2)), 9, "camera", 20, 2))
             self.assertFalse(check(HeldConnection(owner=owner, event=event(2)), 9, "camera", 20, 1))
@@ -220,7 +209,7 @@ class RetryReadFactsTests(unittest.TestCase):
                 if "SELECT c.id,r.id,r.status,r.attempts_used" in query:
                     return Cursor(self.rows)
                 return super().execute(query, parameters)
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             check = module.read_reservation_blocks_control
             self.assertFalse(check(ReservationConnection([]), "camera"))
             self.assertFalse(check(ReservationConnection([(9, 7, 2, 1, 1)]), "camera"))
@@ -237,14 +226,14 @@ class RetryReadFactsTests(unittest.TestCase):
 
     def test_complete_and_abandon_remain_distinct(self):
         module, _ = load_reads()
-        with patch.dict(sys.modules, load_reads()[1]):
+        with patch_collaborators(load_reads()[1]):
             self.assertTrue(module.RetryWaitReads(Connection(event=event(2))).completed(7, 1))
             self.assertFalse(module.RetryWaitReads(Connection(event=event(3))).completed(7, 1))
             self.assertFalse(module.RetryWaitReads(Connection(event=event(1))).completed(7, 1))
 
     def test_unfinished_original_attempt_cannot_complete_wait(self):
         module, _ = load_reads()
-        with patch.dict(sys.modules, load_reads()[1]):
+        with patch_collaborators(load_reads()[1]):
             self.assertFalse(module.RetryWaitReads(Connection(last=(12, 1, None, None), event=event(2))).completed(7, 1))
             self.assertFalse(module.RetryWaitReads(Connection(running=True, event=event(2))).completed(7, 1))
             self.assertFalse(module.RetryWaitReads(Connection(last=(12, 2, "{}", 101), event=event(2))).completed(7, 1))
@@ -253,7 +242,7 @@ class RetryReadFactsTests(unittest.TestCase):
         module, _ = load_reads()
         wrong = event(2)
         wrong["evidence"] = {"attempt_id": 13}
-        with patch.dict(sys.modules, load_reads()[1]):
+        with patch_collaborators(load_reads()[1]):
             with self.assertRaises(module.ConsistencyError):
                 module.RetryWaitReads(Connection(event=wrong)).completed(7, 1)
 
@@ -264,7 +253,7 @@ class RetryReadFactsTests(unittest.TestCase):
                 if "sqlite_master" in query and parameters == ("history_events_row",):
                     return Cursor([])
                 return super().execute(query, parameters)
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             with self.assertRaises(module.ConsistencyError):
                 module.RetryWaitReads(MissingIndex(event=event(2))).completed(7, 1)
 
@@ -273,7 +262,7 @@ class RetryReadFactsTests(unittest.TestCase):
         result = SimpleNamespace(envelope=SimpleNamespace(rows=(SimpleNamespace(
             table="operation_attempts", row_id=1,
             after=SimpleNamespace(values={"status": 3, "result_json": {}, "result_event_id": 100})),)))
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             reads = module.RetryWaitReads(Connection(running=True))
             self.assertFalse(reads.no_unsettled_attempts(7))
             self.assertTrue(reads.no_unsettled_attempts(7, (result,)))
@@ -281,19 +270,19 @@ class RetryReadFactsTests(unittest.TestCase):
     def test_cancelled_delivery_cannot_complete_wait(self):
         module, modules = load_reads()
         owner = (2, 1, 10, 9, "camera", 2, 1, 3, "camera", "driver", "camera", "driver")
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             self.assertFalse(module.RetryWaitReads(Connection(owner=owner)).read_eligible(7, 20))
 
     def test_valid_delivery_with_original_binding_is_eligible(self):
         module, modules = load_reads()
         owner = (2, 0, 10, 9, "camera", 2, 1, 3, "camera", "driver", "camera", "driver")
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             self.assertTrue(module.RetryWaitReads(Connection(owner=owner)).read_eligible(7, 20))
 
     def test_slotless_fallback_requires_proven_original_switch(self):
         module, modules = load_reads()
         owner = (2, 0, 10, 9, None, 2, 1, 3, "camera", "driver", "camera", "driver")
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             reads = module.RetryWaitReads(Connection(owner=owner))
             reads.source_fallback = lambda run_id: False
             self.assertFalse(reads.read_eligible(7, 20))
@@ -303,7 +292,7 @@ class RetryReadFactsTests(unittest.TestCase):
     def test_cancelled_slotless_fallback_cannot_complete_wait(self):
         module, modules = load_reads()
         owner = (2, 1, 10, 9, None, 2, 1, 3, "camera", "driver", "camera", "driver")
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             reads = module.RetryWaitReads(Connection(owner=owner))
             reads.source_fallback = lambda run_id: True
             self.assertFalse(reads.read_eligible(7, 20))
@@ -317,12 +306,11 @@ class RetryReadFactsTests(unittest.TestCase):
         modules["camctl.persistence.repositories.operations"]._load_row = lambda connection, table, identity: {
             "operation_runs": run, "file_copies": copy, "operation_attempts": attempt}[table]
         modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda connection, copy, attempt: True
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             reads = module.RetryWaitReads(Connection())
             self.assertTrue(reads.source_fallback(7))
-            modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda *args: False
-            self.assertFalse(reads.source_fallback(7))
-            modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda *args: True
+            with patch("camctl.persistence.repositories.outputs._has_source_fallback_retry_proof", return_value=False):
+                self.assertFalse(reads.source_fallback(7))
             attempt["error_json"]["details"]["source_failed"] = False
             self.assertFalse(reads.source_fallback(7))
 
@@ -332,39 +320,37 @@ class RetryReadFactsTests(unittest.TestCase):
             "operation_runs": {"copy_id": 9, "attempts_used": 1},
             "file_copies": {"slot_device_id": None, "source_device_file_id": 15, "source_intermediate_file_id": None}}[table]
         modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda *args: True
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             self.assertFalse(module.RetryWaitReads(Connection(running=True)).source_fallback(7))
 
     def test_fallback_proof_queries_exact_copy_attempt_and_source(self):
-        source = SOURCE / "persistence" / "repositories" / "outputs.py"
-        tree = ast.parse(source.read_text())
-        function = next(node for node in tree.body
-                        if isinstance(node, ast.FunctionDef) and node.name == "_has_source_fallback_retry_proof")
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                    function], type_ignores=[])
-        structure = ModuleType("camctl.persistence.retry_wait_structure")
-        structure.verify_retry_wait_index = lambda connection, name: None
-        namespace = {"closing": __import__("contextlib").closing,
-            "is_json_integer": lambda value: type(value) is int, "_COPY_CHANGED_EVENT": 22,
-            "_COPY_SOURCE_FALLBACK_REASON": 8, "ConsistencyError": ValueError}
-        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+        from camctl.persistence.repositories import operations
+
         class ProofConnection:
             def __init__(self, exists): self.exists, self.parameters = exists, None
             def execute(self, query, parameters):
                 self.parameters = parameters
                 return Cursor([(1,)] if self.exists else [])
-        copy = {"id": 9, "source_device_file_id": 15}
-        attempt = {"id": 12, "result_event_id": 101}
-        with patch.dict(sys.modules, {structure.__name__: structure}):
+        run = {"copy_id": 9, "attempts_used": 1}
+        copy = {"id": 9, "source_device_file_id": 15, "source_intermediate_file_id": None,
+                "slot_device_id": None}
+        attempt = {"id": 12, "result_event_id": 101, "intent_event_id": 99,
+                   "error_json": {"code": "local_read_failed", "stage": "source_read",
+                                  "details": {"source_failed": True}}}
+        rows = {"operation_runs": run, "file_copies": copy, "operation_attempts": attempt}
+        with patch.object(operations, "_load_row", side_effect=lambda connection, table, identity: rows[table]), \
+             patch.object(RetryWaitReads, "last_attempt", return_value=(12, 3, "{}", 101)), \
+             patch("camctl.persistence.retry_wait_structure.verify_retry_wait_index"):
             connection = ProofConnection(True)
-            self.assertTrue(namespace["_has_source_fallback_retry_proof"](connection, copy, attempt))
+            self.assertTrue(RetryWaitReads(connection).source_fallback(7))
             self.assertEqual(connection.parameters, (22, 9, 101, 8, 12, 15))
-            self.assertFalse(namespace["_has_source_fallback_retry_proof"](ProofConnection(False), copy, attempt))
+            self.assertFalse(RetryWaitReads(ProofConnection(False)).source_fallback(7))
 
     def test_changed_source_binding_is_consistency_error(self):
         module, modules = load_reads()
         owner = (2, 0, 10, 9, "camera", 2, 1, 3, "camera", "driver", "other", "driver")
-        with patch.dict(sys.modules, modules):
+        with patch_collaborators(modules):
             with self.assertRaises(module.ConsistencyError):
                 module.RetryWaitReads(Connection(owner=owner)).read_eligible(7, 20)
 
@@ -557,164 +543,97 @@ class CompleteReadCommandTests(unittest.TestCase):
 
 
 class RetryGuardTests(unittest.TestCase):
-    def load_guard(self, eligible):
-        source = SOURCE / "persistence" / "repositories" / "operations.py"
-        tree = ast.parse(source.read_text())
-        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_retry_guard")
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                    function], type_ignores=[])
+    def test_completion_rechecks_owner_and_original_attempt(self):
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+        from camctl.persistence.repositories.validation import build_business_rules
 
-        class Reads:
-            def last_attempt(self, run_id, attempts_used): return (12, 3, "{}", 101)
-            def read_eligible(self, run_id, now): return eligible
-
-        module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        module.RetryWaitReads = Reads
-        def fail(message): raise ValueError(message)
-        namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
-            "_RETRY_WAIT_EVENT": 6, "_RUN_KIND": SimpleNamespace(READ_FILE=3, CHECK_DEVICE_AVAILABILITY=12),
-            "load_event_registry": lambda: {"events": {"RETRY_WAIT_CHANGED": {"branches": {"COMPLETE": {"reason": 2}}}}},
-            "_RUN_STATUS": SimpleNamespace(PENDING=1, ACTIVE=2), "_fail": fail,
-            "_row_after_facts": lambda context, row: {"kind": 3, "attempts_used": 1}}
-        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
-        return namespace["_retry_guard"], Reads(), module
-
-    def test_guard_accepts_settled_read_and_matching_attempt(self):
-        guard, reads, module = self.load_guard(True)
+        reads = RetryWaitReads(None)
         row = SimpleNamespace(table="operation_runs", row_id=7,
                               after=SimpleNamespace(values={"retry_wait_required": 0}))
         event = SimpleNamespace(rows=(row,), event_type=6, reason=2,
                                 evidence={"attempt_id": 12}, occurred_at=20)
-        with patch.dict(sys.modules, {module.__name__: module}):
-            guard(event, SimpleNamespace(retry_wait_reads=reads))
-
-    def test_guard_rechecks_cancelled_owner(self):
-        guard, reads, module = self.load_guard(False)
-        row = SimpleNamespace(table="operation_runs", row_id=7,
-                              after=SimpleNamespace(values={"retry_wait_required": 0}))
-        event = SimpleNamespace(rows=(row,), event_type=6, reason=2,
-                                evidence={"attempt_id": 12}, occurred_at=20)
-        with patch.dict(sys.modules, {module.__name__: module}):
-            with self.assertRaises(ValueError):
-                guard(event, SimpleNamespace(retry_wait_reads=reads))
-
-    def test_guard_rejects_another_attempt(self):
-        guard, reads, module = self.load_guard(True)
-        row = SimpleNamespace(table="operation_runs", row_id=7,
-                              after=SimpleNamespace(values={"retry_wait_required": 0}))
-        event = SimpleNamespace(rows=(row,), event_type=6, reason=2,
-                                evidence={"attempt_id": 13}, occurred_at=20)
-        with patch.dict(sys.modules, {module.__name__: module}):
-            with self.assertRaises(ValueError):
-                guard(event, SimpleNamespace(retry_wait_reads=reads))
+        context = SimpleNamespace(retry_wait_reads=reads,
+            state_rows={"operation_runs": {7: {"kind": 3, "attempts_used": 1}}})
+        guard = build_business_rules()["retry"]
+        with patch.object(RetryWaitReads, "last_attempt", return_value=(12, 3, "{}", 101)), \
+             patch.object(RetryWaitReads, "read_eligible", return_value=True) as eligible:
+            guard(event, context)
+            eligible.return_value = False
+            with self.assertRaises(EventValidationError): guard(event, context)
+            eligible.return_value = True
+            event.evidence = {"attempt_id": 13}
+            with self.assertRaises(EventValidationError): guard(event, context)
 
 
 class ExhaustGuardTests(unittest.TestCase):
     def test_unknown_guard_checks_owner_copy_evidence_and_budget(self):
-        source = SOURCE / "persistence" / "repositories" / "operations.py"
-        tree = ast.parse(source.read_text())
-        function = next(node for node in tree.body
-                        if isinstance(node, ast.FunctionDef) and node.name == "_operation_finish_guard")
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                    function], type_ignores=[])
-        class Reads:
-            connection = object()
-            valid = True
-            def last_attempt(self, run_id, used): return (12, 4, "{}", 101)
-            def recovered_unknown(self, run_id, used): return (12, 4, "{}", 101) if self.valid else None
-        reads_module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        reads_module.RetryWaitReads = Reads
-        outputs = ModuleType("camctl.persistence.repositories.outputs")
-        owner = {"id": 1, "status": 2, "cancel_requested": 0, "scheduled_at": 10}
-        outputs._slot_owner_action = lambda context, copy: owner
-        outputs._read_owner_eligible = lambda action: action["status"] == 2 and action["cancel_requested"] == 0
-        outputs._read_is_due = lambda action, now: action["scheduled_at"] <= now
-        outputs._internal_input_requirement = lambda processing: processing["reason"]
-        discovery = ModuleType("camctl.outputs.read_discovery")
-        copy_ready = [False]
-        discovery.read_copy_dispatch_eligible = lambda connection, copy_id: not copy_ready[0]
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+        from camctl.persistence.repositories.validation import build_business_rules
+
+        reads = RetryWaitReads(None)
         facts = {"kind": 3, "status": 4, "retry_wait_required": 0, "attempts_used": 2,
                  "max_attempts_used": 2, "copy_id": 9, "action_id": 1,
                  "error_json": {"code": "read_attempts_exhausted"}}
-        def fail(message): raise ValueError(message)
-        namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
-            "_OPERATION_CONFIGURED_EVENT": 10, "_RUN_KIND": SimpleNamespace(READ_FILE=3, PREPARE_CAPTURE=10, CHECK_DEVICE_AVAILABILITY=12),
-            "_RUN_STATUS": SimpleNamespace(PENDING=1, FAILED=4, CANCELED=5, UNCONFIRMED=6, SUCCEEDED=3),
-            "ResultErrorIssue": ResultErrorIssue, "run_finish_error_issue": run_finish_error_issue,
-            "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3, UNKNOWN=4), "Mapping": dict,
-            "_fail": fail, "_row_after_facts": lambda context, row: facts}
-        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
+        owner = {"id": 1, "status": 2, "cancel_requested": 0, "scheduled_at": 10}
+        copy = {"id": 9, "source_device_file_id": None, "delivery_id": None, "processing_id": 8}
+        processing = {"action_id": 1, "reason": None}
         row = SimpleNamespace(table="operation_runs", row_id=7,
             before=SimpleNamespace(exists=True, values={"retry_wait_required": 0}),
             after=SimpleNamespace(values={"status": 4}))
-        event = SimpleNamespace(rows=(row,), event_type=10, reason=3, evidence={"attempt_id": 12}, occurred_at=20)
-        reads = Reads()
-        copy = {"id": 9, "source_device_file_id": None, "delivery_id": None, "processing_id": 8}
-        processing = {"reason": None}
-        context = SimpleNamespace(retry_wait_reads=reads, validated_events=(), state_rows={"file_copies": {9: copy},
-            "recording_processing": {8: processing}})
-        modules = {m.__name__: m for m in (reads_module, outputs, discovery)}
-        enums = ModuleType("camctl.contracts.enums")
-        enums.enum_for = lambda name: namespace["_RUN_STATUS"]
-        modules[enums.__name__] = enums
-        guard = namespace["_operation_finish_guard"]
-        with patch.dict(sys.modules, modules):
+        event = SimpleNamespace(rows=(row,), event_type=10, reason=3,
+                                evidence={"attempt_id": 12}, occurred_at=20)
+        context = SimpleNamespace(retry_wait_reads=reads, validated_events=(), state_rows={
+            "operation_runs": {7: facts}, "file_copies": {9: copy},
+            "recording_processing": {8: processing}, "actions": {1: owner}})
+        guard = build_business_rules()["operation_finish"]
+        with patch.object(RetryWaitReads, "last_attempt", return_value=(12, 4, "{}", 101)), \
+             patch.object(RetryWaitReads, "recovered_unknown", return_value=(12, 4, "{}", 101)) as recovered, \
+             patch("camctl.persistence.repositories.outputs._internal_input_requirement", side_effect=lambda value: value["reason"]), \
+             patch("camctl.outputs.read_discovery.read_copy_dispatch_eligible", return_value=True) as dispatch:
             guard(event, context)
-            for target, key, changed in ((owner, "cancel_requested", 1), (processing, "reason", "input_not_needed"),
-                                          (facts, "max_attempts_used", 3)):
+            for target, key, value in ((owner, "cancel_requested", 1),
+                                       (processing, "reason", "input_not_needed"),
+                                       (facts, "max_attempts_used", 3)):
                 original = target[key]
-                target[key] = changed
-                with self.assertRaises(ValueError): guard(event, context)
+                target[key] = value
+                with self.assertRaises(EventValidationError): guard(event, context)
                 target[key] = original
-            copy_ready[0] = True
-            with self.assertRaises(ValueError): guard(event, context)
-            copy_ready[0] = False
-            reads.valid = False
-            with self.assertRaises(ValueError): guard(event, context)
-            reads.valid = True
+            dispatch.return_value = False
+            with self.assertRaises(EventValidationError): guard(event, context)
+            dispatch.return_value = True
+            recovered.return_value = None
+            with self.assertRaises(EventValidationError): guard(event, context)
+            recovered.return_value = (12, 4, "{}", 101)
             changed = SimpleNamespace(table="file_copies", row_id=9,
                 before=SimpleNamespace(values={}), after=SimpleNamespace(values={}))
             context.validated_events = (SimpleNamespace(envelope=SimpleNamespace(rows=(changed,))),)
-            with self.assertRaises(ValueError): guard(event, context)
-            changed.table = "operation_attempts"
-            changed.row_id = 14
+            with self.assertRaises(EventValidationError): guard(event, context)
+            changed.table, changed.row_id = "operation_attempts", 14
             changed.after.values["run_id"] = 7
-            with self.assertRaises(ValueError): guard(event, context)
+            with self.assertRaises(EventValidationError): guard(event, context)
 
     def test_settled_failure_requires_matching_attempt_reference(self):
-        source = SOURCE / "persistence" / "repositories" / "operations.py"
-        tree = ast.parse(source.read_text())
-        function = next(node for node in tree.body
-                        if isinstance(node, ast.FunctionDef) and node.name == "_operation_finish_guard")
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                    function], type_ignores=[])
-        class Reads:
-            def last_attempt(self, run_id, used): return (12, 3, "{}", 101)
-            def read_eligible(self, run_id, now): return True
-        module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        module.RetryWaitReads = Reads
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+        from camctl.persistence.repositories.validation import build_business_rules
+
+        reads = RetryWaitReads(None)
         facts = {"kind": 3, "status": 4, "retry_wait_required": 0, "attempts_used": 2,
                  "max_attempts_used": 2, "copy_id": 9, "error_json": {"code": "read_attempts_exhausted"}}
-        def fail(message): raise ValueError(message)
-        namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
-            "_OPERATION_CONFIGURED_EVENT": 10, "_RUN_KIND": SimpleNamespace(READ_FILE=3, PREPARE_CAPTURE=10, CHECK_DEVICE_AVAILABILITY=12),
-            "_RUN_STATUS": SimpleNamespace(PENDING=1, FAILED=4, CANCELED=5, UNCONFIRMED=6, SUCCEEDED=3),
-            "ResultErrorIssue": ResultErrorIssue, "run_finish_error_issue": run_finish_error_issue,
-            "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3, UNKNOWN=4), "Mapping": dict,
-            "_fail": fail, "_row_after_facts": lambda context, row: facts}
-        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
-        row = SimpleNamespace(table="operation_runs", row_id=7, before=SimpleNamespace(exists=True, values={"retry_wait_required": 1}),
-                              after=SimpleNamespace(values={"status": 4}))
+        row = SimpleNamespace(table="operation_runs", row_id=7,
+            before=SimpleNamespace(exists=True, values={"retry_wait_required": 1}),
+            after=SimpleNamespace(values={"status": 4}))
         event = SimpleNamespace(rows=(row,), event_type=10, reason=3, evidence={}, occurred_at=20)
-        context = SimpleNamespace(retry_wait_reads=Reads(), state_rows={"file_copies": {9: {
-            "source_device_file_id": 15, "delivery_id": 8}}})
-        enums = ModuleType("camctl.contracts.enums")
-        enums.enum_for = lambda name: namespace["_RUN_STATUS"]
-        with patch.dict(sys.modules, {module.__name__: module, enums.__name__: enums}):
-            with self.assertRaises(ValueError):
-                namespace["_operation_finish_guard"](event, context)
+        context = SimpleNamespace(retry_wait_reads=reads, state_rows={"operation_runs": {7: facts},
+            "file_copies": {9: {"source_device_file_id": 15, "delivery_id": 8}}})
+        guard = build_business_rules()["operation_finish"]
+        with patch.object(RetryWaitReads, "last_attempt", return_value=(12, 3, "{}", 101)), \
+             patch.object(RetryWaitReads, "read_eligible", return_value=True):
+            with self.assertRaises(EventValidationError): guard(event, context)
             event.evidence = {"attempt_id": 12}
-            namespace["_operation_finish_guard"](event, context)
+            guard(event, context)
 
 
 class DeliveryCancellationTests(unittest.TestCase):
@@ -763,33 +682,26 @@ class DeliveryCancellationTests(unittest.TestCase):
                 namespace["_require_read_finished"](None, None, {"id": 7, "status": 4})
 
     def test_source_protection_release_rechecks_unsettled_read(self):
-        source = SOURCE / "persistence" / "repositories" / "outputs.py"
-        tree = ast.parse(source.read_text())
-        function = next(node for node in tree.body
-                        if isinstance(node, ast.FunctionDef) and node.name == "_read_permission_guard")
-        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
-                                    function], type_ignores=[])
-        class Reads:
-            def no_unsettled_attempts(self, run_id, validated=()): return False
-        module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        module.RetryWaitReads = Reads
-        namespace = {"__name__": "isolated.outputs", "__package__": "camctl.persistence.repositories",
-            "_READ_PERMISSION_EVENT": 4, "_GRANT_REASON": 1, "_REJECT_REASON": 2, "_RELEASE_REASON": 3,
-            "_DELIVERY_STATUS": SimpleNamespace(FAILED=6, CANCELED=7, WITHDRAWN=8),
-            "_RUN_TERMINAL": {3, 4, 5, 6, 7}, "EventValidationError": ValueError}
-        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+        from camctl.persistence.repositories.validation import build_business_rules
+
+        reads = RetryWaitReads(None)
         row = SimpleNamespace(table="obtain_items", row_id=2,
             before=SimpleNamespace(exists=True, values={"source_dependency": 1}),
             after=SimpleNamespace(values={"source_dependency": 0}))
-        event = SimpleNamespace(event_type=4, reason=3, rows=(row,))
-        context = SimpleNamespace(retry_wait_reads=Reads(), validated_events=(), state_rows={
+        event = SimpleNamespace(event_type=load_event_registry()["events"]["READ_PERMISSION_CHANGED"]["id"],
+                                reason=reason_for_branch("READ_PERMISSION_CHANGED", "RELEASE"), rows=(row,))
+        context = SimpleNamespace(retry_wait_reads=reads, validated_events=(), state_rows={
             "obtain_items": {2: {"delivery_id": 8}}, "deliveries": {8: {"status": 6}},
-            "file_copies": {9: {"id": 9, "delivery_id": 8}},
-            "operation_runs": {7: {"id": 7, "copy_id": 9, "status": 4, "retry_wait_required": 0}}},
+            "file_copies": {9: {"id": 9, "delivery_id": 8}}},
             complete_rows=lambda table, column, identity: {7: {"id": 7, "status": 4, "retry_wait_required": 0}})
-        with patch.dict(sys.modules, {module.__name__: module}):
-            with self.assertRaises(ValueError):
-                namespace["_read_permission_guard"](event, context)
+        guard = build_business_rules()["read_permission"]
+        with patch.object(RetryWaitReads, "no_unsettled_attempts", return_value=False) as settled:
+            with self.assertRaises(EventValidationError):
+                guard(event, context)
+            settled.return_value = True
+            guard(event, context)
 
 if __name__ == "__main__":
     unittest.main()
