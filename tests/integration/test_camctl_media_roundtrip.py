@@ -104,6 +104,14 @@ def _generate_source_video(target: Path) -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+@pytest.fixture(scope="module")
+def source_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    source = tmp_path_factory.mktemp("media-source") / "source.mp4"
+    _generate_source_video(source)
+    _decode_media(source)
+    return source
+
+
 def _probe_media_facts(path: Path) -> tuple[Decimal, set[str]]:
     """以真实 ffprobe 读取时长与视频编码名。"""
     completed = subprocess.run(
@@ -314,7 +322,7 @@ def _assert_repaired_delivery(deployment: Deployment) -> None:
 
 @_MEDIA_TOOLS
 def test_insufficient_timing_checks_repairs_and_delivers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_video: Path,
 ) -> None:
     """计时证据不足的检查链：受限会话保守停止保存等待阶段，正常会
     话拷贝原片以真实 ffprobe 确认时长、超过门槛后无重编码修复，修
@@ -325,16 +333,15 @@ def test_insufficient_timing_checks_repairs_and_delivers(
     assert initialized.exit_code == 0, initialized.stderr
 
     source = tmp_path / "source.mp4"
-    _generate_source_video(source)
+    shutil.copyfile(source_video, source)
     source_duration, source_codecs = _probe_media_facts(source)
     assert source_duration == Decimal(_SOURCE_DURATION_S)
     assert source_codecs == {"h264"}
 
-    _decode_media(source)
+    original_path = os.environ["PATH"]
     ffmpeg_log = _observe_ffmpeg(tmp_path, monkeypatch)
-    content = source.read_bytes()
     spec = stub_driver_spec(
-        {"1": [video_file("clip-1", size_bytes=len(content))]},
+        {"1": [video_file("clip-1", size_bytes=source.stat().st_size)]},
         record_duration_s=_TARGET_DURATION_S,
         device_files={"clip-1": {"path": str(source)}})
     scheduled_at = deployment.schedule(1)
@@ -384,6 +391,7 @@ def test_insufficient_timing_checks_repairs_and_delivers(
     # 门槛秒数是实际比较门槛：目标时长（3 秒）加修复余量（0.5 秒）。
     assert Decimal(str(basis["threshold_s"])) == Decimal("3.5")
     _assert_stream_copy(ffmpeg_log)
+    monkeypatch.setenv("PATH", original_path)
     _assert_repaired_delivery(deployment)
 
     report = _ready_report(deployment)
@@ -395,7 +403,7 @@ def test_insufficient_timing_checks_repairs_and_delivers(
 
 @_MEDIA_TOOLS
 def test_excess_recording_repairs_without_probing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_video: Path,
 ) -> None:
     """可信计时多录的对账链：跨会话对账停止确认录制严格超过门槛后
     固定多录决定，不取回探测时长直接修复，修复成品由默认取回交付。"""
@@ -410,12 +418,11 @@ def test_excess_recording_repairs_without_probing(
     assert initialized.exit_code == 0, initialized.stderr
 
     source = tmp_path / "source.mp4"
-    _generate_source_video(source)
-    _decode_media(source)
+    shutil.copyfile(source_video, source)
+    original_path = os.environ["PATH"]
     ffmpeg_log = _observe_ffmpeg(tmp_path, monkeypatch)
-    content = source.read_bytes()
     spec = stub_driver_spec(
-        {"1": [video_file("clip-1", size_bytes=len(content))]},
+        {"1": [video_file("clip-1", size_bytes=source.stat().st_size)]},
         record_duration_s=_TARGET_DURATION_S,
         device_files={"clip-1": {"path": str(source)}})
     scheduled_at = deployment.schedule(1)
@@ -460,6 +467,7 @@ def test_excess_recording_repairs_without_probing(
     # 门槛秒数与判定使用的实际比较门槛一致：目标加余量，不只余量。
     assert Decimal(str(basis["threshold_s"])) == Decimal("3.5")
     _assert_stream_copy(ffmpeg_log)
+    monkeypatch.setenv("PATH", original_path)
     _assert_repaired_delivery(deployment)
 
     report = _ready_report(deployment)

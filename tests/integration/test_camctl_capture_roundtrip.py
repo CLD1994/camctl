@@ -189,16 +189,10 @@ def test_timelapse_recovers_remaining_wait(tmp_path: Path) -> None:
     scheduled_at = deployment.schedule(1)
     plan = deployment.write_plan(timelapse_plan("42", scheduled_at))
     spec = stub_driver_spec({"1": [video_file("seq-1")]})
-    submitted = deployment.camctl(
-        "submit", str(plan), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
-
-    # 受理完成后进入原启动窗口；CLI 准备不消耗业务窗口。
+    # 冻结在原启动窗口，首次 run 受理计划并启动拍摄。
     deployment.freeze_at(scheduled_at)
     state_db = deployment.state_db
-    spec = stub_driver_spec({"1": [video_file("seq-1")]})
-    first = deployment.start_camctl("run", "--config", str(deployment.config_path),
+    first = deployment.start_camctl("run", str(plan), "--config", str(deployment.config_path),
                                     driver=spec)
     try:
         # 等待安排已保存（CAPTURE_WAIT_CHANGED 的首次安排）。
