@@ -23,13 +23,18 @@ VIDEO = ROOT + "/DJI_001/new.MP4"
 TICKET = AttemptTicket(1, "result", "7", "results/7", 9)
 
 
-def _raw(output, *, exit_code=0, error=None, stderr=b""):
-    return RawToolOutcome(LocalExit(exit_code=exit_code), output, None, error, stderr=stderr)
+def _raw(output, *, exit_code=0, stderr=b""):
+    return RawToolOutcome(LocalExit(exit_code=exit_code), output, None, None, stderr=stderr)
 
 
 def _frame(*paths, more=False):
     return b"\0".join((b"CAMCTL-DIRECTORY/1", *(path.encode() for path in paths),
                        b"MORE" if more else b"END", b""))
+
+
+def _metadata(path, *, stdout=b"10\n", stderr=b"", status=0):
+    return b"\0".join((b"CAMCTL-METADATA/2", path.encode(), stdout, stderr,
+                       str(status).encode(), b"END", b""))
 
 
 def _context():
@@ -98,7 +103,7 @@ def _page(result):
 
 @pytest.mark.asyncio
 async def test_known_stop_waits_five_seconds_before_listing_and_finalizes_mp4(monkeypatch):
-    driver, transport, waits = _driver(monkeypatch, [_raw(_frame(VIDEO)), _raw(b"10\n")])
+    driver, transport, waits = _driver(monkeypatch, [_raw(_frame(VIDEO)), _raw(_metadata(VIDEO))])
     result = await _list(driver, context=_context())
     page = _page(result)
     assert result.outcome.status is AttemptStatus.SUCCEEDED
@@ -117,7 +122,7 @@ async def test_known_stop_waits_five_seconds_before_listing_and_finalizes_mp4(mo
 
 @pytest.mark.asyncio
 async def test_missing_stop_context_preserves_actual_entries_without_completion(monkeypatch):
-    driver, _, waits = _driver(monkeypatch, [_raw(_frame(VIDEO)), _raw(b"10\n")])
+    driver, _, waits = _driver(monkeypatch, [_raw(_frame(VIDEO)), _raw(_metadata(VIDEO))])
     page = _page(await _list(driver))
     assert waits == []
     assert page["set_finalized"] is False
@@ -127,7 +132,7 @@ async def test_missing_stop_context_preserves_actual_entries_without_completion(
 
 @pytest.mark.asyncio
 async def test_more_page_does_not_finalize_even_after_completion_wait(monkeypatch):
-    driver, _, _ = _driver(monkeypatch, [_raw(_frame(VIDEO, more=True)), _raw(b"10\n")])
+    driver, _, _ = _driver(monkeypatch, [_raw(_frame(VIDEO, more=True)), _raw(_metadata(VIDEO))])
     page = _page(await _list(driver, context=_context()))
     assert page["set_finalized"] is False
     assert page["next_cursor"] == DirectoryCursor(BINDING, (ROOT,), 0, VIDEO).as_json()
@@ -152,7 +157,7 @@ async def test_auxiliary_files_are_not_registered_as_formal_video(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_prior_completed_wait_is_reused_for_next_page_without_new_wait(monkeypatch):
-    driver, _, waits = _driver(monkeypatch, [_raw(_frame(VIDEO)), _raw(b"10\n")])
+    driver, _, waits = _driver(monkeypatch, [_raw(_frame(VIDEO)), _raw(_metadata(VIDEO))])
     context = _context()
     context["prior_completion"] = {"result_page_event_id": 40, "evidence": _completion()}
     result = await _list(driver, context=context)
@@ -205,8 +210,8 @@ async def test_directory_failure_does_not_become_final_empty_page(monkeypatch):
 @pytest.mark.asyncio
 async def test_metadata_failure_keeps_partial_files_and_error_without_finalizing(monkeypatch):
     second = ROOT + "/DJI_001/new2.MP4"
-    driver, _, _ = _driver(monkeypatch, [_raw(_frame(VIDEO, second)), _raw(b"10\n"),
-                                       _raw(b"", exit_code=1, stderr=b"stat failed")])
+    driver, _, _ = _driver(monkeypatch, [_raw(_frame(VIDEO, second)), _raw(_metadata(VIDEO)),
+                                       _raw(_metadata(second, stdout=b"", stderr=b"stat failed", status=1))])
     result = await _list(driver, context=_context())
     page = _page(result)
     assert result.error is not None and page["set_finalized"] is False
