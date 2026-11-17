@@ -198,13 +198,9 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -
         ],
     }
     cancel_path, _ = deployment.export_plan_with_client(cancel_body)
-    cancel_submitted = deployment.camctl(
-        "submit", str(cancel_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert cancel_submitted.exit_code == 0, cancel_submitted.stderr
     deployment.freeze_at(cancel_body["actions"][0]["scheduled_at"])
     cancel_run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(cancel_path), "--config", str(deployment.config_path), driver=spec)
     assert cancel_run.exit_code == 0, cancel_run.stderr
 
     # 取消动作成功收场：processing 不可撤回是独立事实，不删除交付。
@@ -504,15 +500,11 @@ def test_plan_cancel_before_start_settles_auto_preview(
         ],
     }
     cancel_path, _ = deployment.export_plan_with_client(cancel_body)
-    cancel_submitted = deployment.camctl(
-        "submit", str(cancel_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert cancel_submitted.exit_code == 0, cancel_submitted.stderr
 
-    # 一个 run 会话执行取消：待执行动作按取消收场，无需等到拍摄
+    # 一个 run 会话受理并执行取消：待执行动作按取消收场，无需等到拍摄
     # 时刻。
     run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(cancel_path), "--config", str(deployment.config_path), driver=spec)
     assert run.exit_code == 0, run.stderr
 
     assert _query(state_db, "SELECT status FROM plans") == [(3,), (3,)]
@@ -816,12 +808,9 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path, reuse_client) ->
         ],
     }
     second_path, _ = deployment.export_plan_with_client(second_body)
-    second_submit = deployment.camctl(
-        "submit", str(second_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert second_submit.exit_code == 0, second_submit.stderr
     second_run = _run_capture_at_schedule(
-        deployment, spec, second_body["actions"][0]["scheduled_at"], "次拍")
+        deployment, spec, second_body["actions"][0]["scheduled_at"], "次拍",
+        plan_path=second_path)
     assert second_run.exit_code == 0, second_run.stderr
 
     # 三个动作全部成功；取回解析固定到第一个请求的真实来源计划。

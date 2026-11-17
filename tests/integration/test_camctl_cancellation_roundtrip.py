@@ -177,12 +177,8 @@ def test_cleanup_unknown_preserves_original_request_result(
     succeeding = stub_driver_spec(
         {"1": [photo_file("shot-1")]},
         device_files={"shot-1": _PHOTO_CONTENT}, delete_error=None)
-    second_submitted = deployment.camctl(
-        "submit", str(second_path), "--config", str(deployment.config_path),
-        driver=succeeding)
-    assert second_submitted.exit_code == 0, second_submitted.stderr
     second_run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=succeeding)
+        "run", str(second_path), "--config", str(deployment.config_path), driver=succeeding)
     assert second_run.exit_code == 0, second_run.stderr
 
     # 精确清理成功：产物按可靠删除事实转为已清理并保留身份；第一
