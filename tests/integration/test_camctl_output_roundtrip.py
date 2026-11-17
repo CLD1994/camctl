@@ -302,14 +302,9 @@ def test_auto_preview_obtains_registered_preview(tmp_path: Path, reuse_client) -
         ],
     }
     plan_path, _ = deployment.export_plan_with_client(body)
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
-
     # 一个 run 会话完成拍摄、预览列举登记、取回拷贝与交付发布。
     run = _run_capture_at_schedule(
-        deployment, spec, shoot_at, "shoot")
+        deployment, spec, shoot_at, "shoot", plan_path=plan_path)
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db
@@ -607,16 +602,11 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path, reuse_client) -> Non
         ],
     }
     plan_path, _ = deployment.export_plan_with_client(body)
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
-
     # 一个 run 会话顺序完成三种拍摄与两次取回（一次一份拷贝）。
     deployment.freeze_at(shoot_at)
     deadline = time.monotonic() + 180
     process = deployment.start_camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(plan_path), "--config", str(deployment.config_path), driver=spec)
     try:
         _await_row(
             deployment.state_db,
@@ -719,12 +709,8 @@ def test_repeated_obtain_of_same_output_yields_independent_deliveries(
         ],
     }
     plan_path, _ = deployment.export_plan_with_client(body)
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
     run = _run_capture_at_schedule(
-        deployment, spec, shoot_at, "拍录")
+        deployment, spec, shoot_at, "拍录", plan_path=plan_path)
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db
