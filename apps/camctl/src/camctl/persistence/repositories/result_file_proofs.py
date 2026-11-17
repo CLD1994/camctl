@@ -104,23 +104,22 @@ def _load_fixed_file(db,file_id,file_event_id):
 def _page_file(connection, page_id, file, boundary, *, run_id, completed=False, scope_run=None):
     if page_id > boundary.last_event_id or page_id > file['last_event_id']:
         raise ConsistencyError('文件引用页越过固定文件边界')
-    saved, raw = result_pages.read_saved_page(connection, page_id)
-    record = read_event(connection, page_id)
+    saved = result_pages.read_page_file_view(connection, page_id)
     identity = parse_exact_json(file['identity_key'])[2]
-    same_source = raw['run_id'] == run_id
+    same_source = saved.ref.ticket.run_id == run_id
     if not same_source and scope_run is not None:
-        original_run = row_facts(connection, 'operation_runs', raw['run_id'])
+        original_run = row_facts(connection, 'operation_runs', saved.ref.ticket.run_id)
         result_pages.result_responsibility(original_run)
         same_source = (original_run['action_id'] == scope_run['action_id']
             and original_run['activity_id'] == scope_run['activity_id'])
-    if (record.transaction.last_event_id > boundary.last_event_id
+    if (saved.transaction_last_event_id > boundary.last_event_id
             or not same_source or (identity, file['id']) not in saved.file_ids):
         raise ConsistencyError('文件引用页不是同一来源的真实文件')
     if completed:
-        entries = [entry for entry in saved.page.entries if entry.identity == identity]
-        if (len(entries) != 1 or not entries[0].complete or file['size_bytes'] is None
-                or entries[0].size_bytes != file['size_bytes']
-                or not json_equal(entries[0].locator, file['locator_json'])):
+        entry = saved.read_entry(identity)
+        if (entry is None or not entry.complete or file['size_bytes'] is None
+                or entry.size_bytes != file['size_bytes']
+                or not json_equal(entry.locator, file['locator_json'])):
             raise ConsistencyError('固定完成文件与引用页的完整大小或定位不同')
     return saved
 
@@ -148,13 +147,12 @@ def _read_result_file_input(connection, page, file_id, boundary, *, pairing_fact
         raise TypeError('文件读取要求原页引用和完整历史边界')
     ObjectId(file_id)
     if pairing_fact_id is not None: ObjectId(pairing_fact_id)
-    saved, raw = result_pages.read_saved_page(connection, page.event_id)
+    saved = result_pages.read_page_file_view(connection, page.event_id)
     if saved.ref != page:
         raise ConsistencyError('文件引用改变原页票据、页号或游标')
-    record = read_event(connection, page.event_id)
-    if record.transaction.last_event_id > boundary.last_event_id:
+    if saved.transaction_last_event_id > boundary.last_event_id:
         raise ConsistencyError('原页位于固定文件边界之后')
-    run = row_facts(connection, 'operation_runs', raw['run_id'])
+    run = row_facts(connection, 'operation_runs', saved.ref.ticket.run_id)
     action = None if run is None else row_facts(connection, 'actions', run['action_id'])
     if (action is None or run['id'] != page.ticket.run_id
             or str(run['activity_id']) != page.ticket.target_id):

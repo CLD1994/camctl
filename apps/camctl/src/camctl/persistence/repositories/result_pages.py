@@ -1,6 +1,6 @@
 """结果页保留原完整实际结果，页范围与首次文件发现共同提交。"""
 from contextlib import closing, contextmanager, nullcontext
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
 from camctl.capture.result_pairing import result_file_family
@@ -9,6 +9,7 @@ from camctl.capture.result_inputs import decode_result_cursor, observed_file, pa
 from camctl.capture.result_pages import ResultPageSave, ResultPageRef, SavedResultPage, result_page_input
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.contracts.json_encoding import encode_exact_json
 from camctl.capture.results import CaptureFile
 from camctl.capture.baseline_models import BaselineRef, BaselineState
 from camctl.contracts.pages import Page
@@ -25,7 +26,8 @@ from camctl.persistence.repositories.transactions import (CommandPlan, Transacti
     event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
     saved_transaction_events, update_change)
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.fact_reads import read_event, read_events, iter_transaction_events, opened_operation_fact_scope
+from camctl.persistence.fact_reads import (read_event, read_events, iter_transaction_events,
+    opened_operation_fact_scope, _reuse_readonly_event)
 from camctl.history.reads import ResultPageWriteScope
 from .baseline import read_reference, read_chunks, _chunk_at, _check_entries, _directories
 
@@ -504,6 +506,53 @@ def read_saved_page(connection, event_id):
     record = read_event(connection, event_id)
     saved, raw = _decode_saved_event(connection, record.event)
     return saved, raw
+
+
+@dataclass(frozen=True)
+class ResultPageFileEntry:
+    complete: bool
+    size_bytes: int | None
+    locator: dict
+
+
+@dataclass(frozen=True)
+class ResultPageFileView:
+    """固定原页的身份和逐文件观察，不交付可变的整页正文。"""
+    ref: ResultPageRef
+    transaction_last_event_id: int
+    file_ids: tuple
+    entries: tuple
+
+    def read_entry(self, identity):
+        matches = [entry for entry in self.entries if entry[0] == identity]
+        if len(matches) != 1:
+            return None
+        _, complete, size, locator = matches[0]
+        return ResultPageFileEntry(complete, size, parse_exact_json(locator))
+
+
+def read_page_file_view(connection, event_id):
+    """从实际已提交页读取文件依据，并沿同一事实范围复用不可变字段。"""
+    def load():
+        record = read_event(connection, event_id)
+        saved, raw = _decode_saved_event(connection, record.event)
+        cursor = saved.ref.next_cursor
+        return (raw['run_id'], raw['activity_id'], raw['attempt_no'], raw['page_no'],
+            saved.ref.event_id, None if cursor is None else encode_exact_json(cursor.as_json()),
+            record.transaction.last_event_id, saved.file_ids,
+            tuple((entry.identity, entry.complete, entry.size_bytes, encode_exact_json(entry.locator))
+                  for entry in saved.page.entries))
+
+    (run_id, activity_id, attempt_no, page_no, actual_id, cursor, last_event_id,
+     file_ids, entries) = _reuse_readonly_event(connection, event_id, load)
+    run = row_facts(connection, 'operation_runs', run_id)
+    responsibility = result_responsibility(run)
+    if run['id'] != run_id or run['activity_id'] != activity_id:
+        raise ConsistencyError('结果页历史与原流程、活动不同')
+    ticket = AttemptTicket(attempt_no, 'result', str(activity_id), responsibility, run_id)
+    ref = ResultPageRef(ticket, page_no, actual_id,
+        None if cursor is None else decode_result_cursor(parse_exact_json(cursor)))
+    return ResultPageFileView(ref, last_event_id, file_ids, entries)
 
 
 def _decode_saved_event(connection, event):

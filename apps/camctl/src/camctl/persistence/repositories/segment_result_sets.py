@@ -187,7 +187,8 @@ def _run_files(db,run_id,boundary):
 def _retained_input(db, file_id, page_event_id, boundary):
     from .result_file_proofs import read_result_file_input, read_file_at_boundary
     from camctl.capture.segment_models import SegmentMemberRole
-    saved,_=_at(db,page_event_id)
+    from .result_pages import read_page_file_view
+    saved=read_page_file_view(db,page_event_id)
     result = read_result_file_input(db,saved.ref,file_id,boundary)
     if result.role is not SegmentMemberRole.PREVIEW:
         return result

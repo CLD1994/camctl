@@ -144,10 +144,10 @@ def _cached(state, key):
     return deepcopy(value)
 
 
-def _remember(state, key, value):
+def _remember(state, key, value, *, readonly=False):
     if state is None or not state.active or not state.connection.in_transaction:
         return
-    stored = deepcopy(value)
+    stored = value if readonly else deepcopy(value)
     seen = set()
     size = _retained_size(key, seen)+_retained_size(stored, seen)
     if size > MAX_FACT_BYTES:
@@ -160,6 +160,31 @@ def _remember(state, key, value):
         state.retained_bytes -= removed
     state.entries[key] = stored, size
     state.retained_bytes += size
+
+
+def _reuse_readonly_event(connection, event_id, loader):
+    """同一事务中复用固定事件的不可变值，容量与其他事实共用。"""
+    ObjectId(event_id)
+    state = _facts(connection)
+    if state is not None and event_id > state.boundary.last_event_id:
+        raise ConsistencyError('历史事件越过操作开始时的完整C0')
+    key = ('readonly_event', typed_read_key(event_id))
+    if state is not None and key in state.entries:
+        value, _ = state.entries[key]
+        state.entries.move_to_end(key)
+        return value
+    value = loader()
+
+    def check(item):
+        if type(item) is tuple:
+            for child in item:
+                check(child)
+        elif type(item) not in (str, bytes, int, bool, type(None)):
+            raise TypeError('只读事实只能包含不可变基本值及元组')
+
+    check(value)
+    _remember(state, key, value, readonly=True)
+    return value
 
 
 def read_transaction(connection, transaction_id):

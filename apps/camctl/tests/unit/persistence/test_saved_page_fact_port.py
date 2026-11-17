@@ -126,3 +126,48 @@ def test_result_read_scope_checks_original_responsibility(monkeypatch, kind, key
         with pytest.raises(ConsistencyError):
             reader.result_pages(ticket, None, 1)
         read.assert_not_called()
+
+
+def test_file_view_reuses_committed_page_but_isolates_each_locator(monkeypatch):
+    from decimal import Decimal
+    from camctl.capture.result_pages import ResultPageRef, SavedResultPage
+    from camctl.capture.result_inputs import ObservedFile
+    from camctl.contracts.history_values import HistoryBoundary, TransactionRange
+    from camctl.contracts.values import ConsistencyError
+    from camctl.operations.models import AttemptTicket
+
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    connection.in_transaction = True
+    connection.total_changes = 0
+    run = {'id': 5, 'activity_id': 8, 'kind': int(result_pages._RUN_KIND.CHECK_CAPTURE_RESULTS),
+        'responsibility_key': 'results/8'}
+    ticket = AttemptTicket(1, 'result', '8', 'results/8', 5)
+    entry = ObservedFile('/a', {'nested': [Decimal('1.25')]}, {}, True, 10)
+    saved = SavedResultPage(ResultPageRef(ticket, 1, 7, None),
+        SimpleNamespace(entries=(entry,)), 1, (('/a', 3),))
+    record = SimpleNamespace(event=object(), transaction=TransactionRange(1, 7, 8))
+    read = create_autospec(result_pages.read_event, return_value=record)
+    decode = create_autospec(result_pages._decode_saved_event, return_value=(saved,
+        {'run_id': 5, 'activity_id': 8, 'attempt_no': 1, 'page_no': 1}))
+    monkeypatch.setattr(result_pages, 'read_event', read)
+    monkeypatch.setattr(result_pages, '_decode_saved_event', decode)
+    monkeypatch.setattr(result_pages, 'row_facts', create_autospec(result_pages.row_facts, return_value=run))
+    monkeypatch.setattr(fact_reads, 'read_transaction', create_autospec(fact_reads.read_transaction,
+        return_value=TransactionRange(1, 7, 8)))
+    with fact_reads.operation_fact_scope(connection, HistoryBoundary(1, 8)):
+        view = result_pages.read_page_file_view(connection, 7)
+        assert view.ref == saved.ref and view.transaction_last_event_id == 8
+        assert view.file_ids == (('/a', 3),)
+        first = view.read_entry('/a')
+        first.locator['nested'].append(99)
+        connection.total_changes += 1
+        second = result_pages.read_page_file_view(connection, 7).read_entry('/a')
+        assert second.complete is True and second.size_bytes == 10
+        assert second.locator == {'nested': [Decimal('1.25')]}
+        assert view.read_entry('/missing') is None
+        run['responsibility_key'] = 'scope/8'
+        with pytest.raises(ConsistencyError):
+            result_pages.read_page_file_view(connection, 7)
+    run['responsibility_key'] = 'results/8'
+    result_pages.read_page_file_view(connection, 7)
+    assert read.call_count == decode.call_count == 2

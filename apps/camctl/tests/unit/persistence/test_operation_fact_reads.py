@@ -391,3 +391,75 @@ def test_kernel_accepted_current_page_prefix_remains_separate_from_committed_c0(
         with pytest.raises(ConsistencyError, match='已通过的真实前序'):
             reads.accepted_result_page_event(4, current)
     assert state['events'] == (1 if bounded else 0)
+
+
+def test_readonly_event_values_share_the_existing_budget_and_transaction_scope(database, facts, monkeypatch):
+    connection, _ = database
+    loaded = []
+    def load(identity):
+        loaded.append(identity)
+        return (identity, ('x' * 3000,))
+    monkeypatch.setattr(facts, 'MAX_FACT_BYTES', 4096)
+    with facts.operation_fact_scope(connection, HistoryBoundary(1, 3)):
+        first = facts._reuse_readonly_event(connection, 1, lambda: load(1))
+        assert facts._reuse_readonly_event(connection, 1, lambda: load(1)) is first
+        connection.total_changes += 1
+        assert facts._reuse_readonly_event(connection, 1, lambda: load(1)) is first
+        facts._reuse_readonly_event(connection, 2, lambda: load(2))
+        facts._reuse_readonly_event(connection, 1, lambda: load(1))
+        assert loaded == [1, 2, 1]
+        assert facts._facts(connection).retained_bytes <= facts.MAX_FACT_BYTES
+        with pytest.raises((ValueError, TypeError)):
+            facts._reuse_readonly_event(connection, True, lambda: ())
+        with pytest.raises(ConsistencyError):
+            facts._reuse_readonly_event(connection, 4, lambda: ())
+    facts._reuse_readonly_event(connection, 1, lambda: load(1))
+    assert loaded == [1, 2, 1, 1]
+
+
+def test_readonly_event_rejects_mutable_values_and_never_caches_failure(database, facts):
+    connection, _ = database
+    with facts.operation_fact_scope(connection, HistoryBoundary(1, 3)):
+        with pytest.raises(TypeError):
+            facts._reuse_readonly_event(connection, 2, lambda: (1, {'nested': []}))
+        failure = RuntimeError('original')
+        def fail():
+            raise failure
+        with pytest.raises(RuntimeError) as caught:
+            facts._reuse_readonly_event(connection, 2, fail)
+        assert caught.value is failure
+        assert facts._reuse_readonly_event(connection, 2, lambda: (2,)) == (2,)
+
+
+def test_readonly_event_does_not_cross_connections_or_scope_end(database, facts):
+    connection, _ = database
+    other = create_autospec(sqlite3.Connection, instance=True)
+    other.in_transaction = True
+    other.execute.side_effect = connection.execute.side_effect
+    loaded = []
+    def load():
+        loaded.append(1)
+        return ('fixed',)
+    with facts.operation_fact_scope(connection, HistoryBoundary(1, 3)):
+        facts._reuse_readonly_event(connection, 2, load)
+        facts._reuse_readonly_event(other, 2, load)
+        with facts.operation_fact_scope(other, HistoryBoundary(1, 3)):
+            facts._reuse_readonly_event(other, 2, load)
+            facts._reuse_readonly_event(other, 2, load)
+        facts._reuse_readonly_event(connection, 2, load)
+        facts.discard_operation_facts(connection)
+        facts._reuse_readonly_event(connection, 2, load)
+    assert len(loaded) == 4
+
+
+def test_readonly_event_oversized_value_is_returned_without_retention(database, facts, monkeypatch):
+    connection, _ = database
+    monkeypatch.setattr(facts, 'MAX_FACT_BYTES', 1024)
+    loaded = []
+    def load():
+        loaded.append(1)
+        return ('x' * 3000,)
+    with facts.operation_fact_scope(connection, HistoryBoundary(1, 3)):
+        assert facts._reuse_readonly_event(connection, 2, load) == ('x' * 3000,)
+        assert facts._reuse_readonly_event(connection, 2, load) == ('x' * 3000,)
+    assert len(loaded) == 2
