@@ -4,6 +4,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.wakeups import RecordingWakeups
 
 
@@ -55,11 +56,23 @@ def test_devices_keep_independent_deadlines_and_shutdown_clears_hints():
     assert wakeups.next_at(100, 0) is None
 
 
+def _runtime(**collaborators):
+    context = CaptureRuntime(
+        database=object(), scheduling=None, operations=None, capture=None,
+        timelapse=None, driver=None, results=None, evidence=None,
+        wall_us=lambda: 150, monotonic_ns=lambda: 0,
+        window_of=lambda _: None, wait_config=lambda _: None,
+    )
+    for name, value in collaborators.items():
+        setattr(context, name, value)
+    return context
+
+
 def _waiting_context(mocker):
     from camctl.capture.recording import RecordingState
 
     action = {"id": 1, "status": 2, "cancel_requested": 0, "execution_spec_json": {}}
-    context = SimpleNamespace(
+    context = _runtime(
         resume_result_check_closes=AsyncMock(), resume_capture_completions=AsyncMock(),
         resume_baselines=AsyncMock(), resume_file_observations=AsyncMock(),
         resume_start_results=AsyncMock(return_value=False),
@@ -118,10 +131,11 @@ async def test_resume_start_results_reports_only_consumed_results_for_requested_
 
     ticket = object()
     pending = SimpleNamespace(result_disposition_ready=True, finish=SimpleNamespace(ticket=ticket))
-    context = SimpleNamespace(pending_start_results={(7, 1): pending},
+    context = _runtime(pending_start_results={(7, 1): pending},
         action_id_of_ticket=AsyncMock(return_value=owner))
 
-    async def save(identity, original):
+    async def save(identity, original, *, retry):
+        assert retry is True
         assert original is pending
         if consumed:
             del context.pending_start_results[identity]
@@ -141,7 +155,8 @@ async def test_recording_wait_preserves_real_start_result_consumption(mocker, ow
     context.pending_start_results[(7, 1)] = pending
     context.action_id_of_ticket = AsyncMock(return_value=owner)
 
-    async def save(identity, original):
+    async def save(identity, original, *, retry):
+        assert retry is True
         del context.pending_start_results[identity]
 
     async def resume(action_id):
@@ -159,7 +174,7 @@ async def test_recording_wait_preserves_real_start_result_consumption(mocker, ow
 async def test_internal_read_wakes_only_after_original_pending_changes(mocker, mapping, change):
     from camctl.capture.handlers import _resume_internal_read_results
 
-    context = SimpleNamespace(database=object(), operations=object(), wall_us=lambda: 150,
+    context = _runtime(database=object(), operations=object(), wall_us=lambda: 150,
         pending_read_business={}, pending_read_results={}, pending_read_ends={}, continuing_read_tickets={})
     original = object()
     pending = getattr(context, mapping)
@@ -204,7 +219,7 @@ async def test_recording_wait_keeps_global_read_progress_without_waking_for_obse
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prior", ["absent", "same", "other_ticket"])
-async def test_internal_read_recopy_qualification_wakes_once_without_time_refresh_loop(prior):
+async def test_internal_read_recopy_consumes_original_end_and_wakes_once(prior):
     from camctl.capture.handlers import _resume_internal_read_results
     from camctl.capture.input_copy import InputPhase, InputStep
     from camctl.capture.media_flow import _finish_internal_read_result
@@ -218,9 +233,9 @@ async def test_internal_read_recopy_qualification_wakes_once_without_time_refres
     facts = SimpleNamespace(verification_state=1, source_support=SourceChecksumSupport.UNSUPPORTED,
         source_sha256=None, target_sha256=None, committed_bytes=8, source_size=8)
     database = create_autospec(BusinessDatabase, instance=True)
-    database.read.side_effect = [facts, (ticket, 1)] * 2
+    database.read.side_effect = [facts, (ticket, 1)]
     clock = [100]
-    context = SimpleNamespace(database=database, operations=object(), evidence=object(),
+    context = _runtime(database=database, operations=object(), evidence=object(),
         wall_us=lambda: clock[0], occurred_at=lambda: clock[0], pending_read_business={},
         pending_read_results={}, pending_read_ends={}, continuing_read_tickets={})
     step = InputStep(InputPhase.RECOPY_PENDING, copy_id=7)
@@ -235,9 +250,14 @@ async def test_internal_read_recopy_qualification_wakes_once_without_time_refres
         context.continuing_read_tickets[7] = ReadContinuation(
             earlier, False, step, 99, evidence=context.evidence)
 
-    assert await _resume_internal_read_results(context) is (prior != "same")
-    assert context.pending_read_ends[7] is held
+    # 原结束依据被消费本身就是进展，即使此前已持有同一续读资格。
+    assert await _resume_internal_read_results(context) is True
+    assert not context.pending_read_ends
     assert context.continuing_read_tickets[7].ticket == ticket
+    assert context.continuing_read_tickets[7].step is step
+    assert context.continuing_read_tickets[7].occurred_at == 100
     clock[0] = 101
     assert await _resume_internal_read_results(context) is False
+    assert context.continuing_read_tickets[7].occurred_at == 100
+    assert database.read.await_count == 2
     database.write.assert_not_awaited()
