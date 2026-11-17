@@ -1,7 +1,6 @@
 """正常准备和恢复加入原保存阶段，实际结果只应用一次。"""
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -12,6 +11,8 @@ from camctl.capture.preparation import (
     resume_preparation_saves,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+from camctl.persistence.repositories.scheduling import ReservePreparationOutcome, ReservePreparationResult
 from camctl.persistence.models import (
     DbOutcome, DbOutcomeKind, _attach_db_outcome, db_outcome_for,
 )
@@ -40,11 +41,11 @@ def _saving_world(mocker, phase):
     elif phase == "reservation":
         preparation._activity.return_value = None
         runtime.scheduling.reserve_preparation.return_value = DbOutcome(
-            DbOutcomeKind.COMPLETED, SimpleNamespace(outcome=SimpleNamespace(value="rejected")))
+            DbOutcomeKind.COMPLETED, ReservePreparationResult(ReservePreparationOutcome.REJECTED, reason="device_busy"))
         normal = lambda: advance_preparation(runtime, 1)
     else:
         runtime.capture.release_occupancy.return_value = DbOutcome(
-            DbOutcomeKind.COMPLETED, SimpleNamespace(outcome=SimpleNamespace(value="released")))
+            DbOutcomeKind.COMPLETED, ActivityReleaseResult(ReleaseOutcome.RELEASED))
         runtime.scheduling.fail_preparation.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
         normal = lambda: _end(runtime, 1,
             "release" if phase == "release" else "fail_preparation", object())
