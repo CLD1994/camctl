@@ -614,7 +614,8 @@ def test_report_failure_preserves_device_work_and_redelivers(
     assert saved["saved_report_ids"] == [report["report_id"]]
 
 
-def test_late_result_preserves_terminal_decision(tmp_path: Path, start_owned_camctl) -> None:
+def test_late_result_preserves_terminal_decision(
+        tmp_path: Path, start_owned_camctl, reuse_client) -> None:
     """设备定义改变与迟到文件不改写已确定结果：集合核实失败的动作
     保持终态与无产物事实。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
@@ -624,7 +625,9 @@ def test_late_result_preserves_terminal_decision(tmp_path: Path, start_owned_cam
 
     # 首个驱动剧本列举空集合：延时任务等待完成后可靠确认没有视频
     # 产物，按 no_outputs 失败收场且不登记产物。
-    empty_spec = stub_driver_spec({"1": []}, timelapse_duration_s=3.0)
+    duration_s = 3
+    empty_spec = stub_driver_spec({"1": []}, timelapse_duration_s=duration_s)
+    reuse_client(deployment)
     deployment.install_client_capabilities(empty_spec)
 
     shoot_at = deployment.schedule(1)
@@ -635,10 +638,24 @@ def test_late_result_preserves_terminal_decision(tmp_path: Path, start_owned_cam
     deadline = time.monotonic() + 180
     process = start_owned_camctl(deployment,
         "run", str(plan_path), "--config", str(deployment.config_path), driver=empty_spec)
+    state_db = deployment.state_db
+    # 原 START 的发送事实和未完成的等待安排保存后，推进业务钟到检查时点。
+    _await_row(
+        state_db,
+        "SELECT 1 FROM device_activities d"
+        " JOIN actions a ON a.id = d.action_id"
+        " WHERE a.name = ? AND d.expected_check_at = d.sent_at + ?"
+        " AND d.wait_completed_event_id IS NULL",
+        ("timelapse", duration_s * 1_000_000), process=process)
+    deployment.freeze_at(deployment.schedule(duration_s))
     first = _resume_after_capture_start(
         deployment, process, "timelapse", deadline=deadline)
     assert first.exit_code == 0, first.stderr
-    state_db = deployment.state_db
+    assert _query(
+        state_db,
+        "SELECT d.wait_completed_event_id IS NOT NULL FROM device_activities d"
+        " JOIN actions a ON a.id = d.action_id WHERE a.name = 'timelapse'"
+    ) == [(1,)]
     assert _query(
         state_db, "SELECT status FROM actions WHERE name = 'timelapse'"
     ) == [(4,)]
@@ -654,7 +671,7 @@ def test_late_result_preserves_terminal_decision(tmp_path: Path, start_owned_cam
     # 设备绑定改变：新剧本在收场后报告视频文件（迟到结果）。
     late_spec = stub_driver_spec(
         {"1": [video_file("late-1")]},
-        timelapse_duration_s=3.0,
+        timelapse_duration_s=duration_s,
         device_files={"late-1": _CLIP_CONTENT})
     second = deployment.camctl(
         "run", "--config", str(deployment.config_path), driver=late_spec)
