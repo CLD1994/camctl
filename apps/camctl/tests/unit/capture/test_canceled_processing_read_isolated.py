@@ -1,46 +1,19 @@
 """取消录像内部读取的原事实、机会和文件拥有者；全部使用内存替身。"""
 
-import ast
 import asyncio
-from contextlib import closing
-from pathlib import Path
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from camctl.capture import canceled_internal_reads, handlers
 from camctl.capture.recovery import RecoveryBoundary
-
-ROOT = Path(__file__).parents[3] / "src/camctl"
-OUTPUTS = ROOT / "persistence/repositories/outputs.py"
-CANCELED = ROOT / "capture/canceled_internal_reads.py"
-LIFECYCLE = ROOT / "bootstrap/lifecycle.py"
-
-
-class StripImports(ast.NodeTransformer):
-    def visit_Import(self, node): return None
-    def visit_ImportFrom(self, node): return None
-
-
-def load(path, name, namespace):
-    namespace.setdefault("closing", closing)
-    tree = ast.parse(path.read_text())
-    node = next(n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.name == name)
-    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), StripImports().visit(node)], type_ignores=[])
-    exec(compile(ast.fix_missing_locations(module), str(path), "exec"), namespace)
-    return namespace[name]
-
+from camctl.history.events import load_event_registry, reason_for_branch
 
 class Cursor:
     def __init__(self, rows): self.rows = rows
     def fetchone(self): return self.rows[0] if self.rows else None
+    def fetchall(self): return self.rows
     def close(self): pass
-
-
-def no_running_read():
-    return SimpleNamespace(connection=SimpleNamespace(
-        execute=lambda sql, args: SimpleNamespace(fetchall=lambda: [], close=lambda: None)))
 
 
 class ProcessingCancelTests(unittest.TestCase):
@@ -71,57 +44,85 @@ class ProcessingCancelTests(unittest.TestCase):
         self.assertEqual(asyncio.run(run(True)), ["read_settlement", "cancel_finish"])
 
     def test_release_transaction_waits_for_other_original_call(self):
-        current = [False]
-        ns = {"_RUN_STATUS": SimpleNamespace(PENDING=1), "_RUN_KIND": SimpleNamespace(READ_FILE=3),
-            "_RUN_TERMINAL": {3, 4, 5}, "_ATTEMPT_STATUS": SimpleNamespace(RUNNING=1),
-            "SlotOutcome": SimpleNamespace(WAIT="wait", RELEASED="released", ALREADY_RELEASED="already"),
-            "ConsistencyError": ValueError, "TransactionError": ValueError,
-            "_canceled_binding_processing_settled": lambda *args: current[0]}
-        cls = load(OUTPUTS, "_SlotChangeCommand", ns)
-        command = object.__new__(cls)
-        command._request = SimpleNamespace(capture_selection=None)
-        command._state = {"operation_attempts": {}}
-        command._load_attempts = lambda *args: None
-        command._load_owner_action = lambda *args: {"id": 4, "status": 2, "cancel_requested": 1}
-        command._decision = lambda outcome, reason=None: (outcome, reason)
-        command._save = lambda *args: ("released", None)
-        copy = {"id": 9, "slot_device_id": "camera", "processing_id": 3, "committed_bytes": 10, "source_size": 10}
-        run = {"id": 7, "status": 4, "retry_wait_required": 0}
-        scope = SimpleNamespace(connection=object())
-        self.assertEqual(command._release(scope, copy, "camera", run), ("wait", "action_active"))
-        current[0] = True
-        self.assertEqual(command._release(scope, copy, "camera", run), ("released", None))
+        from camctl.outputs.slots import SlotOutcome, SlotRequest
+        from camctl.persistence.repositories.outputs import OutputsRepository
+
+        class Connection:
+            unsettled = True
+            def execute(self, sql, args):
+                if "history_transactions WHERE operation_key" in sql: return Cursor([])
+                if "SELECT id FROM operation_runs WHERE responsibility_key" in sql: return Cursor([(7,)])
+                if "SELECT id FROM operation_attempts WHERE run_id" in sql: return Cursor([])
+                if "SELECT 1 FROM operation_attempts t JOIN operation_runs" in sql:
+                    return Cursor([(1,)] if self.unsettled else [])
+                table = sql.split("FROM ")[1].split()[0]
+                rows = {
+                    ("file_copies", 9): {"id": 9, "delivery_id": None, "processing_id": 3,
+                        "source_device_file_id": 15, "slot_device_id": "camera",
+                        "committed_bytes": 10, "source_size": 10},
+                    ("recording_processing", 3): {"id": 3, "action_id": 4},
+                    ("device_files", 15): {"id": 15, "observer_action_id": 5, "source_action_id": 6},
+                    ("actions", 4): {"id": 4, "status": 2, "cancel_requested": 1},
+                    ("actions", 5): {"id": 5, "device_id": "camera", "driver_id": "driver"},
+                    ("actions", 6): {"id": 6, "device_id": "camera", "driver_id": "driver"},
+                    ("operation_runs", 7): {"id": 7, "status": 4, "retry_wait_required": 0,
+                        "error_json": '{"code":"device_binding_unavailable"}'}}
+                values = rows[(table, args[0])]
+                cursor = Cursor([tuple(values.values())])
+                cursor.description = [(key,) for key in values]
+                return cursor
+        class Storage:
+            def commit_operation(self, command, key, owned):
+                self.plan = command.plan(SimpleNamespace(connection=owned.connection,
+                    allocate=lambda count: SimpleNamespace(first_event_id=200, txn_id=3)))
+                return SimpleNamespace(kind="completed", result=self.plan.result)
+        connection = Connection()
+        storage = Storage()
+        repository = OutputsRepository(storage=storage)
+        with patch("camctl.persistence.repositories.binding_read_cancel.load_saved_binding_read_failure"):
+            outcome = repository.release_read_slot(SlotRequest(9, 20), "key", SimpleNamespace(connection=connection))
+            self.assertEqual((outcome.value.outcome, outcome.value.reason), (SlotOutcome.WAIT, "action_active"))
+            self.assertTrue(storage.plan.read_only)
+            connection.unsettled = False
+            outcome = repository.release_read_slot(SlotRequest(9, 20), "key", SimpleNamespace(connection=connection))
+            self.assertEqual(outcome.value.outcome, SlotOutcome.RELEASED)
+            self.assertEqual(storage.plan.events[0].rows[0].after.values, {"slot_device_id": None})
 
     def test_release_guard_independently_requires_all_original_calls_settled(self):
-        module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-        class Reads:
-            connection = object()
-            def no_unsettled_attempts(self, run_id, validated): return True
-        module.RetryWaitReads = Reads
-        ready = [True]
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+        from camctl.persistence.repositories.validation import build_business_rules
+
+        class Connection:
+            unsettled = False
+            def execute(self, sql, args):
+                return Cursor([(1,)] if self.unsettled else [])
+
+        connection = Connection()
+        reads = RetryWaitReads(connection)
         copy = {"id": 9, "processing_id": 3, "source_device_file_id": 15,
                 "committed_bytes": 10, "source_size": 10}
-        source = {"observer_action_id": 5, "source_action_id": 6}
-        owner = {"device_id": "camera", "driver_id": "driver"}
-        run = {"id": 7, "status": 4, "retry_wait_required": 0}
-        facts = {("file_copies", 9): copy, ("device_files", 15): source,
-                 ("actions", 5): owner, ("actions", 6): owner}
-        ns = {"__name__": "isolated.outputs", "__package__": "camctl.persistence.repositories",
-            "_COPY_CHANGED_EVENT": 22, "_SLOT_REASON": 6, "EventValidationError": ValueError,
-            "_guard_facts": lambda context, table, identity: facts[(table, identity)],
-            "_slot_run": lambda context, copy_id: run, "_slot_owner_action": lambda context, copy: {"id": 4},
-            "RetryWaitReads": Reads,
-            "_canceled_binding_processing_settled": lambda *args: ready[0], "_RUN_TERMINAL": {3, 4, 5}}
-        guard = load(OUTPUTS, "_read_slot_guard", ns)
+        run = {"id": 7, "copy_id": 9, "kind": 3, "status": 4, "retry_wait_required": 0,
+               "error_json": {"code": "device_binding_unavailable"}}
+        context = SimpleNamespace(retry_wait_reads=reads, validated_events=(), state_rows={
+            "file_copies": {9: copy}, "operation_runs": {7: run},
+            "device_files": {15: {"observer_action_id": 5, "source_action_id": 6}},
+            "recording_processing": {3: {"action_id": 4}},
+            "actions": {4: {"id": 4, "status": 2, "cancel_requested": 1},
+                        5: {"device_id": "camera", "driver_id": "driver"},
+                        6: {"device_id": "camera", "driver_id": "driver"}}})
         row = SimpleNamespace(table="file_copies", row_id=9,
             before=SimpleNamespace(exists=True, values={"slot_device_id": "camera"}),
             after=SimpleNamespace(values={"slot_device_id": None}))
-        event = SimpleNamespace(event_type=22, reason=6, rows=(row,))
-        context = SimpleNamespace(retry_wait_reads=Reads(), validated_events=())
-        with patch.dict(sys.modules, {module.__name__: module}):
+        event = SimpleNamespace(event_type=load_event_registry()["events"]["COPY_CHANGED"]["id"],
+                                reason=reason_for_branch("COPY_CHANGED", "SLOT"), rows=(row,))
+        guard = build_business_rules()["read_slot"]
+        with patch.object(RetryWaitReads, "no_unsettled_attempts", return_value=True), \
+             patch("camctl.persistence.repositories.binding_read_cancel.load_saved_binding_read_failure"):
             guard(event, context)
-            ready[0] = False
-            with self.assertRaises(ValueError): guard(event, context)
+            connection.unsettled = True
+            with self.assertRaises(EventValidationError):
+                guard(event, context)
 
     def test_terminal_recovery_pages_without_device_assembly(self):
         async def run():
@@ -137,62 +138,93 @@ class ProcessingCancelTests(unittest.TestCase):
                 work_files=SimpleNamespace(executor=object()))
             context = SimpleNamespace(database=Database(), clock=SimpleNamespace(utc_micros=lambda: 20),
                 wake=SimpleNamespace(mark_changed=lambda reason: notifications.append(reason)))
-            ns = {"settle_canceled_processing_read": settle, "OperationRepository": lambda: object(),
-                "internal_read_scope": lambda database, operations, **kwargs: SimpleNamespace(**kwargs),
-                "WakeReason": SimpleNamespace(ACTIVITY_FINISHED="wake")}
-            await load(LIFECYCLE, "_resume_canceled_internal_reads", ns)(deps, context)
+            from camctl.bootstrap import lifecycle
+            from camctl.scheduling.notifications import WakeReason
+            with patch.object(canceled_internal_reads, "settle_canceled_processing_read", settle):
+                await lifecycle._resume_canceled_internal_reads(deps, context)
             self.assertEqual(deps.capture_canceled_read_after, 128)
-            self.assertEqual(notifications, ["wake"])
+            self.assertEqual(notifications, [WakeReason.ACTIVITY_FINISHED])
             self.assertEqual(len(calls), 128)
             self.assertIs(calls[0][0].pending_segment_inspection_results, shared)
-        # The extracted function imports only fake collaborators.
         asyncio.run(run())
 
     def test_release_requires_original_failed_read_and_all_calls_settled(self):
-        binding = ModuleType("camctl.persistence.repositories.binding_read_cancel")
-        calls = []
-        binding.load_saved_binding_read_failure = lambda connection, action, copy, error: calls.append((action, copy, error))
-        ns = {"__name__": "isolated.outputs", "__package__": "camctl.persistence.repositories",
-              "closing": closing, "Mapping": dict, "_RUN_STATUS": SimpleNamespace(FAILED=4),
-              "load_saved_binding_read_failure": binding.load_saved_binding_read_failure}
-        check = load(OUTPUTS, "_canceled_binding_processing_settled", ns)
-        rows = []
-        connection = SimpleNamespace(execute=lambda sql, args: Cursor(rows))
-        copy = {"id": 9, "processing_id": 3}
-        run = {"id": 7, "status": 4, "error_json": {"code": "device_binding_unavailable"}}
+        from camctl.history.validators import EventValidationError
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+        from camctl.persistence.repositories.validation import build_business_rules
+
+        class Connection:
+            unsettled = False
+            def execute(self, sql, args):
+                return Cursor([(1,)] if self.unsettled else [])
+        connection = Connection()
+        reads = RetryWaitReads(connection)
+        error = {"code": "device_binding_unavailable"}
         action = {"id": 4, "status": 2, "cancel_requested": 1}
-        with patch.dict(sys.modules, {binding.__name__: binding}):
-            self.assertTrue(check(connection, copy, run, action))
-            self.assertEqual(calls[-1][:2], (4, 9))
-            rows.append((1,))
-            self.assertFalse(check(connection, copy, run, action))
+        context = SimpleNamespace(retry_wait_reads=reads, validated_events=(), state_rows={
+            "file_copies": {9: {"id": 9, "processing_id": 3, "source_device_file_id": 15,
+                "committed_bytes": 10, "source_size": 10}},
+            "operation_runs": {7: {"id": 7, "copy_id": 9, "kind": 3, "status": 4,
+                "retry_wait_required": 0, "error_json": error}},
+            "device_files": {15: {"observer_action_id": 5, "source_action_id": 6}},
+            "recording_processing": {3: {"action_id": 4}},
+            "actions": {4: action, 5: {"device_id": "camera", "driver_id": "driver"},
+                        6: {"device_id": "camera", "driver_id": "driver"}}})
+        row = SimpleNamespace(table="file_copies", row_id=9,
+            before=SimpleNamespace(exists=True, values={"slot_device_id": "camera"}),
+            after=SimpleNamespace(values={"slot_device_id": None}))
+        event = SimpleNamespace(event_type=load_event_registry()["events"]["COPY_CHANGED"]["id"],
+                                reason=reason_for_branch("COPY_CHANGED", "SLOT"), rows=(row,))
+        guard = build_business_rules()["read_slot"]
+        with patch.object(RetryWaitReads, "no_unsettled_attempts", return_value=True), \
+             patch("camctl.persistence.repositories.binding_read_cancel.load_saved_binding_read_failure") as saved:
+            guard(event, context)
+            saved.assert_called_once_with(connection, 4, 9, error)
+            connection.unsettled = True
+            with self.assertRaises(EventValidationError): guard(event, context)
             action["cancel_requested"] = 0
-            self.assertIsNone(check(connection, copy, run, action))
+            saved.reset_mock()
+            guard(event, context)
+            saved.assert_not_called()
 
     def test_file_ownership_and_original_key_precede_release(self):
+        from camctl.outputs.slots import SlotOutcome
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+
         async def run(*, ready=True, busy=False, pending_result=False, pending_business=False, changed=False):
             trace = []
-            current = (9, 20, "camera", ready)
+            class Connection:
+                def execute(self, sql, args):
+                    if "SELECT c.id,ob.device_id" in sql:
+                        return Cursor([])
+                    if "SELECT c.id,c.target_file_id" in sql:
+                        return Cursor([(9, 20, "camera", 7)])
+                    table = sql.split("FROM ")[1].split()[0]
+                    values = {"file_copies": {"id": 9, "processing_id": 3},
+                              "operation_runs": {"id": 7, "status": 5},
+                              "actions": {"id": 4, "status": 2, "cancel_requested": 1}}[table]
+                    cursor = Cursor([tuple(values.values())])
+                    cursor.description = [(key,) for key in values]
+                    return cursor
             class Database:
-                async def read(self, callback): return callback(no_running_read())
+                async def read(self, callback): return callback(SimpleNamespace(connection=Connection()))
             executor = SimpleNamespace(unfinished_files=lambda: (20,) if busy else ())
             result = SimpleNamespace(ticket=SimpleNamespace(target_id="9"))
             flow = SimpleNamespace(database=Database(), file_executor=executor, occurred_at=lambda: 25,
                 pending_read_business={(4, "capture_binding_failure"): object()} if pending_business else {},
                 pending_read_results={(7, 1): result} if pending_result else {})
+            availability = [ready]
             async def owned(runtime, copy_id, callback):
                 trace.append("owner")
-                if changed: candidates[0] = (9, 20, "camera", False)
+                if changed: availability[0] = False
                 return await callback(None)
             async def save(runtime, copy_id, stage, request, method, **kwargs):
                 trace.append(("release", copy_id, request.occurred_at))
-                return SimpleNamespace(value=SimpleNamespace(outcome="released"))
-            candidates = [current]
-            ns = {"_candidate": lambda owned, action: candidates[0], "run_owned_read": owned,
-                "save_read_business": save, "SlotRequest": lambda copy, now: SimpleNamespace(copy_id=copy, occurred_at=now),
-                "OutputsRepository": lambda: SimpleNamespace(release_read_slot=object()),
-                "SlotOutcome": SimpleNamespace(RELEASED="released", ALREADY_RELEASED="already")}
-            result = await load(CANCELED, "settle_canceled_processing_read", ns)(flow, 4)
+                return SimpleNamespace(value=SimpleNamespace(outcome=SlotOutcome.RELEASED))
+            with patch.object(RetryWaitReads, "no_unsettled_attempts", side_effect=lambda *args: availability[0]), \
+                 patch.object(canceled_internal_reads, "run_owned_read", owned), \
+                 patch.object(canceled_internal_reads, "save_read_business", save):
+                result = await canceled_internal_reads.settle_canceled_processing_read(flow, 4)
             return result, trace
         self.assertEqual(asyncio.run(run()), (True, ["owner", ("release", 9, 25)]))
         for values in ({"ready": False}, {"busy": True}, {"pending_result": True}, {"pending_business": True}):
@@ -200,26 +232,39 @@ class ProcessingCancelTests(unittest.TestCase):
         self.assertEqual(asyncio.run(run(changed=True)), (False, ["owner"]))
 
     def test_slot_unknown_retries_existing_key_even_if_already_released(self):
+        from camctl.outputs.slots import SlotOutcome
+        from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+
         async def run():
             prior = SimpleNamespace(key="original-release-key", request=object())
             pending = {(9, "release_read_slot"): prior}
-            flow = SimpleNamespace(database=SimpleNamespace(read=lambda callback: call(callback)),
-                file_executor=SimpleNamespace(unfinished_files=lambda: ()), occurred_at=lambda: 25,
-                pending_read_business=pending, pending_read_results={})
+            class Connection:
+                def execute(self, sql, args):
+                    if "SELECT c.id,ob.device_id" in sql: return Cursor([])
+                    if "SELECT c.id,c.target_file_id" in sql: return Cursor([(9, 20, None, 7)])
+                    table = sql.split("FROM ")[1].split()[0]
+                    values = {"file_copies": {"id": 9, "processing_id": 3},
+                              "operation_runs": {"id": 7, "status": 5},
+                              "actions": {"id": 4, "status": 2, "cancel_requested": 1}}[table]
+                    cursor = Cursor([tuple(values.values())])
+                    cursor.description = [(key,) for key in values]
+                    return cursor
+            class Database:
+                async def read(self, callback): return callback(SimpleNamespace(connection=Connection()))
+            flow = SimpleNamespace(database=Database(), file_executor=SimpleNamespace(unfinished_files=lambda: ()),
+                occurred_at=lambda: 25, pending_read_business=pending, pending_read_results={})
             calls = []
             async def owned(runtime, copy_id, callback): return await callback(None)
             async def save(runtime, copy_id, stage, request, method, **kwargs):
                 actual = runtime.pending_read_business[(copy_id, stage)]
                 calls.append((actual.key, actual.request, kwargs["retry"]))
                 del runtime.pending_read_business[(copy_id, stage)]
-                return SimpleNamespace(value=SimpleNamespace(outcome="already"))
-            ns = {"_candidate": lambda owned, action: (9, 20, None, True), "run_owned_read": owned,
-                "save_read_business": save, "SlotRequest": lambda copy, now: object(),
-                "OutputsRepository": lambda: SimpleNamespace(release_read_slot=object()),
-                "SlotOutcome": SimpleNamespace(RELEASED="released", ALREADY_RELEASED="already")}
-            self.assertTrue(await load(CANCELED, "settle_canceled_processing_read", ns)(flow, 4))
+                return SimpleNamespace(value=SimpleNamespace(outcome=SlotOutcome.ALREADY_RELEASED))
+            with patch.object(RetryWaitReads, "no_unsettled_attempts", return_value=True), \
+                 patch.object(canceled_internal_reads, "run_owned_read", owned), \
+                 patch.object(canceled_internal_reads, "save_read_business", save):
+                self.assertTrue(await canceled_internal_reads.settle_canceled_processing_read(flow, 4))
             self.assertEqual(calls, [("original-release-key", prior.request, True)])
-        async def call(callback): return callback(no_running_read())
         asyncio.run(run())
 
 
