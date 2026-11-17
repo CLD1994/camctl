@@ -125,6 +125,9 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -
     """录像交付存活迟到取消：拷贝交付到 ready、领取进 processing、
     取消按不可撤回收场后原请求终态与交付字节保持。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例不验证计划发现间隔；业务时钟与录像目标保持独立。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
