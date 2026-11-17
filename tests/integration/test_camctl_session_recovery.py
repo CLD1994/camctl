@@ -268,6 +268,9 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path, start_owned
     间，按无法确认失败收场；同设备后续动作不被遗留活动阻塞，会话
     正常退出。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例不验证计划发现的默认轮询间隔；保留原业务时钟与故障门。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -553,6 +556,9 @@ def test_report_failure_preserves_device_work_and_redelivers(
     """报告文件交接失败不阻止设备动作：动作与计划按事实终态，报告
     责任保留并由后续会话补交付。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例不验证计划发现的默认轮询间隔；保留报告失败与补交顺序。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
