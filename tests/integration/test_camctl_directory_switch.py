@@ -4,6 +4,7 @@ from camctl_memory_plugin import run_camctl
 
 import json
 import os
+import re
 import shlex
 import sqlite3
 import subprocess
@@ -47,17 +48,10 @@ def test_new_binding_publishes_and_claims_after_explicit_init(tmp_path, host_dem
     _cli(config, "init")
     first = tmp_path / "first.json"
     _plan(first, "1", "原目录报告")
-    _cli(config, "run", str(first))
-    originals = {path.name: path.read_bytes() for path in old["ready"].glob("status-report-*.json")}
-    assert originals
-    with sqlite3.connect(f"file:{state_db}?mode=ro", uri=True) as connection:
-        identity = connection.execute("SELECT instance_id FROM database_metadata").fetchone()[0]
-        old_report_id = connection.execute("SELECT MAX(id) FROM reports").fetchone()[0]
-
     launcher = tmp_path / "camctl-launcher"
     launcher.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(_ENTRY)} \"$@\"\n")
     launcher.chmod(0o755)
-    deployment = SimpleNamespace(root=tmp_path, ready=old["ready"], processing=old["processing"], config_path=config)
+    deployment = SimpleNamespace(root=tmp_path, ready=old["ready"], processing=old["processing"], config_path=config, state_db=state_db)
     demo = HostDemo(deployment, host_demo, launcher=str(launcher))
     archive = tmp_path / "old-claimed-files"
     archive.mkdir()
@@ -72,8 +66,33 @@ def test_new_binding_publishes_and_claims_after_explicit_init(tmp_path, host_dem
             target.write_bytes(content)
         path.unlink()
 
+    def old_report_completed():
+        for path in old["ready"].glob("status-report-*.json"):
+            try:
+                document = json.loads(path.read_bytes())
+            except FileNotFoundError:
+                continue
+            if any(action["name"] == "原目录报告" and action["status"] == "succeeded"
+                   for plan in document.get("plans", []) for action in plan["actions"]):
+                return True
+        return False
+
     try:
-        demo.start()
+        assert not demo.log_path.exists()
+        failure = demo.watch_failures(request_id="1", expected_statuses={"原目录报告": "SUCCEEDED"})
+        demo.start(initial_plan=first)
+        wait_for(old_report_completed, 30, "原目录的报告动作没有完成", failure=failure)
+        wait_for(
+            lambda: demo.log_path.exists() and re.search(
+                r"^call=\d+ command=run pid=\d+ result=success exit_kind=0 exit=0 needs_run=0\b",
+                demo.module_log(), re.MULTILINE),
+            30, "原目录的 run 没有成功结束", failure=failure,
+        )
+        originals = {path.name: path.read_bytes() for path in old["ready"].glob("status-report-*.json")}
+        assert originals
+        with sqlite3.connect(f"file:{state_db}?mode=ro", uri=True) as connection:
+            identity = connection.execute("SELECT instance_id FROM database_metadata").fetchone()[0]
+            old_report_id = connection.execute("SELECT MAX(id) FROM reports").fetchone()[0]
         demo.claim()
         assert not tuple(old["ready"].iterdir())
         for name, content in originals.items():
