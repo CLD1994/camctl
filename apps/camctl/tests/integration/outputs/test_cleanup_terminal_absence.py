@@ -40,8 +40,8 @@ class _RejectFinish(OutputsRepository):
                          error=OperationalError("保存确认回滚"))
 
 
-async def _terminal(environment, *, query=False, with_error=False):
-    owned, context, runtime, driver, item_id = await _prepared(environment)
+async def _terminal(environment, *, query=False, with_error=False, devices=("cam-a",)):
+    owned, context, runtime, driver, item_id = await _prepared(environment, devices=devices)
     driver.unknown_delete = query
     if query:
         driver.matrix_enabled, driver.present = True, False
@@ -159,7 +159,7 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
     environment, query, with_error
 ):
     (output_id, action_id), (owned, context, prior_runtime, driver, item_id) = await _terminal(
-        environment, query=query, with_error=with_error
+        environment, query=query, with_error=with_error, devices=("cam-a", "cam-b")
     )
     from camctl.outputs.cleanup_discovery import (
         cleanup_item_batches,
@@ -180,6 +180,7 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
     sibling = owned.connection.execute(
         "SELECT * FROM outputs WHERE id<>?", (output_id,)
     ).fetchall()
+    assert len(sibling) == 1
     assert extra_cleanup_settlements(owned.connection) == 1
     assert tuple([batch async for batch in cleanup_item_batches(context.database, batch_size=1)]) == ((item_id,),)
     runtime = await session_cleanup_assembly(
@@ -350,7 +351,8 @@ async def test_handoff_original_application_survives_save_failure_and_factory_re
 async def test_original_handoff_key_rejects_changed_source_or_identity(
     environment, changed
 ):
-    (_, _), (owned, _, _, _, item_id) = await _terminal(environment)
+    devices = ("cam-a", "cam-b") if changed in ("output", "file") else ("cam-a",)
+    (_, _), (owned, _, _, _, item_id) = await _terminal(environment, devices=devices)
     request = _request(owned, item_id)
     key = new_operation_key()
     repository = OutputsRepository()

@@ -96,10 +96,14 @@ async def _configured(environment, owned, driver, *, database=None, devices=None
 
 
 async def _prepared(environment, *, query_attempts=3, missing_binding=False,
-                    before_query=False, evidence=None, delete_attempts=3):
+                    before_query=False, evidence=None, delete_attempts=3,
+                    devices=("cam-a",)):
     cfg, owned, context, capture_driver = environment
-    await _save_photos(cfg, owned, context, capture_driver)
-    output_id = owned.connection.execute("SELECT id FROM outputs ORDER BY id LIMIT 1").fetchone()[0]
+    await _save_photos(cfg, owned, context, capture_driver, devices=devices)
+    output_id = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'"
+    ).fetchone()[0]
     request_id = "2"
     if before_query:
         from .test_cleanup_query_cancel_before_delete import _c1_unknown_delete_terminal
