@@ -78,14 +78,14 @@ def _changed(command, change):
     raise AssertionError(change)
 
 
-@pytest.mark.parametrize(("branch", "change"), [
-    ("check", "processing"), ("check", "media"), ("check", "time"),
-    ("decision", "processing"), ("decision", "basis"), ("decision", "decision"), ("decision", "time"),
-    ("repair_failed", "processing"), ("repair_failed", "error"), ("repair_failed", "phase"), ("repair_failed", "time"),
-    ("start", "processing"), ("start", "extension"), ("start", "time"),
-    ("complete", "processing"), ("complete", "output"), ("complete", "size"), ("complete", "digest"), ("complete", "time"),
+@pytest.mark.parametrize(("branch", "changes"), [
+    ("check", ("processing", "media", "time")),
+    ("decision", ("processing", "basis", "decision", "time")),
+    ("repair_failed", ("processing", "error", "phase", "time")),
+    ("start", ("processing", "extension", "time")),
+    ("complete", ("processing", "output", "size", "digest", "time")),
 ])
-async def test_media_original_key_rejects_changed_full_request(pipeline, branch, change):
+async def test_media_original_key_rejects_changed_full_request(pipeline, branch, changes):
     owned = pipeline[0]
     save, command = await _original_request(owned, branch)
     key = new_operation_key()
@@ -94,11 +94,18 @@ async def test_media_original_key_rejects_changed_full_request(pipeline, branch,
     before = tuple(owned.connection.iterdump())
     repeated = save(command, key, owned)
     assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
+    assert not owned.connection.in_transaction
     assert tuple(owned.connection.iterdump()) == before
-    changed = save(_changed(command, change), key, owned)
-    assert changed.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(changed.error, TransactionError), changed.error
-    assert tuple(owned.connection.iterdump()) == before
+    for change in changes:
+        try:
+            changed = save(_changed(command, change), key, owned)
+            assert changed.kind is DbOutcomeKind.ROLLED_BACK, changed.error
+            assert isinstance(changed.error, TransactionError), changed.error
+            assert not owned.connection.in_transaction
+            assert tuple(owned.connection.iterdump()) == before
+        except Exception as error:
+            error.add_note(f"branch={branch}, change={change}")
+            raise
 
 
 async def test_check_running_key_cannot_be_reused_as_actual_observation(pipeline):

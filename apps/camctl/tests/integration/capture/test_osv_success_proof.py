@@ -130,11 +130,10 @@ async def test_both_success_commands_reject_invalid_output_probes(tmp_path, entr
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("entry", ["complete", "result"])
 @pytest.mark.parametrize("fault", ["source_missing",
     "source_short", "source_unknown", "source_tool_error", "source_container", "source_stream_short",
     "source_identity", "copy_missing", "copy_unverified", "copy_path", "copy_size", "wrong_output"])
-async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(tmp_path, entry, fault):
+async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(tmp_path, fault):
     owned, output_id, source, output = await prepared_repair(tmp_path)
     try:
         if fault == "source_missing": alter_source_history(owned, lambda original: None)
@@ -164,19 +163,26 @@ async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(t
             owned.connection.execute("INSERT INTO intermediate_files (id,owner_action_id,purpose,relative_path,retention_state,cleanup_state,size_bytes,sha256,created_event_id,last_event_id,change_count) VALUES (?,1,4,?,1,1,NULL,NULL,1,1,1)",
                 (output_id, f"derived/{output_id}.mp4"))
             owned.connection.commit()
-        if entry == "complete":
-            command = RepairSuccess(1, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
-            save = CaptureRepository().complete_repair_output
-        else:
-            owned.connection.execute("UPDATE intermediate_files SET size_bytes=2048,sha256=? WHERE id=?", ("a"*64, output_id))
-            owned.connection.commit()
-            command = RepairResultSave(1, RepairOutcome.SUCCEEDED, _NOW+200,
-                output_file_id=output_id, output_probe=output)
-            save = CaptureRepository().save_repair_result
-        before = tuple(owned.connection.iterdump())
-        outcome = save(command, new_operation_key(), owned)
-        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-        assert tuple(owned.connection.iterdump()) == before
+        repository = CaptureRepository()
+        for entry in ("complete", "result"):
+            try:
+                if entry == "complete":
+                    command = RepairSuccess(1, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
+                    save = repository.complete_repair_output
+                else:
+                    owned.connection.execute("UPDATE intermediate_files SET size_bytes=2048,sha256=? WHERE id=?", ("a"*64, output_id))
+                    owned.connection.commit()
+                    command = RepairResultSave(1, RepairOutcome.SUCCEEDED, _NOW+200,
+                        output_file_id=output_id, output_probe=output)
+                    save = repository.save_repair_result
+                before = tuple(owned.connection.iterdump())
+                outcome = save(command, new_operation_key(), owned)
+                assert outcome.kind is DbOutcomeKind.ROLLED_BACK, outcome.error
+                assert not owned.connection.in_transaction
+                assert tuple(owned.connection.iterdump()) == before
+            except Exception as error:
+                error.add_note(f"entry={entry}, fault={fault}")
+                raise
     finally:
         owned.connection.close()
 
