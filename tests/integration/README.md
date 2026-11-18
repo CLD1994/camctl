@@ -148,7 +148,7 @@ ADB 提供的 OSV／LRF 是合成字节样例，不证明真实媒体可解码�
 apps/camctl/.venv311/bin/python -m pytest --test-kind acceptance tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
 ```
 
-`client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <凭据路径>` 是测试接缝。存储目录应含真实 `describe` 输出的 `device-capabilities.json`；用例 JSON 显式包含非空字符串 `action_type`、`device_id`、`action_name`，以及 `scheduled_at` 和 `cases`。每项用例有 `name`、保存完整原数字词元的 `params_text` 字符串和独立预期；可选的 `action_name` 为该项导出指定动作名，省略时使用顶层名称。浏览器共享校验与客户端后端共享校验都使用输入中的动作类型和设备标识，真实导出使用对应的动作类型、设备标识和动作名；必需身份字段或显式提供的动作名为空时命令明确报错。凭据按同序记录 `browser_valid`、`shared_valid`、`export_valid`、两处未改写的参数正文，以及成功导出的完整 JSON 正文或明确的 `invalid_plan`。测试命令不接收产品候选能力开关，也不维护设备完整参数枚举。
+`client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <凭据路径>` 是测试接缝。存储目录应含真实 `describe` 输出的 `device-capabilities.json`；用例 JSON 显式包含非空字符串 `action_type`、`device_id`、`action_name`，以及 `scheduled_at` 和 `cases`。每项用例有 `name`、保存完整原数字词元的 `params_text` 字符串和独立预期；可选的 `action_name` 为该项导出指定动作名，省略时使用顶层名称。浏览器共享校验与客户端后端共享校验都使用输入中的动作类型和设备标识，真实导出使用对应的动作类型、设备标识和动作名；必需身份字段或显式提供的动作名为空时命令明确报错。凭据的 `initialization` 记录实际执行校验和导出的客户端在业务操作前的初始化状态；凭据按同序记录 `browser_valid`、`shared_valid`、`export_valid`、两处未改写的参数正文，以及成功导出的完整 JSON 正文或明确的 `invalid_plan`。测试命令不接收产品候选能力开关，也不维护设备完整参数枚举。
 
 ### Hasselblad 网页与文件上传接缝
 
@@ -177,7 +177,7 @@ CAMCTL_HB_TEST_CLIENT_ROOT=/absolute/private/candidate \
 
 测试驱动的独立入口包括 `browser-photo-export <store> <input.json> <plan> <receipt>`、`browser-plan-export <store> <body.json> <plan> <receipt>` 和 `upload-files <store> <manifest.json> <receipt>`；拍摄世界通过私有 `session` 连接按序调用这些操作及 `application-photo-export`，存储目录固定为该世界的 `client-store`。照片输入含 `device_id/action_type/action_name/case_name/params_text/scheduled_at`，精确参数以正文字符串传递。普通计划入口也操作真实网页并下载文件。上传清单是非空 `[{path,kind:"report"|"media"}]`，图片使用 media；媒体先到不要求已有报告。凭据包含实际 import、媒体、报告覆盖和原始快门正文；原有 import 命令仍是直接报告应用接缝，与上传证据分别解释。
 
-`test_video_size_estimate.py` 使用同源虚构驱动，经真实 `describe` 导出、客户端整份加载及 HTTP 状态交接验证视频估算，再通过客户端计划导出、camctl 受理和执行、报告发布及客户端导入核对实际文件事实。它覆盖精确小数、数学整数帧数、非法声明的整份失败和重载保留、合法但无法估算的导出，以及估算不进入生效参数或报告。`client_driver.ts` 的估算命令只提供测试凭据，没有新增产品接口。该文件无需 C 构建或真实设备；安装物资源由组件的包测试核对，真实相机的固定假定参考值另按[估算设计](../../docs/superpowers/specs/2026-10-10-video-size-estimate-design.md#实施状态与设备接入前提)解释。
+`test_video_size_estimate.py` 使用同源虚构驱动，经真实 `describe` 导出、客户端整份加载及 HTTP 状态交接验证视频估算，再通过客户端计划导出、camctl 受理和执行、报告发布及客户端导入核对实际文件事实。它覆盖精确小数、数学整数帧数、非法声明的整份失败和重载保留、合法但无法估算的导出，以及估算不进入生效参数或报告。`client_driver.ts` 的估算凭据包含建立草稿前的客户端 `initialization` 状态，没有新增产品接口。该文件无需 C 构建或真实设备；安装物资源由组件的包测试核对，真实相机的固定假定参考值另按[估算设计](../../docs/superpowers/specs/2026-10-10-video-size-estimate-design.md#实施状态与设备接入前提)解释。
 
 ```bash
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv" uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_video_size_estimate.py -q

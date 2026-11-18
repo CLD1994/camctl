@@ -82,13 +82,17 @@ function openApp(storeDir: string) {
   }
 }
 
+function clientInitialization(app: Application) {
+  const state = app.state();
+  return { initialized: state.startup.state === "ready", state };
+}
+
 function initializeClient(storeDir: string, receiptPath: string, existing?: ApplicationStore) {
   const app = existing?.app ?? openApp(storeDir);
   try {
-    const state = app.state();
     writeFileSync(
       receiptPath,
-      stringifyJson({ initialized: state.startup.state === "ready", state }),
+      stringifyJson(clientInitialization(app)),
       "utf-8",
     );
   } finally {
@@ -285,6 +289,7 @@ async function estimateAction(
       server.once("listening", resolve);
       server.once("error", reject);
     });
+    const initialization = parseClientJson(stringifyJson(clientInitialization(app)));
     const action = parseJson(readFileSync(actionPath, "utf8"));
     // 先建立测试输入；随后的估算及状态交接应保留这份草稿的原事实。
     const draft = app.createDraft({
@@ -325,6 +330,7 @@ async function estimateAction(
     writeFileSync(
       receiptPath,
       stringifyJson({
+        initialization,
         initial,
         estimate: estimateVideoAction(action, app.capabilities.active),
         http_estimate: estimateVideoAction(observedAction, browserCapabilities),
@@ -401,6 +407,7 @@ async function validateParameters(
   const app = openApp(storeDir);
   let browser;
   try {
+    const initialization = parseClientJson(stringifyJson(clientInitialization(app)));
     await vite.listen();
     const address = vite.httpServer!.address() as { port: number };
     const origin = `http://127.0.0.1:${address.port}`;
@@ -490,7 +497,7 @@ async function validateParameters(
         export_error: exportError,
       };
     });
-    writeFileSync(receiptPath, stringifyJson({ cases }));
+    writeFileSync(receiptPath, stringifyJson({ initialization, cases }));
   } finally {
     await browser?.close();
     await vite.close();
