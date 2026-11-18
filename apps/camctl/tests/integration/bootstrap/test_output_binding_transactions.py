@@ -45,19 +45,17 @@ async def pending_read(environment):
     return cfg, owned, command
 
 
-@pytest.mark.parametrize("prefix", [
-    "UPDATE deliveries", "UPDATE operation_runs", "UPDATE obtain_items", "UPDATE file_copies",
-])
-async def test_read_binding_projection_failure_rolls_back_complete_group(pending_read, prefix):
+async def test_read_binding_projection_failure_rolls_back_complete_group(pending_read):
     _cfg, owned, command = pending_read
     before = tuple(owned.connection.iterdump())
-
-    fault = SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, prefix.split()[1])
-    result = OutputsRepository().fail_read_binding(command, new_operation_key(), replace(owned, connection=fault))
-
-    assert fault.triggered
-    assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert tuple(owned.connection.iterdump()) == before
+    repository = OutputsRepository()
+    for table in ("deliveries", "operation_runs", "obtain_items", "file_copies"):
+        fault = SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, table)
+        result = repository.fail_read_binding(command, new_operation_key(), replace(owned, connection=fault))
+        assert fault.triggered, table
+        assert result.kind is DbOutcomeKind.ROLLED_BACK, (table, result.error)
+        assert not owned.connection.in_transaction, table
+        assert tuple(owned.connection.iterdump()) == before, table
 
 
 @pytest.mark.parametrize("after_commit", [False, True])
@@ -92,23 +90,22 @@ async def test_read_binding_unknown_commit_reopens_and_verifies_original_key(pen
         recovered.connection.close()
 
 
-@pytest.mark.parametrize("field", ["copy_id", "source_device_file_id", "binding_result", "occurred_at"])
-async def test_read_binding_original_key_rejects_changed_effective_input(pending_read, field):
+async def test_read_binding_original_key_rejects_changed_effective_input(pending_read):
     cfg, owned, command = pending_read
     repository, key = OutputsRepository(), new_operation_key()
     assert repository.fail_read_binding(command, key, owned).kind is DbOutcomeKind.COMPLETED
-    changed = {
+    changes = {
         "copy_id": command.copy_id + 1,
         "source_device_file_id": command.source_device_file_id + 1,
         "binding_result": check_binding(DeviceBinding("cam-a", "camctl-adb"), _changed(cfg, "mismatch")),
         "occurred_at": command.occurred_at + 1,
-    }[field]
+    }
     before = tuple(owned.connection.iterdump())
-
-    result = repository.fail_read_binding(replace(command, **{field: changed}), key, owned)
-
-    assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert tuple(owned.connection.iterdump()) == before
+    for field, changed in changes.items():
+        result = repository.fail_read_binding(replace(command, **{field: changed}), key, owned)
+        assert result.kind is DbOutcomeKind.ROLLED_BACK, (field, result.error)
+        assert not owned.connection.in_transaction, field
+        assert tuple(owned.connection.iterdump()) == before, field
 
 
 @pytest_asyncio.fixture
@@ -125,17 +122,17 @@ async def pending_cleanup(environment):
     return cfg, owned, command
 
 
-@pytest.mark.parametrize("prefix", ["UPDATE cleanup_items", "UPDATE outputs", "UPDATE operation_runs"])
-async def test_cleanup_binding_projection_failure_rolls_back_complete_group(pending_cleanup, prefix):
+async def test_cleanup_binding_projection_failure_rolls_back_complete_group(pending_cleanup):
     _cfg, owned, command = pending_cleanup
     before = tuple(owned.connection.iterdump())
-
-    fault = SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, prefix.split()[1])
-    result = OutputsRepository().fail_cleanup_binding(command, new_operation_key(), replace(owned, connection=fault))
-
-    assert fault.triggered
-    assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert tuple(owned.connection.iterdump()) == before
+    repository = OutputsRepository()
+    for table in ("cleanup_items", "outputs", "operation_runs"):
+        fault = SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, table)
+        result = repository.fail_cleanup_binding(command, new_operation_key(), replace(owned, connection=fault))
+        assert fault.triggered, table
+        assert result.kind is DbOutcomeKind.ROLLED_BACK, (table, result.error)
+        assert not owned.connection.in_transaction, table
+        assert tuple(owned.connection.iterdump()) == before, table
 
 
 @pytest.mark.parametrize("after_commit", [False, True])
@@ -175,27 +172,27 @@ async def test_cleanup_binding_unknown_commit_reopens_and_verifies_complete_grou
         recovered.connection.close()
 
 
-@pytest.mark.parametrize("field", [
-    "item_id", "source_device_file_id", "binding_result", "responsibility_keys", "occurred_at", "canceled",
-])
-async def test_cleanup_binding_original_key_rejects_changed_effective_input(pending_cleanup, field):
+async def test_cleanup_binding_original_key_rejects_changed_effective_input(pending_cleanup):
     cfg, owned, command = pending_cleanup
     repository, key = OutputsRepository(), new_operation_key()
     saved = repository.fail_cleanup_binding(command, key, owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    changed = {
+    changes = {
         "item_id": command.item_id + 1,
         "source_device_file_id": command.source_device_file_id + 1,
         "binding_result": check_binding(DeviceBinding("cam-a", "camctl-adb"), _changed(cfg, "mismatch")),
         "responsibility_keys": command.responsibility_keys[:1],
         "occurred_at": command.occurred_at + 1,
         "canceled": True,
-    }[field]
+    }
     before = tuple(owned.connection.iterdump())
-
-    changed_command = (replace(command, item_id=changed, responsibility_keys=(f"delete/{changed}", f"exists/{changed}"))
-                       if field == "item_id" else replace(command, **{field: changed}))
-    result = repository.fail_cleanup_binding(changed_command, key, owned)
-
-    assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert tuple(owned.connection.iterdump()) == before
+    for field, changed in changes.items():
+        if field == "item_id":
+            changed_command = replace(
+                command, item_id=changed, responsibility_keys=(f"delete/{changed}", f"exists/{changed}"))
+        else:
+            changed_command = replace(command, **{field: changed})
+        result = repository.fail_cleanup_binding(changed_command, key, owned)
+        assert result.kind is DbOutcomeKind.ROLLED_BACK, (field, result.error)
+        assert not owned.connection.in_transaction, field
+        assert tuple(owned.connection.iterdump()) == before, field
