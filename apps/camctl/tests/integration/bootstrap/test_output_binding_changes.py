@@ -178,11 +178,11 @@ async def _accept(owned, request_id, actions):
     assert result.plan_id is not None, result
 
 
-async def _save_photos(cfg, owned, context, driver):
+async def _save_photos(cfg, owned, context, driver, *, devices=("cam-a", "cam-b")):
     await _accept(owned, "1", [{"name": device, "type": "camera_take_photo", "device_id": device,
                            "scheduled_at": "2026-01-15 09:00:00", "group": "files",
                            "params": {"type": "single_shot"}, "policy": {"max_delay_ms": 1000}}
-                          for device in ("cam-a", "cam-b")])
+                          for device in devices])
     identities = [row[0] for row in owned.connection.execute("SELECT id FROM actions ORDER BY id")]
     results = ResultsDouble({identity: (ObservedFile(
         identity=f"photo-{identity}", locator={"path": f"/DCIM/{identity}"},
@@ -196,8 +196,8 @@ async def _save_photos(cfg, owned, context, driver):
     capture = capture_flow(factory)
     await capture(context)
     await capture.settle()
-    assert owned.connection.execute("SELECT status FROM actions ORDER BY id").fetchall() == [(3,), (3,)]
-    assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+    assert owned.connection.execute("SELECT status FROM actions ORDER BY id").fetchall() == [(3,)] * len(devices)
+    assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (len(devices),)
 
 
 def _changed(cfg, state):

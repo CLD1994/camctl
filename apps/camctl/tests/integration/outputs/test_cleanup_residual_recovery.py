@@ -566,9 +566,9 @@ async def test_all_saved_local_handoffs_precede_any_current_port_resolution(
     from .test_cleanup_query_save_recovery import _start_cleanup
 
     cfg = environment[0]
-    owned, context, runtime, driver, first_item = await _prepared(environment)
+    owned, context, runtime, driver, first_item = await _prepared(environment, devices=("cam-a", "cam-b"))
     second_output = owned.connection.execute(
-        "SELECT id FROM outputs ORDER BY id DESC LIMIT 1"
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id WHERE a.device_id='cam-b'"
     ).fetchone()[0]
     _, second_item = _start_cleanup(owned, second_output, "3")
     port = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
@@ -753,8 +753,10 @@ async def test_pending_query_with_original_intent_is_saved_before_other_member_p
     from camctl.devices.bindings import DeviceConfigurationError
     from .test_cleanup_query_save_recovery import _start_cleanup, _QueryFinishPort
     cfg = environment[0]
-    owned, context, runtime, driver, _ = await _prepared(environment)
-    second_output, = owned.connection.execute("SELECT id FROM outputs ORDER BY id DESC LIMIT 1").fetchone()
+    owned, context, runtime, driver, _ = await _prepared(environment, devices=("cam-a", "cam-b"))
+    second_output, = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id WHERE a.device_id='cam-b'"
+    ).fetchone()
     _, second_item = _start_cleanup(owned, second_output, "3")
     driver.unknown_delete = True
     driver.matrix_enabled, driver.present = True, False
