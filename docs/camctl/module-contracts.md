@@ -26,7 +26,7 @@ uv run --project apps/camctl --group test pytest apps/camctl/tests/integration -
 
 O6 的真实 C 进程收场和 R9 的真实报告消费者用例分别位于根 `tests/integration/test_camctl_process_recovery.py` 与 `tests/integration/test_camctl_report_contract.py`。其他模块组件测试可以用受领取契约约束的协作者安排文件移动与删除；真实 C 领取及客户端导入由 I4/I5 和上述根用例验证。
 
-测试分类及资源边界由[共享测试规则](../../.agents/rules/testing.md#测试设计与验证)统一定义。真实协作者组合放在组件集成测试；客户端、C 模块和 camctl 的组合放在根 `tests/integration`。第一版软件集成用受真实接口约束的设备替身，真实设备、ARM64 安装、目标性能与物理断电另行联调。
+测试分类及资源边界由[共享测试规则](../../.agents/rules/testing.md)统一定义。真实协作者组合放在组件集成测试；客户端、C 模块和 camctl 的组合放在根 `tests/integration`。第一版软件集成用受真实接口约束的设备替身，真实设备、ARM64 安装、目标性能与物理断电另行联调。
 
 执行计划中的“通过”表示建议的验收条件，不表示生产代码或测试已经存在。首次执行任务时检查依赖交付及实际代码；出现未定义状态、代码事实与计划冲突或需要改变既定协议时，停止受影响任务并报告证据。
 
