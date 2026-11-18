@@ -97,18 +97,11 @@ def test_photo_keeps_completed_outputs(tmp_path: Path) -> None:
     scheduled_at = deployment.schedule(1)
     plan = deployment.write_plan(photo_plan("41", scheduled_at))
     spec = stub_driver_spec({"1": [photo_file("shot-1")]})
-    submitted = deployment.camctl(
-        "submit", str(plan), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
-    assert submitted.message() == {
-        "kind": "succeeded", "body": {"needs_run": True}}
-
     # 受理与进程准备不占用原启动窗口；实际 START 收场后恢复业务钟。
     deployment.freeze_at(scheduled_at)
     deadline = time.monotonic() + 180
     process = deployment.start_camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(plan), "--config", str(deployment.config_path), driver=spec)
     try:
         _await_row(deployment.state_db,
             "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"

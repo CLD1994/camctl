@@ -81,8 +81,8 @@ def _deployment_with_report_plan(tmp_path: Path, name: str) -> tuple[Deployment,
     return deployment, deployment.write_plan(plan), request_id
 
 
-def _reuse_recovery_client(deployment: Deployment, request, monkeypatch) -> None:
-    """CLI恢复期间保持客户端打开；跨客户端重开由独立闭环验证。"""
+def _reuse_recovery_client(deployment: Deployment, request, monkeypatch) -> ClientSession | None:
+    """复用本世界的客户端，调用者可在需要重开时提前关闭。"""
     if sys.platform != "linux":
         return
     integration = Path(__file__).resolve().parent
@@ -93,6 +93,7 @@ def _reuse_recovery_client(deployment: Deployment, request, monkeypatch) -> None
     )
     request.addfinalizer(session.close)
     monkeypatch.setattr(deployment, "run_client_driver", session.call)
+    return session
 
 
 def _matches_request(report: dict, request_id: int, plan_id: int, action_id: int) -> bool:
@@ -145,7 +146,8 @@ def _published_report(deployment: Deployment, demo: HostDemo,
                   message="同步动作与计划未到终态，或 ready 报告尚未覆盖其结果", failure=failure)
 
 
-def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
+def test_report_import_ack_roundtrip(
+        tmp_path: Path, host_demo: str, request, monkeypatch) -> None:
     """无设备闭环：导出→submit/run→发布→领取→导入→ACK 吸收。
 
     请求身份由客户端分配并在主机侧保持；报告经 C 领取移动位置，
@@ -153,6 +155,8 @@ def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
     并推进主机累计确认。
     """
     deployment, state_db = _deployment_with_client(tmp_path)
+    original_client_driver = deployment.run_client_driver
+    client = _reuse_recovery_client(deployment, request, monkeypatch)
 
     # 客户端真实导出：能力校验+整数请求身份分配；首份无 ACK。
     plan_path, receipt = deployment.export_plan_with_client(_plan_body("首份同步"))
@@ -198,6 +202,10 @@ def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
         assert saved["saved_report_ids"] == [str(report_id)]
         assert saved["ack_id"] == str(report_id)
 
+        # 保存后关闭客户端；重新启动并导出，确认 ACK 由持久化事实恢复。
+        if client is not None:
+            client.close()
+            monkeypatch.setattr(deployment, "run_client_driver", original_client_driver)
         # 第二份导出自动携带 ACK；经主程序递交后被受理接口吸收。
         second_plan, second_receipt = deployment.export_plan_with_client(
             _plan_body("第二份同步"))

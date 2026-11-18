@@ -194,9 +194,9 @@ def _delivered_files(directory: Path) -> list[Path]:
         and not path.name.startswith("status-report-"))
 
 
-def _submit_record_and_obtain(deployment: Deployment, spec: dict, *,
-                              scheduled_at: str | None = None) -> None:
-    """受理录像与取回同计划：取回按名称引用来源，默认选择修复成品。"""
+def _write_record_and_obtain(deployment: Deployment, *,
+                             scheduled_at: str | None = None) -> Path:
+    """准备录像与取回同计划：取回按名称引用来源，默认选择修复成品。"""
     if scheduled_at is None:
         record_at = future_schedule(1)
         obtain_at = future_schedule(2)
@@ -229,23 +229,19 @@ def _submit_record_and_obtain(deployment: Deployment, spec: dict, *,
             },
         ],
     }
-    plan_path = deployment.write_plan(body)
-    submitted = deployment.camctl(
-        "submit", str(plan_path), "--config", str(deployment.config_path),
-        driver=spec)
-    assert submitted.exit_code == 0, submitted.stderr
-    assert submitted.message() == {"kind": "succeeded", "body": {"needs_run": True}}
+    return deployment.write_plan(body)
 
 
 def _start_recording_and_interrupt(deployment: Deployment,
-                                   spec: dict, *, resume_clock: bool = False) -> int:
+                                   spec: dict, plan_path: Path, *,
+                                   resume_clock: bool = False) -> int:
     """启动 run 会话执行录像，确认启动后终止会话树。
 
     返回启动确认的墙钟微秒；录像保持执行中、停止未尝试，供后续会
     话按对账或保守收场接管。
     """
     process = deployment.start_camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+        "run", str(plan_path), "--config", str(deployment.config_path), driver=spec)
     try:
         rows = _await_row(
             deployment.state_db,
@@ -348,12 +344,12 @@ def test_insufficient_timing_checks_repairs_and_delivers(
         record_duration_s=_TARGET_DURATION_S,
         device_files={"clip-1": {"path": str(source)}})
     scheduled_at = deployment.schedule(1)
-    _submit_record_and_obtain(deployment, spec, scheduled_at=scheduled_at)
-    # 受理完成后进入原启动窗口；CLI 准备不消耗业务窗口。
+    plan_path = _write_record_and_obtain(deployment, scheduled_at=scheduled_at)
+    # CLI 受理与准备不消耗原启动窗口。
     deployment.freeze_at(scheduled_at)
 
     # 第一个会话启动录像后中断：录像执行中、锚点随会话失效。
-    _start_recording_and_interrupt(deployment, spec, resume_clock=True)
+    _start_recording_and_interrupt(deployment, spec, plan_path, resume_clock=True)
 
     # 时钟异常会话保守收场：放弃计时停止、列举原片、固定计时证据
     # 不足的检查决定并归属源文件，会话以 clock_invalid 结束。
@@ -432,12 +428,13 @@ def test_excess_recording_repairs_without_probing(
         record_duration_s=_TARGET_DURATION_S,
         device_files={"clip-1": {"path": str(source)}})
     scheduled_at = deployment.schedule(1)
-    _submit_record_and_obtain(deployment, spec, scheduled_at=scheduled_at)
+    plan_path = _write_record_and_obtain(deployment, scheduled_at=scheduled_at)
     deployment.freeze_at(scheduled_at)
 
     # 第一个会话启动录像后中断；等待同一业务 UTC 越过目标加余量，
     # 再由正常会话对账停止，停止确认时的已录时长严格超过修复门槛。
-    started_at_us = _start_recording_and_interrupt(deployment, spec, resume_clock=True)
+    started_at_us = _start_recording_and_interrupt(
+        deployment, spec, plan_path, resume_clock=True)
     started_moment = datetime.fromtimestamp(
         started_at_us / 1_000_000, tz=timezone.utc)
     assert datetime.now(timezone.utc) > started_moment + timedelta(
