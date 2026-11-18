@@ -224,28 +224,38 @@ def prepare_copy(directory, count):
 
 def verify_output(directory, manifest):
     """在组外比对全部分页、完整快照和固定库成员身份。"""
-    from contextlib import closing
     import json
-    import sqlite3
-    from camctl.history.snapshots import decode_snapshot, SnapshotRef
     from camctl.contracts.json_values import parse_exact_json
+
     result=json.loads((directory/'result.json').read_text())
     size=manifest['count']
     assert result['counts']=={'segment_members':size,'segment_gaps':size-2}
     content=(directory/'snapshot.jsonl').read_bytes()
     assert len(content)==result['snapshot_length']
-    header,rows=decode_snapshot(content,expect_ref=SnapshotRef(1,manifest['action_id']))
-    assert header['boundary_event_id']==manifest['boundary']['last_event_id']
     actual=[parse_exact_json(line) for line in (directory/'rows.jsonl').read_text().splitlines()]
     selected={table:[item['row'] for item in actual if item['table']==table]
         for table in ('segment_members','segment_gaps')}
+    verify_snapshot_against_source(directory/'state.db', manifest, content, selected)
+
+
+def verify_snapshot_against_source(database, manifest, content, selected):
+    """比较真实分页结果、解码后的完整快照和来源库。"""
+    from contextlib import closing
+    import sqlite3
+    from camctl.history.snapshots import decode_snapshot, SnapshotRef
+    from camctl.contracts.json_values import parse_exact_json
+
+    size=manifest['count']
+    expected_counts={'segment_members':size,'segment_gaps':size-2}
+    header,rows=decode_snapshot(content,expect_ref=SnapshotRef(1,manifest['action_id']))
+    assert header['boundary_event_id']==manifest['boundary']['last_event_id']
     snapshot={table:{row.row_id:dict(row.values) for row in rows if row.table==table}
         for table in selected}
     expected_tables={'actions','device_activities','operation_attempts','operation_runs',
         'recording_processing','result_page_files','segment_gaps','segment_members',
         'segment_scope_members','segment_sets'}
     assert {row.table for row in rows}==expected_tables
-    with closing(sqlite3.connect((directory/'state.db').resolve().as_uri()+'?mode=ro',uri=True)) as db:
+    with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True)) as db:
         db.row_factory=sqlite3.Row
         for table in expected_tables:
             saved=[row for row in rows if row.table==table]
@@ -254,7 +264,7 @@ def verify_output(directory, manifest):
             assert len(saved)==len(source)
             assert {row.row_id:dict(row.values) for row in saved}==source
         for table, values in selected.items():
-            assert len(values)==len(snapshot[table])==result['counts'][table]
+            assert len(values)==len(snapshot[table])==expected_counts[table]
             assert {row['id']:row for row in values}==snapshot[table]
             assert {row['id'] for row in values}=={row[0] for row in db.execute(f'SELECT id FROM {table}')}
         indexes=[row['segment_index'] for row in selected['segment_members']]

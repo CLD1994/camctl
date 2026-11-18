@@ -819,18 +819,17 @@ async def test_external_view_read_failure_is_reported_and_later_read_recovers(tm
 async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
     """真实生成 130 项，核对 128 项写批与末批跨目录。"""
     from collections import Counter
-    import json
     from camctl.capture.segment_models import SegmentSetRef
     from camctl.contracts.history_values import HistoryBoundary
     from camctl.history.snapshots import prepare_snapshot
-    from camctl.persistence.repositories.transactions import encode_json_value
-    from ..support.segment_history_corpus import prepare_source, verify_output
+    from ..support.segment_history_corpus import prepare_source, verify_snapshot_against_source
 
     directory=tmp_path/'world'
     manifest=await prepare_source(directory,130,start_number=870)
     ref=SegmentSetRef(*(manifest[name] for name in ('action_id','scan_id','final_page_event_id','version')))
     boundary=HistoryBoundary(**manifest['boundary'])
-    history=HistoryRepository(directory/'state.db')
+    database=directory/'state.db'
+    history=HistoryRepository(database)
     with history.open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
         members=tuple(_rows(handle,'segment_members',ref,limit=7))
         gaps=tuple(_rows(handle,'segment_gaps',ref,limit=7))
@@ -843,19 +842,16 @@ async def test_real_segment_source_crosses_write_batch_and_directory(tmp_path):
         assert list(Counter(row.values['created_event_id'] for row in members).values())==[128,2]
         assert list(Counter(row.values['page_event_id'] for row in members).values())==[128,2]
         assert [row.values['empty_member_id'] for row in gaps]==[row.row_id for row in members[1:-1]]
-        with (directory/'rows.jsonl').open('w') as output:
-            for table,rows in (('segment_members',members),('segment_gaps',gaps)):
-                for row in rows:
-                    output.write(encode_json_value({'table':table,'row':dict(row.values)})+'\n')
         prepared=prepare_snapshot(handle)
         try:
-            with (directory/'snapshot.jsonl').open('wb') as output:
-                length=sum(output.write(chunk) for chunk in prepared.chunks)
-            assert length==prepared.length
+            content=b''.join(prepared.chunks)
+            assert len(content)==prepared.length
         finally:prepared.close()
-    (directory/'result.json').write_text(json.dumps({'counts':{'segment_members':len(members),
-        'segment_gaps':len(gaps)},'snapshot_length':length}))
-    verify_output(directory,manifest)
+    selected={
+        'segment_members':[dict(row.values) for row in members],
+        'segment_gaps':[dict(row.values) for row in gaps],
+    }
+    verify_snapshot_against_source(database,manifest,content,selected)
 
 
 @pytest.mark.performance
