@@ -22,13 +22,11 @@ import json
 import shutil
 import sqlite3
 import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from camctl_fixtures import (
     CliResult,
     Deployment,
-    future_schedule,
     photo_file,
     preview_file,
     stub_driver_spec,
@@ -264,18 +262,13 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path, reuse_client) -
     ) == [(int(report_id), report["to_wm"])]
 
 
-def _wait_until(moment: str) -> None:
-    """等待部署墙钟越过给定的计划时刻（秒精度加一秒余量）。"""
-    target = datetime.strptime(moment, "%Y-%m-%d %H:%M:%S").replace(
-        tzinfo=timezone.utc) + timedelta(seconds=1)
-    while datetime.now(timezone.utc) < target:
-        time.sleep(0.1)
-
-
 def test_auto_preview_obtains_registered_preview(tmp_path: Path, reuse_client) -> None:
     """自动预览链：驱动按配对关联列举预览文件，预览登记为正式产
     物并保留配对证据，客户端展开的自动取回选择预览产物交付。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例验证预览交付，不验证默认计划轮询间隔。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -364,7 +357,7 @@ def test_auto_preview_obtains_registered_preview(tmp_path: Path, reuse_client) -
 def test_duplicate_auto_preview_fails_at_admission(tmp_path: Path) -> None:
     """同一来源的两个自动预览取回：受理时全部登记为失败并保留冲突
     范围；拍摄按自身条件正常执行，冲突动作没有交付。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -374,7 +367,7 @@ def test_duplicate_auto_preview_fails_at_admission(tmp_path: Path) -> None:
         device_files={"shot-1": _PHOTO_CONTENT},
         photo_preview_supported=True)
 
-    shoot_at = future_schedule(1)
+    shoot_at = deployment.schedule(1)
     body = {
         "request_id": "42",
         "created_at": "2026-01-15 08:00:00",
@@ -406,8 +399,7 @@ def test_duplicate_auto_preview_fails_at_admission(tmp_path: Path) -> None:
         state_db, "SELECT status FROM actions ORDER BY id"
     ) == [(1,), (4,), (4,)]
 
-    run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+    run = _run_capture_at_schedule(deployment, spec, shoot_at, "shoot")
     assert run.exit_code == 0, run.stderr
     assert _query(
         state_db, "SELECT status FROM actions ORDER BY id"
@@ -452,7 +444,10 @@ def test_plan_cancel_before_start_settles_auto_preview(
         tmp_path: Path, reuse_client) -> None:
     """拍摄执行前的计划级取消：计划实例入口直接针对计划内动作，
     待执行拍摄与关联的自动预览取回都按取消收场，没有产物或交付。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例验证拍摄前取消，不验证默认计划轮询间隔。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -465,8 +460,8 @@ def test_plan_cancel_before_start_settles_auto_preview(
         photo_preview_supported=True)
     reuse_client(deployment)
     deployment.install_client_capabilities(spec)
-    shoot_at = future_schedule(30)
-    cancel_at = future_schedule(1)
+    shoot_at = deployment.schedule(30)
+    cancel_at = deployment.schedule(1)
 
     body = {
         "request_id": "0",
@@ -504,8 +499,7 @@ def test_plan_cancel_before_start_settles_auto_preview(
         state_db, "SELECT id FROM plans WHERE name = 'photo-auto-preview'"
     )[0][0]
 
-    # 取消时刻先于拍摄时刻：等待墙钟越过取消时刻再提交取消计划。
-    _wait_until(cancel_at)
+    # 取消时刻先于拍摄时刻；导出计划不消耗业务窗口。
     cancel_body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -520,6 +514,7 @@ def test_plan_cancel_before_start_settles_auto_preview(
         ],
     }
     cancel_path, _ = deployment.export_plan_with_client(cancel_body)
+    deployment.freeze_at(cancel_at)
 
     # 一个 run 会话受理并执行取消：待执行动作按取消收场，无需等到拍摄
     # 时刻。
@@ -682,6 +677,9 @@ def test_repeated_obtain_of_same_output_yields_independent_deliveries(
     持可用、设备原文件保留，两份 ready 副本字节与来源一致且文件名
     互不相同，源文件与副本生命周期分开。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例验证独立交付，不验证默认计划轮询间隔。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -729,7 +727,8 @@ def test_repeated_obtain_of_same_output_yields_independent_deliveries(
     }
     plan_path, _ = deployment.export_plan_with_client(body)
     run = _run_capture_at_schedule(
-        deployment, spec, shoot_at, "拍录", plan_path=plan_path)
+        deployment, spec, shoot_at, "拍录", plan_path=plan_path,
+        advance_after_start_s=1)
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db
@@ -768,6 +767,9 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path, reuse_client) ->
     交付；第三个请求引用不存在的实例在执行资格取得后按解析失败
     收场，不产生交付，已确定的跨计划交付不受影响。"""
     deployment = Deployment(tmp_path, controlled_clock=True)
+    # 本例验证跨计划引用，不验证默认计划轮询间隔。
+    with deployment.config_path.open("a", encoding="utf-8") as config:
+        config.write("\n[session]\nplan_poll_interval_ms = 25\n")
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
