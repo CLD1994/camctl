@@ -2,6 +2,48 @@
 
 本页是本次重构唯一的计划、进度、剩余问题和接口改进记录，维护受测源码、范围、运行方式及正式结论。通用要求由[测试规则](../../.agents/rules/testing.md)维护，原因分析与后续写法见[持续复盘](integration-test-lessons-2026-10-27.md)。临时调试材料按[写作规则](../../.agents/rules/writing.md#临时调试材料)原位处理；后续只在对应责任文档更新信息，不另建平行进度清单。
 
+## 最近一次功能全量回归（2026-11-18）
+
+用户要求执行一次逻辑全量回归并排除性能测试。本次固定干净源码`cf69e98e6763be6de4181180316bf6322e084873`，使用Python3.11.17、SQLite3.53.1、pytest9.1.1及已准备的客户端依赖，通过统一预算启动器执行`run-integration.py --scope all --test-kind functional --jobs 4 --root-shards 1`。不指定目标或历史输入，覆盖全部camctl组件集成目录、根Python和四组根Node；性能专项、按需完整安装验收、独立单元测试、客户端Vitest及host独立CTest不属于此次选择。
+
+运行已自然结束，**入口墙钟1324.009秒（22分04.009秒），运行器1323.323秒，退出码1**。52个任务中44个通过、一个失败、七个没有功能节点；后者仅含按需安装验收，保留pytest退出码5，不计作通过。实际选择与执行的10,210个唯一Python主节点全部属于functional，未发现重复或漏跑。结果如下，嵌套检查和Node不加入Python主节点总数。
+
+| 范围 | 通过 | 失败 | 跳过 |
+| --- | ---: | ---: | ---: |
+| camctl组件Python主节点 | 9,984 | 1 | 2 |
+| 根Python主节点 | 221 | 0 | 2 |
+| Python主节点合计 | 10,205 | 1 | 4 |
+| 根Python嵌套检查，另计 | 340 | 0 | 0 |
+| 四组根Node用例，另计 | 118 | 0 | 0 |
+
+四项跳过为三项Windows专用路径／句柄场景，以及一项主机来源没有读取配置的参数场景。受限CLI沿用2GiB内存与交换空间合计预算，预算工具自身的校准用例保持原预算；启动器未报告委派错误，专属目录已移除且没有遗留PID。成功任务的源码与环境已回收；失败任务现场原位保留。本轮没有修改程序或测试，也没有追加复测。
+
+**唯一失败待诊断。** `apps/camctl/tests/integration/bootstrap/test_obtain_flow.py::TestObtainExecutionLink::test_read_batch_and_parallel_recording_respect_start_order[recording]`验证先开始录像时，驱动声明兼容的文件读取及失败后重试仍能进行。录像已经启动，测试注入的第一次读取故障也已发生；推进受控时间1.5秒后，测试在原15秒保护期限内没有等到取回成功，第二次读取尚未开始。该节点准备0.003668秒、执行失败16.173072秒、收场0.002161秒，合计16.178902秒；同函数先读取的参数通过。当前只确认失败位于首次读取故障与第二次读取之间，尚不能判为生产缺陷或测试时序错误。后续先诊断该节点，不因本轮失败自动重跑完整回归。
+
+**超过九秒的功能节点。** 共46项，分布在17个Python文件：45项通过、一项为上述失败。下表的总耗时是文件中全部主节点准备、执行、收场之和，最大值是单节点三阶段合计；二者都不等于文件所在任务或整轮墙钟。失败节点只计已实际执行到的时间。这次四槽运行的数据更新单槽或旧源码的测量记录，不直接作为稳定提速比例。
+
+| 文件 | 超九秒／本文件节点 | 单节点最大（秒） | 全部节点累计（秒） |
+| --- | ---: | ---: | ---: |
+| `tests/integration/test_camctl_motor_recovery.py` | 11／21 | 12.388 | 172.990 |
+| `tests/integration/test_camctl_output_roundtrip.py` | 3／7 | 18.506 | 73.167 |
+| `tests/integration/test_video_size_estimate.py` | 2／12 | 14.213 | 72.506 |
+| `tests/integration/test_camctl_session_recovery.py` | 4／6 | 19.856 | 70.958 |
+| `tests/integration/test_camctl_process_recovery.py` | 2／8 | 28.346 | 70.347 |
+| `apps/camctl/tests/integration/persistence/test_segment_storage.py` | 1／89 | 13.850 | 69.883 |
+| `tests/integration/test_real_camera_demo_roundtrip.py` | 4／4 | 17.708 | 64.709 |
+| `tests/integration/test_camctl_report_roundtrip.py` | 4／6 | 14.355 | 63.239 |
+| `tests/integration/test_camctl_c_module_roundtrip.py` | 2／3 | 39.158 | 58.010 |
+| `tests/integration/test_camctl_motor_notifications.py` | 4／5 | 11.950 | 49.853 |
+| `apps/camctl/tests/integration/history/test_record_segment_history.py` | 1／30 | 10.425 | 49.692 |
+| `tests/integration/test_timelapse_time_parameters.py` | 2／3 | 20.309 | 38.392 |
+| `tests/integration/test_camctl_media_roundtrip.py` | 2／3 | 16.169 | 26.986 |
+| `apps/camctl/tests/integration/bootstrap/test_obtain_flow.py` | 1／6 | 16.179 | 25.416 |
+| `tests/integration/test_camctl_capture_roundtrip.py` | 1／2 | 11.737 | 18.188 |
+| `tests/integration/test_camctl_cancellation_roundtrip.py` | 1／1 | 14.972 | 14.972 |
+| `tests/integration/test_camctl_directory_switch.py` | 1／1 | 9.524 | 9.524 |
+
+本轮48次包资源准备累计70.503秒，计入各任务墙钟；普通C构建一次19.468秒，计入触发构建的节点准备，不从九秒统计中扣除。未请求共享wheel或客户端网页构建。组件bootstrap、capture、outputs任务分别1118.975／1014.508／825.651秒，是本轮最长的三个任务；任务之间并行，不能相加作为入口耗时。文件累计较高也不等于存在慢单例，例如自然等待转换文件129项全部通过，累计85.927秒、单项最大1.066秒。此前已核实的保留及暂缓决定继续有效；本轮新观察到的失败与慢项以此处为准，不将旧队列处置完成解释为当前全量已经全绿。
+
 ## 目标与边界
 
 范围为 camctl 全部组件集成测试，以及根目录跨组件 Python、Node 测试。保留有效功能、失败、取消、提交未知后的恢复、文件所有权、分页和容量分区，通过合理的模块公开接口验证最小而有意义的真实协作。
