@@ -270,9 +270,10 @@ async function estimateAction(
   actionPath: string,
   receiptPath: string,
   replacementPath?: string,
+  existing?: ApplicationStore,
 ) {
-  const app = openApp(storeDir);
-  const files = new Files(app),
+  const app = existing?.app ?? openApp(storeDir);
+  const files = existing?.files ?? new Files(app),
     requests = new RequestLifecycle();
   const server = createHttpApp(app, files, requests).listen(0, "127.0.0.1");
   const stop = createStop(
@@ -282,7 +283,7 @@ async function estimateAction(
       ),
     requests,
     () => files.idle(),
-    () => app.store.close(),
+    () => { if (!existing) app.store.close(); },
   );
   try {
     await new Promise<void>((resolve, reject) => {
@@ -1378,8 +1379,9 @@ const clientCommands: Record<string, ClientCommand> = {
     run: ([store, receipt]) => capabilityState(store, receipt) },
   "validate-parameters": { argumentCount: 3, storeIndex: 0,
     run: ([store, input, receipt]) => validateParameters(store, input, receipt) },
-  estimate: { argumentCount: 3, storeIndex: 0,
-    run: ([store, action, receipt]) => estimateAction(store, action, receipt) },
+  estimate: { argumentCount: 3, storeIndex: 0, shared: true,
+    run: async ([store, action, receipt], owner) =>
+      estimateAction(store, action, receipt, undefined, owner ? await owner.application() : undefined) },
   "reload-estimate": { argumentCount: 4, storeIndex: 0,
     run: ([store, action, replacement, receipt]) => estimateAction(store, action, receipt, replacement) },
 };

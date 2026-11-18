@@ -124,6 +124,7 @@ def test_record_estimate_stays_out_of_execution_and_report(tmp_path, reuse_clien
         "duration": {"method": "direct", "seconds": {"source": "constant", "value": 1}},
     })}
     original_bytes = deployment.write_client_capabilities(driver)
+    reuse_client(deployment)
     action = _action()
     result = _estimate(deployment, action)
     deployment.assert_client_initialized(result["initialization"], original_bytes)
@@ -134,7 +135,6 @@ def test_record_estimate_stays_out_of_execution_and_report(tmp_path, reuse_clien
     assert result["drafts_before"] == result["drafts_after"]
     assert len(result["drafts_before"]) == 1
     assert result["http_action"] == action
-    reuse_client(deployment)
     initialized = deployment.camctl("init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
     execution_action = {**action, "scheduled_at": deployment.schedule(3)}
@@ -163,15 +163,17 @@ def test_timelapse_estimate_uses_same_capture_duration_as_execution(tmp_path, re
                      "playback_fps": {"source": "constant", "value": 30}},
     })}
     original_bytes = deployment.write_client_capabilities(driver)
+    reuse_client(deployment)
     action = _action("camera_timelapse", {
         "type": "timelapse", "capture_duration_s": 3, "interval_s": 1})
     result = _estimate(deployment, action)
     deployment.assert_client_initialized(result["initialization"], original_bytes)
     expected = {"kind": "ready", "sizeBytes": 2_187_500,
-                "playbackSeconds": 0.1, "bitrateMbps": 175}
-    assert result["estimate"] == result["http_estimate"] == expected
+                "playbackSeconds": Decimal("0.1"), "bitrateMbps": 175}
+    for estimate in (result["estimate"], result["http_estimate"]):
+        # 独立驱动的 JSON 读取使用 float，会话凭据保留 Decimal。
+        assert {**estimate, "playbackSeconds": Decimal(str(estimate["playbackSeconds"]))} == expected
     assert result["http_action"] == action
-    reuse_client(deployment)
     initialized = deployment.camctl("init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
     execution_action = {**action, "scheduled_at": deployment.schedule(3)}

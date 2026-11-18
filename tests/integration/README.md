@@ -177,7 +177,7 @@ CAMCTL_HB_TEST_CLIENT_ROOT=/absolute/private/candidate \
 
 测试驱动的独立入口包括 `browser-photo-export <store> <input.json> <plan> <receipt>`、`browser-plan-export <store> <body.json> <plan> <receipt>` 和 `upload-files <store> <manifest.json> <receipt>`；拍摄世界通过私有 `session` 连接按序调用这些操作及 `application-photo-export`，存储目录固定为该世界的 `client-store`。照片输入含 `device_id/action_type/action_name/case_name/params_text/scheduled_at`，精确参数以正文字符串传递。普通计划入口也操作真实网页并下载文件。上传清单是非空 `[{path,kind:"report"|"media"}]`，图片使用 media；媒体先到不要求已有报告。凭据包含实际 import、媒体、报告覆盖和原始快门正文；原有 import 命令仍是直接报告应用接缝，与上传证据分别解释。
 
-`test_video_size_estimate.py` 使用同源虚构驱动，经真实 `describe` 导出、客户端整份加载及 HTTP 状态交接验证视频估算，再通过客户端计划导出、camctl 受理和执行、报告发布及客户端导入核对实际文件事实。它覆盖精确小数、数学整数帧数、非法声明的整份失败和重载保留、合法但无法估算的导出，以及估算不进入生效参数或报告。`client_driver.ts` 的估算凭据包含建立草稿前的客户端 `initialization` 状态，没有新增产品接口。该文件无需 C 构建或真实设备；安装物资源由组件的包测试核对，真实相机的固定假定参考值另按[估算设计](../../docs/superpowers/specs/2026-10-10-video-size-estimate-design.md#实施状态与设备接入前提)解释。
+`test_video_size_estimate.py` 使用同源虚构驱动，经真实 `describe` 导出、客户端整份加载及 HTTP 状态交接验证视频估算，再通过客户端计划导出、camctl 受理和执行、报告发布及客户端导入核对实际文件事实。它覆盖精确小数、数学整数帧数、非法声明的整份失败和重载保留、合法但无法估算的导出，以及估算不进入生效参数或报告。`client_driver.ts` 的估算凭据包含建立草稿前的客户端 `initialization` 状态。录像与延时两个执行场景在支持客户端会话的环境中由同一个客户端完成估算、导出和导入。估算结束时关闭该次 HTTP 服务，客户端存储随所属会话关闭。该文件无需 C 构建或真实设备；安装物资源由组件的包测试核对，真实相机的固定假定参考值另按[估算设计](../../docs/superpowers/specs/2026-10-10-video-size-estimate-design.md#实施状态与设备接入前提)解释。
 
 ```bash
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv" uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_video_size_estimate.py -q
