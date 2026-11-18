@@ -2,7 +2,83 @@
 
 本页是本次重构唯一的计划、进度、剩余问题和接口改进记录，维护受测源码、范围、运行方式及正式结论。通用要求由[测试规则](../../.agents/rules/testing.md)维护，原因分析与后续写法见[持续复盘](integration-test-lessons-2026-10-27.md)。临时调试材料按[写作规则](../../.agents/rules/writing.md#临时调试材料)原位处理；后续只在对应责任文档更新信息，不另建平行进度清单。
 
-## 最近一次功能全量回归（2026-11-18）
+## 最近一次功能全量回归（2026-11-18，整轮优化后）
+
+在干净源码 `a359bdfef9b4373cb07962ef7757ea55b9ed89d4` 上，以Python3.11.17、原依赖和2GiB内存与交换空间合计预算启动器执行 `run-integration.py --scope all --test-kind functional --jobs 4 --root-shards 1`。使用默认排序，与前次回归功能范围和并发配置一致。**入口墙钟1295.950秒（21分35.950秒），运行器1294.658秒，退出码0。** 比前次入口少28.059秒，约2.1%。这是两次实际运行差值，任务间负载、构建与排程尾部会波动，不能将差值全归因于某一项改动。
+
+| 范围 | 通过 | 失败 | 跳过 |
+| --- | ---: | ---: | ---: |
+| camctl组件Python主节点 | 9,925 | 0 | 2 |
+| 根Python主节点 | 221 | 0 | 2 |
+| Python主节点合计 | 10,146 | 0 | 4 |
+| 根Python嵌套检查，另计 | 340 | 0 | 0 |
+| 四组根Node用例，另计 | 118 | 0 | 0 |
+
+52个任务中45个通过、7个只含按需验收，功能清单为空。实际选中的10,150个Python节点与各任务的实际结果逐项对应，节点身份全轮唯一，全部为功能类别。4个跳过与前次原因一致。节点比前次少60个，来自分段存储18个、绑定事务13个、撤回事务3个、两组媒体拒绝26个重复准备实例合并。各组原有输入与拒绝核对仍执行。容量性能专项和完整安装保持按需。预算委派正常收回，无遗留PID。
+
+| 组件任务 | 前次墙钟（秒） | 本次墙钟（秒） | 本次较前次（秒） |
+| --- | ---: | ---: | ---: |
+| `bootstrap` | 1118.975 | 1107.872 | -11.103 |
+| `capture` | 1014.508 | 1019.378 | +4.870 |
+| `outputs` | 825.651 | 785.414 | -40.237 |
+
+上述任务并行。最后结束的仍是视频估算任务，任务墙钟74.718秒。普通C按需构建一次，20.693秒，保持计入首次调用者的准备。48次包资源准备累计71.235秒。
+
+**超过九秒的功能节点。** 共44项，分布在16个文件，均通过。本轮逐项保留节点身份和阶段耗时，后续可直接定位。
+
+<details>
+<summary>44个慢用例及阶段耗时</summary>
+
+| 文件 | 用例 | 准备／执行／收场（秒） | 合计（秒） |
+| --- | --- | ---: | ---: |
+| `test_record_segment_history.py` | `test_real_segment_source_crosses_write_batch_and_directory` | 0.002／9.855／0.001 | 9.859 |
+| `test_segment_storage.py` | `test_preview_candidate_pair_and_original_cross_page_and_batch_boundaries` | 0.003／13.213／0.010 | 13.227 |
+| `test_camctl_c_module_roundtrip.py` | `test_capture_obtain_cleanup_roundtrip_via_c_module` | 20.705／13.461／0.061 | 34.227 |
+|  | `test_late_cancel_roundtrip_via_c_module` | 0.003／11.075／0.151 | 11.229 |
+| `test_camctl_cancellation_roundtrip.py` | `test_cleanup_unknown_preserves_original_request_result` | 0.003／15.473／0.097 | 15.573 |
+| `test_camctl_capture_roundtrip.py` | `test_photo_keeps_completed_outputs` | 0.002／10.450／0.013 | 10.465 |
+| `test_camctl_directory_switch.py` | `test_new_binding_publishes_and_claims_after_explicit_init` | 0.010／10.007／0.033 | 10.050 |
+| `test_camctl_media_roundtrip.py` | `test_insufficient_timing_checks_repairs_and_delivers` | 0.361／14.392／0.017 | 14.770 |
+|  | `test_excess_recording_repairs_without_probing` | 0.002／9.678／0.008 | 9.689 |
+| `test_camctl_motor_notifications.py` | `test_client_export_host_callback_report_import_boundaries` | 0.088／10.821／0.099 | 11.008 |
+|  | `test_slow_callback_allows_submit_new_run_and_fifo` | 0.002／12.141／0.070 | 12.213 |
+|  | `test_host_restarts_interrupted_cli_without_repeating_notification[after_intent-0]` | 0.003／10.598／0.130 | 10.731 |
+|  | `test_host_restarts_interrupted_cli_without_repeating_notification[after_write-1]` | 0.003／10.628／0.124 | 10.756 |
+| `test_camctl_motor_recovery.py` | `test_restart_never_repeats_saved_intent[before_intent-0-3]` | 0.649／12.149／0.015 | 12.812 |
+|  | `test_restart_never_repeats_saved_intent[after_intent-0-4]` | 0.491／11.010／0.014 | 11.515 |
+|  | `test_restart_never_repeats_saved_intent[before_write-0-4]` | 0.510／10.538／0.013 | 11.062 |
+|  | `test_restart_never_repeats_saved_intent[after_write-1-4]` | 0.497／10.592／0.015 | 11.103 |
+|  | `test_restart_never_repeats_saved_intent[before_result-1-4]` | 0.511／11.014／0.014 | 11.538 |
+|  | `test_restart_never_repeats_saved_intent[after_result-1-3]` | 0.521／10.952／0.013 | 11.485 |
+|  | `test_restart_never_repeats_saved_intent[intent_commit_unknown-0-4]` | 0.493／10.215／0.014 | 10.722 |
+|  | `test_restart_never_repeats_saved_intent[result_commit_unknown-1-3]` | 0.522／10.220／0.014 | 10.756 |
+|  | `test_restart_never_repeats_saved_intent[observe_commit_unknown-1-3]` | 0.494／10.122／0.011 | 10.627 |
+|  | `test_restart_never_repeats_saved_intent[intent_absent_unknown-0-3]` | 0.574／10.860／0.016 | 11.450 |
+|  | `test_restart_never_repeats_saved_intent[result_absent_unknown-1-4]` | 0.545／10.469／0.018 | 11.033 |
+| `test_camctl_output_roundtrip.py` | `test_recording_delivery_survives_late_cancel` | 0.002／15.382／0.100 | 15.485 |
+|  | `test_cross_plan_reference_and_multi_request` | 0.002／17.592／0.065 | 17.660 |
+| `test_camctl_process_recovery.py` | `test_next_run_waits_for_old_group_settlement[0]` | 21.976／6.357／0.039 | 28.372 |
+|  | `test_abnormal_restart_keeps_shared_budget` | 0.002／9.565／0.039 | 9.605 |
+| `test_camctl_report_roundtrip.py` | `test_report_import_ack_roundtrip` | 0.009／12.985／0.031 | 13.025 |
+|  | `test_report_generation_failure_preserves_responsibility` | 0.001／10.119／0.059 | 10.179 |
+|  | `test_report_save_failure_retry_keeps_determined_bytes` | 0.001／11.273／0.061 | 11.336 |
+|  | `test_state_db_failure_delivers_log_copy` | 0.001／10.402／0.028 | 10.432 |
+| `test_camctl_session_recovery.py` | `test_process_restart_resumes_interrupted_work` | 0.002／15.362／0.060 | 15.424 |
+|  | `test_start_call_interruption_settles_unconfirmed` | 0.002／9.448／0.058 | 9.508 |
+|  | `test_future_action_waits_and_past_window_expires` | 0.001／18.876／0.012 | 18.890 |
+|  | `test_report_failure_preserves_device_work_and_redelivers` | 0.001／9.188／0.091 | 9.280 |
+| `test_real_camera_demo_roundtrip.py` | `test_camera_demo_capture_obtain_and_report[camera_record-dji-action6]` | 0.009／18.551／0.107 | 18.667 |
+|  | `test_camera_demo_capture_obtain_and_report[camera_record-dji-osmo360-ii]` | 0.002／16.311／0.083 | 16.396 |
+|  | `test_camera_demo_capture_obtain_and_report[camera_timelapse-dji-action6]` | 0.004／16.538／0.095 | 16.637 |
+|  | `test_camera_demo_capture_obtain_and_report[camera_timelapse-dji-osmo360-ii]` | 0.002／15.922／0.091 | 16.016 |
+| `test_timelapse_time_parameters.py` | `test_describe_python_browser_and_node_export_agree[dji-action6]` | 0.002／19.087／0.061 | 19.150 |
+|  | `test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]` | 0.002／15.468／0.056 | 15.526 |
+| `test_video_size_estimate.py` | `test_record_estimate_stays_out_of_execution_and_report` | 0.003／10.989／0.058 | 11.050 |
+|  | `test_timelapse_estimate_uses_same_capture_duration_as_execution` | 0.002／10.687／0.064 | 10.752 |
+
+</details>
+
+## 前一次功能全量回归（2026-11-18，22分04秒）
 
 用户要求执行一次逻辑全量回归并排除性能测试。本次固定干净源码`cf69e98e6763be6de4181180316bf6322e084873`，使用Python3.11.17、SQLite3.53.1、pytest9.1.1及已准备的客户端依赖，通过统一预算启动器执行`run-integration.py --scope all --test-kind functional --jobs 4 --root-shards 1`。不指定目标或历史输入，覆盖全部camctl组件集成目录、根Python和四组根Node；性能专项、按需完整安装验收、独立单元测试、客户端Vitest及host独立CTest不属于此次选择。
 
@@ -62,17 +138,17 @@
 
 ### 缩短整轮功能回归
 
-最新完整功能回归为22分04秒。组件任务中，`bootstrap`、`capture`、`outputs`分别用时约18分39秒、16分55秒和13分46秒。三个任务并行；整轮耗时由实际开始、等待及完成时间共同决定。先核对这些目录内反复发生的准备和测试运行器的排程，再按对整轮的潜在影响安排改动。
+本阶段以用时22分04秒的前一次完整功能回归为线索。组件任务中，`bootstrap`、`capture`、`outputs`分别用时约18分39秒、16分55秒和13分46秒。三个任务并行；整轮耗时由实际开始、等待及完成时间共同决定。先核对这些目录内反复发生的准备和测试运行器的排程，再按对整轮的潜在影响安排改动。
 
 - [x] 从`bootstrap`的已有记录和代表用例辨认重复准备、实际业务耗时及可独立执行的文件。
 - [x] 核对`capture`和`outputs`中高累计文件，找出可减少的真实工作，并确认测试数据和共享夹具边界。
 - [x] 核对长任务是否推迟最后一批完成，验证既有权重排序的计划。
 - [x] 复查跨计划取回、视频修复交付及C交付的剩余耗时，保持各自业务目标并区分共享构建。
-- [ ] 实施并定向验证有明确收益的改动，登记实际范围、阶段耗时及仍需处理的项目。在明确的集成节点比较同范围完整功能回归的耗时。
+- [x] 实施并定向验证明确可减少的工作，登记实际范围和阶段耗时。以合入提交进行了同范围四槽功能全量，结果及44个慢节点见页首。
 
 **调度结论。** 原四槽回归中，`bootstrap`和`capture`在首批启动，`outputs`排第12，末段最后完成的是根视频估算任务。各任务的墙钟累计为5096.990秒。按原任务耗时固定不变计算，四槽完全均衡的下界约为21分14秒，比原运行器墙钟少约49秒。这个估算说明只换任务顺序的影响有限，同期负载变化仍须实际测量。用原回归可核实的27个任务权重生成了一次现有排序计划。52个任务及选择路径保持，`outputs`从第12移至第3，视频估算从第52移至第6。计划模式不执行测试。现阶段保留运行器及其默认顺序，使本次整轮测量与上次采用一致的调度配置。
 
-**代表测量与有依据的改动。** 同一Python3.11.17及2GiB内存与交换空间合计预算入口，仅选择功能用例。第一批`bootstrap`读取与恢复两个文件71项通过，外层58.003秒。其中读取运行时48项，准备18.012秒、执行16.481秒、收场0.558秒。后续抽测原拍摄完成恢复56项累计41.525秒、撤回事务23项累计24.321秒，多数成本在测试体内，里面既有准备也有实际故障恢复。拍摄完成恢复会保存原请求并在实际重开后交给不同入口，保留这些独立场景。
+**代表测量与有依据的改动。** 定向验证使用Python3.11.17及隔离运行器，只选择功能用例。需要启动受限camctl进程的组合由2GiB内存与交换空间合计预算入口执行；清理仓储复验按2GiB配置在pytest内验证实际业务。第一批`bootstrap`读取与恢复两个文件71项通过，外层58.003秒。其中读取运行时48项，准备18.012秒、执行16.481秒、收场0.558秒。后续抽测原拍摄完成恢复56项累计41.525秒、撤回事务23项累计24.321秒，多数成本在测试体内，里面既有准备也有实际故障恢复。拍摄完成恢复会保存原请求并在实际重开后交给不同入口，保留这些独立场景。
 
 | 改动 | 继续验证的行为 | 定向验收 |
 | --- | --- | --- |
