@@ -66,6 +66,21 @@ def _deployment_with_client(tmp_path: Path) -> tuple[Deployment, Path]:
     return deployment, deployment.state_db
 
 
+def _deployment_with_report_plan(tmp_path: Path, name: str) -> tuple[Deployment, Path, int]:
+    """初始化无设备部署，按公开格式准备一份同步计划。"""
+    deployment = Deployment(tmp_path, devices=False)
+    initialized = deployment.camctl(
+        "init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+    request_id = 5001
+    plan = {
+        "request_id": str(request_id),
+        "created_at": "2026-01-15 08:00:00",
+        **_plan_body(name),
+    }
+    return deployment, deployment.write_plan(plan), request_id
+
+
 def _reuse_recovery_client(deployment: Deployment, request, monkeypatch) -> None:
     """CLI恢复期间保持客户端打开；跨客户端重开由独立闭环验证。"""
     if sys.platform != "linux":
@@ -208,13 +223,13 @@ def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
 def test_invalid_body_with_valid_ack_absorbs_ack_only(
         tmp_path: Path, host_demo: str) -> None:
     """非法正文但有效 ACK：正文被拒、不建计划，ACK 仍被吸收。"""
-    deployment, state_db = _deployment_with_client(tmp_path)
-    plan_path, receipt = deployment.export_plan_with_client(_plan_body("同步前序"))
+    deployment, plan_path, request_id = _deployment_with_report_plan(tmp_path, "同步前序")
+    state_db = deployment.state_db
     demo = HostDemo(deployment, host_demo)
     try:
         demo.start()
         report_id, _ = _published_report(
-            deployment, demo, plan_path, int(receipt["request_id"]))
+            deployment, demo, plan_path, request_id)
         plans_before = _query(state_db, "SELECT COUNT(*) FROM plans")[0][0]
         # 正文缺少名称与动作：受理必须拒绝；顶层 ACK 引用已发布报告。
         invalid = deployment.root / "invalid-with-ack.json"
@@ -241,9 +256,8 @@ def test_invalid_body_with_valid_ack_absorbs_ack_only(
 def test_resubmitted_request_keeps_single_identity(
         tmp_path: Path, host_demo: str) -> None:
     """同一请求重送：计划与动作身份不重复，重送不产生新事实。"""
-    deployment, state_db = _deployment_with_client(tmp_path)
-    plan_path, receipt = deployment.export_plan_with_client(_plan_body("重送同步"))
-    request_id = int(receipt["request_id"])
+    deployment, plan_path, request_id = _deployment_with_report_plan(tmp_path, "重送同步")
+    state_db = deployment.state_db
     demo = HostDemo(deployment, host_demo)
     try:
         demo.start()
@@ -457,12 +471,9 @@ def test_state_db_failure_delivers_log_copy(
             计划携带远期动作，使会话继续承担后续处理责任。报告任务
             打开原状态库路径失败后交付日志副本，会话按状态库错误退出。
         """
-        submitted = deployment.camctl(
-            "submit", str(plan_path), "--config", str(deployment.config_path))
-        assert submitted.exit_code == 0, submitted.stderr
         known = set(glob.glob("*.tmp", root_dir=str(reports_staging)))
         session = deployment.start_camctl(
-            "run", "--config", str(deployment.config_path))
+            "run", str(plan_path), "--config", str(deployment.config_path))
         try:
             def _generation_started():
                 if session.poll() is not None:
