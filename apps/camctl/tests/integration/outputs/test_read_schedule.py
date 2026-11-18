@@ -1,26 +1,21 @@
 """首次读取建档遵守发起动作时间，恢复原责任不重新竞争资格。"""
 
-from contextlib import closing
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 
 import pytest
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history.decoding import decode_event_row
 from camctl.history.validators import EventValidationError
-from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
+from ..support.output_planning import capture_operation, validate_static_event as validate_event
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.repositories.transactions import TransactionScope
 
 from .test_grant_reuse import read_request, _save_grant
 from .test_local_read import local_read
-from .test_read_associations import read_targets, _command
+from .test_read_associations import read_targets, open_read_targets, _command
 from ..support.output_planning import event_case
 from .test_read_rejections import _availability
 
@@ -94,33 +89,48 @@ def test_existing_preparation_is_readable_before_schedule(read_request):
     assert tuple(owned.connection.iterdump()) == before
 
 
-def _scheduled_event(request, kind, event_type):
-    if kind == "host":
-        owned, command = request.getfixturevalue("local_read")
-    else:
-        owned = request.getfixturevalue("read_targets")
-        command = _command(internal=kind == "internal")
-    if kind == "internal":
-        owned.connection.execute("DELETE FROM obtain_items")
-        owned.connection.execute("DELETE FROM outputs")
-    else:
-        owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
-    owned.connection.commit()
-    plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(
-        command, new_operation_key(), target))
-    event, proposal = event_case(plan, event_type)
-    return event, proposal, command.action_id
+@pytest.fixture(scope="module")
+def _scheduled_event_sources(tmp_path_factory):
+    # 每种实际输入只通过真实仓储生成一次；关闭连接后才复用静态事实。
+    sources = {}
+    for kind in ("device", "host", "internal"):
+        with open_read_targets(tmp_path_factory.mktemp(f"schedule-{kind}")) as owned:
+            if kind == "host":
+                owned, command = local_read.__wrapped__(owned)
+            else:
+                command = _command(internal=kind == "internal")
+            if kind == "internal":
+                owned.connection.execute("DELETE FROM obtain_items")
+                owned.connection.execute("DELETE FROM outputs")
+            else:
+                owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
+            owned.connection.commit()
+            plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(
+                command, new_operation_key(), target))
+            for event_type in ((22,) if kind == "internal" else (22, 21)):
+                event, proposal = event_case(plan, event_type)
+                sources[kind, event_type] = event, proposal, command.action_id
+    return sources
+
+
+def _scheduled_event(sources, kind, event_type):
+    event, proposal, action_id = sources[kind, event_type]
+    # 事件和值字典可能被用例修改；读取范围由不可变映射和 frozenset 构成。
+    event, events, owners, state, future = deepcopy((event, proposal.events, proposal.owners,
+                                                     proposal.state_rows, proposal.transaction_rows))
+    return event, replace(proposal, events=events, owners=owners, state_rows=state,
+                          transaction_rows=future), action_id
 
 
 @pytest.fixture(params=[("device", 22), ("host", 22), ("internal", 22),
                        ("device", 21), ("host", 21)])
-def scheduled_event(request):
-    return _scheduled_event(request, *request.param)
+def scheduled_event(request, _scheduled_event_sources):
+    return _scheduled_event(_scheduled_event_sources, *request.param)
 
 
 @pytest.fixture(params=["device", "host"])
-def grant_event(request):
-    return _scheduled_event(request, request.param, 21)
+def grant_event(request, _scheduled_event_sources):
+    return _scheduled_event(_scheduled_event_sources, request.param, 21)
 
 
 @pytest.mark.parametrize("offset", [-1, 0, 1])
