@@ -155,7 +155,7 @@ def parameter_cases(parameter_type, model):
 def test_describe_python_browser_and_node_export_agree(tmp_path, model, reuse_client):
     deployment = Deployment(tmp_path, devices=False)
     driver = camera_spec(deployment, model, {})
-    deployment.install_client_capabilities(driver)
+    original_bytes = deployment.write_client_capabilities(driver)
     raw = (tmp_path / "client-store/device-capabilities.json").read_text()
     described = parse_exact_json(raw)
     parameter = next(a for a in described["devices"][0]["actions"]
@@ -184,6 +184,7 @@ def test_describe_python_browser_and_node_export_agree(tmp_path, model, reuse_cl
     }, ensure_ascii=False))
     result = deployment.run_client_driver("validate-parameters", str(tmp_path / "client-store"), str(inputs),
                                           output=tmp_path / "parameter-receipt.json")
+    deployment.assert_client_initialized(result["initialization"], original_bytes)
     for case, observed in zip(cases, result["cases"], strict=True):
         assert observed["name"] == case["name"]
         assert observed["browser_valid"] == observed["shared_valid"] == observed["export_valid"] == case["valid"], case["name"]

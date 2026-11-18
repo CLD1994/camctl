@@ -284,13 +284,8 @@ class Deployment:
             "import", str(reports_dir), str(self.root / "client-store"),
             output=self.root / "client-import.json")
 
-    def install_client_capabilities(self, driver: dict) -> dict:
-        """把 camctl describe 的能力说明导入客户端存储。
-
-        真实链路中客户端从部署侧取得设备能力说明；测试以 describe
-        命令与替身驱动的登记定义同源产生同一说明，并完成客户端
-        初始化和能力读取，返回实际存储状态。
-        """
+    def write_client_capabilities(self, driver: dict) -> bytes:
+        """用真实 describe 输出准备客户端能力文件，返回原始字节。"""
         described = self.camctl(
             "describe", "--config", str(self.config_path), driver=driver)
         assert described.exit_code == 0, described.stderr
@@ -298,13 +293,21 @@ class Deployment:
         store.mkdir(exist_ok=True)
         capabilities = store / "device-capabilities.json"
         capabilities.write_text(described.stdout, encoding="utf-8")
-        original_bytes = capabilities.read_bytes()
-        initialized = self.run_client_driver(
-            "initialize", str(store), output=self.root / "client-initialize.json")
+        return capabilities.read_bytes()
+
+    def assert_client_initialized(self, initialized: dict, original_bytes: bytes) -> None:
+        """核对客户端启动凭据及能力文件原始字节。"""
         assert initialized["initialized"] is True, initialized
         assert initialized["state"]["capabilities"]["error"] is None, initialized
         assert initialized["state"]["capabilities"]["active"] is not None, initialized
-        assert capabilities.read_bytes() == original_bytes
+        assert (self.root / "client-store/device-capabilities.json").read_bytes() == original_bytes
+
+    def install_client_capabilities(self, driver: dict) -> dict:
+        """从真实 describe 准备能力文件，初始化客户端并核对加载结果。"""
+        original_bytes = self.write_client_capabilities(driver)
+        initialized = self.run_client_driver(
+            "initialize", str(self.root / "client-store"), output=self.root / "client-initialize.json")
+        self.assert_client_initialized(initialized, original_bytes)
         return initialized
 
     def export_plan_with_client(self, plan_body: dict) -> tuple[Path, dict]:
