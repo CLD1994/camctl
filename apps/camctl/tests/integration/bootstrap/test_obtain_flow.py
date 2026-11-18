@@ -18,6 +18,7 @@ import sqlite3
 import sys
 import time
 from decimal import Decimal
+from functools import wraps
 from pathlib import Path
 
 import pytest
@@ -373,7 +374,17 @@ def _obtain_factory(cfg, drivers, *, scenario_clock=None):
 
 
 def _run_session(deps, cfg, driver, results, clock, tools_dir, *,
-                 capture_read_parallel: bool = False, scenario_clock=None):
+                 capture_read_parallel: bool = False, scenario_clock=None,
+                 on_obtain_advanced=None):
+    actual_obtain = obtain_flow(_obtain_factory(
+        cfg, _registry(driver, capture_read_parallel=capture_read_parallel),
+        scenario_clock=scenario_clock))
+
+    @wraps(actual_obtain)
+    async def observed_obtain(context):
+        await actual_obtain(context)
+        on_obtain_advanced()
+
     return asyncio.create_task(execute_command(
         deps, None,
         flows={
@@ -382,10 +393,7 @@ def _run_session(deps, cfg, driver, results, clock, tools_dir, *,
                     cfg, _registry(
                         driver, capture_read_parallel=capture_read_parallel),
                     results, clock, tools_dir, scenario_clock=scenario_clock)),
-            "obtain": obtain_flow(_obtain_factory(
-                cfg, _registry(
-                    driver, capture_read_parallel=capture_read_parallel),
-                scenario_clock=scenario_clock)),
+            "obtain": actual_obtain if on_obtain_advanced is None else observed_obtain,
             "cancel": cancel_flow(staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
@@ -838,10 +846,12 @@ class TestObtainExecutionLink:
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
         task = None
+        obtain_advanced = asyncio.Event()
         try:
             task = _run_session(
                 deps, cfg, driver, results, clock, tools_dir,
-                capture_read_parallel=True, scenario_clock=scenario_clock)
+                capture_read_parallel=True, scenario_clock=scenario_clock,
+                on_obtain_advanced=obtain_advanced.set)
             if first == "recording":
                 await _await_query(db, "SELECT status FROM actions WHERE name='shoot'", (3,), task=task)
                 scenario_clock.advance(1_000_000)
@@ -854,6 +864,10 @@ class TestObtainExecutionLink:
             await _await_query(
                 db, "SELECT attempts_used, retry_wait_required FROM operation_runs"
                 " WHERE responsibility_key = 'read/1'", (1, 1), task=task)
+            # 提交已可见时，流程可能还在消费保存回执；等真实推进返回后
+            # 再拨钟，保证这1.5秒从已建立的重试起点开始计算。
+            obtain_advanced.clear()
+            await asyncio.wait_for(obtain_advanced.wait(), 15)
             assert len(driver.read_calls) == 1, driver.read_calls
             if first == "read_batch":
                 scenario_clock.advance(1_000_000)
