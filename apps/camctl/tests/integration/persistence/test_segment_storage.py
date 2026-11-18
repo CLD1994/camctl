@@ -716,32 +716,38 @@ async def _preview_world(tmp_path, *, original_sizes=(10,0), paired_index=2, pre
         files.update(page.file_ids);pages.update((entry['identity'],saved.event_id) for entry in chunk)
         cursor=following;last=saved.event_id
     anchors={name:owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(identity,)).fetchone()[0] for name,identity in files.items()}
+    fixed={name:(OwnershipState.UNKNOWN,FileCompletionState.UNKNOWN) for name in files}
     for name,size in zip(names,original_sizes):
         _ok(runtime.capture.save_file_ownership(OwnershipSave(files[name],action_id,1,2,{},runtime.wall_us()),new_operation_key(),owned))
         if original_frozen!='ownership_unknown' or name!=names[paired_index-1]:
             anchors[name]=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(files[name],)).fetchone()[0]
+            fixed[name]=(OwnershipState.OWNED,FileCompletionState.UNKNOWN)
         if original_frozen=='incomplete' and name==names[paired_index-1]:
             _ok(runtime.capture.save_file_completion(FileCompletionSave(files[name],4,runtime.wall_us(),error={'reason':'incomplete'}),new_operation_key(),owned))
             anchors[name]=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(files[name],)).fetchone()[0]
+            fixed[name]=(OwnershipState.OWNED,FileCompletionState.INCOMPLETE)
         elif size is not None:
             _ok(runtime.capture.save_file_completion(FileCompletionSave(files[name],3,runtime.wall_us(),basis=1,observation={},size_bytes=size),new_operation_key(),owned))
             if original_frozen=='complete' or name!=names[paired_index-1]:
                 anchors[name]=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(files[name],)).fetchone()[0]
+                fixed[name]=(OwnershipState.OWNED,FileCompletionState.COMPLETE)
     if preview_owned and preview_pairing is PreviewPairingState.PAIRED:
         _ok(runtime.capture.save_file_ownership(OwnershipSave(files[preview],action_id,1,3,{},runtime.wall_us(),paired_device_file_id=files[names[paired_index-1]],pairing_observation={}),new_operation_key(),owned))
+        fixed[preview]=(OwnershipState.OWNED,FileCompletionState.UNKNOWN)
     if preview_incomplete:
         _ok(runtime.capture.save_file_completion(FileCompletionSave(files[preview],4,runtime.wall_us(),error={'reason':'incomplete'}),new_operation_key(),owned))
+        fixed[preview]=(fixed[preview][0],FileCompletionState.INCOMPLETE)
     elif preview_size is not None:
         _ok(runtime.capture.save_file_completion(FileCompletionSave(files[preview],3,runtime.wall_us(),basis=1,observation={},size_bytes=preview_size),new_operation_key(),owned))
+        fixed[preview]=(fixed[preview][0],FileCompletionState.COMPLETE)
     anchors[preview]=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(files[preview],)).fetchone()[0]
     attempt_id=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',(ticket.run_id,ticket.attempt_id)).fetchone()[0]
     ref=SegmentSetRef(action_id,attempt_id,last,1);repo=SegmentRepository()
     _ok(repo.create(SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,60000,runtime.wall_us()),new_operation_key(),owned))
-    from camctl.persistence.repositories.result_file_proofs import read_fixed_file
     requests=[]
     for entry in entries:
-        name=entry['identity'];frozen=read_fixed_file(owned.connection,files[name],anchors[name])
-        requests.append(SegmentMemberInput(files[name],pages[name],anchors[name],SegmentMemberRole.PREVIEW if name==preview else SegmentMemberRole.ORIGINAL,OwnershipState.OWNED if frozen['source_action_id']==action_id else OwnershipState.UNKNOWN,FileCompletionState.COMPLETE if frozen['completion_state']==3 else FileCompletionState.INCOMPLETE if frozen['completion_state']==4 else FileCompletionState.UNKNOWN,names[paired_index-1] if name==preview and preview_pairing is PreviewPairingState.PAIRED else None,preview_pairing if name==preview else PreviewPairingState.NOT_APPLICABLE))
+        name=entry['identity'];ownership,completion=fixed[name]
+        requests.append(SegmentMemberInput(files[name],pages[name],anchors[name],SegmentMemberRole.PREVIEW if name==preview else SegmentMemberRole.ORIGINAL,ownership,completion,names[paired_index-1] if name==preview and preview_pairing is PreviewPairingState.PAIRED else None,preview_pairing if name==preview else PreviewPairingState.NOT_APPLICABLE))
     for offset in range(0,len(requests),128):_ok(repo.append_members(ref,tuple(requests[offset:offset+128]),runtime.wall_us(),new_operation_key(),owned))
     _ok(repo.fix_members(ref,runtime.wall_us(),new_operation_key(),owned))
     facts=CompletionFacts(EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,SegmentKey(1,1),EvidenceState.CONFIRMED,EvidenceState.UNKNOWN,True,False)
@@ -867,15 +873,17 @@ def _commit_marker_plan(owned,ref,members,at,key,read_scope,monkeypatch,*,tamper
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('read_scope',['plan','bounded'])
-@pytest.mark.parametrize('tamper',['omit_marker','fake_final_marker','wrong_action','wrong_version','wrong_scan','wrong_set','wrong_event_type','duplicate_marker','marker_points_to_publish','omit_terminal'])
-async def test_marker_proof_rejects_tampered_direct_transaction_and_preserves_all_state(tmp_path,read_scope,tamper,monkeypatch):
-    from camctl.persistence.repositories.transactions import commit_operation
+async def test_marker_proof_rejects_tampered_direct_transaction_and_preserves_all_state(tmp_path,read_scope,monkeypatch):
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     try:
-        before=_publication_snapshot(owned);key=new_operation_key()
-        saved=_commit_marker_plan(owned,ref,members,runtime.wall_us(),key,read_scope,monkeypatch,tamper=tamper)
-        assert saved.kind=='rolled_back',saved.error
-        assert _publication_snapshot(owned)==before
+        before=_publication_snapshot(owned)
+        for tamper in ('omit_marker','fake_final_marker','wrong_action','wrong_version','wrong_scan','wrong_set','wrong_event_type','duplicate_marker','marker_points_to_publish','omit_terminal'):
+            key=new_operation_key()
+            saved=_commit_marker_plan(owned,ref,members,runtime.wall_us(),key,read_scope,monkeypatch,tamper=tamper)
+            context=f'read_scope={read_scope}, tamper={tamper}; 后续输入未执行'
+            assert saved.kind=='rolled_back',(context,saved.error)
+            assert not owned.connection.in_transaction,context
+            assert _publication_snapshot(owned)==before,context
     finally:owned.connection.close()
 
 
