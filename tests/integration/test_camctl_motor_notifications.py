@@ -262,14 +262,36 @@ def test_client_export_host_callback_report_import_boundaries(
         _assert_sent(deployment, 4)
         report, _ = _claim_import(host, {action["name"]: "succeeded" for action in body["actions"]})
         _assert_motor_report(report, positions)
-        ack_body = {"name": "累计确认", "actions": [{"name": "同步", "type": "report_status",
-                    "scheduled_at": future_schedule(-1), "params": {"scope": "full"}}]}
-        ack_path, ack = deployment.export_plan_with_client(ack_body)
-        assert ack["last_report_id"] == report["report_id"]
+        ack_path = deployment.root / "motor-with-ack.json"
+        ack = deployment.run_client_driver(
+            "download-request", str(deployment.root / "client-store"),
+            str(receipt["request_id"]), str(ack_path),
+            output=deployment.root / "client-download.json")
+        assert ack == {"request_id": receipt["request_id"], "has_ack": True,
+                       "last_report_id": report["report_id"]}
+        original = json.loads(path.read_text(encoding="utf-8"))
+        redownloaded = json.loads(ack_path.read_text(encoding="utf-8"))
+        assert original["request_id"] == receipt["request_id"]
+        assert redownloaded.pop("last_report_id") == report["report_id"]
+        original.pop("last_report_id", None)
+        assert redownloaded == original
+        log_start = len(host.log.read_text(encoding="utf-8"))
         host.submit(ack_path)
+        submitted = re.search(r"command=submit pid=\d+ result=success [^\n]* needs_run=([01]) ",
+                              host.log.read_text(encoding="utf-8")[log_start:])
+        assert submitted, host.diagnostics()
+        if submitted.group(1) == "1":
+            host.wait(lambda: re.search(
+                r"command=run pid=\d+ result=success [^\n]* needs_run=0 ",
+                host.log.read_text(encoding="utf-8")[log_start:]),
+                "重送后的真实 CLI 未完成回收与解析")
         host.wait(lambda: query_state(deployment.state_db,
-                  "SELECT acknowledged_report_id FROM runtime_state") == [(int(report["report_id"]),)],
+                  "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state")
+                  == [(int(report["report_id"]), report["to_wm"])],
                   "客户端累计确认未经 C submit 吸收")
+        host.drain()
+        assert host.callbacks() == callbacks
+        _assert_sent(deployment, 4)
     finally:
         host.stop()
 
