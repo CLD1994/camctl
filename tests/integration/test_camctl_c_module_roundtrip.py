@@ -138,6 +138,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
     state_db = deployment.state_db
 
     shoot_at = deployment.schedule(1)
+    cleanup_at = deployment.schedule(10)
     body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -190,7 +191,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
                 "type": "delete_action_outputs",
                 # 排期在两种取回完成后：清理依赖来源终态即可执行，
                 # 与正在拷贝的取回同窗口会先删除设备内容。
-                "scheduled_at": deployment.schedule(10),
+                "scheduled_at": cleanup_at,
                 "params": {"source": {"action_name": "拍照"}},
             },
         ],
@@ -214,13 +215,21 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
             timeout_s=max(0, deadline - time.monotonic()),
             message="录像 START 责任未收场", failure=failure)
         # 真实录像 START 后推进其一秒目标；后续延时仍在原五秒窗口内。
-        frozen = deployment.freeze_at(deployment.schedule(1))
+        deployment.freeze_at(deployment.schedule(1))
         wait_for(lambda: query_state(state_db,
             "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
             " WHERE a.name='延时' AND r.responsibility_key='start/' || a.id"
             " AND r.status IN (3,4)") or None,
             timeout_s=max(0, deadline - time.monotonic()),
             message="延时 START 责任未收场", failure=failure)
+        # 保留完整延时目标；两份交付实际发布后再到达原清理时刻。
+        deployment.freeze_at(deployment.schedule(3))
+        wait_for(lambda: query_state(
+            state_db, "SELECT status FROM actions WHERE name IN ('取照片','取延时') ORDER BY id"
+        ) == [(3,), (3,)] and len(_delivered_files(deployment.ready)) == 2 or None,
+            timeout_s=max(0, deadline - time.monotonic()),
+            message="两份取回交付未发布", failure=failure)
+        frozen = deployment.freeze_at(cleanup_at)
         running = deployment.resume_clock()
         assert running["utc_anchor_us"] == frozen["utc_us"]
         assert running["monotonic_anchor_ns"] == frozen["monotonic_ns"]
@@ -504,6 +513,7 @@ def test_late_cancel_roundtrip_via_c_module(
             " AND r.status IN (3,4)") or None,
             timeout_s=max(0, deadline - time.monotonic()),
             message="录像 START 责任未收场", failure=failure)
+        deployment.freeze_at(body["actions"][1]["scheduled_at"])
         deployment.resume_clock()
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions ORDER BY id"
