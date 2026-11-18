@@ -217,11 +217,13 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
         # 真实录像 START 后推进其一秒目标；后续延时仍在原五秒窗口内。
         deployment.freeze_at(deployment.schedule(1))
         wait_for(lambda: query_state(state_db,
-            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
-            " WHERE a.name='延时' AND r.responsibility_key='start/' || a.id"
-            " AND r.status IN (3,4)") or None,
+            "SELECT d.expected_check_at FROM device_activities d"
+            " JOIN actions a ON a.id=d.action_id"
+            " WHERE a.name='延时' AND d.sent_at IS NOT NULL"
+            " AND d.expected_check_at=d.sent_at+3000000"
+            " AND d.wait_completed_event_id IS NULL") or None,
             timeout_s=max(0, deadline - time.monotonic()),
-            message="延时 START 责任未收场", failure=failure)
+            message="延时 START 及三秒等待安排未保存", failure=failure)
         # 保留完整延时目标；两份交付实际发布后再到达原清理时刻。
         deployment.freeze_at(deployment.schedule(3))
         wait_for(lambda: query_state(
