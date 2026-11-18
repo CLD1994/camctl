@@ -64,9 +64,117 @@
 
 本次按用例补查原46个慢项。原全量只留下17个文件的慢项数量、最大耗时和少数明确的用例名。通过功能类别定向执行这17个文件，取得所有现存候选的逐项计时，同时逐组检查上一轮尚未单独处理的行为。测量结果只代表这次选定范围。用例已经明确暂缓的部分保持原决定。
 
-- [ ] 从17个文件的当前用例和已有结果建立逐项核对清单。
-- [ ] 对上一轮遗漏的慢项逐项检查并实施有依据的测试侧优化，保留其有效行为和失效场景。
-- [ ] 补测实际改动范围，按具体用例登记耗时和处置；未达标或有阻碍的项说明原因。
+- [x] 从17个文件的当前用例和已有结果建立逐项核对清单。
+- [x] 对上一轮遗漏的慢项逐项检查并实施有依据的测试侧优化，保留其有效行为和失效场景。
+- [x] 补测实际改动范围，按具体用例登记耗时和处置；未达标或有阻碍的项说明原因。
+
+#### 逐项核查与定向计时
+
+原全量只有文件级慢项数量及少数明确的用例身份。因此本轮固定 `ec6b31f1`，用Python3.11.17和2GiB内存与交换空间合计预算，以四槽定向跑完原17个文件的全部当前功能节点。**189项通过，退出码0，外层445.165秒。** 一次普通C构建19.549秒。此前超时的取回流程六项通过，本次均低于九秒。以下是本次57个超九秒节点的实际分阶段耗时。测试间同期负载与原全量不同，这57项无法逐一还原当时的46项。
+
+- `test_camctl_motor_recovery.py`。验证故障前后原进程退出、独立恢复、重送、报告重建及管道内容。未发现可合并且保留这四次观察的方法。
+- `test_camctl_motor_notifications.py`。回调、独立受理、恢复和领取均保留。轮询候选没有取得可信证据。
+- `test_camctl_output_roundtrip.py`。保留迟到取消前的独立受理和实际领取。三类拍摄保留三份真实开始、时钟目标及两份交付。
+- `test_camctl_session_recovery.py`。保留真实进程重启、故障在途门闩、独立和并行受理、十五秒未来排期及新进程保存原报告。重启用例原五秒剩余等待仍由新会话实际完成。
+- `test_camctl_process_recovery.py`。保留专用C包装、旧进程组退出、扫描与回收、并行提交和下一轮。异常预算用例需要独立运行验证预算未重置，重试已经使用20毫秒。
+- `test_segment_storage.py`。跨页预览上一轮已减少逐文件恢复。129份原片和1份预览保留真实事实及跨页关联，追加窗口和完成事务不合并。
+- `test_real_camera_demo_roundtrip.py`。四种组合保留原长读取、读取期间的停止与报告、完整领取、延时真实重启与原请求重送。缩短轮询候选未保留。
+- `test_camctl_report_roundtrip.py`。状态库故障交付日志副本上一轮已合并两次重复受理。生成失败和保存失败的两个恢复用例继续按原决定暂缓。
+- `test_timelapse_time_parameters.py`。上一轮已去掉独立初始化。保留两种相机的实际Chromium校验、逐项导出、独立受理、取消及报告。
+- `test_camctl_cancellation_roundtrip.py`。客户端已复用，首次受理已并入执行。删除效果未知的预算耗尽和第二次独立请求成功均保留。
+- `test_camctl_directory_switch.py`。上一轮已让第一份报告由C启动时执行。保留新旧目录分别初始化、旧报告字节、新目录交付及数据库身份。
+
+<details>
+<summary>17个文件中本轮测得的超九秒用例</summary>
+
+| 文件 | 用例 | 准备／执行／收场（秒） | 合计（秒） | 处置 |
+| --- | --- | ---: | ---: | --- |
+| `test_camctl_motor_recovery.py` | `test_restart_never_repeats_saved_intent[before_intent-0-3]` | 0.682／12.672／0.020 | 13.375 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[after_intent-0-4]` | 0.584／13.825／0.016 | 14.425 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[before_write-0-4]` | 0.702／14.440／0.010 | 15.152 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[after_write-1-4]` | 0.691／13.649／0.020 | 14.360 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[before_result-1-4]` | 0.663／15.492／0.015 | 16.170 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[after_result-1-3]` | 0.710／15.145／0.017 | 15.872 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[intent_commit_unknown-0-4]` | 0.834／19.906／0.016 | 20.757 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[result_commit_unknown-1-3]` | 1.235／33.887／0.017 | 35.138 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[observe_commit_unknown-1-3]` | 2.264／30.329／0.019 | 32.612 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[intent_absent_unknown-0-3]` | 1.243／28.143／0.029 | 29.415 | 保留 |
+|  | `test_restart_never_repeats_saved_intent[result_absent_unknown-1-4]` | 1.372／27.509／0.031 | 28.912 | 保留 |
+|  | `test_channel_failure_is_final_and_not_retried[absent-27-not_connected]` | 1.252／10.468／0.014 | 11.734 | 保留 |
+|  | `test_channel_failure_is_final_and_not_retried[full-28-would_block]` | 1.454／9.353／0.020 | 10.827 | 保留 |
+|  | `test_channel_failure_is_final_and_not_retried[broken-28-broken_pipe]` | 1.135／11.129／0.009 | 12.273 | 保留 |
+|  | `test_all_cancel_targets_stop_future_motor_without_intent[target0]` | 1.289／8.200／0.015 | 9.504 | 保留 |
+| `test_camctl_output_roundtrip.py` | `test_recording_delivery_survives_late_cancel` | 0.002／16.970／0.101 | 17.073 | 保留 |
+|  | `test_auto_preview_obtains_registered_preview` | 0.003／9.870／0.103 | 9.976 | 本轮已改 |
+|  | `test_plan_cancel_before_start_settles_auto_preview` | 0.003／11.549／0.067 | 11.619 | 本轮已改 |
+|  | `test_three_capture_kinds_partial_obtain` | 0.002／11.581／0.063 | 11.647 | 保留 |
+|  | `test_repeated_obtain_of_same_output_yields_independent_deliveries` | 0.002／12.973／0.085 | 13.060 | 本轮已改 |
+|  | `test_cross_plan_reference_and_multi_request` | 0.002／25.485／0.161 | 25.648 | 本轮已改 |
+| `test_video_size_estimate.py` | `test_record_estimate_stays_out_of_execution_and_report` | 0.003／23.808／0.075 | 23.886 | 本轮已改 |
+|  | `test_timelapse_estimate_uses_same_capture_duration_as_execution` | 0.002／16.958／0.110 | 17.069 | 本轮已改 |
+| `test_camctl_session_recovery.py` | `test_process_restart_resumes_interrupted_work` | 0.003／34.754／0.190 | 34.947 | 保留 |
+|  | `test_start_call_interruption_settles_unconfirmed` | 0.002／28.859／0.172 | 29.033 | 保留 |
+|  | `test_concurrent_submits_and_duplicate_identity` | 0.002／25.498／0.591 | 26.092 | 保留 |
+|  | `test_future_action_waits_and_past_window_expires` | 0.014／26.985／0.028 | 27.027 | 保留 |
+|  | `test_report_failure_preserves_device_work_and_redelivers` | 0.002／25.153／0.145 | 25.301 | 保留 |
+|  | `test_late_result_preserves_terminal_decision` | 0.002／17.831／0.127 | 17.960 | 保留 |
+| `test_camctl_process_recovery.py` | `test_next_run_waits_for_old_group_settlement[0]` | 30.409／8.402／0.038 | 38.849 | 保留 |
+|  | `test_abnormal_restart_keeps_shared_budget` | 0.002／13.516／0.041 | 13.559 | 保留 |
+|  | `test_original_group_does_not_kill_parallel_submit_or_other_groups[grouped]` | 0.002／11.085／0.063 | 11.150 | 保留 |
+|  | `test_original_group_does_not_kill_parallel_submit_or_other_groups[detached]` | 0.003／18.254／0.062 | 18.319 | 保留 |
+|  | `test_original_group_does_not_kill_parallel_submit_or_other_groups[racing]` | 0.002／20.646／0.063 | 20.710 | 保留 |
+| `test_segment_storage.py` | `test_preview_candidate_pair_and_original_cross_page_and_batch_boundaries` | 0.003／13.411／0.015 | 13.429 | 沿用上轮改动 |
+| `test_real_camera_demo_roundtrip.py` | `test_camera_demo_capture_obtain_and_report[camera_record-dji-action6]` | 0.058／49.353／0.232 | 49.643 | 保留 |
+|  | `test_camera_demo_capture_obtain_and_report[camera_record-dji-osmo360-ii]` | 0.002／38.872／0.184 | 39.058 | 保留 |
+|  | `test_camera_demo_capture_obtain_and_report[camera_timelapse-dji-action6]` | 0.003／34.387／0.139 | 34.530 | 保留 |
+|  | `test_camera_demo_capture_obtain_and_report[camera_timelapse-dji-osmo360-ii]` | 0.002／26.859／0.173 | 27.034 | 保留 |
+| `test_camctl_report_roundtrip.py` | `test_report_import_ack_roundtrip` | 0.013／21.516／0.036 | 21.565 | 本轮已改 |
+|  | `test_report_generation_failure_preserves_responsibility` | 0.018／22.065／0.130 | 22.213 | 按原决定暂缓 |
+|  | `test_report_save_failure_retry_keeps_determined_bytes` | 0.003／34.798／0.156 | 34.957 | 按原决定暂缓 |
+|  | `test_state_db_failure_delivers_log_copy` | 0.002／31.457／0.031 | 31.490 | 沿用上轮改动 |
+| `test_camctl_c_module_roundtrip.py` | `test_capture_obtain_cleanup_roundtrip_via_c_module` | 19.564／19.357／0.070 | 38.991 | 本轮已改 |
+|  | `test_late_cancel_roundtrip_via_c_module` | 0.002／11.466／0.076 | 11.545 | 本轮已改 |
+| `test_camctl_motor_notifications.py` | `test_client_export_host_callback_report_import_boundaries` | 0.085／11.366／0.070 | 11.521 | 沿用上轮改动 |
+|  | `test_slow_callback_allows_submit_new_run_and_fifo` | 0.002／13.226／0.109 | 13.337 | 保留 |
+|  | `test_host_restarts_interrupted_cli_without_repeating_notification[after_intent-0]` | 0.002／15.147／0.122 | 15.271 | 保留 |
+|  | `test_host_restarts_interrupted_cli_without_repeating_notification[after_write-1]` | 0.003／14.355／0.083 | 14.440 | 保留 |
+| `test_record_segment_history.py` | `test_real_segment_source_crosses_write_batch_and_directory` | 0.003／10.243／0.001 | 10.247 | 本轮已改 |
+| `test_timelapse_time_parameters.py` | `test_describe_python_browser_and_node_export_agree[dji-action6]` | 0.003／44.739／0.171 | 44.913 | 沿用上轮改动 |
+|  | `test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]` | 0.002／33.634／0.176 | 33.812 | 沿用上轮改动 |
+| `test_camctl_media_roundtrip.py` | `test_insufficient_timing_checks_repairs_and_delivers` | 0.567／16.566／0.019 | 17.152 | 本轮已改 |
+|  | `test_excess_recording_repairs_without_probing` | 0.002／11.304／0.012 | 11.318 | 本轮已改 |
+| `test_camctl_capture_roundtrip.py` | `test_photo_keeps_completed_outputs` | 0.002／12.292／0.020 | 12.314 | 本轮已改 |
+| `test_camctl_cancellation_roundtrip.py` | `test_cleanup_unknown_preserves_original_request_result` | 0.005／15.007／0.057 | 15.069 | 保留 |
+| `test_camctl_directory_switch.py` | `test_new_binding_publishes_and_claims_after_explicit_init` | 0.010／10.385／0.033 | 10.429 | 沿用上轮改动 |
+
+</details>
+
+本轮共改14项，其中13项在上表。另一个重复自动预览用例在组合补验中曾因实际墙钟消耗原五秒启动窗口而失败，改为观察受理结果和真实START后推进受控时钟，随后定向通过。录像与延时估算复用一个客户端，首轮发现独立驱动与会话的回执分别把小数读为float和Decimal。测试改为按相同精确小数核对，两个用例随后定向通过。
+
+电机测试曾在独立工作区试用25毫秒非目标轮询。通知五项通过，恢复完成七项后主动停止，外层退出码130。同一时段并行任务较多，未取得可归因的收益，故撤回这项配置。相机演示四项也执行过缩短轮询的版本，单项用时有升有降，继续使用原配置。
+
+#### 合入后14项复测
+
+在合入源码 `fef124d9` 上，通过相同预算启动器和Python3.11.17，以 `run-integration.py --scope all --test-kind functional --jobs 2 --root-shards 1` 逐项选择14个已改节点。**14项全部通过，退出码0，外层93.654秒，4项不超过九秒、10项仍超过九秒。** 普通C构建一次，17.477秒，计入首个使用该构建的用例。委派已回收，无遗留进程。两槽复测和前面四槽盘点的负载不同，不能从耗时差计算稳定提速比例。
+
+| 用例 | 准备／执行／收场（秒） | 合计（秒） |
+| --- | ---: | ---: |
+| `test_real_segment_source_crosses_write_batch_and_directory` | 0.003／9.533／0.002 | 9.538 |
+| `test_capture_obtain_cleanup_roundtrip_via_c_module` | 17.487／12.194／0.064 | 29.746 |
+| `test_late_cancel_roundtrip_via_c_module` | 0.002／9.797／0.069 | 9.868 |
+| `test_photo_keeps_completed_outputs` | 0.002／9.897／0.016 | 9.915 |
+| `test_insufficient_timing_checks_repairs_and_delivers` | 0.284／13.254／0.014 | 13.552 |
+| `test_excess_recording_repairs_without_probing` | 0.002／9.072／0.011 | 9.084 |
+| `test_auto_preview_obtains_registered_preview` | 0.002／8.042／0.050 | 8.093 |
+| `test_duplicate_auto_preview_fails_at_admission` | 0.001／4.927／0.011 | 4.939 |
+| `test_plan_cancel_before_start_settles_auto_preview` | 0.001／7.600／0.089 | 7.690 |
+| `test_repeated_obtain_of_same_output_yields_independent_deliveries` | 0.002／6.312／0.055 | 6.368 |
+| `test_cross_plan_reference_and_multi_request` | 0.001／15.330／0.070 | 15.401 |
+| `test_report_import_ack_roundtrip` | 0.008／11.273／0.035 | 11.316 |
+| `test_record_estimate_stays_out_of_execution_and_report` | 0.002／9.748／0.055 | 9.804 |
+| `test_timelapse_estimate_uses_same_capture_duration_as_execution` | 0.002／9.554／0.054 | 9.610 |
+
+本轮合入改动保留全部生产代码与原运行类别。两轮定向执行没有安排性能、安装或完整功能回归。14项复测只更新本次实际改过的用例，其他用例沿用上述17文件计时或已有明确结论。当前整个套件仍超过九秒的精确总数没有重新测定。
 
 普通功能仍以九秒为目标。用户明确允许：核实后没有合理优化空间的用例，记录成本及保留原因后自主越过，继续优化其他目标。越过不改变pytest执行类别，不跳过测试、不减少检查，也不记为达标；有新证据再重开。当前状态区分已达标、正在优化、经核实保留并越过、用户明确暂缓和待决事项。
 
