@@ -916,11 +916,22 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path, reuse_client) ->
     assert saved["saved_report_ids"] == [report_id]
     ack = deployment.write_plan(
         {"request_id": "0", "last_report_id": report_id})
+    # 同一文件的请求身份无效，受理仍须保存拒绝原因并吸收有效确认。
     absorbed = deployment.camctl(
-        "run", str(ack), "--config", str(deployment.config_path),
+        "submit", str(ack), "--config", str(deployment.config_path),
         driver=spec)
     assert absorbed.exit_code == 0, absorbed.stderr
+    assert absorbed.message()["kind"] == "succeeded"
     assert _query(
         state_db,
         "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
     ) == [(int(report_id), report["to_wm"])]
+    [(errors,)] = _query(state_db, "SELECT errors_json FROM plan_file_diagnostics")
+    [error] = json.loads(errors)
+    assert error["code"] == "invalid_request_id"
+    assert error["details"]["field"] == "request_id"
+    assert error["details"]["value"] == "0"
+    assert _query(
+        state_db, "SELECT status FROM plans ORDER BY id") == [(3,), (3,), (3,)]
+    assert _query(
+        state_db, "SELECT action_id FROM deliveries") == [(3,)]
