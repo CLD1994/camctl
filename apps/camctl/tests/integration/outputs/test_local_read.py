@@ -15,7 +15,11 @@ from .test_qualification import _seed_output
 
 @pytest.fixture
 def local_read(read_targets):
-    owned = read_targets
+    return read_targets, prepare_local_read(read_targets)
+
+
+def prepare_local_read(owned):
+    """在调用者拥有的库中准备主机产物的读取申请。"""
     connection = owned.connection
     connection.execute(
         "INSERT INTO intermediate_files (id, owner_action_id, owner_delivery_id, purpose,"
@@ -29,9 +33,8 @@ def local_read(read_targets):
     connection.execute("INSERT INTO output_origins (output_id, original_output_id) VALUES (701, 703)")
     connection.execute("UPDATE obtain_items SET basis=2, original_output_id=703 WHERE id=101")
     connection.commit()
-    command = replace(_command(), source_device_file_id=None,
-                      source_intermediate_file_id=801, config=None)
-    return owned, command
+    return replace(_command(), source_device_file_id=None,
+                   source_intermediate_file_id=801, config=None)
 
 
 def test_local_read_creates_independent_copy_with_local_config(local_read):

@@ -14,7 +14,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from .test_grant_reuse import read_request, _save_grant
-from .test_local_read import local_read
+from .test_local_read import local_read, prepare_local_read
 from .test_read_associations import read_targets, open_read_targets, _command
 from ..support.output_planning import event_case
 from .test_read_rejections import _availability
@@ -96,7 +96,7 @@ def _scheduled_event_sources(tmp_path_factory):
     for kind in ("device", "host", "internal"):
         with open_read_targets(tmp_path_factory.mktemp(f"schedule-{kind}")) as owned:
             if kind == "host":
-                owned, command = local_read.__wrapped__(owned)
+                command = prepare_local_read(owned)
             else:
                 command = _command(internal=kind == "internal")
             if kind == "internal":

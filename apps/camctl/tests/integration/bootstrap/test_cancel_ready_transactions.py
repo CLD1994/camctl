@@ -56,22 +56,26 @@ def _error(delivery_id, marker="first"):
             "details": {"delivery_id": str(delivery_id), "error": marker}}
 
 
-@pytest.mark.parametrize("changed", ["delivery", "choice", "error", "time"])
-async def test_withdrawal_original_key_rejects_changed_full_input(environment, changed):
+async def test_withdrawal_original_key_rejects_changed_full_input(environment):
     _target, ids, _runtime = await _pending(environment)
     owned, repository = environment[1], OutputsRepository()
     command = AdvanceWithdrawal(ids[0], WithdrawalChoice.UNKNOWN, _NOW, _error(ids[0]))
     key = new_operation_key()
     saved = repository.advance_withdrawal(command, key, owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    changed_command = replace(command, **({"delivery_id": ids[1]} if changed == "delivery" else
-        {"choice": WithdrawalChoice.FAILED} if changed == "choice" else
-        {"error": _error(ids[0], "changed")} if changed == "error" else {"occurred_at": _NOW+1}))
+    changed_commands = {
+        "delivery_id": replace(command, delivery_id=ids[1]),
+        "choice": replace(command, choice=WithdrawalChoice.FAILED),
+        "error": replace(command, error=_error(ids[0], "changed")),
+        "occurred_at": replace(command, occurred_at=_NOW + 1),
+    }
     baseline = tuple(owned.connection.iterdump())
-    rejected = repository.advance_withdrawal(changed_command, key, owned)
-    assert rejected.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(rejected.error, TransactionError)
-    assert tuple(owned.connection.iterdump()) == baseline
+    for field, changed_command in changed_commands.items():
+        rejected = repository.advance_withdrawal(changed_command, key, owned)
+        assert rejected.kind is DbOutcomeKind.ROLLED_BACK, (field, rejected.error)
+        assert isinstance(rejected.error, TransactionError), (field, rejected.error)
+        assert not owned.connection.in_transaction, field
+        assert tuple(owned.connection.iterdump()) == baseline, field
 
 
 async def test_withdrawal_result_cannot_reuse_requested_only_key(environment):

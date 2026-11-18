@@ -270,15 +270,13 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
         report_path = _report_file(deployment.ready)
         report_bytes = report_path.read_bytes()
         demo.claim()
-        wait_for(lambda: (
-            len(_delivered_files(deployment.processing)) == 2
-            and _report_file(deployment.processing).exists()) or None,
-            timeout_s=30, message="领取未移动交付与报告", failure=failure)
         assert not list(deployment.ready.iterdir())
         claimed = _delivered_files(deployment.processing)
+        assert len(claimed) == 2, claimed
         assert {path.read_bytes() for path in claimed} == expected
-        assert (deployment.processing / report_path.name
-                ).read_bytes() == report_bytes
+        claimed_report = _report_file(deployment.processing)
+        assert claimed_report.name == report_path.name
+        assert claimed_report.read_bytes() == report_bytes
         statuses = {
             action["name"]: action["status"]
             for plan in report["plans"] for action in plan["actions"]}
