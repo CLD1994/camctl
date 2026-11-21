@@ -16,7 +16,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/reporting -q
 ```
 
-当前集成目录由 `python scripts/run-integration.py --scope camctl --list` 从实际源码发现，不另行维护目录清单。完整回归可以使用[隔离并行入口](../../../scripts/README.md#隔离并行集成测试)，默认在全部目录中选择功能测试；性能专项须显式使用 `--test-kind performance`，完整构建和独立安装链使用 `--test-kind acceptance` 按需验收，全部类别使用 `--test-kind all`。按需安装验收不设九秒目标或额外总耗时上限，仍保留业务超时与防挂起保护。直接 pytest 使用同一参数，额外的 `-m` 表达式与类别取交集；`--target` 用于窄范围验证，不能替代完整回归。
+当前集成目录由 `python scripts/run-integration.py --scope camctl --list` 从实际源码发现，不另行维护目录清单。完整回归可以使用[隔离并行入口](../../../scripts/README.md#隔离并行集成测试)，默认在全部目录中选择功能测试；性能专项须显式使用 `--test-kind performance`，完整构建和独立安装链使用 `--test-kind acceptance` 按需验收，全部类别使用 `--test-kind all`。按需安装验收的总耗时仅作记录，仍保留业务超时与防挂起保护。直接 pytest 使用同一参数，额外的 `-m` 表达式与类别取交集；`--target` 用于窄范围验证，不能替代完整回归。
 
 新工作区直接运行组件集成测试前，以测试使用的 Python 3.11 执行 `apps/camctl/scripts/sync_resources.py`。部分目录的 `conftest.py` 在加载时就导入需要固定定义的模块，早于集成配置的 `pytest_configure` 同步钩子；不能依靠后者准备首次导入所需资源。隔离并行入口已经在启动 pytest 前执行这一步。未完成资源准备导致的收集错误，不计作业务功能失败。
 
